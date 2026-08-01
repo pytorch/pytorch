@@ -103,7 +103,6 @@ class AssociativeScanOp(HigherOrderOperator):
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import materialize_as_graph
 
         # For associative scan, we need two copies of xs for the combine function
         # The combine function takes two elements and returns one element
@@ -175,7 +174,6 @@ def associative_scan(
             This function must be pure, i.e., no lifted arguments are supported at the moment,
             satisfy the associative property and have no side-effects.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
-            All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
@@ -185,6 +183,10 @@ def associative_scan(
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
+    Returns:
+        A pytree of the same structure and shape as ``xs``. If the scan dimension has size 0,
+        the output mirrors the (empty) input unchanged. The gradient with respect to ``xs``
+        is also empty (size 0 along ``dim``), since there are no elements to differentiate through.
 
     Example::
 
@@ -226,13 +228,7 @@ def associative_scan(
                 "xs leaves must dense Tensors, consider using `to_dense()`"
             )
         if any(x.ndim <= d for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -711,6 +707,14 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
+
+        if scan_length == 0:
+            return (
+                *[None] * 3,
+                *[torch.zeros_like(x) for x in xs],
+                *[None] * num_additional_inputs,
+            )
+
         ndim = outs[0].ndim
 
         # First_slice_copy does not keep the original requires_grad flag,
@@ -914,8 +918,11 @@ def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
         r_flat, _ = pytree.tree_flatten(r)
         result_flat.append(r_flat)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
-        for leave_ind in range(num_leaves)
-    ]
+    if len(result_flat) == 0:
+        results = list(inp_leaves)
+    else:
+        results = [
+            torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+            for leave_ind in range(num_leaves)
+        ]
     return pytree.tree_unflatten(results, spec)
