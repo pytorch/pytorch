@@ -65,7 +65,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -4005,7 +4008,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold
         exec'd launcher keys that aren't picklable.
@@ -4053,7 +4056,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         xnumel = 256
         inp = torch.randn(xnumel, device=GPU_TYPE)
         out = torch.empty_like(inp)
-        autotuner.run(inp, out, xnumel, stream=torch.cuda.current_stream().cuda_stream)
+        autotuner.run(inp, out, xnumel, stream=torch.accelerator.current_stream().native_handle)
         self.assertEqual(out, inp + 1.0)
 
         # Inject a launcher key into benchmark_failure_reasons — this is how
