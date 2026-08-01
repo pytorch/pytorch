@@ -297,6 +297,43 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             fut.wait()
 
     @requires_gloo()
+    def test_split_world_pg_created_after_another_gloo_pg(self):
+        # Regression test: ProcessGroupGloo::groupRanks() used to derive the
+        # identity rank mapping only when local_id_ == 0. local_id_ is a
+        # process-global counter over every ProcessGroupGloo constructed in the
+        # process, so a world-sized pg built after any other gloo pg (e.g. a
+        # stateless pg, or one inherited across fork) fell through to its empty
+        # global_ranks_in_group, and split() then indexed that empty vector and
+        # segfaulted on a null data pointer.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # (1) burn local_id_ == 0 on an unrelated gloo pg.
+        self._create_process_group_gloo(
+            c10d.PrefixStore("prior", store),
+            self.rank,
+            self.world_size,
+            self.opts(group_name="prior"),
+        )
+        # (2) a world-sized pg: default options -> global_ranks_in_group empty.
+        pg = self._create_process_group_gloo(
+            c10d.PrefixStore("world", store),
+            self.rank,
+            self.world_size,
+            self.opts(group_name="world"),
+        )
+
+        ranks = list(range(self.world_size))
+        split = pg.split(
+            c10d.PrefixStore("split", store), ranks, self.opts(group_name="split")
+        )
+        self.assertIsNotNone(split)
+        self.assertEqual(split.options.global_ranks_in_group, ranks)
+
+        tensor = torch.full((4,), float(self.rank + 1))
+        split.allreduce([tensor]).wait()
+        expected = float(sum(r + 1 for r in ranks))
+        self.assertEqual(tensor, torch.full_like(tensor, expected))
+
+    @requires_gloo()
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
