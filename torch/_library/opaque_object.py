@@ -44,7 +44,11 @@ from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._custom_class_base import CustomClassBase, CustomClassBaseMeta
+from torch._custom_class_base import (
+    _ensure_custom_class_base_metaclass,
+    CustomClassBase,
+    CustomClassBaseMeta,
+)
 
 
 if TYPE_CHECKING:
@@ -213,13 +217,18 @@ def register_custom_class(
 
     # Constant types store the real object directly during tracing (no
     # FakeScriptObject wrapper), so they don't need CustomClassBaseMeta.
-    if typ != "constant" and not isinstance(cls, CustomClassBaseMeta):
+    if typ != "constant" and issubclass(cls, CustomClassBase):
+        _ensure_custom_class_base_metaclass(cls)
+
+    if typ != "constant" and not (
+        issubclass(cls, CustomClassBase) or isinstance(cls, CustomClassBaseMeta)
+    ):
         raise TypeError(
             f"Custom class {cls} must subclass torch._custom_class_base.CustomClassBase "
-            "or 'metaclass=torch._custom_class_base.CustomClassBaseMeta'. "
-            "This is required so that FakeScriptObject can be registered "
-            "as a virtual subclass, allowing isinstance() checks to work "
-            "during torch.compile tracing. "
+            "or use metaclass=torch._custom_class_base.CustomClassBaseMeta. "
+            "Pybind classes should pass CustomClassBase as an explicit base. "
+            "This is required so that isinstance() checks can unwrap "
+            "FakeScriptObject during torch.compile tracing. "
         )
 
     if typ not in ["symbolic", "constant"]:

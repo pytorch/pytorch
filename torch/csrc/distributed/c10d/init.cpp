@@ -260,8 +260,7 @@ class PythonStore : public ::c10d::Store {
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
-    std::string str = pybind11::cast<py::bytes>(fn(key));
-    return toVec8(str);
+    return toVec8(pybind11::cast<py::bytes>(fn(key)));
   }
 
   // Note: this function manually calls the Python-side overload
@@ -280,9 +279,8 @@ class PythonStore : public ::c10d::Store {
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
-    std::string str = pybind11::cast<py::bytes>(
-        fn(key, toPyBytes(expectedValue), toPyBytes(desiredValue)));
-    return toVec8(str);
+    return toVec8(pybind11::cast<py::bytes>(
+        fn(key, toPyBytes(expectedValue), toPyBytes(desiredValue))));
   }
 
   int64_t add(const std::string& key, int64_t value) override {
@@ -406,10 +404,10 @@ class PythonResponse : public ::c10d::control_plane::Response {
 // register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
-    py::object state,
-    py::object comm_hook) {
-  reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
-      std::move(state), std::move(comm_hook)));
+    const py::object& state,
+    const py::object& comm_hook) {
+  reducer.register_comm_hook(
+      std::make_unique<::c10d::PythonCommHook>(state, comm_hook));
 }
 
 // Called from DDP's Python API to create a c10d C++ comm hook.
@@ -937,9 +935,8 @@ This class does not support ``__members__`` property.)");
             const auto preMulSupplement_factor = t[1];
             if (py::isinstance<py::float_>(preMulSupplement_factor)) {
               return ::c10d::makePreMulSum(t[1].cast<double>());
-            } else {
-              return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
             }
+            return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
           }))
       .def_property_readonly(
           "factor",
@@ -2144,18 +2141,19 @@ Arguments:
           &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
           R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
 
-  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj,
-  // ProcessGroup) to work.
-  py::object opaque_base_module =
+  // Subclass CustomClassBase so pybind sees a real Python base while
+  // isinstance(fake_obj, ProcessGroup) still unwraps real_obj.
+  py::object custom_class_base_module =
       py::module_::import("torch._custom_class_base");
-  py::object opaque_base = opaque_base_module.attr("CustomClassBaseMeta");
+  py::object custom_class_base =
+      custom_class_base_module.attr("CustomClassBase");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
           ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
           module,
           "ProcessGroup",
-          py::metaclass(opaque_base),
+          custom_class_base,
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -4492,10 +4490,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               [](c10::intrusive_ptr<::c10d::Work> self) {
                 return torch::jit::toPyObject(c10::IValue(std::move(self)));
               })
-          .def_static("unbox", [](py::object obj) {
+          .def_static("unbox", [](const py::object& obj) {
             auto typePtr =
                 torch::getCustomClass("__torch__.torch.classes.c10d.Work");
-            auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+            auto ivalue = torch::jit::toIValue(obj, typePtr);
             return ivalue.toCustomClass<::c10d::Work>();
           });
 

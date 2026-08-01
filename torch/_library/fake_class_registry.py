@@ -19,7 +19,14 @@ class FakeScriptObject:
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
 
+        from torch._custom_class_base import (
+            _ensure_custom_class_base_metaclass,
+            CustomClassBase,
+        )
         from torch._library.opaque_object import is_custom_class
+
+        if issubclass(type(x), CustomClassBase):
+            _ensure_custom_class_base_metaclass(type(x))
 
         # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)

@@ -22,17 +22,18 @@ void initPlacementBindings(PyObject* module) {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   auto distributed_module = py_module.def_submodule("_distributed");
 
-  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj,
-  // Placement) to work.
-  py::object opaque_base_module =
+  // Subclass CustomClassBase so pybind sees a real Python base while
+  // isinstance(fake_obj, Placement) still unwraps real_obj.
+  py::object custom_class_base_module =
       py::module_::import("torch._custom_class_base");
-  py::object opaque_base = opaque_base_module.attr("CustomClassBaseMeta");
+  py::object custom_class_base =
+      custom_class_base_module.attr("CustomClassBase");
 
   auto placement_cls =
       py::class_<Placement>(
           distributed_module,
           "Placement",
-          py::metaclass(opaque_base),
+          custom_class_base,
           placement_class_docstring)
           .def(py::init<>()) // Allow construction of Python subclasses.
           .def(
@@ -43,8 +44,7 @@ void initPlacementBindings(PyObject* module) {
           .def("is_shard", &Placement::is_shard, py::arg("dim") = py::none());
 
   auto shard_cls =
-      py::class_<Shard, Placement>(
-          distributed_module, "Shard", py::metaclass(opaque_base))
+      py::class_<Shard, Placement>(distributed_module, "Shard")
           .def(py::init<int64_t>(), py::arg("dim"))
           .def_readonly("dim", &Shard::dim)
           .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
@@ -61,8 +61,7 @@ void initPlacementBindings(PyObject* module) {
               }));
 
   auto strided_shard_cls =
-      py::class_<StridedShard, Placement>(
-          distributed_module, "StridedShard", py::metaclass(opaque_base))
+      py::class_<StridedShard, Placement>(distributed_module, "StridedShard")
           .def(
               py::init<int64_t, int64_t>(),
               py::arg("dim"),
@@ -88,8 +87,7 @@ void initPlacementBindings(PyObject* module) {
               }));
 
   auto replicate_cls =
-      py::class_<Replicate, Placement>(
-          distributed_module, "Replicate", py::metaclass(opaque_base))
+      py::class_<Replicate, Placement>(distributed_module, "Replicate")
           .def(py::init())
           .def("is_replicate", &Replicate::is_replicate)
           .def(
@@ -109,8 +107,7 @@ void initPlacementBindings(PyObject* module) {
               [](const py::dict&) { return Replicate(); }));
 
   auto partial_cls =
-      py::class_<Partial, Placement>(
-          distributed_module, "Partial", py::metaclass(opaque_base))
+      py::class_<Partial, Placement>(distributed_module, "Partial")
           .def(py::init<>())
           .def(py::init<std::optional<std::string>>(), py::arg("reduce_op"))
           .def_readonly("reduce_op", &Partial::reduce_op)

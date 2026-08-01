@@ -2033,6 +2033,53 @@ class CuTeLayoutTest(TestCase):
 class ProcessGroupOpaqueTypeTest(TestCase):
     """Test that ProcessGroup opaque type members are registered and exist on the class."""
 
+    def test_process_group_subclasses_opaque_base(self):
+        from torch._custom_class_base import CustomClassBase
+        from torch.distributed.device_mesh import _register_distributed_opaque_types
+
+        _register_distributed_opaque_types()
+
+        self.assertTrue(issubclass(ProcessGroup, CustomClassBase))
+        self.assertEqual(ProcessGroup.__dictoffset__, 0)
+        process_group = ProcessGroup(0, 1)
+        self.assertIsInstance(process_group, CustomClassBase)
+        self.assertFalse(hasattr(process_group, "__dict__"))
+        self.assertEqual(process_group.rank(), 0)
+        for _ in range(1000):
+            process_group = ProcessGroup(0, 1)
+            self.assertIsInstance(process_group, CustomClassBase)
+            self.assertEqual(
+                ProcessGroup.unbox(process_group.boxed()).rank(),
+                process_group.rank(),
+            )
+
+        store = dist.PrefixStore("opaque_base", dist.HashStore())
+        process_group = ProcessGroup(store, 0, 1)
+        self.assertIsInstance(process_group, CustomClassBase)
+        self.assertEqual(
+            ProcessGroup.unbox(process_group.boxed()).rank(),
+            process_group.rank(),
+        )
+
+    def test_process_group_python_subclass_must_initialize_pybind_base(self):
+        class BadProcessGroup(ProcessGroup):
+            def __init__(self):
+                pass
+
+        with self.assertRaisesRegex(TypeError, "must be called"):
+            BadProcessGroup()
+
+    def test_process_group_python_subclass_initializes_pybind_base(self):
+        class GoodProcessGroup(ProcessGroup):
+            def __init__(self):
+                super().__init__(0, 1)
+                self.initialized = True
+
+        process_group = GoodProcessGroup()
+        self.assertTrue(process_group.initialized)
+        self.assertEqual(process_group.rank(), 0)
+        self.assertEqual(process_group.size(), 1)
+
     def test_registered_members_exist_on_process_group(self):
         from torch._library.opaque_object import get_member_type
 
@@ -2048,6 +2095,7 @@ class ProcessGroupOpaqueTypeTest(TestCase):
             "group_name",
             "group_desc",
             "__eq__",
+            "__ne__",
         ]
         for member_name in registered_members:
             self.assertIsNotNone(
@@ -2062,6 +2110,34 @@ class ProcessGroupOpaqueTypeTest(TestCase):
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )
+
+    def test_fake_process_group_gets_registered_members(self):
+        from torch._library.fake_class_registry import maybe_to_fake_obj
+        from torch.distributed.device_mesh import _register_distributed_opaque_types
+
+        _register_distributed_opaque_types()
+
+        already_initialized = dist.is_initialized()
+        if already_initialized:
+            process_group = dist.group.WORLD
+        else:
+            dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=1)
+            process_group = dist.group.WORLD
+
+        try:
+            fake_pg = maybe_to_fake_obj(FakeTensorMode(), process_group)
+            self.assertEqual(fake_pg.size(), process_group.size())
+            self.assertEqual(fake_pg.rank(), process_group.rank())
+            self.assertEqual(
+                fake_pg._get_backend_name(), process_group._get_backend_name()
+            )
+            self.assertEqual(fake_pg.group_name, process_group.group_name)
+            self.assertEqual(fake_pg.group_desc, process_group.group_desc)
+            self.assertEqual(fake_pg, process_group)
+            self.assertFalse(fake_pg != process_group)
+        finally:
+            if not already_initialized:
+                dist.destroy_process_group()
 
 
 if __name__ == "__main__":
