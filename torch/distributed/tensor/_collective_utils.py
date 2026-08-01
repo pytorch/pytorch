@@ -459,8 +459,8 @@ def _compute_placement_transition_cost(
         comm_bytes_gb /= num_devices_on_mesh_dim
         return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_partial():
-        # ban shard -> partial as it does not make sense to perform
-        # this redistribute
+        # Do not introduce Shard -> Partial as an automatic op-strategy option.
+        # Explicit redistribution handles the supported Partial("sum") case.
         return float("inf"), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_partial():
         # we already handled the == case at the top, and we ban converting between partial types.
