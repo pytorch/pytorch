@@ -37,6 +37,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch._guards import ChainedSource
 from torch._library.utils import RegistrationHandle
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
@@ -51,7 +52,14 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import (
+    AttrSource,
+    GlobalSource,
+    LocalCellSource,
+    LocalSource,
+    Source,
+    TempLocalSource,
+)
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
@@ -79,6 +87,12 @@ if TYPE_CHECKING:
 
 
 side_effects_log = torch._logging.getArtifactLogger(__name__, "side_effects")
+
+
+class GeneratorReconstructionMode(enum.Enum):
+    OFF = enum.auto()
+    STRICT = enum.auto()
+    TENSOR_ONLY = enum.auto()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -447,11 +461,71 @@ class SideEffects:
 
     def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
-
-        return bool(
-            output_graph
-            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
+        return (
+            output_graph is not None
+            and output_graph.current_tx.output.current_tracer.generator_reconstruction_mode
+            is not GeneratorReconstructionMode.OFF
         )
+
+    def is_reconstructing_generator_tensor_only(self) -> bool:
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph is not None
+            and output_graph.current_tx.output.current_tracer.generator_reconstruction_mode
+            is GeneratorReconstructionMode.TENSOR_ONLY
+        )
+
+    def _was_exposed_during_generator_reconstruction(
+        self, item: VariableTracker
+    ) -> bool:
+        output_graph = self.output_graph_weakref()
+        if not output_graph:
+            return False
+
+        target = item.unwrap()
+        found = False
+
+        def visit(vt: VariableTracker) -> None:
+            nonlocal found
+            if vt is target:
+                found = True
+
+        tx = output_graph.current_tx
+        while tx is not None and not found:
+            if tx.generated_items is not None:
+                VariableTracker.visit(
+                    visit,
+                    tx.generated_items,
+                    side_effects=self,
+                )
+            if tx.generator_reconstruction_return_value is not None:
+                VariableTracker.visit(
+                    visit,
+                    tx.generator_reconstruction_return_value,
+                    side_effects=self,
+                )
+            tx = tx.parent
+        return found
+
+    def _should_graph_break_for_generator_reconstruction_mutation(
+        self, item: VariableTracker
+    ) -> bool:
+        if self.is_reconstructing_generator_tensor_only():
+            if item.is_tensor():
+                return True
+            if isinstance(item.mutation_type, ValueMutationNew):
+                return self._was_exposed_during_generator_reconstruction(item)
+            source = item.source
+            if source is None:
+                return True
+            base = source.get_base() if isinstance(source, ChainedSource) else source
+            return isinstance(base, GlobalSource) or (
+                isinstance(base, LocalSource)
+                and (base.is_input or base.is_derefed_cell_contents)
+            )
+        if isinstance(item.mutation_type, ValueMutationNew):
+            return self._was_exposed_during_generator_reconstruction(item)
+        return True
 
     def _maybe_record_side_effect(self, item: VariableTracker) -> None:
         """Record the first externally-visible side effect on the current tracer."""
@@ -479,9 +553,10 @@ class SideEffects:
         if self.should_allow_side_effects_in_hop():
             self._maybe_record_side_effect(item)
             return True
-        if self.is_reconstructing_generator():
-            # This is missing the case where one mutates a tensor. See
-            # test_generator.py::test_reconstruct_generator_tensor_mutation
+        if (
+            self.is_reconstructing_generator()
+            and self._should_graph_break_for_generator_reconstruction_mutation(item)
+        ):
             unimplemented(
                 gb_type="Generator reconstruction with mutations",
                 context=f"mutating object: {item}",
@@ -2098,10 +2173,12 @@ def allow_externally_visible_side_effects_in_subtracer(
 @contextlib.contextmanager
 def disallow_side_effects_in_generator(
     tx: "InstructionTranslatorBase",
+    *,
+    mode: GeneratorReconstructionMode = GeneratorReconstructionMode.STRICT,
 ) -> Generator[None, None, None]:
-    orig_val = tx.output.current_tracer.is_reconstructing_generator
+    orig_mode = tx.output.current_tracer.generator_reconstruction_mode
     try:
-        tx.output.current_tracer.is_reconstructing_generator = True
+        tx.output.current_tracer.generator_reconstruction_mode = mode
         yield
     finally:
-        tx.output.current_tracer.is_reconstructing_generator = orig_val
+        tx.output.current_tracer.generator_reconstruction_mode = orig_mode
