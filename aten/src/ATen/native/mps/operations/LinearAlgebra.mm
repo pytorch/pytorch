@@ -1396,6 +1396,17 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
+  // Materialize the conjugate bit before any MPS path.
+  //
+  // Placeholder feeds the raw storage of conj views; graph-level
+  // conjugateWithTensor (added in #178010) is insufficient for complex batch
+  // matmul and silently returns wrong results for inputs such as b.conj() or
+  // U.mH. Metal and tiled paths already call resolve_conj; do the same here so
+  // all bmm paths see physically conjugated tensors.
+  if (batch1.is_conj() || batch2.is_conj()) {
+    return bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
+  }
+
   if (c10::isIntegralType(batch1.scalar_type(), true)) {
     return do_metal_bmm(batch1, batch2, result);
   }
@@ -1434,8 +1445,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
-    // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
-    result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
+    result = tiled_bmm_out_mps_impl(batch1, batch2, result);
     return result;
   }
 
@@ -1455,15 +1465,13 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
       auto batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
-
-      auto batch1TensorOp = batch1.is_conj() ? [mpsGraph conjugateWithTensor:batch1Tensor name:nil] : batch1Tensor;
-      auto batch2TensorOp = batch2.is_conj() ? [mpsGraph conjugateWithTensor:batch2Tensor name:nil] : batch2Tensor;
+      auto batch2TensorOp = batch2Tensor;
 
       if (doTranspose) {
-        batch2TensorOp = [mpsGraph transposeTensor:batch2TensorOp dimension:-1 withDimension:-2 name:nil];
+        batch2TensorOp = [mpsGraph transposeTensor:batch2Tensor dimension:-1 withDimension:-2 name:nil];
       }
 
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1TensorOp
+      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
                                                                       secondaryTensor:batch2TensorOp
                                                                                  name:@"MM/(batch1@batch2)"];
 

@@ -1367,6 +1367,8 @@ class TestMPS(TestCaseMPS):
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
         # See https://github.com/pytorch/pytorch/issues/177474
+        # Graph-level conjugateWithTensor alone was insufficient; resolve_conj
+        # is required so complex batch matmul does not silently ignore conj/mH.
         a = torch.randn(4, 3, 5, dtype=torch.complex64, device="mps")
         b = torch.randn(4, 5, 2, dtype=torch.complex64, device="mps")
         result_mps = torch.bmm(a, b.conj())
@@ -1374,6 +1376,17 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(result_cpu, result_mps)
         result_mps = torch.bmm(a.conj(), b)
         result_cpu = torch.bmm(a.cpu().conj(), b.cpu())
+        self.assertEqual(result_cpu, result_mps)
+        result_mps = torch.bmm(a.conj(), b.conj())
+        result_cpu = torch.bmm(a.cpu().conj(), b.cpu().conj())
+        self.assertEqual(result_cpu, result_mps)
+
+        # Hermitian adjoint view (conj + transpose) used by unitary matmuls.
+        u = torch.randn(8, 4, 4, dtype=torch.complex64, device="mps")
+        d = torch.diag_embed(torch.randn(8, 4, dtype=torch.complex64, device="mps"))
+        left = u @ d
+        result_mps = left @ u.mH
+        result_cpu = left.cpu() @ u.cpu().mH.contiguous()
         self.assertEqual(result_cpu, result_mps)
 
     def test_addmm_conj(self):
