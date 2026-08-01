@@ -4046,6 +4046,33 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+def _is_custom_op_fake_tensor_subclass_data_ptr_error(
+    node: torch.fx.Node, args: Any, kwargs: Any, cause: BaseException
+) -> bool:
+    if node.op != "call_function":
+        return False
+
+    target = node.target
+    custom_op_namespace: str | None
+    if isinstance(target, torch._ops.OpOverload):
+        custom_op_namespace = target.namespace
+    elif isinstance(target, torch._ops.OpOverloadPacket):
+        custom_op_namespace = target._qualified_op_name.split("::", maxsplit=1)[0]
+    else:
+        custom_op_namespace = None
+
+    if (
+        custom_op_namespace is None
+        or custom_op_namespace in {"aten", "prim", "prims"}
+        or "Cannot access data pointer of Tensor" not in str(cause)
+    ):
+        return False
+
+    return pytree.tree_any(
+        lambda x: is_traceable_wrapper_subclass(x) and is_fake(x), (args, kwargs)
+    )
+
+
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
     from .exc import TorchRuntimeError, Unsupported
 
@@ -4326,6 +4353,25 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        if _is_custom_op_fake_tensor_subclass_data_ptr_error(node, args, kwargs, cause):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Custom op Tensor subclass data pointer access",
+                    context="",
+                    explanation=(
+                        "A Tensor subclass argument reached a custom op while Dynamo "
+                        f"was running fake tensor propagation: {msg}"
+                    ),
+                    hints=[
+                        "A Tensor subclass argument reached this custom op during fake-value propagation. In this case, the subclass's `__torch_dispatch__` may run the custom op implementation instead of the registered fake impl.",
+                        "This happens while compiling with fake tensors; the same custom op may still run correctly in eager with real tensors.",
+                        "Handle FakeTensor-wrapped subclass inputs in the custom op implementation, or change the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
+                    ],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
+
         from .exc import (
             FakeTensorObservedException,
             ObservedException,
