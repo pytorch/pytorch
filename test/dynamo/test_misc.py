@@ -3331,6 +3331,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
 
+    def test_member_descriptor_set_delete_slot(self):
+        # member_descriptor (a __slots__ field) exposes __set__/__delete__ via
+        # the shared tp_descr_set slot; explicit calls should trace.
+        class Slotted:
+            __slots__ = ("a",)
+
+        def set_fn(x):
+            o = Slotted()
+            type(o).a.__set__(o, 9)
+            return x + o.a
+
+        def del_fn(x):
+            o = Slotted()
+            o.a = 4
+            type(o).a.__delete__(o)
+            return x + (0 if hasattr(o, "a") else 100)
+
+        for fn in (set_fn, del_fn):
+            opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_tuplegetter_readonly_slot(self):
+        # namedtuple field accessors are read-only; __set__/__delete__ raise
+        # AttributeError through the tp_descr_set slot.
+        P = collections.namedtuple("P", ["x", "y"])
+
+        def fn(t):
+            p = P(1, 2)
+            try:
+                type(p).x.__set__(p, 5)
+                return t + 1
+            except AttributeError as e:
+                return t, str(e)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
     def test_dict_with_descriptor(self):
         class MyDescriptor:
             def __get__(self, obj, objtype=None):
@@ -14409,9 +14446,10 @@ fn
         self.assertTrue(same(result[0], torch.tensor(3)))
 
     def test_dynamo_reset_clears_cache(self):
-        """Test that dynamo bytecode cache is freed
+        """Test that dynamo bytecode and fake tensor caches are freed
         when dynamo reset is called
         """
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x):
             return torch.sin(x)
@@ -14422,9 +14460,16 @@ fn
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 1)
 
+        # Under symbolic shapes the dispatch cache lives on the ShapeEnv rather
+        # than the process-global FakeTensorMode.cache, so only check the latter
+        # is populated when shapes are static.
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertGreater(len(FakeTensorMode.cache), 0)
+
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+        self.assertEqual(len(FakeTensorMode.cache), 0)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_check_simplification(self):

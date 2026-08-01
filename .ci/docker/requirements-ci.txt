@@ -377,7 +377,7 @@ parameterized==0.8.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pip==26.0.1
+pip==26.1.2
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
