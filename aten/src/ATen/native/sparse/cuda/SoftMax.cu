@@ -9,10 +9,12 @@
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/cuda/thrust_compat.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -315,13 +317,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] == offsets_ptr[y];
       });
-#if !defined(USE_ROCM)
-  auto new_sz = ::cuda::std::distance(
+  auto new_sz = TORCH_CUDA_STD_NS::distance(
       thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
-#else
-  auto new_sz = thrust::distance(
-      thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
-#endif
   pool_sizes.resize_({new_sz});
 
   auto pool_offsets = pool_sizes.clone();
@@ -370,7 +367,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
         });
   }
   return std::make_tuple(
-      sorted_indices, pool_offsets, pool_sizes, mx_buffer);
+      std::move(sorted_indices),
+      std::move(pool_offsets),
+      std::move(pool_sizes),
+      std::move(mx_buffer));
 }
 
 template <typename scalar_t, bool LogSoftMax>
