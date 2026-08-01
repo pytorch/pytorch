@@ -721,8 +721,11 @@ def _create_nccl_process_group(
 def _nccl2_options(
     backend_options: object | None,
 ) -> "ProcessGroupNCCL.Options":
+    # ProcessGroupNCCL2.Options subclasses ProcessGroupNCCL.Options and adds the
+    # nccl2-only knobs; a plain ProcessGroupNCCL.Options is still accepted (the
+    # backend copies it) so callers written against the stock backend work.
     if backend_options is None:
-        return ProcessGroupNCCL.Options()
+        return ProcessGroupNCCL2.Options()
     if not isinstance(backend_options, ProcessGroupNCCL.Options):
         raise AssertionError(
             "Expected backend_options argument to be of type ProcessGroupNCCL.Options"

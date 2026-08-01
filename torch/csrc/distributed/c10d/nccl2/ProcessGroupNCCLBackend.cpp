@@ -69,15 +69,26 @@ c10::intrusive_ptr<WorkNCCL> coalesceWorks(
 
 } // namespace
 
+c10::intrusive_ptr<ProcessGroupNCCL::Options> ProcessGroupNCCL::toNccl2Options(
+    const c10::intrusive_ptr<BaseOptions>& options) {
+  if (!options) {
+    return Options::create();
+  }
+  if (auto derived = c10::dynamic_intrusive_pointer_cast<Options>(options)) {
+    return derived;
+  }
+  return c10::make_intrusive<Options>(*options);
+}
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     c10::intrusive_ptr<::c10d::Store> store,
     int rank,
     int size,
-    c10::intrusive_ptr<Options> options)
+    const c10::intrusive_ptr<BaseOptions>& options)
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      options_c10d_(options ? std::move(options) : Options::create()) {
+      options_c10d_(toNccl2Options(options)) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 }

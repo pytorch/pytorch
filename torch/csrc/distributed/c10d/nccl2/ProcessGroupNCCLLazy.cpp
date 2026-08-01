@@ -30,6 +30,11 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
     pair_options->is_high_priority_stream = options->is_high_priority_stream;
     pair_options->config = cloneNcclConfig(options->config);
     pair_options->group_name = pair_name;
+    // Each pair comm runs its own watchdog, so it needs the same abort policy
+    // as the primary -- otherwise one stalled pair kills a process that asked
+    // not to be killed.
+    pair_options->abort_process_on_timeout_or_error =
+        options->abort_process_on_timeout_or_error;
     return c10::make_intrusive<ProcessGroupNCCL>(
         pair_store, pair_rank, /*size=*/2, pair_options);
   };
@@ -41,7 +46,7 @@ ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
-    const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options)
+    const c10::intrusive_ptr<ProcessGroupNCCL::BaseOptions>& options)
     : LazyBackend(
           rank,
           size,
@@ -49,10 +54,8 @@ ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
               store,
               rank,
               size,
-              options ? options : ProcessGroupNCCL::Options::create()),
-          makePairFactory(
-              store,
-              options ? options : ProcessGroupNCCL::Options::create())) {}
+              ProcessGroupNCCL::toNccl2Options(options)),
+          makePairFactory(store, ProcessGroupNCCL::toNccl2Options(options))) {}
 
 } // namespace c10d::nccl2
 

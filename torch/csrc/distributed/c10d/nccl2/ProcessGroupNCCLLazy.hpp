@@ -29,7 +29,7 @@ class TORCH_API ProcessGroupNCCLLazy
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,
-      const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options =
+      const c10::intrusive_ptr<ProcessGroupNCCL::BaseOptions>& options =
           ProcessGroupNCCL::Options::create());
 
   const std::string getBackendName() const override {

@@ -4136,18 +4136,18 @@ Returns:
       intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL2", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Store>& store,
-                     int rank,
-                     int size,
-                     c10::intrusive_ptr<
-                         ::c10d::nccl2::ProcessGroupNCCL::Options> options) {
-                    // gil_scoped_release is not safe as a call_guard in init.
-                    // https://github.com/pybind/pybind11/issues/5473
-                    py::gil_scoped_release nogil{};
-                    return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                        store, rank, size, std::move(options));
-                  }),
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const c10::intrusive_ptr<
+                              ::c10d::nccl2::ProcessGroupNCCL::BaseOptions>&
+                              options) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                    store, rank, size, options);
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
@@ -4176,20 +4176,57 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
               R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
-  processGroupNCCL2.attr("Options") = processGroupNCCL.attr("Options");
+  intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
+      processGroupNCCL2,
+      "Options",
+      processGroupNCCL.attr("Options"),
+      R"(
+ProcessGroup options for the nccl2 backend.
+
+Everything :class:`~torch.distributed.ProcessGroupNCCL.Options` accepts is
+accepted here too; the attribute below is specific to nccl2.
+
+Attributes:
+    abort_process_on_timeout_or_error (bool): if True (the default), a
+            collective timeout or NCCL async error detected by the nccl2
+            watchdog terminates the process with ``abort()`` after running the
+            registered abort hooks. If False the communicator is still aborted
+            but the process survives: ``backend.get_error()`` reports
+            ``TIMEOUT``/``COMM_ERROR`` and the next collective raises. It does
+            not affect ``backend.abort()`` or ``destroy_process_group()``,
+            which never terminate the process.
+      )")
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+      .def_readwrite(
+          "abort_process_on_timeout_or_error",
+          &::c10d::nccl2::ProcessGroupNCCL::Options::
+              abort_process_on_timeout_or_error)
+      .def(
+          "__copy__",
+          [](const ::c10d::nccl2::ProcessGroupNCCL::Options& self) {
+            return ::c10d::nccl2::ProcessGroupNCCL::Options(self);
+          })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::nccl2::ProcessGroupNCCL::Options& self,
+             const py::dict& memo) {
+            return ::c10d::nccl2::ProcessGroupNCCL::Options(self);
+          },
+          py::arg("memo"));
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
       .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      int rank,
-                      int size,
-                      const c10::intrusive_ptr<
-                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
-            py::gil_scoped_release nogil{};
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
-          }),
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 const c10::intrusive_ptr<
+                     ::c10d::nccl2::ProcessGroupNCCL::BaseOptions>& options) {
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+              }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),

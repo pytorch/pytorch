@@ -2,12 +2,15 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import copy
 import ctypes
 import os
 import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import ErrorType
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
@@ -51,13 +54,42 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_shared_options_type(self) -> None:
-        self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
+    def test_options_type(self) -> None:
+        # nccl2 has its own Options, but it derives from the stock one so the
+        # whole pre-existing attribute surface keeps working.
+        self.assertTrue(
+            issubclass(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
+        )
         opts = dist.ProcessGroupNCCL2.Options()
         opts.config.cga_cluster_size = 2
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
+        self.assertTrue(opts.abort_process_on_timeout_or_error)
+        opts.abort_process_on_timeout_or_error = False
+        self.assertFalse(copy.deepcopy(opts).abort_process_on_timeout_or_error)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_stock_options_accepted(self) -> None:
+        # Callers written against the stock backend hand us a
+        # ProcessGroupNCCL.Options; it must still be usable and get the nccl2
+        # defaults for the nccl2-only fields.
+        opts = dist.ProcessGroupNCCL.Options()
+        pg = dist.new_group(
+            backend=self.backend_str(),
+            pg_options=opts,
+            use_local_synchronization=True,
+            timeout=timedelta(seconds=60),
+        )
+        try:
+            backend = pg._get_backend(self.device)
+            self.assertTrue(backend.options.abort_process_on_timeout_or_error)
+            t = torch.ones(4, device=self.device)
+            dist.all_reduce(t, group=pg)
+            self.assertEqual(t, torch.full_like(t, self.world_size))
+        finally:
+            dist.destroy_process_group(pg)
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
@@ -101,6 +133,109 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self.assertEqual(backend.options.config.cga_cluster_size, 2)
         self.assertEqual(backend.options.config.max_ctas, 4)
         self.assertTrue(backend.options.is_high_priority_stream)
+        self._check_all_reduce()
+
+
+class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
+    """Base for tests that tear a group down.
+
+    They run on a throwaway subgroup so the class-wide default group survives;
+    a collective on that default group afterwards is what proves the process is
+    still alive and healthy.
+    """
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    def _new_subgroup(self, backend_options=None, timeout=timedelta(seconds=60)):
+        return dist.new_group(
+            backend="nccl2",
+            pg_options=backend_options,
+            use_local_synchronization=True,
+            timeout=timeout,
+        )
+
+    def _check_all_reduce(self, group=None) -> None:
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+
+class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_backend_abort_on_healthy_group(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        backend = pg._get_backend(self.device)
+        # Must return instead of ::abort()ing the process, like stock NCCL.
+        backend.abort()
+        self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_abort_process_group_on_healthy_group(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        dist.distributed_c10d._abort_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_process_group_returns(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2WatchdogAbortOptionTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_timeout_without_process_abort(self) -> None:
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.abort_process_on_timeout_or_error = False
+        pg = self._new_subgroup(opts, timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self.assertFalse(backend.options.abort_process_on_timeout_or_error)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            # Nobody else joins, so this can never complete and the watchdog
+            # trips. With the option off the process must survive and the
+            # timeout must become readable through get_error().
+            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            deadline = time.time() + 60
+            while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
+                time.sleep(0.5)
+            self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
+            # The next collective on the timed-out group raises rather than
+            # silently proceeding on a dead communicator.
+            with self.assertRaises(RuntimeError):
+                dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+        else:
+            time.sleep(30)
+
+        dist.destroy_process_group(pg)
         self._check_all_reduce()
 
 

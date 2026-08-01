@@ -95,17 +95,53 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
-  using Options = ::c10d::ProcessGroupNCCL::Options;
+  // nccl2 shares the whole option surface of the stock NCCL backend (config,
+  // split_from/split_color, is_high_priority_stream, ...) and adds the knobs
+  // that only exist in this engine. Anything accepting a
+  // ::c10d::ProcessGroupNCCL::Options keeps working with these.
+  using BaseOptions = ::c10d::ProcessGroupNCCL::Options;
+
+  struct TORCH_API Options : BaseOptions {
+    explicit Options(bool is_high_priority_stream = false)
+        : BaseOptions(is_high_priority_stream) {}
+    // Adopt a plain base Options; the nccl2-only fields take their defaults.
+    explicit Options(const BaseOptions& base) : BaseOptions(base) {}
+    Options(const Options&) = default;
+    ~Options() override = default;
+
+    static c10::intrusive_ptr<Options> create(
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(is_high_priority_stream);
+    }
+
+    // Whether a watchdog-detected collective timeout or NCCL async error
+    // terminates the process with ::abort() (after running the abort hooks).
+    // When false the communicator is still aborted, but the process survives:
+    // getError() reports TIMEOUT/COMM_ERROR and the next collective throws.
+    // Has no effect on a user-initiated abort()/shutdown(), which never
+    // terminate the process.
+    bool abort_process_on_timeout_or_error{true};
+  };
+
+  // Returns `options` unchanged if it already is an nccl2 Options, otherwise a
+  // copy of it as one (nccl2-only fields at their defaults). A null `options`
+  // yields a default-constructed Options.
+  static c10::intrusive_ptr<Options> toNccl2Options(
+      const c10::intrusive_ptr<BaseOptions>& options);
 
   // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
   // the first collective (or via eagerConnectSingleDevice / bound_device_id),
   // matching c10d's device-binding model -- unlike torchcomms which took an
   // eager init(device).
+  //
+  // `options` may be a plain ::c10d::ProcessGroupNCCL::Options (what callers
+  // passed before nccl2 had its own Options subclass); it is then copied into
+  // an nccl2 Options carrying the defaults for the nccl2-only fields.
   ProcessGroupNCCL(
       c10::intrusive_ptr<::c10d::Store> store,
       int rank,
       int size,
-      c10::intrusive_ptr<Options> options = Options::create());
+      const c10::intrusive_ptr<BaseOptions>& options = Options::create());
   ~ProcessGroupNCCL() override;
 
   ProcessGroupNCCL(const ProcessGroupNCCL&) = delete;
@@ -309,7 +345,19 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void returnEvent(
       std::unique_ptr<at::cuda::CUDAEvent> event,
       bool timing_enabled);
+  // Tears the NCCL communicator down. This NEVER terminates the process --
+  // a user-initiated abort()/shutdown() must be survivable, matching
+  // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
+  // watchdog-detected timeout or async error follow it with abortProcess().
   void abortNcclComm();
+  // Terminates the process (after running the abort hooks) if
+  // Options::abort_process_on_timeout_or_error is set and we are not in
+  // reconfigurable mode. `reason` is logged after "Aborting process on rank N
+  // due to ", so it must describe the actual trigger.
+  void abortProcess(const std::string& reason);
+  // Signals the watchdog thread to exit and reaps it. Detaches instead of
+  // joining when called from the watchdog thread itself.
+  void stopWatchdog();
   void revokeNcclComm();
 
   enum class CommState {
@@ -548,9 +596,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
-  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
 
+  // Always an nccl2 Options: the constructor copies a plain
+  // ::c10d::ProcessGroupNCCL::Options into one.
   c10::intrusive_ptr<Options> options_c10d_;
 
   // Identifies the current communicator generation in the reconfigure regime;
