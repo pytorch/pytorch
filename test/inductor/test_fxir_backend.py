@@ -7,6 +7,7 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import sympy
 
@@ -23,7 +24,7 @@ from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
     FxConverter,
     replace_floor_div,
@@ -42,16 +43,16 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     patch_custom_fallback_pass,
     requires_gpu,
-    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv
 
 
 try:
-    from .test_control_flow import CondModels
+    from .test_control_flow import CondModels, SwitchModels
 except ImportError:
     from test_control_flow import (
         CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+        SwitchModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
     )
 
 if HAS_GPU:
@@ -152,6 +153,19 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_standard_kernel_omits_empty_launch_kwargs(self):
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+
+        # launch_kwargs is only needed when user Triton backend options must be
+        # replayed. Omitting the empty case keeps standard FXIR HOP calls
+        # compatible with downstream py_impls that have fixed keyword-only
+        # signatures matching the original HOP payload.
+        self.assertNotIn("launch_kwargs", triton_node.kwargs)
 
     def test_device_type(self):
         """
@@ -717,6 +731,30 @@ class FxirTestCase(InductorTestCase):
             target = subgm_getattr.name
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
 
+    @parametrize("idx", (0, 1, 2))
+    def test_switch_subgraph(self, idx: int):
+        x = torch.randn((2, 3), device=self.device)
+        idx_tensor = torch.tensor(idx, device=self.device)
+        model = SwitchModels.Simple()
+        gm = self._compile_and_check(
+            model, [idx_tensor, x], expected_num_triton_kernels=4
+        )[-1]
+
+        # The FX graph should call torch.ops.higher_order.switch (not cond).
+        switch_nodes = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.switch
+            )
+        )
+        self.assertEqual(len(switch_nodes), 1)
+
+        # Each branch should be a subgraph GraphModule attached as an attribute.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 3)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
     @parametrize("pred", (False, True))
     def test_cond_no_operands(self, pred: bool):
         """
@@ -1120,8 +1158,8 @@ class AOTFxirTestCase(InductorTestCase):
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
@@ -1462,8 +1500,26 @@ class TestReplaceFloorDiv(InductorTestCase):
         self._check(expr)
 
 
+class TestUnbackedSymbolDefs(InductorTestCase):
+    """Tests for FxConverter._generate_unbacked_symbol_defs."""
+
+    def test_empty_bindings_returns_before_buffer_lookup(self):
+        # A line with no unbacked symbols must return before the output-buffer
+        # lookup: such kernels are not recorded in buffer_to_node, so the lookup
+        # would KeyError. Fails without the early-return guard, passes with it.
+        conv = MagicMock(spec=FxConverter)
+        conv.gm = MagicMock()
+        conv.buffer_to_node = {}
+        line = MagicMock(spec=UnbackedSymbolDefsLine)
+        # output_name is set so that, absent the guard, the buffer_to_node lookup
+        # is actually reached and raises KeyError (its documented failure mode).
+        line.output_name = "buf0"
+        line.unbacked_bindings = {}
+        self.assertIsNone(FxConverter._generate_unbacked_symbol_defs(conv, line))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU:
         run_tests(needs="filelock")
