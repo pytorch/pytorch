@@ -101,6 +101,33 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(actual, fn(x))
 
+    def test_safe_type_repr(self):
+        class CustomReprMeta(type):
+            def __repr__(cls):
+                raise AssertionError("custom repr should not be called")
+
+        class CustomReprClass(metaclass=CustomReprMeta):
+            pass
+
+        class SpoofedClass:
+            @property
+            def __class__(self):
+                return type
+
+        self.assertEqual(
+            torch._dynamo.guards._safe_type_repr(CustomReprClass),
+            type.__repr__(CustomReprClass),
+        )
+        self.assertEqual(
+            torch._dynamo.guards._safe_type_repr(list[int]),
+            type.__repr__(type(list[int])),
+        )
+        self.assertIsInstance(SpoofedClass(), type)
+        self.assertEqual(
+            torch._dynamo.guards._safe_type_repr(SpoofedClass()),
+            type.__repr__(SpoofedClass),
+        )
+
     def test_guard_debug_info_user_stack(self):
         """Test that GuardDebugInfo can store user stack trace information."""
         import traceback
