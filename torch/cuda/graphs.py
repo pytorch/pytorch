@@ -802,15 +802,23 @@ class CUDAGraph(_CUDAGraph):
 
             # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
             # capture the handle so a wait node can be matched to the record that signals it.
+            # Not best-effort like the kernel-name lookup above (a name can legitimately be
+            # unavailable): the node type is already established here, so these calls are
+            # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
+            # record/wait match quietly wrong rather than loud.
             event_ptr = 0
             if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
-                err, ev = _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
-                if err == _cuda_runtime.cudaError_t.cudaSuccess:
-                    event_ptr = int(ev)
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
+                    )
+                )
             elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
-                err, ev = _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
-                if err == _cuda_runtime.cudaError_t.cudaSuccess:
-                    event_ptr = int(ev)
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
+                    )
+                )
 
             # Host nodes carry no name in the CUPTI record; recover the callback address
             # from the node params and resolve a best-effort symbol name (see
