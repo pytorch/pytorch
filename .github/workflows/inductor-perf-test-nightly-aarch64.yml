@@ -8,6 +8,7 @@ on:
   # MOCK / DO NOT MERGE: run this workflow on the PR that edits it, so the
   # aarch64 perf matrix can be exercised against the staging m8g.metal-24xl
   # runner before the bare-metal switch lands. Remove before merging.
+  # Re-run 1: after the 92c/338Gi resize (ci-infra#969) was deployed to staging-ue1.
   pull_request:
     paths:
       - .github/workflows/inductor-perf-test-nightly-aarch64.yml
