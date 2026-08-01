@@ -24,6 +24,7 @@ import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -65,6 +66,7 @@ def run_tests(needs: str | tuple[str, ...] = ()) -> None:
 
 
 class TestCase(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC  # All dynamo tests are device-agnostic by default
     _exit_stack: contextlib.ExitStack
 
     @classmethod
