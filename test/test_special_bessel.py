@@ -27,11 +27,8 @@ class TestModifiedBesselFunctions(TestCase):
         return dict(rtol=1e-5, atol=1e-8)
 
     def _scipy_tensor(self, scipy_fn, x, nu_val, device, dtype):
-        return torch.as_tensor(
-            scipy_fn(nu_val, x.cpu().numpy()),
-            device=device,
-            dtype=dtype,
-        )
+        result = scipy_fn(nu_val, x.cpu().numpy())
+        return torch.as_tensor(result, device=device, dtype=dtype)
 
     def _assert_matches_scipy(
         self, torch_fn, scipy_fn, x, nu_val, device, dtype, finite_only=False
@@ -84,16 +81,13 @@ class TestModifiedBesselFunctions(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     def test_modified_bessel_i_edge_cases(self, device, dtype):
+        bessel_i = torch.special.modified_bessel_i
         x_zero = torch.tensor([0.0], device=device, dtype=dtype)
-        self.assertEqual(
-            torch.special.modified_bessel_i(
-                x_zero, torch.tensor([0.0], device=device, dtype=dtype)
-            ),
-            torch.ones_like(x_zero),
-        )
+        nu_zero = torch.zeros_like(x_zero)
+        self.assertEqual(bessel_i(x_zero, nu_zero), torch.ones_like(x_zero))
         for nu_val in [1.0, 2.5, 10.0]:
             nu = torch.tensor([nu_val], device=device, dtype=dtype)
-            self.assertEqual(torch.special.modified_bessel_i(x_zero, nu), x_zero)
+            self.assertEqual(bessel_i(x_zero, nu), x_zero)
 
     @dtypes(torch.float32, torch.float64)
     def test_modified_bessel_i_nan_inf(self, device, dtype):
@@ -112,10 +106,8 @@ class TestModifiedBesselFunctions(TestCase):
         for nu_val in [1.0 + eps, 2.0 - eps, -1.0 - eps]:
             nu_near_int = torch.tensor([nu_val], device=device, dtype=dtype)
             self.assertTrue(torch.isnan(bessel_i(x_neg, nu_near_int)).all())
-        self.assertEqual(
-            bessel_i(x_zero, torch.tensor([1e-12], device=device, dtype=dtype)),
-            torch.zeros_like(x_zero),
-        )
+        nu_small = torch.full_like(x_zero, 1e-12)
+        self.assertEqual(bessel_i(x_zero, nu_small), torch.zeros_like(x_zero))
         for nu_val in [-1e-12, -1.0 - eps]:
             nu = torch.tensor([nu_val], device=device, dtype=dtype)
             self.assertTrue(torch.isinf(bessel_i(x_zero, nu)).all())
@@ -194,11 +186,9 @@ class TestModifiedBesselFunctions(TestCase):
         tol = dict(rtol=1e-10, atol=1e-10)
         if dtype == torch.float32:
             tol = dict(rtol=1e-5, atol=1e-5)
-        self.assertEqual(
-            torch.special.modified_bessel_k(x, nu_pos),
-            torch.special.modified_bessel_k(x, nu_neg),
-            **tol,
-        )
+        actual = torch.special.modified_bessel_k(x, nu_pos)
+        expected = torch.special.modified_bessel_k(x, nu_neg)
+        self.assertEqual(actual, expected, **tol)
 
     @dtypes(torch.float64)
     def test_modified_bessel_near_integer_orders(self, device, dtype):
@@ -295,20 +285,16 @@ class TestModifiedBesselFunctions(TestCase):
 
     @dtypes(torch.float64)
     def test_modified_bessel_i_series_peak_region(self, device, dtype):
-        # Regression: bessel_i_series was capped at 300 terms, but the series
-        # peaks at k = (sqrt(nu^2+x^2)-nu)/2 (~785 terms near nu=50, x~1300),
-        # so nu ~34-50 with x >~640 was truncated before its dominant terms
-        # (98.5% error at (700, 45)). References are mpmath at 40 dps.
+        # Regression values from mpmath at 40 dps for the former 300-term cap.
         cases = [
             (700.0, 45.0, 3.5988822944596692681e301),
             (624.8, 49.0, 5.195399607670892877e268),
             (588.0, 40.0, 9.779522723878312322e252),
         ]
         for x_val, nu_val, expected in cases:
-            x = torch.tensor([x_val], device=device, dtype=dtype)
-            nu = torch.tensor([nu_val], device=device, dtype=dtype)
-            result = torch.special.modified_bessel_i(x, nu)
-            self.assertEqual(result, torch.tensor([expected], device=device, dtype=dtype), rtol=1e-11, atol=0)
+            args = torch.tensor([x_val, nu_val, expected], device=device, dtype=dtype)
+            result = torch.special.modified_bessel_i(args[0], args[1])
+            self.assertEqual(result, args[2], rtol=1e-11, atol=0)
 
     @dtypes(torch.float32, torch.float64)
     def test_modified_bessel_i_broadcasting(self, device, dtype):
@@ -331,9 +317,8 @@ class TestModifiedBesselFunctions(TestCase):
         out = torch.empty_like(x)
         ret = torch.special.modified_bessel_k(x, nu, out=out)
         self.assertTrue(ret.data_ptr() == out.data_ptr())
-        self.assertEqual(
-            out, torch.special.modified_bessel_k(x, nu), **self._tol(dtype)
-        )
+        expected = torch.special.modified_bessel_k(x, nu)
+        self.assertEqual(out, expected, **self._tol(dtype))
 
     def test_modified_bessel_int_to_float_promotion(self, device):
         x = torch.tensor([1, 2, 3], device=device, dtype=torch.int64)

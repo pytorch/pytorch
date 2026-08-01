@@ -3966,10 +3966,8 @@ inline C10_HOST_DEVICE T bessel_i_series(T x, T nu) {
     T ln_half_x = std::log(half_x);
     T result = T(0.0);
 
-    // Terms peak near k = (sqrt(nu^2 + x^2) - nu)/2. This branch runs up to
-    // x = max(20, nu^2/2) + nu (~1300 for nu just under 50), so the peak can sit
-    // near k = 650; the cap must clear it plus the convergence tail or the sum is
-    // silently truncated. The loop still exits early once terms stop mattering.
+    // Near the branch boundary, the peak and convergence tail can require about
+    // 785 terms; the loop still exits early once terms stop mattering.
     for (int64_t k = 0; k < 1000; k++) {
         T gamma_arg = nu + T(k) + T(1.0);
 

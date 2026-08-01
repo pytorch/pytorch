@@ -2916,10 +2916,7 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
         T ln_half_x = log(half_x);
         T result = T(0.0);
 
-        // Terms peak near k = (sqrt(nu^2 + x^2) - nu)/2. This branch runs up to
-        // x = max(20, nu^2/2) + nu (~1300 for nu just under 50), so the peak can
-        // sit near k = 650; the cap must clear it plus the convergence tail or the
-        // sum is silently truncated. The loop still exits early on convergence.
+        // The branch boundary can require about 785 terms before convergence.
         for (int k = 0; k < 1000; k++) {
             T gamma_arg = nu + T(k) + T(1.0);
 
