@@ -413,39 +413,91 @@ class TestCuptiRecords(TestCase):
             json.loads(both["kernel"]["metadata"][0]), {"func": "ReduceScatter"}
         )
 
-    def test_order_event_nodes(self):
-        # Ordering the event-record nodes of a graph by dependency depth: a serial chain is
-        # totally ordered (returns tools_ids in order); concurrent event nodes at the same
-        # depth are ambiguous (None); no event nodes -> empty. Pure host-side.
-        from torch.profiler._cupti._event_nodes import order_event_nodes
+    def test_recorder_keeps_node_id_order_and_refuses_opaque_bodies(self):
+        # The recorder takes event nodes in the order get_graph_data() returns them (node-id
+        # == node-creation order) with no DAG-derived sorting: sync id follows node id, not
+        # execution order, so ordering by dependency depth mislabels nodes on any fork/join
+        # graph. Graphs with child/conditional bodies are refused outright -- get_graph_data()
+        # does not descend into them, so their event nodes are invisible here. Pure host-side.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
 
-        def node(i, ntype, tid, deps):
-            return {
-                "index": i,
-                "node_type": ntype,
-                "tools_id": tid,
-                "dependencies": deps,
+        def node(ntype, tid, deps):
+            return {"node_type": ntype, "tools_id": tid, "dependencies": deps}
+
+        class FakeGraph:
+            def __init__(self, nodes):
+                self._nodes = nodes
+                self._recorded_exec_ids: set[int] = set()
+
+            def get_graph_data(self):
+                return {"nodes": self._nodes, "exec_graph_id": 7}
+
+        # Fork/join: the deeper branch's event node is created FIRST (lower node id) but sits
+        # at greater dependency depth. Node-id order must win.
+        deep_first = [
+            node("kernel", (7 << 32) | 0, []),
+            node("kernel", (7 << 32) | 1, [0]),
+            node("kernel", (7 << 32) | 2, [1]),
+            node("event_record", (7 << 32) | 3, [2]),  # deep branch, created first
+            node("event_record", (7 << 32) | 4, [0]),  # shallow branch, created second
+        ]
+        r = _EventNodeRecorder()
+        r._on_instantiate(FakeGraph(deep_first))
+        self.assertEqual(
+            r.graph_event_nodes[7], [(7 << 32) | 3, (7 << 32) | 4]
+        )  # NOT depth order, which would invert these
+
+        # No event nodes -> nothing tracked at all.
+        r2 = _EventNodeRecorder()
+        r2._on_instantiate(FakeGraph([node("kernel", (7 << 32) | 0, [])]))
+        self.assertNotIn(7, r2.graph_event_nodes)
+
+        # Opaque bodies -> refuse, even though a top-level event node is present.
+        for opaque in ("child_graph", "conditional"):
+            r3 = _EventNodeRecorder()
+            r3._on_instantiate(
+                FakeGraph(
+                    [
+                        node("event_record", (7 << 32) | 0, []),
+                        node(opaque, (7 << 32) | 1, [0]),
+                    ]
+                )
+            )
+            self.assertNotIn(7, r3.graph_event_nodes, opaque)
+
+    def test_recorder_handles_deep_chains(self):
+        # A graph is an arbitrary DAG and a captured chain is routinely thousands of nodes
+        # deep. Any recursive walk over dependencies blows the interpreter stack well before
+        # that (and run_graph_instantiate_hooks swallows it, silently disabling the bridge),
+        # so the recorder must not walk the DAG at all.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+        n = 5000
+        nodes = [
+            {
+                "node_type": "kernel",
+                "tools_id": (7 << 32) | i,
+                "dependencies": ([i - 1] if i else []),
             }
-
-        # kernel(0) -> event(1) -> kernel(2) -> event(3): depths 1 and 3 -> ordered.
-        serial = [
-            node(0, "kernel", 100, []),
-            node(1, "event_record", 111, [0]),
-            node(2, "kernel", 102, [1]),
-            node(3, "event_record", 133, [2]),
+            for i in range(n)
         ]
-        self.assertEqual(order_event_nodes(serial), [111, 133])
+        nodes.append(
+            {
+                "node_type": "event_record",
+                "tools_id": (7 << 32) | n,
+                "dependencies": [n - 1],
+            }
+        )
 
-        # root(0) -> event(1), event(2): both depth 1 -> ambiguous.
-        concurrent = [
-            node(0, "kernel", 100, []),
-            node(1, "event_record", 111, [0]),
-            node(2, "event_record", 122, [0]),
-        ]
-        self.assertIsNone(order_event_nodes(concurrent))
+        class FakeGraph:
+            _recorded_exec_ids: set[int] = set()
 
-        # No event nodes -> empty list.
-        self.assertEqual(order_event_nodes([node(0, "kernel", 100, [])]), [])
+            def get_graph_data(self):
+                return {"nodes": nodes, "exec_graph_id": 7}
+
+        r = _EventNodeRecorder()
+        r._on_instantiate(FakeGraph())
+        self.assertEqual(r.graph_event_nodes[7], [(7 << 32) | n])
 
     def test_event_node_recorder_purge(self):
         # The recorder holds each graph's ordered event nodes; purge drops a destroyed graph.
@@ -2453,6 +2505,79 @@ class TestCuptiMonitorCUDA(TestCase):
 
         # The earlier graph is still absent -- arming does not retroactively record it.
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
+
+    def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
+        # The serial-chain case above is the one where every candidate ordering agrees. This
+        # is the case that separates them: two event nodes on CONCURRENT branches of differing
+        # depth. The recorder must report them in node-id (creation) order, which is what
+        # cuda_event_sync_id follows -- ordering by dependency depth inverts them here, and
+        # does so silently because the two depths are distinct.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+        x = torch.randn(8, 8, device="cuda")
+        s_deep, s_shallow = torch.cuda.Stream(), torch.cuda.Stream()
+        warm = torch.cuda.Stream()
+        warm.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warm):
+            for _ in range(3):
+                (x @ x).relu()
+        torch.cuda.current_stream().wait_stream(warm)
+
+        ev_deep = torch.cuda.Event(external=True)
+        ev_shallow = torch.cuda.Event(external=True)
+        r = _EventNodeRecorder()
+        r.arm()
+        self.addCleanup(lambda: r._handle.remove())
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g):
+            y = x @ x
+            s_deep.wait_stream(torch.cuda.current_stream())
+            s_shallow.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s_deep):  # longer branch, event created FIRST
+                a = (y * 2).relu()
+                a = (a @ a).relu()
+                ev_deep.record()
+            with torch.cuda.stream(s_shallow):  # shorter branch, event created SECOND
+                b = y + 1
+                ev_shallow.record()
+            torch.cuda.current_stream().wait_stream(s_deep)
+            torch.cuda.current_stream().wait_stream(s_shallow)
+            (a + b).sum()
+        g.instantiate()
+
+        data = g.get_graph_data()
+        nodes = data["nodes"]
+        ev_nodes = [n for n in nodes if n["node_type"] == "event_record"]
+        self.assertEqual(len(ev_nodes), 2, "expected one event node per branch")
+
+        # get_graph_data() returns nodes in increasing node id -- the invariant the recorder
+        # relies on to skip sorting entirely.
+        ids = [n["tools_id"] for n in nodes]
+        self.assertEqual(ids, sorted(ids))
+
+        recorded = r.graph_event_nodes[data["exec_graph_id"]]
+        self.assertEqual(recorded, [n["tools_id"] for n in ev_nodes])
+        self.assertEqual(recorded, sorted(recorded))
+
+        # And the branches really are at different dependency depths, so a depth sort would
+        # have produced a different (wrong) order here rather than coincidentally agreeing.
+        by_index = {n["tools_id"]: i for i, n in enumerate(nodes)}
+        depth: dict[int, int] = {}
+
+        def node_depth(i):
+            if i in depth:
+                return depth[i]
+            deps = nodes[i]["dependencies"]
+            depth[i] = 0 if not deps else 1 + max(node_depth(j) for j in deps)
+            return depth[i]
+
+        d = [node_depth(by_index[t]) for t in recorded]
+        self.assertNotEqual(d[0], d[1], "branches should differ in depth")
+        if d[0] > d[1]:
+            self.assertNotEqual(
+                recorded, [t for _, t in sorted(zip(d, recorded))]
+            )  # depth order != node-id order
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_v2_columnar_collection(self):
