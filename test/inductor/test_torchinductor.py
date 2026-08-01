@@ -6337,6 +6337,9 @@ for dtype in (torch.int32, torch.int64):
     )
     @parametrize("nhwc", (False, True))
     @with_tf32_off
+    @skipIfRocmVersionAtLeast(
+        [7, 14]
+    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
     def test_conv2d_backward_parametrized(
         self,
         channels_groups: list,

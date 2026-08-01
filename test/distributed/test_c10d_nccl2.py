@@ -10,6 +10,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
@@ -126,6 +127,7 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_large_in_place_all_gather(self) -> None:
         numel = 16 * 1024 * 1024
         output = torch.empty(
