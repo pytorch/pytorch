@@ -1770,7 +1770,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Internal uses should prefer this over hardcoded type name strings.
         """
         try:
-            return self.python_type().__name__
+            name = type.__dict__["__name__"].__get__(self.python_type(), type)
+            if isinstance(name, str):
+                return name
+            return "<unknown type>"
         except NotImplementedError:
             return "<unknown type>"
 
