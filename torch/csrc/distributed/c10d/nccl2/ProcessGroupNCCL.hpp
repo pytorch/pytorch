@@ -115,6 +115,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
+    c10::intrusive_ptr<::c10d::Backend::Options> clone() const override {
+      auto copy = c10::make_intrusive<Options>(*this);
+      copy->config = cloneNcclConfig(config);
+      return copy;
+    }
+
     // Whether a watchdog-detected collective timeout or NCCL async error
     // terminates the process with ::abort() (after running the abort hooks).
     // When false the communicator is still aborted, but the process survives:

@@ -4,7 +4,6 @@
 import builtins
 import collections.abc
 import contextlib
-import copy
 import ctypes
 import hashlib
 import io
@@ -6687,11 +6686,12 @@ def split_group(
         pg_backend = Backend(str(backend))
         backend_config = BackendConfig(pg_backend)
 
-    if pg_options is None and not _use_torchcomms_enabled():
-        # default pg_options same as the parent process group
-        # A deep copy is needed because if the option will be modified inside split
-        # and if we split parent pg multiple times, we will run into device out of bound error.
-        pg_options = copy.deepcopy(parent_backend.options)
+    # pg_options is left as-is when the caller did not pass any: ProcessGroup::
+    # splitGroup gives each device's backend a copy of *that backend's* options,
+    # which is what the child needs. Substituting the default (accelerator)
+    # backend's options here would hand e.g. ProcessGroupNCCL::Options to the
+    # gloo leg of a "cpu:gloo,cuda:nccl" group, which rejects them and silently
+    # falls back to defaults, dropping the caller's timeout and group_name.
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)

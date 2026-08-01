@@ -525,6 +525,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
