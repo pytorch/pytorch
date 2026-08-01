@@ -32,7 +32,7 @@
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <libshm.h>
@@ -194,22 +194,23 @@ void markOpaqueBaseHolderConstructed(PyObject* self) {
 
 void opaqueBaseInitInstance(
     py::detail::instance* inst,
-    const void* holder_ptr) {
-  (void)holder_ptr;
+    [[maybe_unused]] const void* holder_ptr) {
   markOpaqueBaseHolderConstructed(reinterpret_cast<PyObject*>(inst));
 }
 
-PyObject* opaqueBaseNew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
-  (void)args;
-  (void)kwargs;
+PyObject* opaqueBaseNew(
+    PyTypeObject* type,
+    [[maybe_unused]] PyObject* args,
+    [[maybe_unused]] PyObject* kwargs) {
   auto* self = py::detail::make_new_instance(type);
   markOpaqueBaseHolderConstructed(self);
   return self;
 }
 
-int opaqueBaseInit(PyObject* self, PyObject* args, PyObject* kwargs) {
-  (void)args;
-  (void)kwargs;
+int opaqueBaseInit(
+    PyObject* self,
+    [[maybe_unused]] PyObject* args,
+    [[maybe_unused]] PyObject* kwargs) {
   markOpaqueBaseHolderConstructed(self);
   return 0;
 }
@@ -553,8 +554,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
@@ -910,13 +914,12 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     try {
       at::IntArrayRef shape(
           prototype->shape, prototype->shape + prototype->ndim);
-      const auto device_index = c10::checked_convert<c10::DeviceIndex>(
-          prototype->device.device_id, "c10::DeviceIndex");
       at::TensorOptions options =
           at::TensorOptions()
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::dlDeviceToTorchDevice(
-                  prototype->device.device_type, device_index));
+                  prototype->device.device_type,
+                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -938,10 +941,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
         return 0;
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
-        const auto device_index = c10::checked_convert<c10::DeviceIndex>(
-            device_id, "c10::DeviceIndex");
-        *out_stream =
-            at::accelerator::getCurrentStream(device_index).native_handle();
+        *out_stream = at::accelerator::getCurrentStream(
+                          static_cast<c10::DeviceIndex>(device_id))
+                          .native_handle();
       }
       return 0;
     } catch (const std::exception& e) {
@@ -971,7 +973,7 @@ struct TorchConstDLPackExchangeAPI : public TorchDLPackExchangeAPI {
     dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
   }
 
-  static const DLPackExchangeAPI* Global() {
+  static DLPackExchangeAPI* Global() {
     static TorchConstDLPackExchangeAPI inst;
     return &inst;
   }
@@ -1009,11 +1011,7 @@ static PyObject* THPModule_ConstDLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
-      // PyCapsule_New takes void*, but this capsule exposes a const API.
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<DLPackExchangeAPI*>(TorchConstDLPackExchangeAPI::Global()),
-      "dlpack_exchange_api",
-      nullptr);
+      TorchConstDLPackExchangeAPI::Global(), "dlpack_exchange_api", nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -2540,6 +2538,11 @@ void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
+#ifdef USE_MPS
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+void THPMPSStream_init(PyObject* module);
+#endif
+
 static std::vector<PyMethodDef> methods;
 
 static void LogAPIUsageMetadataFromPython(
@@ -2554,7 +2557,7 @@ class WeakTensorRef {
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  WeakTensorRef(const at::Tensor& t) : weakref_(t.getIntrusivePtr()) {}
+  explicit WeakTensorRef(const at::Tensor& t) : weakref_{t.getIntrusivePtr()} {}
 
   bool expired() {
     return weakref_.expired();
@@ -2738,6 +2741,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
+  THPMPSStream_init(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);
@@ -2795,7 +2799,7 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
+#if defined(USE_CUSPARSELT) || defined(USE_HIPSPARSELT)
   PyObject* has_cusparselt = Py_True;
 #else
   PyObject* has_cusparselt = Py_False;
@@ -2827,6 +2831,19 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+
+  // Serialized access to the process environment. Prefer these over Python's
+  // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so
+  // reads and writes are consistent with C++ code that also goes through
+  // c10::utils::{get,set}_env.
+  py_module.def("_getenv", &c10::utils::get_env);
+  py_module.def(
+      "_setenv",
+      &c10::utils::set_env,
+      py::arg("name"),
+      py::arg("value"),
+      py::arg("overwrite") = true);
+  py_module.def("_unsetenv", &c10::utils::unset_env);
 
   {
     using at::impl::FakeDispatchCategory;
@@ -2882,6 +2899,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
+    return t.is_fake();
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -3455,6 +3476,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
+        TORCH_CHECK(
+            !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

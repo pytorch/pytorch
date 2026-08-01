@@ -1,31 +1,7 @@
-import sys
-from functools import wraps
-
-
 # Cached lazily on first __instancecheck__ miss to avoid an import cycle at
 # module load (FakeScriptObject's module imports torch, which imports us).
 _FakeScriptObject_cls: type | None = None
-_skipped_dynamo_codes: set[object] = set()
-_constructing_instance_ids: dict[int, int] = {}
-
-
-def _maybe_skip_dynamo_code(fn):
-    """Preserve skip-frame handling when wrapping constructors."""
-    eval_frame = sys.modules.get("torch._dynamo.eval_frame")
-    if eval_frame is None:
-        return
-
-    code = getattr(fn, "__code__", None)
-    if code is None:
-        return
-    if code in _skipped_dynamo_codes:
-        return
-
-    skip_code = getattr(eval_frame, "skip_code", None)
-    if skip_code is None:
-        return
-    skip_code(code)
-    _skipped_dynamo_codes.add(code)
+_MISSING_PICKLE_METHOD = object()
 
 
 def _get_pybind_custom_class_base():
@@ -48,9 +24,9 @@ def _rebuild_custom_class_base(cls, newargs=(), newkwargs=None):
 
 
 def _set_custom_class_base_state(instance, state):
-    setstate = _find_pickle_method(type(instance), "__setstate__")
-    if setstate is not None:
-        setstate(instance, state)
+    setstate = _find_pickle_method(instance, "__setstate__")
+    if setstate is not _MISSING_PICKLE_METHOD:
+        setstate(state)
         return
 
     if state is None:
@@ -68,29 +44,17 @@ def _set_custom_class_base_state(instance, state):
             setattr(instance, name, value)
 
 
-def _find_pickle_method(cls, name):
+def _find_pickle_method(instance, name):
+    cls = type(instance)
     for base in cls.__mro__:
-        method = base.__dict__.get(name)
-        if method is None:
+        method = base.__dict__.get(name, _MISSING_PICKLE_METHOD)
+        if method is _MISSING_PICKLE_METHOD:
             continue
         if base in {CustomClassBase, object} or base.__module__ == "pybind11_builtins":
             continue
-        return method
-    return None
-
-
-def _strip_custom_class_base_state(state):
-    if isinstance(state, dict):
-        state = dict(state)
-        state.pop("_opaque_base_constructing", None)
-        state.pop("_opaque_base_initialized", None)
-        return state
-
-    if isinstance(state, tuple) and len(state) == 2:
-        dict_state, slot_state = state
-        return _strip_custom_class_base_state(dict_state), slot_state
-
-    return state
+        descriptor_get = getattr(method, "__get__", None)
+        return descriptor_get(instance, cls) if descriptor_get is not None else method
+    return _MISSING_PICKLE_METHOD
 
 
 def _get_object_state(instance):
@@ -161,32 +125,28 @@ def _is_custom_class_base_instance(cls, instance, base_instancecheck):
     return False
 
 
-def _set_constructing(instance):
-    # The instance stays alive until _restore_constructing runs, so this id
-    # cannot be reused by another live object while the guard is active.
-    instance_id = id(instance)
-    _constructing_instance_ids[instance_id] = (
-        _constructing_instance_ids.get(instance_id, 0) + 1
-    )
-    return instance_id
-
-
-def _restore_constructing(instance, instance_id):
-    if id(instance) != instance_id:
-        return
-    depth = _constructing_instance_ids.get(instance_id, 0)
-    if depth <= 1:
-        _constructing_instance_ids.pop(instance_id, None)
-    else:
-        _constructing_instance_ids[instance_id] = depth - 1
-
-
-def _is_custom_class_base_constructing(instance):
-    return _constructing_instance_ids.get(id(instance), 0) > 0
-
-
 def _ensure_custom_class_base_initialized(instance):
     _get_pybind_custom_class_base().__init__(instance)
+
+
+def _ensure_custom_class_base_metaclass(cls):
+    pybind_meta = type(_get_pybind_custom_class_base())
+    pending = []
+
+    def validate(current_cls):
+        if not isinstance(current_cls, CustomClassBaseMeta):
+            if type(current_cls) is not pybind_meta:
+                raise TypeError(
+                    f"{current_cls.__name__} must use a metaclass derived from "
+                    "CustomClassBaseMeta"
+                )
+            pending.append(current_cls)
+        for subclass in current_cls.__subclasses__():
+            validate(subclass)
+
+    validate(cls)
+    for current_cls in pending:
+        current_cls.__class__ = CustomClassBaseMeta
 
 
 class CustomClassBaseMeta(type):
@@ -219,27 +179,7 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
                 cls, instance, super().__instancecheck__
             )
 
-    def _wrap_python_construction_method(cls, name):
-        if _needs_pybind_meta_call(cls):
-            return
-        method = cls.__dict__.get(name)
-        if method is None or not callable(method):
-            return
-        if _is_pybind_init(method):
-            return
-
-        @wraps(method)
-        def wrapped(self, *args, **kwargs):
-            _maybe_skip_dynamo_code(method)
-            instance_constructing = _set_constructing(self)
-            try:
-                return method(self, *args, **kwargs)
-            finally:
-                _restore_constructing(self, instance_constructing)
-
-        setattr(cls, name, wrapped)
-
-    class CustomClassBase(_PybindCustomClassBase):
+    class CustomClassBase(_PybindCustomClassBase, metaclass=CustomClassBaseMeta):
         __slots__ = ()
 
         def __new__(cls, *args, **kwargs):
@@ -260,30 +200,30 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
             ):
                 raise TypeError(f"{type(self).__name__}() takes no arguments")
 
-        def __init_subclass__(cls, **kwargs):
-            super().__init_subclass__(**kwargs)
-            _wrap_python_construction_method(cls, "__init__")
-            _wrap_python_construction_method(cls, "__post_init__")
-
         def __reduce_ex__(self, protocol):
             if _needs_pybind_meta_call(type(self)):
                 return object.__reduce_ex__(self, protocol)
 
-            reduce = _find_pickle_method(type(self), "__reduce__")
-            if reduce is not None:
-                return reduce(self)
+            reduce = _find_pickle_method(self, "__reduce__")
+            if reduce is not _MISSING_PICKLE_METHOD:
+                return reduce()
 
-            getnewargs_ex = _find_pickle_method(type(self), "__getnewargs_ex__")
-            if getnewargs_ex is not None:
-                newargs, newkwargs = getnewargs_ex(self)
+            getnewargs_ex = _find_pickle_method(self, "__getnewargs_ex__")
+            if getnewargs_ex is not _MISSING_PICKLE_METHOD:
+                newargs, newkwargs = getnewargs_ex()
             else:
-                getnewargs = _find_pickle_method(type(self), "__getnewargs__")
-                newargs = getnewargs(self) if getnewargs is not None else ()
+                getnewargs = _find_pickle_method(self, "__getnewargs__")
+                newargs = (
+                    getnewargs() if getnewargs is not _MISSING_PICKLE_METHOD else ()
+                )
                 newkwargs = {}
 
-            getstate = _find_pickle_method(type(self), "__getstate__")
-            state = getstate(self) if getstate is not None else _get_object_state(self)
-            state = _strip_custom_class_base_state(state)
+            getstate = _find_pickle_method(self, "__getstate__")
+            state = (
+                getstate()
+                if getstate is not _MISSING_PICKLE_METHOD
+                else _get_object_state(self)
+            )
             return _rebuild_custom_class_base, (type(self), newargs, newkwargs), state
 
         def __setstate__(self, state):
@@ -331,16 +271,6 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
         # pybind11, so the dependency is stable and covered by opaque tests.
         return type(init).__name__ == "instancemethod"
 
-    def _pybind_instancecheck(cls, instance):
-        if CustomClassBase in getattr(cls, "__mro__", ()):
-            return _is_custom_class_base_instance(
-                cls, instance, lambda obj: type.__instancecheck__(cls, obj)
-            )
-        return type.__instancecheck__(cls, instance)
-
-    pybind_meta = type(_PybindCustomClassBase)
-    # pyrefly: ignore [bad-assignment, missing-attribute]
-    pybind_meta.__instancecheck__ = _pybind_instancecheck
     CustomClassBase._pybind_backed = True
     CustomClassBaseMeta.__qualname__ = "CustomClassBaseMeta"
     CustomClassBase.__qualname__ = "CustomClassBase"

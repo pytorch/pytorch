@@ -1652,6 +1652,11 @@ def _has_sufficient_memory(device, size):
 
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
+        # Sync and cleanup MPS memory before checking available memory
+        if device_type == "mps":
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+
     return psutil.virtual_memory().available >= effective_size
 
 
@@ -2040,6 +2045,10 @@ def expectedFailureCPU(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure("cuda")(fn)
+
+
+def expectedFailureIfRocm(fn):
+    return expectedFailure("cuda")(fn) if TEST_WITH_ROCM else fn
 
 
 def expectedFailureXPU(fn):

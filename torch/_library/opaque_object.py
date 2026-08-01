@@ -44,7 +44,11 @@ from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._custom_class_base import CustomClassBase, CustomClassBaseMeta
+from torch._custom_class_base import (
+    _ensure_custom_class_base_metaclass,
+    CustomClassBase,
+    CustomClassBaseMeta,
+)
 
 
 if TYPE_CHECKING:
@@ -213,6 +217,9 @@ def register_custom_class(
 
     # Constant types store the real object directly during tracing (no
     # FakeScriptObject wrapper), so they don't need CustomClassBaseMeta.
+    if typ != "constant" and issubclass(cls, CustomClassBase):
+        _ensure_custom_class_base_metaclass(cls)
+
     if typ != "constant" and not (
         issubclass(cls, CustomClassBase) or isinstance(cls, CustomClassBaseMeta)
     ):

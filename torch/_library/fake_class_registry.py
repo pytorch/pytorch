@@ -19,7 +19,14 @@ class FakeScriptObject:
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
 
+        from torch._custom_class_base import (
+            _ensure_custom_class_base_metaclass,
+            CustomClassBase,
+        )
         from torch._library.opaque_object import is_custom_class
+
+        if issubclass(type(x), CustomClassBase):
+            _ensure_custom_class_base_metaclass(type(x))
 
         # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)
@@ -256,14 +263,9 @@ def maybe_to_fake_obj(
         opaque_info = get_opaque_obj_info(x_type)
         if opaque_info is None:
             raise AssertionError(f"opaque_info for type {x_type} must not be None")
-        from torch._custom_class_base import _is_custom_class_base_constructing
-
-        opaque_base_constructing = _is_custom_class_base_constructing(x)
         for attr_name in opaque_info.members:
             with _disable_current_modes():
                 if not hasattr(x, attr_name):
-                    if opaque_base_constructing:
-                        continue
                     raise TypeError(
                         f"Opaque object of type '{type_name}' was specified to have member "
                         f"'{attr_name}', but this doesn't actually exist in the object."
@@ -411,11 +413,11 @@ def register_fake_class(qualname, fake_class: HasStaticMethodFromReal | None = N
             def size(self):
                 return len(self.queue)
 
-    In this example, the original TensorQeue need to add a __obj_flatten__ method
+    In this example, the original TensorQueue need to add a __obj_flatten__ method
     to the class TensorQueue and the flattened result is passed into FakeTensorQueue's
     __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
     at the contents of the script object and properly handle them in the subsystems
-    like dynamo, aot_aotugrad or more.
+    like dynamo, aot_autograd or more.
     """
 
     def inner(fake_class: HasStaticMethodFromReal):

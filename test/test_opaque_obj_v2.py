@@ -987,89 +987,6 @@ class TestOpaqueObject(TestCase):
         self.assertIsInstance(fake_queue, FakeScriptObject)
         self.assertIsInstance(fake_rng, FakeScriptObject)
 
-    def test_opaque_base_constructing_guard_is_instance_local(self):
-        class ConstructingOpaque(OpaqueBase):
-            def __init__(self, value, peer=None, fake_mode=None):
-                self.value = value
-                if peer is not None:
-                    with fake_mode:
-                        self.fake_peer = maybe_to_fake_obj(fake_mode, peer)
-
-        register_opaque_type(
-            ConstructingOpaque,
-            typ="reference",
-            members={"value": MemberType.USE_REAL},
-        )
-
-        existing = ConstructingOpaque(5)
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        constructing = ConstructingOpaque(6, existing, fake_mode)
-
-        self.assertIsInstance(constructing.fake_peer, FakeScriptObject)
-        self.assertEqual(constructing.fake_peer.value, 5)
-
-    def test_opaque_base_constructing_guard_preserves_initialized_members(self):
-        class ConstructingOpaque(OpaqueBase):
-            def __init__(self, value, fake_mode):
-                self.value = value
-                with fake_mode:
-                    self.fake_self = maybe_to_fake_obj(fake_mode, self)
-                self.late = value + 1
-
-        register_opaque_type(
-            ConstructingOpaque,
-            typ="reference",
-            members={"value": MemberType.USE_REAL, "late": MemberType.USE_REAL},
-        )
-
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        obj = ConstructingOpaque(5, fake_mode)
-
-        self.assertIsInstance(obj.fake_self, FakeScriptObject)
-        self.assertEqual(obj.fake_self.value, 5)
-        self.assertFalse(hasattr(obj.fake_self, "late"))
-
-    def test_opaque_base_constructing_guard_covers_dataclass_post_init(self):
-        @dataclass
-        class ConstructingDataOpaque(OpaqueBase):
-            value: int
-            fake_mode: FakeTensorMode
-
-            def __post_init__(self):
-                with self.fake_mode:
-                    self.fake_self = maybe_to_fake_obj(self.fake_mode, self)
-                self.late = self.value + 1
-
-        register_opaque_type(
-            ConstructingDataOpaque,
-            typ="reference",
-            members={"value": MemberType.USE_REAL, "late": MemberType.USE_REAL},
-        )
-
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        obj = ConstructingDataOpaque(5, fake_mode)
-
-        self.assertIsInstance(obj.fake_self, FakeScriptObject)
-        self.assertEqual(obj.fake_self.value, 5)
-        self.assertFalse(hasattr(obj.fake_self, "late"))
-
-    def test_opaque_base_constructing_guard_ignores_user_attribute(self):
-        class ForgedConstructingOpaque(OpaqueBase):
-            pass
-
-        register_opaque_type(
-            ForgedConstructingOpaque,
-            typ="reference",
-            members={"late": MemberType.USE_REAL},
-        )
-
-        obj = ForgedConstructingOpaque()
-        obj._opaque_base_constructing = True
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        with self.assertRaisesRegex(TypeError, "member 'late'"):
-            with fake_mode:
-                maybe_to_fake_obj(fake_mode, obj)
-
     def test_isinstance_opaque_base_covers_all_opaque_types(self):
         # isinstance(x, CustomClassBase) should match all registered opaque types,
         # not just classes that directly subclass CustomClassBase.
@@ -1271,7 +1188,8 @@ def forward(self, x_1, cfg_1):
     def test_opaque_base_is_pybind_backed(self):
         self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
         self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
-        self.assertIs(type(OpaqueBase), type(torch._C._OpaqueBase))
+        self.assertTrue(issubclass(type(OpaqueBase), type(torch._C._OpaqueBase)))
+        self.assertIsInstance(OpaqueBase, CustomClassBaseMeta)
         self.assertEqual(OpaqueBase.__dictoffset__, 0)
         self.assertFalse(hasattr(OpaqueBase(), "__dict__"))
 
@@ -1305,6 +1223,14 @@ def forward(self, x_1, cfg_1):
         self.assertEqual(data_copy.value, 5)
         self.assertIsInstance(data_copy, torch._C._OpaqueBase)
         self.assertIsInstance(data_copy, OpaqueBase)
+
+        data_with_guard_named_fields = DataOpaque(5)
+        data_with_guard_named_fields._opaque_base_constructing = "user value"
+        data_with_guard_named_fields._opaque_base_initialized = "another user value"
+        guard_named_fields_copy = copy.deepcopy(data_with_guard_named_fields)
+        self.assertEqual(
+            guard_named_fields_copy.__dict__, data_with_guard_named_fields.__dict__
+        )
 
         @dataclass(frozen=True)
         class FrozenDataOpaque(OpaqueBase):
@@ -1412,6 +1338,28 @@ def forward(self, x_1, cfg_1):
                 return 123
 
         self.assertEqual(NonInstanceNew(), 123)
+
+        class UnpickleableOpaque(OpaqueBase):
+            __reduce__ = None
+
+        with self.assertRaises(TypeError):
+            pickle.dumps(UnpickleableOpaque())
+
+        class DescriptorStateOpaque(OpaqueBase):
+            class_state = 12
+
+            @classmethod
+            def __getstate__(cls):
+                return {"value": cls.class_state}
+
+        self.assertEqual(copy.deepcopy(DescriptorStateOpaque()).value, 12)
+
+        class StaticStateOpaque(OpaqueBase):
+            @staticmethod
+            def __getstate__():
+                return {"value": 13}
+
+        self.assertEqual(copy.deepcopy(StaticStateOpaque()).value, 13)
 
     def test_opaque_base_weights_only_safe_globals_roundtrip(self):
         obj = SizeStore(13)
@@ -2063,6 +2011,8 @@ def forward(self, primals, tangents):
 namespace py = pybind11;
 
 struct OpaqueThing {};
+struct LateOpaqueThing : OpaqueThing {};
+struct FailureThing {};
 struct PlainThing {};
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -2073,8 +2023,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
   py::class_<OpaqueThing>(m, "OpaqueThing", custom_class_base)
       .def(py::init<>());
+  py::class_<FailureThing>(m, "FailureThing", custom_class_base)
+      .def(py::init<>());
   py::class_<PlainThing>(m, "PlainThing")
       .def(py::init<>());
+  m.def("make_late_type", [m]() mutable {
+    py::class_<LateOpaqueThing, OpaqueThing>(m, "LateOpaqueThing")
+        .def(py::init<>());
+  });
 }
         """
 
@@ -2086,8 +2042,33 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             with_cuda=False,
         )
 
+        class OpaqueThingChild(module.OpaqueThing):
+            pass
+
+        class FailureGoodChild(module.FailureThing):
+            pass
+
+        class FailureMeta(type(module.FailureThing)):
+            pass
+
+        class FailureBadChild(module.FailureThing, metaclass=FailureMeta):
+            pass
+
+        default_pybind_meta = type(module.FailureThing)
+        with self.assertRaisesRegex(TypeError, "FailureBadChild"):
+            register_opaque_type(module.FailureThing, typ="reference")
+        self.assertIs(type(module.FailureThing), default_pybind_meta)
+        self.assertIs(type(FailureGoodChild), default_pybind_meta)
+        self.assertIs(type(FailureBadChild), FailureMeta)
+
         self.assertTrue(issubclass(module.OpaqueThing, OpaqueBase))
+        self.assertIs(type(module.OpaqueThing), type(module.PlainThing))
+        self.assertIs(type(OpaqueThingChild), type(module.PlainThing))
         register_opaque_type(module.OpaqueThing, typ="reference")
+        self.assertIsInstance(module.OpaqueThing, CustomClassBaseMeta)
+        self.assertIsInstance(OpaqueThingChild, CustomClassBaseMeta)
+        self.assertIsNot(type(module.OpaqueThing), type(module.PlainThing))
+        self.assertIs(type(module.PlainThing), type(torch._C._OpaqueBase))
 
         obj = module.OpaqueThing()
         fake_obj = FakeScriptObject(None, get_opaque_type_name(module.OpaqueThing), obj)
@@ -2095,6 +2076,21 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         self.assertIsInstance(obj, module.OpaqueThing)
         self.assertIsInstance(obj, OpaqueBase)
         self.assertIsInstance(fake_obj, module.OpaqueThing)
+
+        child_obj = OpaqueThingChild()
+        fake_child = FakeScriptObject(
+            None, get_opaque_type_name(OpaqueThingChild), child_obj
+        )
+        self.assertIsInstance(fake_child, OpaqueThingChild)
+
+        module.make_late_type()
+        self.assertIs(type(module.LateOpaqueThing), type(module.PlainThing))
+        late_obj = module.LateOpaqueThing()
+        fake_late = FakeScriptObject(
+            None, get_opaque_type_name(module.LateOpaqueThing), late_obj
+        )
+        self.assertIsInstance(module.LateOpaqueThing, CustomClassBaseMeta)
+        self.assertIsInstance(fake_late, module.LateOpaqueThing)
 
         self.assertFalse(issubclass(module.PlainThing, OpaqueBase))
         with self.assertRaisesRegex(
@@ -3735,9 +3731,9 @@ class GraphModule(torch.nn.Module):
             ep.graph_module.code.strip(),
             """\
 def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
-    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    return (linear,)""",
+    noisy_inject_default = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject_default = None
+    linear_default = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear_default,)""",
         )
 
     def test_hoist_no_recompile_on_different_string(self):
@@ -3838,8 +3834,8 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[4, 4]", d):
-        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
-        return (add,)
+        add_tensor: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
+        return (add_tensor,)
 """,
         )
 
@@ -4252,13 +4248,13 @@ class GraphModule(torch.nn.Module):
                 self.assertIn(
                     "val",
                     node.meta,
-                    f"Node {node.name} created via reconstruct_fn is missing "
+                    lambda msg: f"{msg}\nNode {node.name} created via reconstruct_fn is missing "
                     f"meta['val']. This would cause the partitioner to fail "
                     f"with 'Expected {node.name} to be a tensor'.",
                 )
                 self.assertTrue(
                     is_opaque_node(node),
-                    f"Node {node.name} should be classified as opaque",
+                    lambda msg: f"{msg}\nNode {node.name} should be classified as opaque",
                 )
         finally:
             _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = original_reconstruct_fn
