@@ -214,6 +214,7 @@ void CUDASymmetricMemory::put_signal(
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_, get_signal_pad_size());
+  check_rank(dst_rank, world_size_);
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -276,6 +277,7 @@ void CUDASymmetricMemory::wait_signal(
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_, get_signal_pad_size());
+  check_rank(src_rank, world_size_);
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),

@@ -116,7 +116,7 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
   TORCH_CHECK(
       channel >= 0,
       "channel for barrier(), put_signal() and wait_signal() ",
-      "must be greater than 0 (got ",
+      "must be non-negative (got ",
       channel,
       ")");
   const size_t num_channels =
@@ -127,6 +127,20 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
       num_channels - 1,
       " (got ",
       channel,
+      ")");
+}
+
+// Validates the peer rank argument for put_signal() and wait_signal(). The
+// rank indexes the device array of signal pad pointers and the per-channel
+// slot row, so an out-of-range value reads a wild pointer or lands past the
+// signal pad, in the peer's tensor data.
+inline void check_rank(int rank, int world_size) {
+  TORCH_CHECK(
+      rank >= 0 && rank < world_size,
+      "rank for put_signal() and wait_signal() must be in [0, ",
+      world_size,
+      ") (got ",
+      rank,
       ")");
 }
 
