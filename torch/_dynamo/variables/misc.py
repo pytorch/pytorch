@@ -1017,12 +1017,16 @@ class AutogradFunctionVariable(VariableTracker):
 
     _nonvar_fields = {
         "fn_cls",
+        "fn_cls_source",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, fn_cls: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, fn_cls: Any, fn_cls_source: Source | None = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
+        self.fn_cls_source = fn_cls_source if fn_cls_source is not None else self.source
 
     def python_type(self) -> type:
         return type
@@ -1233,7 +1237,70 @@ class AutogradFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "AutogradFunctionVariable":
-        return AutogradFunctionVariable(self.fn_cls)
+        return AutogradFunctionVariable(
+            self.fn_cls,
+            fn_cls_source=self.fn_cls_source,
+        )
+
+    def _resolve_staticmethod(
+        self, obj: Any, source: Source | None, name: str
+    ) -> VariableTracker:
+        func = obj.__get__(self.fn_cls)
+        traced = trace_rules.lookup(func)
+        if traced is None:
+            unimplemented(
+                gb_type="Unsupported callable in torch.autograd.Function staticmethod",
+                context=f"{self.fn_cls.__qualname__}.{name}",
+                explanation="Dynamo could not determine how to trace a staticmethod "
+                "on a torch.autograd.Function subclass.",
+                hints=["Use a standard function or another supported callable."],
+            )
+        if source is None:
+            return traced(func)  # type: ignore[misc]
+
+        # create_with_source can guard the function's code, but callers also
+        # observe function identity (for example, setup_context comparisons).
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return traced.create_with_source(  # type: ignore[attr-defined]
+            func, source=source
+        )
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        source = AttrSource(self.source, name) if self.source is not None else None
+        if name == "apply":
+            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
+        if source is None:
+            return GetAttrVariable(self, name)
+
+        try:
+            obj = inspect.getattr_static(self.fn_cls, name)
+        except AttributeError:
+            unimplemented(
+                gb_type="Missing attribute on torch.autograd.Function subclass",
+                context=f"{self.fn_cls.__qualname__}.{name}",
+                explanation="Dynamo could not statically resolve an attribute "
+                "access on a torch.autograd.Function subclass.",
+                hints=[
+                    "Define the missing autograd.Function attribute before compiling."
+                ],
+            )
+
+        if type(obj) is staticmethod:
+            return self._resolve_staticmethod(obj, source, name)
+        elif type(obj) is classmethod:
+            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
+        elif inspect.getattr_static(type(obj), "__get__", None) is not None:
+            unimplemented(
+                gb_type="Unsupported descriptor on torch.autograd.Function subclass",
+                context=f"{self.fn_cls.__qualname__}.{name}",
+                explanation="Dynamo does not execute custom descriptors on "
+                "torch.autograd.Function subclasses while tracing.",
+                hints=["Access custom descriptors outside the compiled region."],
+            )
+
+        return GetAttrVariable(self, name, source=source)
 
     def call_method(
         self,
@@ -1263,30 +1330,27 @@ class AutogradFunctionVariable(VariableTracker):
         elif name == "backward":
             return self.call_backward(tx, args, kwargs)
         else:
-            source = AttrSource(self.source, name) if self.source is not None else None
+            source = (
+                AttrSource(self.fn_cls_source, name)
+                if self.fn_cls_source is not None
+                else None
+            )
             try:
                 obj = inspect.getattr_static(self.fn_cls, name)
             except AttributeError:
                 obj = None
 
-            if isinstance(obj, staticmethod):
-                func = obj.__get__(self.fn_cls)
-                traced = trace_rules.lookup(func)
-                if traced is None:
-                    raise AssertionError(f"trace_rules.lookup returned None for {func}")
-                if source is not None:
-                    return (
-                        # type: ignore[attr-defined]
-                        traced.create_with_source(func, source=source).call_function(
-                            tx, args, kwargs
-                        )
-                    )
-                else:
-                    # type: ignore[misc]
-                    return traced(func).call_function(tx, args, kwargs)
-            elif isinstance(obj, classmethod):
+            if type(obj) is staticmethod:
+                return self._resolve_staticmethod(obj, source, name).call_function(
+                    tx, args, kwargs
+                )
+            elif type(obj) is classmethod:
+                func_source = AttrSource(source, "__func__") if source else None
+                if func_source:
+                    install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
+                    install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    obj.__func__, self, source=source
+                    obj.__func__, self, source_fn=func_source, source=source
                 ).call_function(tx, args, kwargs)
             else:
                 unimplemented(
