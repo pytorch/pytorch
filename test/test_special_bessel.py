@@ -293,6 +293,23 @@ class TestModifiedBesselFunctions(TestCase):
             for nu_val in [0.5, 2.5, 5.0]:
                 self._assert_matches_scipy(torch_fn, scipy_fn, x, nu_val, device, dtype)
 
+    @dtypes(torch.float64)
+    def test_modified_bessel_i_series_peak_region(self, device, dtype):
+        # Regression: bessel_i_series was capped at 300 terms, but the series
+        # peaks at k = (sqrt(nu^2+x^2)-nu)/2 (~785 terms near nu=50, x~1300),
+        # so nu ~34-50 with x >~640 was truncated before its dominant terms
+        # (98.5% error at (700, 45)). References are mpmath at 40 dps.
+        cases = [
+            (700.0, 45.0, 3.5988822944596692681e301),
+            (624.8, 49.0, 5.195399607670892877e268),
+            (588.0, 40.0, 9.779522723878312322e252),
+        ]
+        for x_val, nu_val, expected in cases:
+            x = torch.tensor([x_val], device=device, dtype=dtype)
+            nu = torch.tensor([nu_val], device=device, dtype=dtype)
+            result = torch.special.modified_bessel_i(x, nu)
+            self.assertEqual(result, torch.tensor([expected], device=device, dtype=dtype), rtol=1e-11, atol=0)
+
     @dtypes(torch.float32, torch.float64)
     def test_modified_bessel_i_broadcasting(self, device, dtype):
         self._skip_if_no_scipy()
