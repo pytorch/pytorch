@@ -588,9 +588,13 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Attach the per-collective blob as a "metadata" column on the GPU-op kinds (these
         # columns are this thread's now, no lock). No-op without comms metadata.
         _attach_metadata(columns, meta, self._metadata_resolver)
-        _attach_event_node_ids(columns, self._event_node_recorder)
+        _attach_event_node_ids(
+            columns, self._event_node_recorder, self._annotation_resolver
+        )
         if self._event_node_recorder is not None:
-            _add_graph_event_node_spans(columns, start, boundary_ns)
+            _add_graph_event_node_spans(
+                columns, start, boundary_ns, self._lane_resolver
+            )
         graph_deps = _window_graph_deps(self._dependency_resolver, columns)
         with self._lock:
             w = self._windows.get(window_id)
@@ -712,7 +716,9 @@ def _attach_metadata(
         c["metadata"] = meta
 
 
-def _attach_event_node_ids(columns: dict[str, dict[str, Any]], recorder: Any) -> None:
+def _attach_event_node_ids(
+    columns: dict[str, dict[str, Any]], recorder: Any, resolver: Any = None
+) -> None:
     """Learn ``event_id -> graph_node_id`` from this window's launches and attach a
     ``graph_node_id`` + ``annotation`` column to the ``cuda_event`` frame. Passive: reads only
     records that already flow (never touches the events). Mutates ``columns`` in place; no-op
@@ -740,23 +746,21 @@ def _attach_event_node_ids(columns: dict[str, dict[str, Any]], recorder: Any) ->
         zip(ce["correlation_id"].tolist(), ce["cuda_event_sync_id"].tolist())
     )
     resolved = resolve_window(recorder, corr_exec_pairs, event_rows)
-    try:
-        from torch.cuda._graph_annotations import get_kernel_annotations
-
-        annotations: Any = get_kernel_annotations()
-    except Exception:
-        annotations = {}
-    ann = np.empty(len(resolved), dtype=object)
-    ann[:] = None
-    for i, node in enumerate(resolved):
-        if node is not None:
-            ann[i] = annotations.get(node)
-    ce["graph_node_id"] = np.array([n or 0 for n in resolved], dtype=np.int64)
-    ce["annotation"] = ann
+    gnid = np.array([n or 0 for n in resolved], dtype=np.int64)
+    ce["graph_node_id"] = gnid
+    # Same resolver the GPU-op column builders use, so an event node's annotation arrives in
+    # the shape the export expects (the default resolver reads torch.cuda._graph_annotations;
+    # an installed one may merge a node's annotation list into a single dict). Resolving it
+    # here rather than reading the store directly is what lets _annotation_to_args spread the
+    # fields into args -- a raw list is re-serialized to an opaque "annotation" string instead.
+    ce["annotation"] = _resolve_annotation_column(resolver, gnid)
 
 
 def _add_graph_event_node_spans(
-    columns: dict[str, dict[str, Any]], start_ns: int, boundary_ns: int
+    columns: dict[str, dict[str, Any]],
+    start_ns: int,
+    boundary_ns: int,
+    lane_resolver: Any = None,
 ) -> None:
     """Derive a timed ``graph_event_node`` span frame from the resolved CUDA_EVENT records in
     this window, so graph event-record nodes render as (point) spans and become dependency-arrow
@@ -772,7 +776,7 @@ def _add_graph_event_node_spans(
     if not mask.any():
         return
     g = gnid[mask]
-    columns["graph_event_node"] = {
+    frame = {
         "start_ns": s[mask],
         "end_ns": ce["end_ns"][mask],
         "device_id": ce["device_id"][mask],
@@ -783,6 +787,15 @@ def _add_graph_event_node_spans(
         "graph_id": g >> 32,
         "annotation": ce["annotation"][mask],
     }
+    # This frame is synthesized after _on_activities has already run the lane resolver over the
+    # _COLUMN_BUILDERS frames, so it has to attach its own lane columns -- without them the
+    # export's reassignment is gated off and an event node strands on its capture stream while
+    # the collective's kernel moves to the process-group lane.
+    if lane_resolver is not None:
+        frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+            lane_resolver, frame
+        )
+    columns["graph_event_node"] = frame
 
 
 def _nearest_present_preds(resolver: Any, node: int, present: set[int]) -> list[int]:
