@@ -54,9 +54,10 @@ from torch.distributed.pipelining.stage import (
     _RecvInfo,
     PipelineStage,
 )
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -67,11 +68,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -147,6 +143,8 @@ def _run_adjacency_validation(stage, num_stages):
 
 
 class ScheduleTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
@@ -599,6 +597,8 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class TestSchedulePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
@@ -765,6 +765,8 @@ instantiate_parametrized_tests(TestSchedulePlan)
 
 
 class TestScheduleCsv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "ScheduleClass,csv_name",
         [
@@ -808,11 +810,14 @@ class TestScheduleCsv(TestCase):
 instantiate_parametrized_tests(TestScheduleCsv)
 
 
+def _parse_actions(actions: list[str]) -> list[_Action]:
+    return [_Action.from_str(s) for s in actions]
+
+
 class TestScheduleLowering(TestCase):
     """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
 
-    def _parse_actions(self, actions: list[str]) -> list[_Action]:
-        return [_Action.from_str(s) for s in actions]
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "action_str_and_ref",
@@ -865,8 +870,8 @@ class TestScheduleLowering(TestCase):
         FSDP unshard/reshard operations to the schedule.  This is just part of the process of adding communication
         ops and producing a complete schedule.
         """
-        compute_sch = self._parse_actions(test_info["compute"])
-        expected_comms_sch = self._parse_actions(test_info["comms"])
+        compute_sch = _parse_actions(test_info["compute"])
+        expected_comms_sch = _parse_actions(test_info["comms"])
 
         comms_sch = _add_unshard_reshard(compute_sch)
         for expected, actual in zip(expected_comms_sch, comms_sch):
@@ -904,8 +909,8 @@ class TestScheduleLowering(TestCase):
         ],
     )
     def test_reduce_grad(self, test_info):
-        compute_sch = self._parse_actions(test_info["compute"])
-        expected_comms_sch = self._parse_actions(test_info["comms"])
+        compute_sch = _parse_actions(test_info["compute"])
+        expected_comms_sch = _parse_actions(test_info["comms"])
 
         comms_sch = _add_reduce_grad(compute_sch, 2)
         for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
@@ -939,8 +944,8 @@ class TestScheduleLowering(TestCase):
     )
     def test_merge_bw(self, test_info):
         """Test the pass that merges adjacent I and W operations into a B operation."""
-        compute_sch = self._parse_actions(test_info["compute"])
-        expected_merged_sch = self._parse_actions(test_info["comms"])
+        compute_sch = _parse_actions(test_info["compute"])
+        expected_merged_sch = _parse_actions(test_info["comms"])
 
         merged_sch = _merge_bw(compute_sch)
         for expected, actual in zip(expected_merged_sch, merged_sch):
@@ -1080,11 +1085,11 @@ class TestScheduleLowering(TestCase):
     def test_send_recv(self, test_info):
         """Tests the lowering pass that adds send/recv ops to a compute-only schedule."""
         compute_sch = {
-            rank: self._parse_actions(test_info["compute"][rank])
+            rank: _parse_actions(test_info["compute"][rank])
             for rank in test_info["compute"]
         }
         expected_comms_sch = {
-            rank: self._parse_actions(test_info["comms"][rank])
+            rank: _parse_actions(test_info["comms"][rank])
             for rank in test_info["comms"]
         }
 
@@ -1436,11 +1441,11 @@ class TestScheduleLowering(TestCase):
     def test_defer_recv_ops(self, test_info):
         """Tests that _defer_recv_ops defers RECVs with rank-parity ordering."""
         input_sch = {
-            rank: self._parse_actions(test_info["input"][rank])
+            rank: _parse_actions(test_info["input"][rank])
             for rank in test_info["input"]
         }
         expected_sch = {
-            rank: self._parse_actions(test_info["expected"][rank])
+            rank: _parse_actions(test_info["expected"][rank])
             for rank in test_info["expected"]
         }
 
@@ -1635,8 +1640,11 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_v_schedule(self):
+
+class TestScheduleLoweringDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_grad_with_v_schedule(self, device):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
         E.g.
@@ -1700,7 +1708,7 @@ class TestScheduleLowering(TestCase):
         )
         schedule._prepare_schedule_with_comms(
             {
-                0: self._parse_actions(
+                0: _parse_actions(
                     [
                         "0F0",
                         "0F1",
@@ -1753,8 +1761,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_split_b_w(self):
+    def test_grad_with_split_b_w(self, device):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
         This test runs on a single rank and just tests a single stage with 2 microbatches with separate B, W operations.
@@ -1811,7 +1818,7 @@ class TestScheduleLowering(TestCase):
         )
         schedule._prepare_schedule_with_comms(
             {
-                0: self._parse_actions(
+                0: _parse_actions(
                     [
                         "0F0",
                         "0F1",
@@ -1863,7 +1870,17 @@ class TestScheduleLowering(TestCase):
         torch.distributed.destroy_process_group()
 
 
+instantiate_device_type_tests(
+    TestScheduleLoweringDevice,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+
 class TestValidateSchedule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid_schedule(self):
         schedule_actions = [
             {
@@ -1904,6 +1921,8 @@ class TestValidateSchedule(TestCase):
 
 
 class ScheduleUtilTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_generate_stage_to_rank_mapping(self):
         stage_to_rank = generate_stage_to_rank_mapping(2, 2)
         self.assertEqual(
@@ -1977,6 +1996,8 @@ instantiate_parametrized_tests(TestScheduleLowering)
 class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()
