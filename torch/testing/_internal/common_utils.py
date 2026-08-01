@@ -2015,6 +2015,14 @@ def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
+def xfailIfPy314Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 14) else func
+
+
+def xfailIfPy313AndEarlier(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 14) else func
+
+
 def xfailIfLinux(func):
     return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM and not IS_FBCODE else func
 
@@ -2549,6 +2557,8 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
         lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
     )
     return decorator(func) if func is not None else decorator
+
+requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -3665,7 +3675,15 @@ class TestCase(expecttest.TestCase):
         return CudaMemoryLeakCheck(self, name)
 
     def before_cuda_memory_leak_check(self):
-        torch._dynamo.reset()
+        self._reset_dynamo_if_imported()
+
+    @staticmethod
+    def _reset_dynamo_if_imported():
+        dynamo = sys.modules.get("torch._dynamo")
+        if dynamo is not None:
+            reset = getattr(dynamo, "reset", None)
+            if reset is not None:
+                reset()
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
@@ -3834,6 +3852,13 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        else:
+            # For the non-compiled path there is no optimize() region, so this
+            # reset (and the matching one after super_run) is the only place we
+            # clear Dynamo state between tests. Resetting inside setUp/tearDown
+            # would land inside the compiled region and corrupt compiled
+            # autograd state, so do it here instead.
+            self._reset_dynamo_if_imported()
 
         torch.compiler.set_stance("default")
 
@@ -3923,6 +3948,8 @@ class TestCase(expecttest.TestCase):
             torch._dynamo.reset()
         elif torch._dynamo.config.compiled_autograd:
             torch._dynamo.compiled_autograd.reset()
+        else:
+            self._reset_dynamo_if_imported()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():

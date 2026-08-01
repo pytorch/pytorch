@@ -115,9 +115,9 @@ struct TORCH_API ForwardADLevel {
     grads_.erase(grad);
   }
 
-  void insert(const std::shared_ptr<ForwardGrad>& grad) {
+  void insert(std::shared_ptr<ForwardGrad> grad) {
     std::lock_guard<std::mutex> lock(mutex_);
-    grads_.insert(grad);
+    grads_.insert(std::move(grad));
   }
 
  private:
@@ -144,6 +144,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      levels_idx.reserve(content_.size());
       for (auto& c : content_) {
         levels_idx.push_back(c.first);
       }
@@ -161,14 +162,14 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
     }
   }
 
-  void set_value(const at::Tensor& value, uint64_t level) {
+  void set_value(at::Tensor value, uint64_t level) {
     // Owning reference to ensure the forward_level is not destroyed
     // while we are updating our internal state
     auto forward_level = ForwardADLevel::get_by_idx(level);
     forward_level->insert(shared_from_this());
 
     std::lock_guard<std::mutex> lock(mutex_);
-    content_.insert({level, value});
+    content_.try_emplace(level, std::move(value));
   }
 
   // This function removes the tangent for a given level from this ForwardGrad
@@ -180,14 +181,14 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
-    const auto& it = content_.find(level);
+    const auto it = content_.find(level);
     TORCH_INTERNAL_ASSERT(
         it != content_.end(), "Resetting a non-existent level.");
     // Keep the Tensor alive until we have released the lock
     // This is needed as we can be in a case where this function is called by
     // ForwardADLevel destructor
-    auto t = (*it).second;
-    content_.erase(level);
+    auto t = std::move(it->second);
+    content_.erase(it);
     lock.unlock();
   }
 

@@ -55,13 +55,15 @@ def _can_use_cudnn(
         return False
     if max_q <= 128:
         return False
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        return False
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         return False
     if window_size != [-1, -1]:
         return False
-    if enable_gqa or query.size(1) != key.size(1):
+    if enable_gqa or query.size(-2) != key.size(-2):
         return False
-    if seqused_k is not None or block_table is not None or num_splits is not None:
+    if num_splits is not None or (block_table is not None and seqused_k is None):
         return False
     return True
 
@@ -127,6 +129,8 @@ def _varlen_attn(
             is_causal=is_causal,
             return_debug_mask=False,  # return_debug_mask
             scale=scale,
+            seqused_k=seqused_k,
+            block_table=block_table,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
         output, softmax_lse, rng_state = result[0], result[1], result[6]
@@ -271,7 +275,7 @@ def varlen_attn(
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H_q, D)`.
 
         If ``return_aux`` is not None and ``return_aux.lse`` is True:
-            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H_q)`.
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(H_q, T_q)`.
 
     Shape legend:
         - :math:`N`: Batch size
