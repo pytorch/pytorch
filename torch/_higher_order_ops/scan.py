@@ -1028,9 +1028,7 @@ class ScanAutogradImpl:
 
         flat_state0 = flatten_carry(list(grad_carry), 0)
         # carry_grads[s] is the gradient of the carry entering forward step s.
-        carry_grads = (
-            torch.matmul(comp_a, flat_state0.unsqueeze(-1)).squeeze(-1) + comp_b
-        )
+        carry_grads = torch.addmv(comp_b, comp_a, flat_state0)
         step_carry_out_grads = torch.cat(
             [carry_grads[1:], flat_state0.unsqueeze(0)], dim=0
         )
