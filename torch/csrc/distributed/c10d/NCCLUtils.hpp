@@ -334,7 +334,8 @@ class NCCLComm {
       bool errorOnRereg = true,
       bool window = false);
 
-  ncclResult_t deregisterSegment(void* ptr, bool window = false);
+  // Uses the window vs local API recorded when the segment was registered.
+  ncclResult_t deregisterSegment(void* ptr);
 
   std::string repr() const;
 

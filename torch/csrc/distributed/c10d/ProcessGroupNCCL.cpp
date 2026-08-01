@@ -320,6 +320,52 @@ static std::mutex ncclCommMemPoolMapMutex;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
+// NOTE [NCCL calls from the caching allocator trace hooks]
+// The hooks below run on whichever thread allocated or freed the segment, with
+// the caching allocator's mutex held, so only NCCL calls that are local to this
+// rank are safe here. ncclCommWindowRegister is not one of them: it runs a
+// bootstrap allgather and barrier across the whole communicator (and
+// ncclCommWindowDeregister is collective too on NCCL builds that barrier before
+// tearing a window down). Issuing one from a hook deadlocks the job inside an
+// innocent-looking `torch.empty()` as soon as one rank allocates or frees a
+// segment that the others do not -- and the allocator mutex it holds stalls
+// every other thread of this process meanwhile. Symmetric windows are therefore
+// only created by registerMemPool(), which the user calls collectively.
+//
+// Returns the communicators interested in this segment, paired with whether
+// their pool was registered as symmetric. Caller must hold
+// ncclCommMemPoolMapMutex, and must keep holding it while acting on the result:
+// that is what keeps abortComms() from retiring a communicator underneath us.
+static std::vector<std::pair<std::shared_ptr<NCCLComm>, bool>>
+commsInterestedInSegment(const c10::CachingDeviceAllocator::TraceEntry& te) {
+  std::vector<std::pair<std::shared_ptr<NCCLComm>, bool>> comms;
+  for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
+    if (te.device_ != ncclComm->getDeviceIndex()) {
+      continue;
+    }
+    bool symm = false;
+    bool should_register = shouldAllCommunicatorsRegisterAllTensors();
+    auto it =
+        std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
+          return std::get<0>(tup) == te.mempool_;
+        });
+    if (it != memPools.end()) {
+      should_register = true;
+      symm = std::get<1>(*it);
+    }
+    if (should_register) {
+      comms.emplace_back(ncclComm, symm);
+    }
+  }
+  // ncclCommMemPoolMap is keyed by pointer, so its iteration order differs
+  // between ranks; sort by a key every rank agrees on so that any NCCL call
+  // that does wait on peers is at least issued in the same order everywhere.
+  std::sort(comms.begin(), comms.end(), [](const auto& a, const auto& b) {
+    return a.first->getUniqueHash() < b.first->getUniqueHash();
+  });
+  return comms;
+}
+
 static void cacheAllocatorRegisterHook(
     const c10::CachingDeviceAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -329,27 +375,22 @@ static void cacheAllocatorRegisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
-  for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
-    if (te.device_ == ncclComm->getDeviceIndex()) {
-      bool symm = false;
-      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
-      auto it =
-          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
-            return std::get<0>(tup) == te.mempool_;
-          });
-      if (it != memPools.end()) {
-        should_register = true;
-        symm = std::get<1>(*it);
-      }
-      if (should_register) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->registerSegment(
-            reinterpret_cast<void*>(te.addr_),
-            te.size_,
-            /*errorOnRereg*/ false,
-            /*window*/ symm);
-      }
+  for (const auto& [ncclComm, symm] : commsInterestedInSegment(te)) {
+    if (symm) {
+      TORCH_WARN_ONCE(
+          "A segment was allocated in a MemPool that is registered with "
+          "symm=True. It is registered with NCCL, but not as a symmetric "
+          "window, because window registration is collective and cannot be "
+          "issued from the allocator hook. Call deregister_mem_pool() and "
+          "register_mem_pool() again, from every rank, to window-register the "
+          "new segments.");
     }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    ncclComm->registerSegment(
+        reinterpret_cast<void*>(te.addr_),
+        te.size_,
+        /*errorOnRereg*/ false,
+        /*window*/ false);
   }
 }
 
@@ -362,23 +403,24 @@ static void cacheAllocatorDeregisterHook(
   }
 
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
-  for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
-    if (te.device_ == ncclComm->getDeviceIndex()) {
-      bool symm = false;
-      bool should_register = shouldAllCommunicatorsRegisterAllTensors();
-      auto it =
-          std::find_if(memPools.begin(), memPools.end(), [&](const auto& tup) {
-            return std::get<0>(tup) == te.mempool_;
-          });
-      if (it != memPools.end()) {
-        should_register = true;
-        symm = std::get<1>(*it);
-      }
-      if (should_register) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_), symm);
-      }
+  for (const auto& [ncclComm, symm] : commsInterestedInSegment(te)) {
+    // Leaving the window behind would be worse than tearing it down here: the
+    // allocator is about to hand this address range back, and a later
+    // allocation reusing it would silently resolve to the stale window.
+    if (symm) {
+      TORCH_WARN_ONCE(
+          "Freeing a segment of a MemPool that is registered with symm=True "
+          "without calling deregister_mem_pool() first. The NCCL window has to "
+          "be torn down from the allocator hook, which hangs on NCCL builds "
+          "where that is a collective unless every rank frees the same segment "
+          "in the same order. Call deregister_mem_pool() from every rank before "
+          "freeing.");
     }
+    // deregisterSegment picks the window vs local API from what was recorded at
+    // registration time, not from `symm`: a symm=True pool can also hold
+    // segments that were registered locally by the hook above.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
   }
 }
 
@@ -1215,7 +1257,6 @@ void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
         DistBackendError,
         "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
-  bool symm;
   {
     std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
     auto iter = ncclCommMemPoolMap.find(ncclComm);
@@ -1226,7 +1267,6 @@ void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
     TORCH_CHECK(
         mempool_it != iter->second.end(),
         "Trying to unregister not previously registered pool");
-    symm = std::get<1>(*mempool_it);
     iter->second.erase(mempool_it);
   }
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
@@ -1235,8 +1275,7 @@ void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    ncclComm->deregisterSegment(
-        reinterpret_cast<void*>(segmentInfo.address), symm);
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
   }
 }
 

@@ -320,7 +320,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Caching-allocator segment registration (called by
   // NCCLCachingAllocatorHook, potentially from allocator threads).
   void register_address(void* addr, size_t len);
-  void deregister_address(void* addr);
+  // from_allocator_hook only controls diagnostics: tearing a symmetric window
+  // down from the hook is the uncollective path worth warning about.
+  void deregister_address(void* addr, bool from_allocator_hook = false);
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);

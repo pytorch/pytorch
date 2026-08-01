@@ -574,7 +574,7 @@ void ProcessGroupNCCL::register_address(void* addr, size_t len) {
   registerAddressLocked(addr, len);
 }
 
-void ProcessGroupNCCL::deregister_address(void* addr) {
+void ProcessGroupNCCL::deregister_address(void* addr, bool from_allocator_hook) {
   if (nccl_comm_ == nullptr) {
     return;
   }
@@ -584,6 +584,19 @@ void ProcessGroupNCCL::deregister_address(void* addr) {
     return;
   }
   if (it->second.winHandle != nullptr) {
+    // Tearing the window down is still the least bad option -- the allocator is
+    // about to hand this address range back, and a later allocation reusing it
+    // would silently resolve to the stale window -- but say so loudly: on NCCL
+    // builds where ncclCommWindowDeregister barriers, a rank-divergent free
+    // hangs here, on an allocator thread, holding the allocator's mutex.
+    if (from_allocator_hook) {
+      TORCH_WARN_ONCE(
+          "A symmetric-window segment was freed without deregister_mem_pool() "
+          "being called first, so its NCCL window is being torn down from the "
+          "CUDA allocator hook. That is only safe if every rank frees the same "
+          "segment in the same order; call deregister_mem_pool() from every "
+          "rank before freeing.");
+    }
     NCCL_CHECK_IGNORE(
         nccl_api_,
         nccl_api_->commWindowDeregister(nccl_comm_, it->second.winHandle),

@@ -519,7 +519,7 @@ ncclResult_t NCCLComm::registerSegment(
   return ncclSuccess;
 }
 
-ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
+ncclResult_t NCCLComm::deregisterSegment(void* ptr) {
   LockType lock(mutex_);
   TORCH_CHECK(
       registeredSegmentHandles_.count(ptr) == 1,
@@ -532,7 +532,10 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
 #ifdef NCCL_HAS_COMM_WINDOW_REGISTER
-  if (window) {
+  // Pick the API from how the segment was actually registered: a caller's view
+  // of a pool ("symmetric") can disagree with an individual segment, and
+  // passing a ncclReg* to the window API (or vice versa) is a type confusion.
+  if (registeredSegmentHandles_[ptr].second) {
     C10D_NCCL_CHECK(
         ncclCommWindowDeregister(comm, (ncclWindow_t)handle),
         c10::str(
