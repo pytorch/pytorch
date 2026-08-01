@@ -732,6 +732,11 @@ Tensor linalg_polar_backward(
     const Tensor& A,
     const Tensor& U,
     const Tensor& H);
+std::tuple<Tensor, Tensor> linalg_polar_jvp(
+    const Tensor& dA,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const std::optional<Tensor>& gamma,

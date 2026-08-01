@@ -4538,8 +4538,10 @@ Tensor linalg_polar_backward(
   Tensor grad_H_eff = grad_H;
   Tensor grad_A_from_U;
   if (grad_U.defined()) {
-    // Y = grad_U H^{-1}; solve H Y^H = grad_U^H since H is Hermitian.
-    auto Y = at::linalg_solve(H, grad_U.mH()).mH();
+    // Y = grad_U H^{-H}; H is Hermitian positive-definite, so solve via its
+    // Cholesky factor rather than a generic (pivoted LU) solve.
+    auto L = at::linalg_cholesky(H);
+    auto Y = at::cholesky_solve(grad_U.mH(), L).mH();
     grad_A_from_U = Y;
     auto extra = -at::matmul(U.mH(), Y);
     grad_H_eff = grad_H_eff.defined() ? grad_H_eff + extra : std::move(extra);
@@ -4555,6 +4557,21 @@ Tensor linalg_polar_backward(
         grad_A.defined() ? grad_A + grad_A_from_U : std::move(grad_A_from_U);
   }
   return grad_A;
+}
+
+std::tuple<Tensor, Tensor> linalg_polar_jvp(
+    const Tensor& dA,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  at::NoTF32Guard disable_tf32;
+  // H = sqrt(A^H A), so dH is the sqrth differential applied to d(A^H A).
+  // U = A H^{-1}, so dU = (dA - U dH) H^{-1}, solved via Cholesky of H.
+  auto dM = at::matmul(dA.mH(), A) + at::matmul(A.mH(), dA);
+  auto dH = linalg_matrix_sqrth_differential(at::matmul(A.mH(), A), dM);
+  auto L = at::linalg_cholesky(H);
+  auto dU = at::cholesky_solve((dA - at::matmul(U, dH)).mH(), L).mH();
+  return std::make_tuple(std::move(dU), std::move(dH));
 }
 
 template <typename F1, typename F2, typename... Ts>

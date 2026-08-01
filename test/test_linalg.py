@@ -4238,7 +4238,7 @@ class TestLinalg(TestCase):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         A = make_fullrank(*shape, device=device, dtype=dtype).requires_grad_(True)
         # check_undefined_grad=False: dynamo_wrapped traces backward with grad defined.
-        self.assertTrue(torch.autograd.gradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
+        self.assertTrue(torch.autograd.gradcheck(torch.linalg.polar, (A,), check_undefined_grad=False, check_forward_ad=True))
         self.assertTrue(torch.autograd.gradgradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
 
     @skipCPUIfNoLapack

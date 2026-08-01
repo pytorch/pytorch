@@ -1703,7 +1703,6 @@ class TestOperators(TestCase):
                 ),  # NYI: forward AD for huber_loss_backward
                 xfail("NumpyCubeNotComposableAutogradFunction"),  # not composable
                 xfail("ormqr", ""),  # NYI: forward AD for ormqr
-                xfail("linalg.polar", ""),  # NYI: forward AD for linalg_polar
                 xfail(
                     "nn.functional.multilabel_margin_loss", ""
                 ),  # NYI: multilabel_margin_loss_forward
@@ -1880,9 +1879,6 @@ class TestOperators(TestCase):
                 xfail("index_reduce", "mean"),  # NYI: forward AD for index_reduce
                 xfail("index_reduce", "amax"),  # NYI: forward AD for index_reduce
                 xfail("index_reduce", "amin"),  # NYI: forward AD for index_reduce
-                xfail(
-                    "linalg.polar"
-                ),  # Forward AD not implemented and no decomposition
                 xfail(
                     "mvlgamma", "mvlgamma_p_1"
                 ),  # vmap: inplace into a regular tensor
