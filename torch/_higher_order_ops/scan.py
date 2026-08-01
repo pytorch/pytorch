@@ -10,8 +10,8 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._guards import detect_fake_mode
 from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -1243,7 +1243,12 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
     results = []
     for leaf_idx, leaf in enumerate(dummy_out_leaves):
         if isinstance(leaf, torch.Tensor):
-            stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
+            if len(result_flat) == 0:
+                stacked = torch.empty(
+                    [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
+                )
+            else:
+                stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
             results.append(
                 torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
             )
