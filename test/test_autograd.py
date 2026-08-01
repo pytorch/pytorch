@@ -17878,6 +17878,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 self.assertEqual(x.grad, expected)
 
 
+@skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
 class TestFunctionAssertMessages(TestCase):
     # THPFunction_assert forwards to a printf-style formatter. Regression tests
     # that the dynamic content (offending type name / index) is not silently
