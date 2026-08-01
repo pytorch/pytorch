@@ -1,8 +1,14 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 #include <algorithm>
 #include <mutex>
 #include <vector>
+
+#if C10_ASAN_ENABLED
+#include <sanitizer/lsan_interface.h>
+#endif
 
 namespace c10 {
 
@@ -10,11 +16,18 @@ template <class T>
 class RingBuffer {
  public:
   RingBuffer() {
-    // alloc_trace is a pointer because we need to intentionally
-    // leak this on deallocation it can hold references to Python
-    // state which will already be destroyed when we are in exit handlers
+    // alloc_trace is a heap pointer we intentionally never free: it can hold
+    // references to Python state that is already destroyed by the time exit
+    // handlers run, so freeing it then is unsafe. The owning allocator impl is
+    // itself heap-allocated and destroyed at exit, which makes this allocation
+    // unreachable and thus flagged by LeakSanitizer; annotate it as a
+    // deliberate leak so LSan ignores it (and everything it transitively holds,
+    // e.g. recorded Python contexts).
     // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     alloc_trace = new std::vector<T>();
+#if C10_ASAN_ENABLED
+    __lsan_ignore_object(alloc_trace);
+#endif
   }
 
   void setMaxEntries(size_t size) {
