@@ -3975,6 +3975,86 @@ class GraphModule(torch.nn.Module):
             for ri, ei in zip(r, e):
                 self.assertEqual(ri, ei)
 
+    def test_subgraph_reuse_dataclass_pytree_arg(self):
+        """Reuse must work for args that are registered pytree dataclasses.
+
+        Fingerprinting such args goes through the pytree-flatten path of
+        build_input_fingerprint (rather than the flat-leaf fast path), which
+        must classify the tensor field inside the dataclass as a reusable
+        leaf so that repeated calls with structurally-identical dataclass
+        instances hit the cache instead of retracing every time.
+
+        Note: this also passes on the pre-fix implementation (reuse already
+        worked, just slowly by re-tracing pytree.tree_flatten's dispatch on
+        every call) -- this guards the fingerprinting correctness, not the
+        compile-time regression fixed alongside it.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(pytree._deregister_pytree_node, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # Same treespec/leaf types on every call -> single trace, rest reused.
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_namedtuple_arg(self):
+        """Reuse must work for args that are plain namedtuples.
+
+        All namedtuple types are implicitly registered as pytree nodes under
+        a single shared registry key (collections.namedtuple), unlike
+        explicitly-registered dataclasses. The fingerprinting path must
+        normalize the concrete namedtuple subtype to that shared key the same
+        way pytree._get_node_type does, or it will be misclassified as an
+        unsupported leaf and never get reused.
+        """
+        import collections
+
+        RegionInput = collections.namedtuple("RegionInput", ["hidden"])
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
     def test_subgraph_reuse_different_constants_retrace(self):
         """Constant args with different values each require a fresh trace.
 

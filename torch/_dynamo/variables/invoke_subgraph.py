@@ -248,29 +248,59 @@ def build_fingerprint_with_pytree(
     fn_args_vt: Any,
     kwargs: dict[str, Any],
 ) -> InputFingerprint:
-    """Build fingerprint via pytree flatten for nested/kwargs cases."""
-    from torch._dynamo.variables.builder import SourcelessBuilder
+    """Build fingerprint via pytree flatten for nested/kwargs cases.
 
-    container_vt = SourcelessBuilder.create(tx, (list(fn_args_vt), kwargs))
-    flat_list_vt, treespec_vt = unpack_iterable(
-        tx, _make_inlined(tx, pytree.tree_flatten)(container_vt)
-    )
-    treespec = treespec_vt.as_python_constant()
+    Recurses over the pytree structure natively (untraced) instead of calling
+    ``_make_inlined(tx, pytree.tree_flatten)``, which used to bytecode-trace
+    pytree.tree_flatten's own recursive dispatch from scratch on every
+    reuse-lookup (i.e. once per region invocation, not once per compile).
+    Only the leaf-level ``flatten_fn`` of each container node is still
+    inlined/traced, same as before.
+
+    Note: since the node-type/registry dispatch (tree_is_leaf,
+    SUPPORTED_NODES lookup) is no longer traced, it no longer installs
+    guards on the pytree registry itself. This is safe: this flatten is
+    purely internal reuse bookkeeping, and a stale/mismatched registry can
+    only make a cached subgraph ineligible for reuse (has_unknown / treespec
+    mismatch), never silently wrong.
+    """
+    from torch._dynamo.variables.builder import SourcelessBuilder
 
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     has_unknown = False
 
-    for vt in unpack_iterable(tx, flat_list_vt):
-        tag = classify_vt(vt)
-        if tag is not None:
-            flat_vts.append((tag, vt))
-        else:
+    def flatten(node_vt: VariableTracker) -> pytree.TreeSpec:
+        nonlocal has_unknown
+        try:
+            node_type = node_vt.python_type()
+        except NotImplementedError:
             has_unknown = True
-            continue
+            return pytree.treespec_leaf()
+        # Keep in sync with pytree._get_node_type.
+        if pytree.is_namedtuple_class(node_type):
+            node_type = pytree.namedtuple
 
-        # Always append (even None) to keep positional alignment with flat_vts.
-        arg_sources.append(getattr(vt, "source", None))
+        if node_type not in pytree.SUPPORTED_NODES:
+            tag = classify_vt(node_vt)
+            if tag is None:
+                has_unknown = True
+            else:
+                flat_vts.append((tag, node_vt))
+                # Always append (even None) to keep positional alignment with flat_vts.
+                arg_sources.append(getattr(node_vt, "source", None))
+            return pytree.treespec_leaf()
+
+        flatten_fn = pytree.SUPPORTED_NODES[node_type].flatten_fn
+        children_vt, context_vt = unpack_iterable(
+            tx, _make_inlined(tx, flatten_fn)(node_vt)
+        )
+        context = context_vt.as_python_constant()
+        child_specs = [flatten(child) for child in unpack_iterable(tx, children_vt)]
+        return pytree.TreeSpec(node_type, context, child_specs)
+
+    container_vt = SourcelessBuilder.create(tx, (list(fn_args_vt), kwargs))
+    treespec = flatten(container_vt)
 
     return InputFingerprint(flat_vts, arg_sources, has_unknown, treespec)
 
