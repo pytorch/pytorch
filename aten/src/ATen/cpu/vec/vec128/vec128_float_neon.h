@@ -24,9 +24,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
-// See Note [CPU_CAPABILITY namespace]
-namespace at::vec::inline CPU_CAPABILITY {
-
 // Right now contains only aarch64 implementation.
 // Due to follow two reasons aarch32 is not currently supported.
 // 1. Due to difference in ISA been aarch32 and aarch64, intrinsics
@@ -48,9 +45,25 @@ namespace at::vec::inline CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-#if defined(CPU_CAPABILITY_SVE128)
+#if defined(__ARM_FEATURE_SVE)
+
+#include <arm_sve.h>
+
+#if defined(__clang__) && (__clang_major__ >= 16)
+
+#include <arm_neon_sve_bridge.h>
+
+static inline svfloat32_t neon_to_sve(float32x4_t v) {
+  return svset_neonq(svundef_f32(), v);
+}
+static inline float32x4_t sve_to_neon(svfloat32_t v) {
+  return svget_neonq(v);
+}
+
+#else
+
 // With -msve-vector-bits=128, svfloat32_t and float32x4_t have identical layout
-// so these conversions compile to zero instructions.
+// so these conversions compile to zero instructions on GCC.
 static inline svfloat32_t neon_to_sve(float32x4_t v) {
   svfloat32_t r;
   __builtin_memcpy(&r, &v, sizeof(v));
@@ -62,6 +75,11 @@ static inline float32x4_t sve_to_neon(svfloat32_t v) {
   return r;
 }
 #endif
+
+#endif
+
+// See Note [CPU_CAPABILITY namespace]
+namespace at::vec::inline CPU_CAPABILITY {
 
 template <int index, bool mask_val>
 struct BlendRegs {
@@ -688,6 +706,48 @@ inline Vectorized<float> Vectorized<float>::le(
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
+#if defined(__clang__) && defined(__ARM_FEATURE_SVE)
+
+// Clang uses FMAD and FMLA interchangeably, depending on the result register
+
+template <>
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+#else
+
 template <>
 Vectorized<float> inline fmadd(
     const Vectorized<float>& a,
@@ -719,6 +779,8 @@ Vectorized<float> inline fnmsub(
     const Vectorized<float>& c) {
   return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
 }
+
+#endif
 
 inline Vectorized<float> Vectorized<float>::erf() const {
   // constants
@@ -753,8 +815,9 @@ inline Vectorized<float> Vectorized<float>::erf() const {
 }
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
-#endif /* defined(aarch64) */
 
 } // namespace at::vec::inline CPU_CAPABILITY
+
+#endif /* defined(aarch64) */
 
 C10_DIAGNOSTIC_POP()
