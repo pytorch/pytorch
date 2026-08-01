@@ -907,7 +907,7 @@ static void _wrap_outputs(
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
-        // Set every differentiable output's grad_dtype, defaulting to its dtype.
+        // Set each differentiable output's grad_dtype, defaulting to its dtype.
         if (is_differentiable) {
           const auto grad_dtype = output_grad_dtypes.has_value()
               ? (*output_grad_dtypes)[i]
