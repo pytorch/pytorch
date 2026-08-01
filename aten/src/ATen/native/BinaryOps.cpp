@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -9,6 +10,9 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
+#include <ATen/functorch/TensorWrapper.h>
+#include <c10/core/TensorOptions.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1002,11 +1006,51 @@ Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
   return self;
 }
 
+static std::optional<DeviceType> zerotensor_device_type_from_backend(
+    c10::BackendComponent backend) {
+  switch (backend) {
+    case c10::BackendComponent::InvalidBit:
+    case c10::BackendComponent::PrivateUse2Bit:
+    case c10::BackendComponent::PrivateUse3Bit:
+      return std::nullopt;
+    default:
+      return c10::dispatchKeyToDeviceType(
+          c10::toRuntimePerBackendFunctionalityKey(
+              c10::DispatchKey::Dense, backend));
+  }
+}
+
+static Device zerotensor_logical_device(const Tensor& tensor) {
+  auto device = tensor.device();
+  // Functorch wrappers retain the logical FakeTensor device, including its
+  // index, while the wrapped FakeTensor reports meta during a meta kernel.
+  if (device.type() != kMeta) {
+    return device;
+  }
+  if (const auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor)) {
+    return zerotensor_logical_device(wrapper->value());
+  }
+  if (const auto* batched = at::functorch::maybeGetBatchedImpl(tensor)) {
+    return zerotensor_logical_device(batched->value());
+  }
+  auto backend_device_type =
+      zerotensor_device_type_from_backend(tensor.key_set().highestBackendKey());
+  // Python FakeTensor reports meta while running meta kernels, but its backend
+  // key still carries the logical device needed for ZeroTensor outputs.
+  if (device.type() == kMeta && backend_device_type.has_value() &&
+      *backend_device_type != kMeta) {
+    return Device(*backend_device_type);
+  }
+  return device;
+}
+
 static Device correct_out_device(const Tensor& self, const Tensor& other) {
-  if (self.device() == at::kCPU){
-      return other.device();
+  auto self_device = zerotensor_logical_device(self);
+  auto other_device = zerotensor_logical_device(other);
+  if (self_device == at::kCPU) {
+    return other_device;
   } else {
-    return self.device();
+    return self_device;
   }
 }
 
