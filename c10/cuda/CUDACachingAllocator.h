@@ -234,9 +234,36 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  virtual void setUserMetadata(const std::string& metadata) {}
+  // Whether this backend records the string set via setUserMetadata onto
+  // memory-history trace entries. When false, setUserMetadata is a no-op and
+  // getUserMetadata always returns "".
+  virtual bool supportsUserMetadata() {
+    return false;
+  }
+  virtual void setUserMetadata(const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support user metadata; the value set via "
+        "torch.cuda.memory._set_memory_metadata is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
+  }
   virtual std::string getUserMetadata() {
     return "";
+  }
+  // Post-facto annotation: records an "annotate" trace entry for a live
+  // allocation identified by its base data pointer. Unlike setUserMetadata,
+  // this does not affect metadata recorded at allocation time; annotations
+  // accumulate as separate trace events keyed by address.
+  virtual void annotateMemory(
+      const void* /*ptr*/,
+      const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support memory annotations; the value passed to "
+        "torch.cuda.memory._annotate_memory is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
@@ -525,12 +552,20 @@ inline void enablePeerAccess(
   get()->enablePeerAccess(dev, dev_to_access);
 }
 
+inline bool supportsUserMetadata() {
+  return get()->supportsUserMetadata();
+}
+
 inline void setUserMetadata(const std::string& metadata) {
   get()->setUserMetadata(metadata);
 }
 
 inline std::string getUserMetadata() {
   return get()->getUserMetadata();
+}
+
+inline void annotateMemory(const void* ptr, const std::string& metadata) {
+  get()->annotateMemory(ptr, metadata);
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
