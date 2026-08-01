@@ -1123,8 +1123,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             try:
                 list(IterNoNext())
             except TypeError as exc:
-                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
-            return False
+                return str(exc)
 
         self.assertEqual(fn(), self._compile(fn))
 
