@@ -49,6 +49,16 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
 
+# bw_gm reduces additional-input gradients over the step's batch dim, so vmapping
+# it over time yields a per-step [scan_length, *addi_shape] buffer that still has
+# to be summed. Time is chunked to keep that temporary bounded. The budget decides
+# whether chunking is worth it at all (below it the buffer is already small), and
+# the chunk cap keeps the reduction parallel: n_chunks grows with both scan_length
+# and addi size, and past a few dozen chunks the extra passes cost far more time
+# than they save memory (measured 10x slower for ~4MB on a 1024-step scan).
+_ADDI_GRAD_CHUNK_BUDGET_ELEMS = 2**22
+_ADDI_GRAD_MAX_CHUNKS = 16
+
 
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
@@ -1012,23 +1022,56 @@ class ScanAutogradImpl:
 
         # grad_xs and grad_additional_inputs for every step follow from one more
         # batched evaluation of the same (correct, no_grad-respecting) bw_gm, now that
-        # every step's incoming carry gradient is known.
-        flat_out = run_bw(
-            bw_full_gm,
-            unflatten_carry(step_carry_out_grads),
-            grad_ys,
-            saved_fw_xs,
-            saved_intermediates,
-            1,
+        # every step's incoming carry gradient is known. bw_gm already reduces
+        # additional-input grads over the batch dim but not over time, so the time
+        # reduction is accumulated chunk by chunk rather than materialized in full.
+        n_addi = sum(additional_inputs_tensor_masks)
+        step_carry_leaves = unflatten_carry(step_carry_out_grads)
+        addi_numel = sum(
+            t.numel()
+            for t in filter_with_masks(
+                self.additional_inputs, additional_inputs_tensor_masks
+            )
         )
-        _, grad_xs, grad_addi = split_into_chunks(
-            flat_out,
-            [n_carry, n_xs, sum(additional_inputs_tensor_masks)],
-        )
+        chunk = scan_length
+        if addi_numel > 0:
+            chunk = min(
+                scan_length,
+                max(
+                    -(-scan_length // _ADDI_GRAD_MAX_CHUNKS),
+                    _ADDI_GRAD_CHUNK_BUDGET_ELEMS // addi_numel,
+                ),
+            )
 
-        grad_additional_inputs: list[torch.Tensor | None] = [
-            g.sum(0) for g in grad_addi
-        ]
+        grad_xs_parts: list[list[torch.Tensor]] = []
+        grad_additional_inputs: list[torch.Tensor | None] = []
+        for start in range(0, scan_length, chunk):
+            sl = slice(start, start + chunk)
+            flat_out = run_bw(
+                bw_full_gm,
+                [c[sl] for c in step_carry_leaves],
+                [g[sl] for g in grad_ys],
+                [x[sl] for x in saved_fw_xs],
+                [x[sl] for x in saved_intermediates],
+                1,
+            )
+            _, grad_xs_chunk, grad_addi_chunk = split_into_chunks(
+                flat_out,
+                [n_carry, n_xs, n_addi],
+            )
+            grad_xs_parts.append(list(grad_xs_chunk))
+            summed = [g.sum(0) for g in grad_addi_chunk]
+            grad_additional_inputs = (
+                summed
+                if not grad_additional_inputs
+                else [acc + g for acc, g in zip(grad_additional_inputs, summed)]
+            )
+
+        grad_xs = (
+            grad_xs_parts[0]
+            if len(grad_xs_parts) == 1
+            else [torch.cat(parts, dim=0) for parts in zip(*grad_xs_parts)]
+        )
         return (
             *unflatten_carry(carry_grads[0]),
             *grad_xs,
