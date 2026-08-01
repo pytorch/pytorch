@@ -158,11 +158,6 @@ void ProcessGroupNCCL::initNcclResources() {
     dependency_event_.emplace(cudaEventDisableTiming);
   }
 
-  if (!barrier_buffer_) {
-    barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
-  }
-
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
 
   NCCL_CHECK(
@@ -1415,6 +1410,20 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
     std::chrono::milliseconds timeout) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
+
+  // Allocated here rather than in initNcclResources() so that merely creating a
+  // process group never touches the CUDA caching allocator. Eager init runs
+  // before anything has initialized CUDA (init_process_group(device_id=...) on
+  // a process that has made no torch.cuda call), and the allocator is brought
+  // up lazily, so allocating there tripped "Allocator not initialized for
+  // device N". lazyInitDevice() is what ATen's own allocating paths call, and
+  // is a no-op once CUDA is up.
+  if (!barrier_buffer_) {
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    c10::cuda::CUDAGuard gpuGuard(device_);
+    barrier_buffer_ =
+        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+  }
 
   TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
   cudaStream_t stream = getOperationStream(async_op);

@@ -5,7 +5,10 @@
 import copy
 import ctypes
 import os
+import subprocess
+import sys
 import time
+import unittest
 from datetime import timedelta
 
 import torch
@@ -16,7 +19,13 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
 
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
@@ -398,6 +407,66 @@ class ProcessGroupNCCL2NonDeterministicNVLSTest(_DeterministicNVLSTest):
     @skip_if_lt_x_gpu(2)
     def test_non_deterministic_does_not_force_nccl_algo(self) -> None:
         self.assertIsNone(self._all_reduce_and_read_algo())
+
+
+_UNINITIALIZED_CUDA_SCRIPT = """\
+import torch
+import torch.distributed as dist
+
+# Nothing above this point may touch torch.cuda: the caching allocator is
+# brought up lazily by the Python torch.cuda layer, and neither CUDAGuard nor
+# stream/event creation does it.
+dist.init_process_group(
+    "cpu:gloo,cuda:nccl2",
+    rank=0,
+    world_size=1,
+    store=dist.HashStore(),
+    device_id=torch.device("cuda:0"),
+)
+assert not torch.cuda.is_initialized(), "creating a process group initialized CUDA"
+{extra}
+dist.destroy_process_group()
+"""
+
+
+class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
+    """Constructing a process group must not need the CUDA caching allocator up.
+
+    Eager init (`init_process_group(device_id=...)`) allocated the barrier
+    buffer from the caching allocator, so a process that had made no torch.cuda
+    call died inside init_process_group with "Allocator not initialized for
+    device 0". Any external launcher or library that builds the PG before
+    touching CUDA hits this. Runs in a subprocess because the harness (and
+    every other test here) calls torch.cuda.set_device in setUp, which hides it.
+    """
+
+    def _run_child(self, extra: str = "") -> None:
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", _UNINITIALIZED_CUDA_SCRIPT.format(extra=extra)],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("child process timed out")
+        except subprocess.CalledProcessError as e:
+            self.fail(f"child process failed with:\n{e.output.decode()}")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_eager_init(self) -> None:
+        self._run_child()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_barrier_after_init(self) -> None:
+        # The allocation is merely deferred, so barrier() is the second entrance
+        # into the same allocator: without lazyInitDevice() it hits the identical
+        # assert one call later.
+        self._run_child("dist.barrier()")
 
 
 if __name__ == "__main__":
