@@ -5,6 +5,12 @@ on:
   schedule:
     # Does not perform max_autotune on CPU, so skip the weekly run setup
     - cron: 0 7 * * *
+  # MOCK / DO NOT MERGE: run this workflow on the PR that edits it, so the
+  # aarch64 perf matrix can be exercised against the staging m8g.metal-24xl
+  # runner before the bare-metal switch lands. Remove before merging.
+  pull_request:
+    paths:
+      - .github/workflows/inductor-perf-test-nightly-aarch64.yml
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:
@@ -80,7 +86,11 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "mt-"
+      # MOCK / DO NOT MERGE: "c-mt-" routes both this build and the whole
+      # translated test-matrix to the meta-staging-aws-ue1 cluster, so the perf
+      # shards land on c-mt-l-barm64g4-94-344 (m8g.metal-24xl bare metal).
+      # Revert to "mt-" before merging.
+      runner_prefix: "c-mt-"
       runner: linux.arm64.${{ needs.get-label-type.outputs.runner-config }}.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
@@ -136,7 +146,10 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-aarch64-py3_10-inductor-build
-    if: github.event.schedule == '0 7 * * *'
+    # MOCK / DO NOT MERGE: the `|| pull_request` clause is what makes the full
+    # 39-shard matrix actually run on this PR. Revert to the schedule-only
+    # condition before merging.
+    if: github.event.schedule == '0 7 * * *' || github.event_name == 'pull_request'
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.build-environment }}
       dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
