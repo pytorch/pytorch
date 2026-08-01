@@ -5895,12 +5895,12 @@ Args:
 cosine_similarity = _add_docstr(
     torch.cosine_similarity,
     r"""
-cosine_similarity(x1, x2, dim=1, eps=1e-8, keepdim=False) -> Tensor
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
 Returns cosine similarity between ``x1`` and ``x2``, computed along dim. ``x1`` and ``x2`` must be broadcastable
-to a common shape. ``dim`` refers to the dimension in this common shape. By default, dimension ``dim`` of the
-output is squeezed (see :func:`torch.squeeze`), resulting in the output tensor having 1 fewer dimension.
-When ``keepdim`` is ``True``, the output has the same number of dimensions as the inputs with size 1 at ``dim``.
+to a common shape. ``dim`` refers to the dimension in this common shape. Dimension ``dim`` of the output is
+squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 fewer dimension.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}
@@ -5913,7 +5913,6 @@ Args:
     dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
-    keepdim (bool, optional): Whether the output tensor retains :attr:`dim`. Default: False
 
 Example::
 
@@ -7147,7 +7146,9 @@ def grouped_mm(
             updates), the trailing dimension of ``mat_a`` and the leading dimension of
             ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
             common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
-            shape ``(num_groups, N, K)``.
+            shape ``(num_groups, K, N)``. If expert weights are stored in the standard
+            ``nn.Linear`` layout ``(num_groups, N, K)``, pass
+            ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
             of group ``i`` and ``offs[-1]`` must be strictly less than the total
