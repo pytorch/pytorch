@@ -21,6 +21,7 @@ OPS = [
 
 
 class TestIndexErrorContract(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     def _make_tensor(self):
         return torch.randn(4)
 

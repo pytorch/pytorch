@@ -7,7 +7,7 @@ import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import HardwareClassification, make_dynamo_test
 
 
 class _OpaqueStrDescriptorObject:
@@ -15,6 +15,7 @@ class _OpaqueStrDescriptorObject:
 
 
 class TpStrTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     @make_dynamo_test
     def test_str_int(self):
         assert str(42) == "42"  # noqa: S101
