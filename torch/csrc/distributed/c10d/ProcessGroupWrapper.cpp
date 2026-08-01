@@ -656,7 +656,6 @@ std::optional<at::Device> ProcessGroupWrapper::getBoundDeviceId() const {
 }
 
 void ProcessGroupWrapper::setBoundDeviceId(std::optional<at::Device> device) {
-  Backend::setBoundDeviceId(device);
   backend_->setBoundDeviceId(device);
 }
 
