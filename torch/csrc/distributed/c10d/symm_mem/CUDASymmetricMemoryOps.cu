@@ -25,7 +25,6 @@
 #include <algorithm>
 #include <mutex>
 #include <unordered_map>
-#include <vector>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -137,65 +136,71 @@ void init_elementwise_launch_config(
 // ---- Low-latency (LL) one-shot all-reduce. See NOTE [LL one-shot]. ----
 constexpr size_t ll_all_reduce_max_num_blocks = 24;
 constexpr size_t ll_all_reduce_max_num_threads = 512;
+// LL is a small-message protocol; above this per-op message size we fall back
+// to the barrier-based op. The fixed inbox is sized to cover exactly this cap,
+// so it never has to grow.
+constexpr int64_t kLLMaxMsgBytes = 256 * 1024;
 
-// Per-group cached symmetric scratch "inbox" plus a device-resident epoch
-// counter, backing the LL one-shot ops. Grows collectively on demand.
-struct LLScratch {
-  at::Tensor buffer; // symmetric scratch storage (kept alive here)
-  c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> symm;
-  uint32_t* epoch = nullptr; // device counter, starts at 1
-  size_t capacity_lines = 0; // allocated 16-byte lines per (slot, src)
-  std::vector<at::Tensor> graveyard; // prior buffers, kept alive across grows
-};
-
-std::mutex ll_scratch_mutex;
-
-// Return a cached LL scratch with room for `needed_lines` lines per (slot,
-// src), growing it if needed. The grow path calls rendezvous(), which has
-// collective semantics, so this must be reached in lockstep by every rank in
-// the group -- which holds for a collective op called with matching sizes on
-// all ranks.
-LLScratch& get_ll_scratch(
-    const std::string& group_name,
-    c10::Device device,
-    int world_size,
-    size_t needed_lines) {
-  // Intentionally leaked: LLScratch holds symmetric-memory tensors whose
-  // destructors call into the CUDA driver, which is unsafe during static
-  // destruction at process exit (cudaErrorCudartUnloading). Torn down with the
-  // process instead.
-  static auto* ll_scratch_cache =
-      new std::unordered_map<std::string, LLScratch>();
-  std::lock_guard<std::mutex> lk(ll_scratch_mutex);
-  auto& s = (*ll_scratch_cache)[group_name];
-  if (s.epoch == nullptr) {
-    C10_CUDA_CHECK(cudaMalloc(&s.epoch, sizeof(uint32_t)));
-    uint32_t one = 1u;
-    C10_CUDA_CHECK(
-        cudaMemcpy(s.epoch, &one, sizeof(uint32_t), cudaMemcpyHostToDevice));
-  }
-  if (needed_lines > s.capacity_lines) {
-    if (s.buffer.defined()) {
-      // A peer may still reference this base from an in-flight op; keep the old
-      // allocation alive rather than freeing it under them.
-      s.graveyard.push_back(s.buffer);
-    }
-    // 2 slots * world_size sources * needed_lines lines * 16 bytes/line.
-    const int64_t bytes = static_cast<int64_t>(2) * world_size *
-        static_cast<int64_t>(needed_lines) * 16;
-    // Allocate group-agnostically -- the NCCL backend's allocator rejects a
-    // group_name at alloc time; rendezvous() below binds the buffer to the
-    // group.
-    s.buffer = c10d::symmetric_memory::empty_strided_p2p(
-        {bytes}, {1}, at::kByte, device, std::nullopt, std::nullopt);
-    s.buffer.zero_(); // flags start at 0, which never equals a live epoch (>=1)
-    s.symm = c10d::symmetric_memory::rendezvous(s.buffer, group_name);
-    s.capacity_lines = needed_lines;
-  }
-  return s;
+// Number of 16-byte LL lines the inbox holds per (slot, source). Fixed.
+constexpr size_t ll_cap_lines() {
+  return static_cast<size_t>(kLLMaxMsgBytes) / 8;
 }
 
-// Bump the device epoch once per LL op (stream-ordered after the LL kernel), so
+struct LLBuffer {
+  at::Tensor buffer; // symmetric inbox: 2 slots * world_size * cap_lines lines
+  c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> symm;
+  uint32_t* epoch = nullptr; // device counter, starts at 1
+};
+
+// One fixed-size symmetric inbox per group, allocated + rendezvous'd once on
+// the first LL op for that group and cached (held) thereafter -- no grow, no
+// graveyard, no per-op allocation. Modeled on NCCL's per-comm LL resource
+// buffer. Must be reached in lockstep by every rank (rendezvous is collective
+// on the first call for a group).
+//
+// The epoch is a dedicated device counter (not stored in the symmetric buffer):
+// reading it from the symm buffer's own memory can observe an inconsistent
+// value across ranks when the first LL op follows another symm op, which
+// partially deadlocks the flag protocol.
+LLBuffer& get_ll_buffer(
+    const std::string& group_name,
+    c10::Device device,
+    int world_size) {
+  static std::mutex mu;
+  // Intentionally leaked: LLBuffer holds symmetric-memory tensors whose
+  // destructors call the CUDA driver, which is unsafe during static destruction
+  // at process exit (cudaErrorCudartUnloading). Torn down with the process.
+  static auto* cache = new std::unordered_map<std::string, LLBuffer>();
+  std::lock_guard<std::mutex> lk(mu);
+  auto it = cache->find(group_name);
+  if (it != cache->end()) {
+    return it->second;
+  }
+  // 2 slots * world_size sources * cap_lines lines, 16 B/line.
+  const int64_t bytes = static_cast<int64_t>(2) * world_size *
+      static_cast<int64_t>(ll_cap_lines()) * 16;
+  // group_name = nullopt: the NCCL backend's allocator rejects a group_name at
+  // alloc; rendezvous() below binds the buffer to the group.
+  auto buffer = c10d::symmetric_memory::empty_strided_p2p(
+      {bytes}, {1}, at::kByte, device, std::nullopt, std::nullopt);
+  // Zero (flags -> 0, never matching a live epoch >= 1) BEFORE rendezvous: the
+  // rendezvous carries a cross-rank barrier, so this guarantees every rank's
+  // buffer is zeroed before any peer's LL kernel can push a flag into it.
+  // Zeroing after rendezvous races -- a fast peer's push gets wiped ->
+  // deadlock.
+  buffer.zero_();
+  auto symm = c10d::symmetric_memory::rendezvous(buffer, group_name);
+  uint32_t* epoch = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&epoch, sizeof(uint32_t)));
+  uint32_t one = 1u;
+  C10_CUDA_CHECK(
+      cudaMemcpy(epoch, &one, sizeof(uint32_t), cudaMemcpyHostToDevice));
+  auto inserted = cache->emplace(
+      group_name, LLBuffer{std::move(buffer), std::move(symm), epoch});
+  return inserted.first->second;
+}
+
+// Bump the device epoch once per LL op, stream-ordered after the LL kernel so
 // CUDA-graph replays advance it. Single-threaded -> plain increment.
 static __global__ void ll_epoch_inc_kernel(uint32_t* epoch_ptr) {
   *epoch_ptr += 1u;
@@ -215,7 +220,9 @@ static __global__ void one_shot_all_reduce_ll_kernel(
     const uint32_t* epoch_ptr,
     size_t rank,
     size_t world_size) {
+  uint4* my_inbox = inbox_ptrs[rank];
   const uint32_t epoch = *epoch_ptr;
+  // (epoch & 1) selects the double-buffer slot.
   const size_t slot_base =
       static_cast<size_t>(epoch & 1u) * world_size * stride;
   const uint2* in2 = reinterpret_cast<const uint2*>(input);
@@ -231,7 +238,6 @@ static __global__ void one_shot_all_reduce_ll_kernel(
     }
   }
 
-  uint4* my_inbox = inbox_ptrs[rank];
   for (size_t i = tid; i < lines; i += nthreads) {
     uint2 acc = ll_ld(my_inbox + slot_base + i, epoch); // src 0
     for (size_t s = 1; s < world_size; ++s) {
@@ -258,6 +264,7 @@ static __global__ void multimem_one_shot_all_reduce_ll_kernel(
     size_t rank,
     size_t world_size) {
   const uint32_t epoch = *epoch_ptr;
+  // (epoch & 1) selects the double-buffer slot.
   const size_t slot_base =
       static_cast<size_t>(epoch & 1u) * world_size * stride;
   const uint2* in2 = reinterpret_cast<const uint2*>(input);
@@ -534,13 +541,15 @@ at::Tensor multimem_one_shot_all_reduce_low_latency(
   const int rank = pg->getRank();
   const int world_size = pg->getSize();
   const size_t elt = input.element_size();
-  // LL packs whole 8-byte lines; fall back to the barrier-based op otherwise.
-  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0) {
+  // LL packs whole 8-byte lines and only covers up to the fixed inbox cap; fall
+  // back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0 ||
+      input.numel() / (8 / elt) > ll_cap_lines()) {
     return multimem_one_shot_all_reduce(input, reduce_op, group_name);
   }
   const size_t lines = input.numel() / (8 / elt);
-  auto& scratch = get_ll_scratch(group_name, input.device(), world_size, lines);
-  if (!scratch.symm->has_multicast_support()) {
+  auto& ll = get_ll_buffer(group_name, input.device(), world_size);
+  if (!ll.symm->has_multicast_support()) {
     return multimem_one_shot_all_reduce(input, reduce_op, group_name);
   }
 
@@ -554,18 +563,18 @@ at::Tensor multimem_one_shot_all_reduce_low_latency(
       input.scalar_type(), "multimem_one_shot_all_reduce_low_latency", [&]() {
         multimem_one_shot_all_reduce_ll_kernel<scalar_t>
             <<<num_blocks, num_threads, 0, stream>>>(
-                reinterpret_cast<uint4*>(scratch.symm->get_multicast_ptr()),
-                reinterpret_cast<uint4*>(scratch.buffer.data_ptr()),
+                reinterpret_cast<uint4*>(ll.symm->get_multicast_ptr()),
+                reinterpret_cast<uint4*>(ll.buffer.data_ptr()),
                 input.data_ptr<scalar_t>(),
                 out.data_ptr<scalar_t>(),
                 lines,
-                scratch.capacity_lines,
-                scratch.epoch,
+                ll_cap_lines(),
+                ll.epoch,
                 rank,
                 world_size);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(scratch.epoch);
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(ll.epoch);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
 }
@@ -928,13 +937,15 @@ at::Tensor one_shot_all_reduce_low_latency(
   const int rank = pg->getRank();
   const int world_size = pg->getSize();
   const size_t elt = input.element_size();
-  // LL packs whole 8-byte lines; fall back to the barrier-based op otherwise.
-  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0) {
+  // LL packs whole 8-byte lines and only covers up to the fixed inbox cap; fall
+  // back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0 ||
+      input.numel() / (8 / elt) > ll_cap_lines()) {
     return one_shot_all_reduce_out_impl(
         input, std::nullopt, reduce_op, group_name, out);
   }
   const size_t lines = input.numel() / (8 / elt);
-  auto& scratch = get_ll_scratch(group_name, input.device(), world_size, lines);
+  auto& ll = get_ll_buffer(group_name, input.device(), world_size);
 
   const int num_threads = static_cast<int>(ll_all_reduce_max_num_threads);
   int num_blocks = static_cast<int>(std::min<size_t>(
@@ -946,17 +957,17 @@ at::Tensor one_shot_all_reduce_low_latency(
       input.scalar_type(), "one_shot_all_reduce_low_latency", [&]() {
         one_shot_all_reduce_ll_kernel<scalar_t>
             <<<num_blocks, num_threads, 0, stream>>>(
-                reinterpret_cast<uint4**>(scratch.symm->get_buffer_ptrs_dev()),
+                reinterpret_cast<uint4**>(ll.symm->get_buffer_ptrs_dev()),
                 input.data_ptr<scalar_t>(),
                 out.data_ptr<scalar_t>(),
                 lines,
-                scratch.capacity_lines,
-                scratch.epoch,
+                ll_cap_lines(),
+                ll.epoch,
                 rank,
                 world_size);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(scratch.epoch);
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(ll.epoch);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
 }
