@@ -1277,10 +1277,13 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
-            # Exception: linalg.cholesky: The factorization could not be completed because the input is not positive-definite
+            # The test also validates gradients, and cholesky backward calls
+            # linalg.solve_triangular, which does not support complex on MPS:
+            # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_noncontiguous_samples",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
@@ -1305,6 +1308,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
+            # The test also validates gradients, and cholesky backward calls
+            # linalg.solve_triangular, which does not support complex on MPS:
             # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
                 unittest.expectedFailure,
