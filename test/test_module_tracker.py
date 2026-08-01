@@ -4,6 +4,7 @@ from copy import copy
 
 import torch
 from torch import nn
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -17,7 +18,7 @@ from torch.utils.module_tracker import ModuleTracker
 class TestModuleTracker(TestCase):
     # "https://github.com/pytorch/pytorch/issues/127112
     @xfailIfTorchDynamo
-    def test_module_hierarchy(self):
+    def test_module_hierarchy(self, device):
         seen_fw = []
         seen_bw = []
 
@@ -41,13 +42,13 @@ class TestModuleTracker(TestCase):
                 x = self.c[0](x)
                 return self.b["nest"](self.a(x))
 
-        mod = Mod()
+        mod = Mod().to(device)
 
         with ModuleTracker() as tracker:
-            mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
+            mod({"a": torch.randn(10, 10, requires_grad=True, device=device).clone()})[
                 "a"
             ].sum().backward()
-            mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
+            mod({"a": torch.randn(10, 10, requires_grad=True, device=device).clone()})[
                 "a"
             ].sum().backward()
 
@@ -76,7 +77,7 @@ class TestModuleTracker(TestCase):
         )
 
     @skipIfTorchDynamo("unexplained 3.13+ recursion error")
-    def test_confused_hierarchy(self):
+    def test_confused_hierarchy(self, device):
         class MyMod(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -91,8 +92,8 @@ class TestModuleTracker(TestCase):
                     self.ran = False
                     return self.inner(inp)
 
-        mod = MyMod()
-        inp = torch.rand(1, 2, requires_grad=True)
+        mod = MyMod().to(device)
+        inp = torch.rand(1, 2, requires_grad=True, device=device)
 
         # Should not fail
         with ModuleTracker():
@@ -104,14 +105,16 @@ class TestModuleTracker(TestCase):
             res = checkpoint(lambda inp: mod(inp), inp)
             res.sum().backward()
 
-    def test_bw_detection(self):
-        mod = nn.Linear(2, 2)
+    def test_bw_detection(self, device):
+        mod = nn.Linear(2, 2).to(device)
 
         with ModuleTracker() as tracker:
-            mod(torch.rand(2, requires_grad=True)).sum().backward()
+            mod(torch.rand(2, requires_grad=True, device=device)).sum().backward()
             self.assertFalse(tracker.is_bw)
             self.assertEqual(tracker.parents, {"Global"})
 
+
+instantiate_device_type_tests(TestModuleTracker, globals())
 
 if __name__ == "__main__":
     run_tests()
