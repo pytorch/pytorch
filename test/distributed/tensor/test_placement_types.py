@@ -5,6 +5,7 @@ import itertools
 import sympy
 
 import torch
+from torch._custom_class_base import CustomClassBase
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -14,6 +15,7 @@ from torch.distributed.tensor.placement_types import (
     _StridedShard,
     _StridedShardOffsetMode,
     Partial,
+    Placement,
     Replicate,
     Shard,
 )
@@ -29,6 +31,38 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    def test_placements_subclass_opaque_base(self):
+        for cls in (Placement, Shard, _StridedShard, Partial, Replicate):
+            self.assertTrue(issubclass(cls, CustomClassBase))
+
+        for cls in (
+            Placement,
+            torch._C._distributed.Shard,
+            torch._C._distributed.StridedShard,
+            torch._C._distributed.Partial,
+            torch._C._distributed.Replicate,
+        ):
+            self.assertEqual(cls.__dictoffset__, 0)
+
+        self.assertIsInstance(Shard(0), CustomClassBase)
+        self.assertIsInstance(Replicate(), CustomClassBase)
+        self.assertIsInstance(Partial(), CustomClassBase)
+        self.assertFalse(hasattr(torch._C._distributed.Shard(0), "__dict__"))
+        self.assertFalse(hasattr(torch._C._distributed.Replicate(), "__dict__"))
+        self.assertFalse(hasattr(torch._C._distributed.Partial(), "__dict__"))
+        for _ in range(1000):
+            self.assertIsInstance(Shard(0), CustomClassBase)
+            self.assertIsInstance(Replicate(), CustomClassBase)
+            self.assertIsInstance(Partial(), CustomClassBase)
+
+    def test_placement_python_subclass_must_initialize_pybind_base(self):
+        class BadPlacement(Placement):
+            def __init__(self):
+                pass
+
+        with self.assertRaisesRegex(TypeError, "must be called"):
+            BadPlacement()
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)

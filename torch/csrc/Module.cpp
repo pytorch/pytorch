@@ -42,6 +42,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <iostream>
+#include <typeindex>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -160,6 +161,135 @@ namespace py = pybind11;
 static PyObject* module;
 
 static THPGenerator* THPDefaultCPUGenerator = nullptr;
+
+namespace {
+
+// Synthetic pybind type used only to let py::class_<..., CustomClassBase>
+// accept torch._custom_class_base.CustomClassBase as a Python base. It must not
+// become a C++ cast target; concrete subclasses own their real value_and_holder
+// entries.
+struct THPOpaqueBasePybindShim {};
+
+void opaqueBaseDealloc(py::detail::value_and_holder& vh) {
+  auto*& value_ptr = vh.value_ptr();
+  if (value_ptr != nullptr) {
+    py::detail::call_operator_delete(
+        value_ptr, vh.type->type_size, vh.type->type_align);
+    value_ptr = nullptr;
+  }
+  vh.set_holder_constructed(false);
+}
+
+void markOpaqueBaseHolderConstructed(PyObject* self) {
+  auto* inst = reinterpret_cast<py::detail::instance*>(self);
+  py::detail::values_and_holders vhs(inst);
+  for (auto& vh : vhs) {
+    if (vh.type != nullptr &&
+        *vh.type->cpptype == typeid(THPOpaqueBasePybindShim)) {
+      vh.set_holder_constructed();
+      return;
+    }
+  }
+}
+
+void opaqueBaseInitInstance(
+    py::detail::instance* inst,
+    [[maybe_unused]] const void* holder_ptr) {
+  markOpaqueBaseHolderConstructed(reinterpret_cast<PyObject*>(inst));
+}
+
+PyObject* opaqueBaseNew(
+    PyTypeObject* type,
+    [[maybe_unused]] PyObject* args,
+    [[maybe_unused]] PyObject* kwargs) {
+  auto* self = py::detail::make_new_instance(type);
+  markOpaqueBaseHolderConstructed(self);
+  return self;
+}
+
+int opaqueBaseInit(
+    PyObject* self,
+    [[maybe_unused]] PyObject* args,
+    [[maybe_unused]] PyObject* kwargs) {
+  markOpaqueBaseHolderConstructed(self);
+  return 0;
+}
+
+void registerOpaqueBasePybindTypeInfo(PyTypeObject* type) {
+  auto* tinfo = new py::detail::type_info();
+  tinfo->type = type;
+  tinfo->cpptype = &typeid(THPOpaqueBasePybindShim);
+  // This tiny size supports pybind's generic lazy-allocation path. It is not
+  // an embedded base subobject, and the dummy allocation is freed above.
+  tinfo->type_size = sizeof(THPOpaqueBasePybindShim);
+  tinfo->type_align = alignof(THPOpaqueBasePybindShim);
+  tinfo->holder_size_in_ptrs = 0;
+  tinfo->operator_new = nullptr;
+  tinfo->init_instance = opaqueBaseInitInstance;
+  tinfo->dealloc = opaqueBaseDealloc;
+  tinfo->simple_type = true;
+  tinfo->simple_ancestors = true;
+  tinfo->module_local = false;
+  tinfo->holder_enum_v = py::detail::holder_enum_t::undefined;
+
+  py::detail::with_internals([&](py::detail::internals& internals) {
+    tinfo->direct_conversions = &internals.direct_conversions[std::type_index(
+        typeid(THPOpaqueBasePybindShim))];
+    internals.registered_types_py[type] = {tinfo};
+  });
+}
+
+py::object createOpaqueBasePybindType() {
+  auto& internals = py::detail::get_internals();
+  auto name =
+      py::reinterpret_steal<py::object>(PYBIND11_FROM_STRING("_OpaqueBase"));
+  auto* heap_type = reinterpret_cast<PyHeapTypeObject*>(
+      internals.default_metaclass->tp_alloc(internals.default_metaclass, 0));
+  if (heap_type == nullptr) {
+    pybind11::pybind11_fail("_OpaqueBase: error allocating type");
+  }
+
+  heap_type->ht_name = name.inc_ref().ptr();
+#ifdef PYBIND11_BUILTIN_QUALNAME
+  heap_type->ht_qualname = name.inc_ref().ptr();
+#endif
+
+  auto* type = &heap_type->ht_type;
+  type->tp_name = "torch._C._OpaqueBase";
+  type->tp_base = py::detail::type_incref(
+      reinterpret_cast<PyTypeObject*>(internals.instance_base));
+  type->tp_basicsize = static_cast<ssize_t>(sizeof(py::detail::instance));
+  // Direct _OpaqueBase instances hold no Python references. Python and pybind
+  // subclasses get GC behavior from their own type creation paths if needed.
+  type->tp_flags =
+      Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HEAPTYPE;
+  type->tp_new = opaqueBaseNew;
+  type->tp_init = opaqueBaseInit;
+  type->tp_dealloc = py::detail::pybind11_object_dealloc;
+  type->tp_weaklistoffset = offsetof(py::detail::instance, weakrefs);
+
+  if (PyType_Ready(type) < 0) {
+    pybind11::pybind11_fail("_OpaqueBase: PyType_Ready failed");
+  }
+
+  auto result =
+      py::reinterpret_steal<py::object>(reinterpret_cast<PyObject*>(heap_type));
+  result.attr("__module__") = "torch._C";
+  registerOpaqueBasePybindTypeInfo(type);
+  return result;
+}
+
+void installOpaqueBase(PyObject* module) {
+  auto py_module = py::reinterpret_borrow<py::module>(module);
+  auto pybind_opaque_base = createOpaqueBasePybindType();
+  py_module.attr("_OpaqueBase") = pybind_opaque_base;
+  auto custom_class_base_module =
+      py::module_::import("torch._custom_class_base");
+  custom_class_base_module.attr("_install_custom_class_base")(
+      pybind_opaque_base);
+}
+
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -2570,6 +2700,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  installOpaqueBase(module);
   // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.
@@ -2796,7 +2927,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
+      [](size_t storage_impl_ptr, const std::string& s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
