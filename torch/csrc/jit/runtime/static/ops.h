@@ -158,7 +158,7 @@ bool hasVarArgs(Node* n);
 inline std::string PrintNode(const Node* node) {
   std::ostringstream ss;
   node->print(ss, 0, nullptr, false);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline void LogAndDumpSchema(const Node* node) {
