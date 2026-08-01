@@ -1573,7 +1573,8 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if shape_env.do_not_specialize_zero_one_symbols and (
         sym_node.expr.free_symbols & shape_env.do_not_specialize_zero_one_symbols
     ):
-        return default
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
 
     r = sym_node.shape_env.evaluate_sym_node(
         sym_node, size_oblivious=False, fallback_value=default
@@ -5865,8 +5866,15 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             symbol_id = self._generate_unique_id(source.name)
+            zero_is_in_dim_range = False
             if type(val) is int or is_nested_int(val):
-                if positive and skip_zero_one_guard_specialization:
+                zero_is_in_dim_range = (
+                    positive
+                    and skip_zero_one_guard_specialization
+                    and isinstance(constraint_dim, StrictMinMaxConstraint)
+                    and constraint_dim.vr.lower <= 0
+                )
+                if zero_is_in_dim_range:
                     sympy_expr = make_symbol(
                         SymT.SIZE, symbol_id, nonnegative=True, integer=True
                     )
@@ -5908,7 +5916,11 @@ class ShapeEnv:
                 if positive:
                     # Add assertions for the newly created symbols
                     if skip_zero_one_guard_specialization:
-                        self._add_assertion(sympy.Ge(sympy_expr, 0, evaluate=False))
+                        if zero_is_in_dim_range:
+                            premise = sympy.Ge(sympy_expr, 0, evaluate=False)
+                        else:
+                            premise = sympy.Gt(sympy_expr, 0, evaluate=False)
+                        self._add_assertion(premise)
                     else:
                         self._add_assertion(sympy_expr > 1)
 
@@ -8166,11 +8178,26 @@ class ShapeEnv:
                     "Specializing %s to %s", self.var_to_sources[a][0].name, tgt
                 )
                 self.log.debug("SPECIALIZATION", stack_info=True)
+        if a in self.do_not_specialize_zero_one_symbols:
+            if isinstance(tgt, sympy.Symbol):
+                # Exact aliases are indistinguishable after replacement.
+                self.do_not_specialize_zero_one_symbols.add(tgt)
+            elif tgt.free_symbols and not (
+                tgt.free_symbols & self.do_not_specialize_zero_one_symbols
+            ):
+                # Replacing the symbol with an ordinary composite expression
+                # would erase its opt-out provenance. Do not mark every input
+                # to the expression, since that changes unrelated guards.
+                log.info(
+                    "skipped set_replacement %s = %s (%s) "
+                    "[would lose zero/one opt-out provenance]",
+                    a,
+                    tgt,
+                    msg,
+                )
+                return
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
         self.replacements[a] = tgt
-        if a in self.do_not_specialize_zero_one_symbols:
-            # Preserve the opt-out provenance after expressions are rewritten.
-            self.do_not_specialize_zero_one_symbols.update(tgt.free_symbols)
         # NB: the replacement may get refined, but the user will find the
         # FIRST one most useful (TODO: Maybe we could consider tracking all of
         # them)

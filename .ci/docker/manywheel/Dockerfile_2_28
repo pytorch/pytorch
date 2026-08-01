@@ -111,6 +111,15 @@ COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/
 COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
 
+# Install Rust toolchain (needed to build the torch._rust extension when building
+# the Python wheels). In `common` so all *_final wheel-builder targets inherit it.
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=12.6
 ARG DEVTOOLSET_VERSION=13

@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     guard_or_false,
+    guard_or_true,
     guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     has_free_symbols,
@@ -1892,29 +1893,37 @@ class f(torch.nn.Module):
         self.assertNotIn(s1.node.expr, shape_env.do_not_specialize_zero_one_symbols)
         self.assertEqual(_broadcast_shapes((s3,), (s1,)), [s3])
 
-    def test_zero_one_opt_out_uses_nonnegative_symbol(self):
-        shape_env = ShapeEnv()
-        shape_env._translation_validation_enabled = True
-        shape_env.validator = mock.Mock()
+    def test_zero_one_opt_out_uses_declared_range_assumption(self):
+        for hint, lower, expected_premise in (
+            (0, 0, sympy.Ge),
+            (1, 1, sympy.Gt),
+        ):
+            with self.subTest(hint=hint, lower=lower):
+                shape_env = ShapeEnv()
+                shape_env._translation_validation_enabled = True
+                shape_env.validator = mock.Mock()
 
-        symbol = shape_env.create_symbol(
-            0,
-            ConstantSource("s0"),
-            DimDynamic.DYNAMIC,
-            StrictMinMaxConstraint(
-                vr=ValueRanges(0, 5),
-                warn_only=False,
-            ),
-            do_not_specialize_zero_one=True,
-            skip_zero_one_guard_specialization=True,
-        )
+                symbol = shape_env.create_symbol(
+                    hint,
+                    ConstantSource("s0"),
+                    DimDynamic.DYNAMIC,
+                    StrictMinMaxConstraint(
+                        vr=ValueRanges(lower, 5),
+                        warn_only=False,
+                    ),
+                    do_not_specialize_zero_one=True,
+                    skip_zero_one_guard_specialization=True,
+                )
 
-        self.assertTrue(symbol.is_nonnegative)
-        self.assertIsNone(symbol.is_positive)
-        self.assertIsNot(sympy.Eq(symbol, 0), sympy.S.false)
-        shape_env.validator.add_assertion.assert_called_once_with(
-            sympy.Ge(symbol, 0, evaluate=False)
-        )
+                self.assertTrue(symbol.is_nonnegative)
+                if lower == 0:
+                    self.assertIsNone(symbol.is_positive)
+                    self.assertIsNot(sympy.Eq(symbol, 0), sympy.S.false)
+                else:
+                    self.assertTrue(symbol.is_positive)
+                shape_env.validator.add_assertion.assert_called_once_with(
+                    expected_premise(symbol, 0, evaluate=False)
+                )
 
     def test_backed_size_oblivious_keeps_positive_symbol(self):
         shape_env = ShapeEnv()
@@ -1932,7 +1941,27 @@ class f(torch.nn.Module):
         self.assertTrue(symbol.is_nonnegative)
         shape_env.validator.add_assertion.assert_called_once_with(symbol > 1)
 
-    def test_zero_one_opt_out_survives_replacement(self):
+    def test_zero_one_opt_out_replacement_preserves_provenance(self):
+        # An exact alias must inherit the opt-out marker.
+        shape_env = ShapeEnv()
+        original = shape_env.create_symbol(
+            1,
+            ConstantSource("original"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+            skip_zero_one_guard_specialization=True,
+        )
+        replacement = shape_env.create_symbol(
+            1,
+            ConstantSource("replacement"),
+            DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        shape_env._set_replacement(original, replacement, "test_alias")
+        self.assertIn(replacement, shape_env.do_not_specialize_zero_one_symbols)
+
+        # A composite of ordinary symbols cannot inherit the marker without
+        # changing every guard on those symbols, so keep the protected source.
         shape_env = ShapeEnv()
         original = shape_env.create_symbol(
             1,
@@ -1947,12 +1976,37 @@ class f(torch.nn.Module):
             DimDynamic.DYNAMIC,
         )
         original_symint = shape_env.create_symintnode(original, hint=1)
+        replacement_symint = shape_env.create_symintnode(replacement, hint=2)
 
-        shape_env._set_replacement(original, replacement - 1, "test")
+        shape_env._set_replacement(original, replacement - 1, "test_composite")
 
         self.assertFalse(guard_or_false(original_symint == 1))
         self.assertEqual(shape_env.guards, [])
-        self.assertIn(replacement, shape_env.do_not_specialize_zero_one_symbols)
+        self.assertNotIn(original, shape_env.replacements)
+        self.assertNotIn(replacement, shape_env.do_not_specialize_zero_one_symbols)
+        self.assertTrue(guard_or_false(replacement_symint == 2))
+        self.assertEqual(len(shape_env.guards), 1)
+
+    def test_zero_one_opt_out_guard_or_uses_static_ranges(self):
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(
+            1,
+            ConstantSource("s0"),
+            DimDynamic.DYNAMIC,
+            StrictMinMaxConstraint(
+                vr=ValueRanges(1, 12),
+                warn_only=False,
+            ),
+            do_not_specialize_zero_one=True,
+            skip_zero_one_guard_specialization=True,
+        )
+        symint = shape_env.create_symintnode(symbol, hint=1)
+
+        self.assertFalse(guard_or_true(symint == 0))
+        self.assertTrue(guard_or_false(symint <= 12))
+        self.assertFalse(guard_or_false(symint == 1))
+        self.assertTrue(guard_or_true(symint == 1))
+        self.assertEqual(shape_env.guards, [])
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):

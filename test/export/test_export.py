@@ -468,7 +468,26 @@ graph():
 
         getattr_1 = torch.randn(1, 8)
         values_1 = torch.randn(1, 4096)
-        # The inferred view dimension requires B to be nonzero.
+
+        # This view is invalid for B == 0 because the inferred dimension is
+        # ambiguous, so a zero-inclusive Dim must report the nonzero guard.
+        zero_inclusive_B = Dim("B", min=0, max=1024)
+        zero_inclusive_ds = {
+            "getattr_1": {0: zero_inclusive_B},
+            "values_1": {0: zero_inclusive_B},
+        }
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                r"generated guard .* != 0",
+            ):
+                export(
+                    M(),
+                    (getattr_1, values_1),
+                    dynamic_shapes=zero_inclusive_ds,
+                    strict=False,
+                )
+
         B = Dim("B", min=1, max=1024)
         ds = {"getattr_1": {0: B}, "values_1": {0: B}}
 
@@ -483,6 +502,25 @@ graph():
         with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
             ep = export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
             self.assertIsNotNone(ep)
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_view_with_zero_inclusive_dim(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(-1, 256)
+
+        B = Dim("B", min=0, max=1024)
+        ep = export(
+            M(),
+            (torch.randn(0, 256),),
+            dynamic_shapes={"x": {0: B}},
+            strict=False,
+        )
+        for size in (0, 3):
+            self.assertEqual(
+                ep.module()(torch.randn(size, 256)).shape,
+                (size, 256),
+            )
 
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):

@@ -647,6 +647,36 @@ def forward(self, x):
                 )
             )
 
+    def test_zero_one_dim_opt_out_roundtrip(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        for example_size, lower in ((0, 0), (1, 1)):
+            with self.subTest(example_size=example_size, lower=lower):
+                dim = Dim("dim", min=lower, max=5)
+                ep = export(
+                    M(),
+                    (torch.randn(example_size),),
+                    dynamic_shapes={"x": {0: dim}},
+                )
+                roundtrip_ep = deserialize(serialize(ep))
+
+                placeholder = next(
+                    node
+                    for node in roundtrip_ep.graph.nodes
+                    if node.op == "placeholder"
+                )
+                roundtrip_dim = placeholder.meta["val"].shape[0]
+                self.assertIn(
+                    roundtrip_dim.node._expr,
+                    roundtrip_dim.node.shape_env.do_not_specialize_zero_one_symbols,
+                )
+                self.assertEqual(
+                    roundtrip_ep.module()(torch.randn(3)).shape,
+                    (3,),
+                )
+
     def test_rational_ranges(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
