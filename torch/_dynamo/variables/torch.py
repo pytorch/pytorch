@@ -3640,6 +3640,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             flat_apply,
             is_graphable_type,
             is_valid_output,
+            NotGraphableError,
             to_graphable,
         )
         from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
@@ -3784,6 +3785,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # list of graph types and then trace the unflattening into the graph.
         captured_spec: TreeSpec | None = None
 
+        def unsupported_output_type() -> NoReturn:
+            unimplemented(
+                gb_type="Unsupported output type for nonstrict_trace-ed function",
+                context=f"Function: {fn.__name__}",
+                explanation=(
+                    "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
+                    " are allowed as output. The result of this call contains an unsupported type."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         def flat_apply_capture(*args: Any) -> list[object]:
             nonlocal captured_spec
             out = flat_apply(*args, checked_output=False)
@@ -3791,7 +3803,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # tree_flattening the output and trace the unflattening. Note that
             # wrapped functions must return the same pytree structure every time
             # they're called.
-            flat_out, spec = to_graphable(out)
+            try:
+                flat_out, spec = to_graphable(out)
+            except NotGraphableError:
+                unsupported_output_type()
             if captured_spec is None:
                 captured_spec = spec
             else:
@@ -3817,25 +3832,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # Build VTs representing (flat_output_list, out_spec)
         try:
             proxy_list_vt = wrap_fx_proxy(tx, proxy)
-        except (
-            # From `handle_traced_output`.
-            torch._dynamo.exc.Unsupported,
-            # From `flat_apply` assert on output type.
-            torch._dynamo.exc.TorchRuntimeError,
-            # From fake tensor eval in _get_fake_value_impl.
-            torch._dynamo.exc.FakeTensorObservedException,
-        ):
-            unimplemented(
-                gb_type="Unsupported output type for nonstrict_trace-ed function",
-                context=f"Function: {fn.__name__}",
-                explanation=(
-                    "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
-                    " are allowed as output. The result of this call contains an unsupported type."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-            # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
-            raise AssertionError("unreachable")  # noqa: B904
+        except torch._dynamo.exc.Unsupported:
+            # From `handle_traced_output` or the explicit output validation in
+            # `flat_apply_capture`. Runtime errors from the traced function must
+            # propagate instead of being misclassified as invalid outputs.
+            unsupported_output_type()
 
         if captured_spec is None:
             raise AssertionError("captured_spec was not set during nonstrict trace")

@@ -1144,7 +1144,7 @@ def squareCheckInputs(self: Tensor, f_name: str):
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
     # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
-    torch._check(
+    torch._check_user_error(
         self.size(-1) == self.size(-2),
         lambda: f"{f_name}: A must be batches of square matrices, "
         f"but they are {self.size(-2)} by {self.size(-1)} matrices",
@@ -3843,10 +3843,10 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
                 lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.uint8, torch.bool]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
