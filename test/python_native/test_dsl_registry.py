@@ -246,12 +246,12 @@ class TestDSLRegistry(TestCase):
                     for method_name in required_methods:
                         self.assertTrue(
                             hasattr(dsl_module, method_name),
-                            f"DSL '{dsl_name}' missing method '{method_name}'",
+                            lambda msg: f"{msg}\nDSL '{dsl_name}' missing method '{method_name}'",
                         )
                         method = getattr(dsl_module, method_name)
                         self.assertTrue(
                             callable(method),
-                            f"DSL '{dsl_name}' method '{method_name}' is not callable",
+                            lambda msg: f"{msg}\nDSL '{dsl_name}' method '{method_name}' is not callable",
                         )
 
     def test_real_dsl_integration(self):
