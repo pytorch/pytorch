@@ -319,6 +319,44 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue(dt._local_tensor.completed)
 
+    def test_async_collective_tensor_nested_in_dtensor_reuses(self):
+        # FSDP+TP motivating case for the ACT guard relaxation: a DTensor whose
+        # _local_tensor alternates between an AsyncCollectiveTensor (async
+        # all-gather output) and the resolved plain Tensor must reuse the
+        # compiled graph. The recursion into _local_tensor re-enters
+        # VariableBuilder.wrap_tensor, hits is_polymorphic_act, and relaxes the
+        # inner guard via UnwrapCollectiveTensorSource, while the outer DTensor
+        # guards (TYPE_MATCH, DTENSOR_SPEC_MATCH, requires_grad) do not
+        # discriminate on the local's class -- so no recompile on the change.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dt(act_local):
+            dt = DTensor.from_local(
+                torch.ones(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            if act_local:
+                dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        expected = torch.full((4, 4), 2.0, device=self.device_type)
+        for i in range(4):
+            # Step 0 traces with the ACT local; odd steps resolve to a plain
+            # Tensor local before the compiled region.
+            out = fn(make_dt(act_local=(i % 2 == 0)))
+            self.assertEqual(out.to_local(), expected)
+        # ACT and plain-Tensor locals share one compiled graph.
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
         # Companion to the wait test above: the crash half of
         # https://github.com/pytorch/pytorch/issues/180614. Direct AOTAutograd
@@ -2732,6 +2770,38 @@ class outer_fn(torch.nn.Module):
             "Shadow empty_strided nodes from ShardingPropagator leaked into "
             "the make_fx graph; disable_proxy_modes_tracing is not active",
         )
+
+    def test_stable_hash_for_caching_is_rank_specific(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188390.
+        # _stable_hash_for_caching must include the local tensor's device so
+        # that each rank produces a unique AOTAutograd cache key.  Before the
+        # fix, the device was omitted and rank 1 incorrectly reused rank 0's
+        # compiled kernel, causing CUDA errors at runtime.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        local = torch.empty(2, 4)
+        dt = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        h0 = dt._stable_hash_for_caching()
+        # Swap to a different device type to verify the device string participates
+        # in the hash.  This does not model two real CPU ranks (both would be plain
+        # "cpu" with no index); see test_stable_hash_for_caching_cuda_ranks for the
+        # actual multi-rank scenario.  _spec is intentionally left inconsistent with
+        # _local_tensor; this is a focused unit test of the hash only.
+        dt._local_tensor = dt._local_tensor.to("meta")
+        h1 = dt._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_stable_hash_for_caching_cuda_ranks(self):
+        # Exercise the exact scenario from #188390: two DTensors with identical
+        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # different AOTAutograd cache keys.
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device="cuda:0")
+        local1 = torch.empty(2, 4, device="cuda:1")
+        dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
+        dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
+        h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
 
 
 @instantiate_parametrized_tests

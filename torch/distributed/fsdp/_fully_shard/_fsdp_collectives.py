@@ -180,7 +180,7 @@ class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
+    ) -> dist.Work | None:
         return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
@@ -201,7 +201,7 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
+    ) -> dist.Work | None:
         return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,

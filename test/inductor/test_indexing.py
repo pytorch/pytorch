@@ -142,10 +142,10 @@ class TestIndexingSimplification(InductorTestCase):
 
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
-        i2 = sympy.Symbol("i2", integer=True)
-        r3 = sympy.Symbol("r3", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
+        i2 = sympy.Symbol("i2", integer=True, nonnegative=True)
+        r3 = sympy.Symbol("r3", integer=True, nonnegative=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -214,9 +214,16 @@ class TestIndexingSimplification(InductorTestCase):
         # Nested modular indexing is correctly simplified
         var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(121 * i1 + i2, 1, 28),
+        )
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 29), 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+        expr = ModularIndexing(ModularIndexing(i2, -3, 12), -3, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
@@ -225,6 +232,33 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+        var_ranges = {i0: 4096, r3: 256}
+        p = r3 + 256 * i0
+        expr = (
+            32768 * FloorDiv(p, 32768)
+            + 4 * FloorDiv(ModularIndexing(p, 1, 32768), 8192)
+            + 16 * ModularIndexing(ModularIndexing(p, 1, 32768), 256, 32)
+            + 512
+            * ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                4,
+                64,
+            )
+            + ModularIndexing(
+                ModularIndexing(ModularIndexing(p, 1, 32768), 1, 8192),
+                1,
+                4,
+            )
+        )
+        expected = (
+            512 * FloorDiv(r3, 4)
+            + 32768 * FloorDiv(i0, 128)
+            + ModularIndexing(r3, 1, 4)
+            + 16 * ModularIndexing(i0, 1, 32)
+            + 4 * ModularIndexing(i0, 32, 4)
+        )
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
 
     def test_floordiv_modularindexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -500,6 +534,23 @@ class TestIndexingSimplification(InductorTestCase):
         compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
+
+    @unittest.skipUnless(HAS_CPU, "requires CPU")
+    def test_bool_minimum_maximum_index_propagation(self):
+        def foo(x):
+            thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
+            eq = torch.eq(thresh, x)
+            empty = torch.empty_like(eq)
+            return torch.minimum(empty, empty), torch.maximum(empty, empty)
+
+        x = torch.randn([32], dtype=torch.float64)
+        compiled_foo = torch.compile(foo, backend="inductor")
+        with torch.no_grad():
+            out_min, out_max = compiled_foo(x)
+        self.assertEqual(out_min.dtype, torch.bool)
+        self.assertEqual(out_max.dtype, torch.bool)
+        self.assertEqual(out_min.shape, x.shape)
+        self.assertEqual(out_max.shape, x.shape)
 
 
 class ExprPrinterTests(InductorTestCase):
@@ -1025,8 +1076,8 @@ class TestWideExpressionThresholds(InductorTestCase):
         self.assertEqual(result, FloorDiv(128 * i1, 8192))
 
     def test_modular_indexing_simplification_small(self):
-        i0 = sympy.Symbol("i0", integer=True)
-        i1 = sympy.Symbol("i1", integer=True)
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        i1 = sympy.Symbol("i1", integer=True, nonnegative=True)
         self.assertEqual(
             ModularIndexing(i0 + i1 * 10, 1, 10),
             ModularIndexing(i0, 1, 10),
@@ -1155,6 +1206,30 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 
         with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
             self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
+
+    def test_hint_respects_symbolic_upper_bound_assert(self):
+        # A reducing slice x[u0:] is sized s0 - u0. The invariant u0 <= s0 lives
+        # only in deferred_runtime_asserts, not var_to_range (which keeps the loose
+        # [0, fallback]). optimization_hint must honor it so u0 is capped at s0's
+        # hint rather than the generic fallback; otherwise s0 - u0 hints negative
+        # (16 - fallback) and overflows downstream allocations such as the AOTI
+        # autotuning example tensors.
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        s0 = shape_env.create_symbol(
+            16,
+            source=ConstantSource("__test_s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=None,
+        )
+        u0 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(u0 <= s0, "u0 <= s0")
+
+        self.assertLessEqual(sizevars.optimization_hint(u0, fallback=1024), 16)
+        self.assertGreaterEqual(sizevars.optimization_hint(s0 - u0, fallback=1024), 0)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
