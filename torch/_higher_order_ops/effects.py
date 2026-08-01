@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Union
+from typing import Any, cast, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -264,8 +264,9 @@ def handle_effects(
             raise AssertionError(
                 f"Could not find a token for effect {key} which came from the function {op}"
             )
-        proxy_tensor_mode = torch._C._get_dispatch_mode(
-            torch._C._TorchDispatchModeKey.PROXY
+        proxy_tensor_mode = cast(
+            "ProxyTorchDispatchMode | None",
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY),
         )
         if proxy_tensor_mode is not None:
             # If we discovered a new token during tracing, we are in backward.

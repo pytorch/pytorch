@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import ast
+import math
 import os
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import (
+    _serialize_storage_nbytes,
     aot_graph_input_parser,
     generate_env_vars_string,
     NNModuleToString,
@@ -23,6 +26,64 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    def test_serialize_symbolic_storage_nbytes(self):
+        from sympy import floor
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import Max
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(4, ConstantSource("storage_size"))
+        expr = 4 * symbol + 18428 * Max(1, symbol)
+        nbytes = torch.SymInt(SymNode(expr, shape_env, int, hint=73728))
+        source = _serialize_storage_nbytes(nbytes)
+
+        self.assertNotIn("Max", source)
+        for value in (0, 1, 4):
+            self.assertEqual(
+                eval(source, {"max": max}, {str(symbol): value}),
+                int(expr.subs(symbol, value)),
+            )
+
+        floor_expr = floor(symbol / 2)
+        floor_nbytes = torch.SymInt(SymNode(floor_expr, shape_env, int, hint=2))
+        floor_source = _serialize_storage_nbytes(floor_nbytes)
+        self.assertIn("math.floor", floor_source)
+        self.assertEqual(
+            eval(floor_source, {"math": math}, {str(symbol): 4}),
+            2,
+        )
+
+    def test_repro_templates_import_symexpr_dependencies(self):
+        from torch._dynamo.repro.after_aot import generate_compiler_repro_string
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        args = [torch.ones(1)]
+
+        repros = {
+            "after_aot": generate_compiler_repro_string(gm, args),
+            "after_dynamo": generate_dynamo_fx_repro_string(
+                gm, args, compiler_name="eager"
+            ),
+        }
+        for name, source in repros.items():
+            with self.subTest(name=name):
+                tree = ast.parse(source)
+                imports = ast.Module(
+                    body=[
+                        node
+                        for node in tree.body
+                        if isinstance(node, (ast.Import, ast.ImportFrom))
+                    ],
+                    type_ignores=[],
+                )
+                namespace = {}
+                exec(compile(imports, f"<{name}>", "exec"), namespace)
+                self.assertEqual(eval("math.floor(3 / 2)", namespace), 1)
+
     def test_cast_model_to_fp64_dtype_args(self):
         # Test that dtype arguments are converted to fp64
 
@@ -107,6 +168,31 @@ def forward(self, x_1):
         self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_LEVEL']", env_strings)
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
         self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
+
+    def test_cuda_system_info_comment_nvcc_os_errors(self):
+        self.addCleanup(debug_utils._cuda_system_info_comment.cache_clear)
+        errors = (
+            PermissionError(13, "Permission denied", "nvcc"),
+            OSError(5, "Input/output error", "nvcc"),
+        )
+
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                debug_utils._cuda_system_info_comment.cache_clear()
+                with (
+                    patch.object(torch.cuda, "is_available", return_value=True),
+                    patch.object(torch.version, "hip", None),
+                    patch.object(
+                        debug_utils.subprocess,
+                        "check_output",
+                        side_effect=error,
+                    ),
+                    patch.object(torch.cuda, "device_count", return_value=0),
+                ):
+                    result = debug_utils._cuda_system_info_comment()
+
+                self.assertIn("# nvcc not found\n", result)
+                self.assertIn("# GPU Hardware Info: \n", result)
 
 
 class TestDebugUtilsDevice(TestCase):
@@ -794,7 +880,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
             patch.object(torch._functorch.config, "enable_autograd_cache", False),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             x = torch.randn(10, device=device, requires_grad=True)
             result = compiled_fn(x)
             result.backward()
@@ -802,15 +888,23 @@ class TestInductorConfigOverrideIntegration(TestCase):
         # Verify each graph has fwd+bwd, correct overrides, no cross-graph
         # leak, and identical configs for forward and backward.
         for gid in range(3):
-            self.assertIn((gid, False), configs_at_compile, f"graph {gid} fwd missing")
-            self.assertIn((gid, True), configs_at_compile, f"graph {gid} bwd missing")
+            self.assertIn(
+                (gid, False),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} fwd missing",
+            )
+            self.assertIn(
+                (gid, True),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} bwd missing",
+            )
             expected = {**baseline, **expected_overrides[gid]}
             for is_bw in [False, True]:
                 phase = "backward" if is_bw else "forward"
                 self.assertEqual(
                     configs_at_compile[(gid, is_bw)],
                     expected,
-                    f"graph {gid} {phase}: config mismatch",
+                    lambda msg: f"{msg}\ngraph {gid} {phase}: config mismatch",
                 )
 
         self.assertIsNotNone(x.grad)
