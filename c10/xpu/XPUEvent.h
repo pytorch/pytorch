@@ -21,11 +21,11 @@ struct XPUEvent {
 #if SYCL_COMPILER_VERSION >= 20260200
   XPUEvent(
       DeviceIndex device_index,
-      const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle)
+      const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle_data)
       : device_index_(device_index) {
     event_ = std::make_unique<sycl::event>(
         sycl::ext::oneapi::experimental::ipc::event::open(
-            handle, c10::xpu::get_device_context()));
+            handle_data, c10::xpu::get_device_context()));
     enable_ipc_ = true;
   }
 #endif
@@ -93,6 +93,7 @@ struct XPUEvent {
     if (!isCreated()) {
       device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
+      TORCH_CHECK(!enable_ipc_ || !enable_timing_, "XPUEvent cannot have both IPC and timing enabled.");
       using syclex = sycl::ext::oneapi::experimental;
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
@@ -161,6 +162,9 @@ struct XPUEvent {
     TORCH_CHECK(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
+    TORCH_CHECK(
+        !enable_ipc_ && !other.enable_ipc_,
+        "Both events must be created with argument 'enable_ipc=False'.");
 
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
