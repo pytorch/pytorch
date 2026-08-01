@@ -289,6 +289,20 @@ class TestValueRanges(TestCase):
             bound_sympy(x**-1, {x: ValueRanges(3, 4)}), ValueRanges.unknown()
         )
 
+    def test_bool_eq(self):
+        self.assertEqual(
+            ValueRangeAnalysis.eq(
+                ValueRanges.wrap(sympy.true), ValueRanges.wrap(sympy.false)
+            ),
+            ValueRanges.wrap(sympy.false),
+        )
+        self.assertEqual(
+            ValueRangeAnalysis.eq(
+                ValueRanges.wrap(sympy.true), ValueRanges.unknown_bool()
+            ),
+            ValueRanges.unknown_bool(),
+        )
+
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):
@@ -834,6 +848,8 @@ class TestSympySolve(TestCase):
             Eq(FloorDiv(a, b), c),
             # Result is a 'sympy.Or'.
             Ne(FloorDiv(a, b), c),
+            # Relational operation over booleans, not arithmetic expressions.
+            Eq(Eq(a, 0, evaluate=False), Eq(b, 0, evaluate=False), evaluate=False),
         ]
 
         for case in cases:

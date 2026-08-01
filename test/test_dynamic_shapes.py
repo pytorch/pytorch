@@ -27,6 +27,7 @@ from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _iterate_exprs,
+    canonicalize_bool_expr,
     DimConstraints,
     DimDynamic,
     expect_true,
@@ -2183,6 +2184,33 @@ class TestSymNumberMagicMethods(TestCase):
         is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
+
+    def test_unbacked_symbool_eq_expect_true(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symbool()
+        b = shape_env.create_unbacked_symbool()
+
+        expr = a == b
+
+        self.assertIsInstance(expr, torch.SymBool)
+        self.assertEqual(expr.node.expr, sympy.Eq(a.node.expr, b.node.expr))
+        self.assertIs(expr.node.expect_true("", 0), True)
+
+    def test_canonicalize_bool_expr_nested_relational(self):
+        x, y, z, w = sympy.symbols("x y z w", integer=True)
+        for expr, equivalent in (
+            (
+                sympy.Eq(x > y, z >= w, evaluate=False),
+                sympy.Eq(y < x, w <= z, evaluate=False),
+            ),
+            (sympy.Xor(x > y, z >= w), sympy.Xor(y < x, w <= z)),
+            (sympy.Implies(x < y, sympy.false, evaluate=False), y <= x),
+            (sympy.ITE(x < y, sympy.false, sympy.true, evaluate=False), y <= x),
+        ):
+            canonical = canonicalize_bool_expr(expr)
+            self.assertEqual(canonical, canonicalize_bool_expr(equivalent))
+            self.assertEqual(canonical, canonicalize_bool_expr(canonical))
+            self.assertFalse(canonical.has(sympy.Gt, sympy.Ge))
 
     @parametrize("fn", list(sym_node.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])

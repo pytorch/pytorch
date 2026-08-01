@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sympy
 from sympy import S
+from sympy.core.relational import Relational
+from sympy.logic.boolalg import BooleanFunction
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -790,9 +792,7 @@ def canonicalize_bool_expr(expr: _T) -> _T:
     # nb. Relational.canonical in sympy is broken
     # https://github.com/sympy/sympy/issues/25924
 
-    if not isinstance(
-        expr, (sympy.Rel, sympy.And, sympy.Or, sympy.Not, sympy.Eq, sympy.Ne)
-    ):
+    if not isinstance(expr, (sympy.Rel, BooleanFunction)):
         return expr
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
@@ -860,11 +860,26 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
     (rewriting them to Le/Lt, respectively).
     """
-    if isinstance(expr, (sympy.And, sympy.Or)):
-        return type(expr)(*map(canonicalize_bool_expr, expr.args))
+    if isinstance(expr, BooleanFunction):
+        args = tuple(map(canonicalize_bool_expr, expr.args))
+        result = type(expr)(*args)
+        if type(result) is type(expr) and result.args == args:
+            return result
+        return canonicalize_bool_expr(result)
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    t: type[Any]
+    if isinstance(expr, Relational) and not (
+        isinstance(expr.lhs, sympy.Expr) and isinstance(expr.rhs, sympy.Expr)
+    ):
+        lhs = canonicalize_bool_expr(expr.lhs)
+        rhs = canonicalize_bool_expr(expr.rhs)
+        if isinstance(expr, tuple(opposite.keys())):
+            return opposite[type(expr)](rhs, lhs, evaluate=False)  # type: ignore[index]
+        if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
+            raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
+        return type(expr)(lhs, rhs, evaluate=False)
+
+    t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
         rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
