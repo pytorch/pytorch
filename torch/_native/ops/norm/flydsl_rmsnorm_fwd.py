@@ -7,7 +7,7 @@ import math
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl.expr import const_expr, gpu, math as fmath, range_constexpr, ReductionOp
+from flydsl.expr import const_expr, gpu, math as fmath, range_constexpr
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
@@ -21,7 +21,6 @@ _SUPPORTED_DTYPES: dict[torch.dtype, str] = {
     torch.float16: "f16",
     torch.bfloat16: "bf16",
 }
-_COMPILE_BACKEND_NAME = flyc.compile_backend_name()
 BLOCK_THREADS = 256
 VEC_WIDTH = 8
 
@@ -179,15 +178,14 @@ def build_rmsnorm_module(
                 vec = _load_vec(copy_atom, vec_width, elem_dtype, in_div, idx)
                 in_local.append(vec)
                 x = vec.to(fx.Float32)
-
-                x2 = x * x
-                red2 = x2.reduce(ReductionOp.ADD)
-                thread_sumsq = thread_sumsq + red2
+                for elem_i in range_constexpr(vec_width):
+                    x_elem = x[elem_i]
+                    thread_sumsq = thread_sumsq + x_elem * x_elem
 
             sum_sq = block_reduce_add(thread_sumsq)
             mean_sq = sum_sq / n_float
             ms_eps = mean_sq + eps_c
-            rrms = fmath.rsqrt(ms_eps)
+            rrms = fmath.rsqrt(ms_eps, fastmath="fast")
 
             # The fused ATen contract returns this value for backward.
             if tid == 0:
@@ -205,8 +203,7 @@ def build_rmsnorm_module(
                 y = (x * rrms) * g
                 out_e = _to_elem(dtype_str, elem_dtype, y)
 
-                out_idx = tid + tile_i * block_threads
-                _store_vec(copy_atom, vec_width, elem_dtype, out_e, out_div, out_idx)
+                _store_vec(copy_atom, vec_width, elem_dtype, out_e, out_div, idx)
 
         else:
             # ==============================================================
@@ -219,20 +216,15 @@ def build_rmsnorm_module(
             row_in = Input_buf[bid, None]
             row_out = Output_buf[bid, None]
 
-            generic_vec_width = 4 if dtype_str == "f32" else VEC_WIDTH
-            full_vecs = N // generic_vec_width
+            full_vecs = N // vec_width
             vec_steps = (full_vecs + block_threads - 1) // block_threads
-            scalar_tail_start = full_vecs * generic_vec_width
+            scalar_tail_start = full_vecs * vec_width
             scalar_tail_elems = N - scalar_tail_start
 
             copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_bits)
-            in_div = fx.logical_divide(row_in, fx.make_layout(generic_vec_width, 1))
-            out_vec_div = fx.logical_divide(
-                row_out, fx.make_layout(generic_vec_width, 1)
-            )
-            gamma_vec_div = fx.logical_divide(
-                Gamma_buf, fx.make_layout(generic_vec_width, 1)
-            )
+            in_div = fx.logical_divide(row_in, fx.make_layout(vec_width, 1))
+            out_vec_div = fx.logical_divide(row_out, fx.make_layout(vec_width, 1))
+            gamma_vec_div = fx.logical_divide(Gamma_buf, fx.make_layout(vec_width, 1))
 
             c_zero_f = fx.Float32(0.0)
             thread_sumsq = c_zero_f
@@ -244,14 +236,15 @@ def build_rmsnorm_module(
                 is_valid = vec_idx < full_vecs
                 vec_idx_safe = is_valid.select(vec_idx, 0)
                 vec = _load_vec(
-                    copy_atom_v, generic_vec_width, elem_dtype, in_div, vec_idx_safe
+                    copy_atom_v, vec_width, elem_dtype, in_div, vec_idx_safe
                 )
                 in_local.append(vec)
                 x = vec.to(fx.Float32)
-                x2 = x * x
-                red2 = x2.reduce(ReductionOp.ADD)
-                red2_safe = is_valid.select(red2, c_zero_f)
-                thread_sumsq = thread_sumsq + red2_safe
+                vec_sumsq = c_zero_f
+                for elem_i in range_constexpr(vec_width):
+                    x_elem = x[elem_i]
+                    vec_sumsq = vec_sumsq + x_elem * x_elem
+                thread_sumsq = thread_sumsq + is_valid.select(vec_sumsq, c_zero_f)
 
             if const_expr(scalar_tail_elems > 0):
                 tail_valid = tid < scalar_tail_elems
@@ -265,7 +258,7 @@ def build_rmsnorm_module(
             sum_sq = block_reduce_add(thread_sumsq)
             mean_sq = sum_sq / n_float
             ms_eps = mean_sq + eps_c
-            rrms = fmath.rsqrt(ms_eps)
+            rrms = fmath.rsqrt(ms_eps, fastmath="fast")
 
             # The fused ATen contract returns this value for backward.
             if tid == 0:
@@ -276,7 +269,7 @@ def build_rmsnorm_module(
                 if vec_idx < full_vecs:
                     g = _load_vec(
                         copy_atom_v,
-                        generic_vec_width,
+                        vec_width,
                         elem_dtype,
                         gamma_vec_div,
                         vec_idx,
@@ -286,7 +279,7 @@ def build_rmsnorm_module(
                     out_e = _to_elem(dtype_str, elem_dtype, y)
                     _store_vec(
                         copy_atom_v,
-                        generic_vec_width,
+                        vec_width,
                         elem_dtype,
                         out_e,
                         out_vec_div,
@@ -330,7 +323,9 @@ def _make_compile_arg(tensor: torch.Tensor):
 
 @instrumented_flydsl_cache(
     "aten::_fused_rms_norm",
-    key_fn=lambda n, dtype, arch, *a, **k: f"fwd N={n} {dtype} {arch}",
+    key_fn=lambda n, dtype, arch, backend, device_index, *a, **k: (
+        f"fwd N={n} {dtype} {arch} backend={backend} device={device_index}"
+    ),
 )
 def _compile_rmsnorm_fwd(
     n: int,
@@ -347,7 +342,7 @@ def _compile_rmsnorm_fwd(
     del backend, device_index
     input_2d, weight, output_2d, rstd, rows_m, eps, stream = compile_args
     launch = build_rmsnorm_module(n, dtype, arch)
-    return flyc.compile[{"fast_fp_math": True}](
+    return flyc.compile(
         launch,
         _make_compile_arg(input_2d),
         flyc.from_torch_tensor(weight),
@@ -381,14 +376,12 @@ def rmsnorm_fwd(
 
         stream = torch.cuda.current_stream()
         device_index = input.device.index
-        if device_index is None:
-            device_index = torch.cuda.current_device()
 
         compiled = _compile_rmsnorm_fwd(
             n,
             _dtype_str(input.dtype),
             _resolve_rocm_arch(device_index),
-            _COMPILE_BACKEND_NAME,
+            flyc.compile_backend_name(),
             device_index,
             compile_args=(
                 input_2d,

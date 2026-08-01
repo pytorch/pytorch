@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import functools
+
 import torch
 
 from ... import flydsl_utils as fu
 
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_SUPPORTED_ARCHES = ("gfx950",)
 _HIP_AVAILABLE = torch.version.hip is not None
 _is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
 _rmsnorm_fwd = None
@@ -40,6 +43,16 @@ def _normalized_shape_1d(normalized_shape) -> int | None:
     return shape[0] if len(shape) == 1 else None
 
 
+@functools.cache
+def _is_supported_arch(device_index: int) -> bool:
+    try:
+        props = torch.cuda.get_device_properties(device_index)
+        arch = str(props.gcnArchName).split(":", 1)[0]
+    except Exception:
+        return False
+    return arch in _SUPPORTED_ARCHES
+
+
 def _common_supported(
     input: torch.Tensor,
     n: int,
@@ -47,6 +60,11 @@ def _common_supported(
 ) -> bool:
     """Cheap dispatcher predicate for supported forward inputs."""
     if not _HIP_AVAILABLE or input.device.type != "cuda":
+        return False
+    device_index = input.device.index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+    if not _is_supported_arch(device_index):
         return False
     if input.dtype not in _SUPPORTED_DTYPES:
         return False
@@ -77,13 +95,10 @@ def _common_supported(
 
 def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
     rows_m = input.numel() // n
-    # Tuned on MI355. The kernel caches a whole row in registers to avoid
-    # re-reading it for the normalize pass, so the register footprint grows
-    # with N and eventually spills to scratch. Measured at rows_m=2048, the
-    # last N where all three dtypes keep a margin is 114688 (1.20x fp16, 1.21x
-    # bf16, 1.12x fp32); by 126976 fp16 is at 0.77x and fp32 at parity. Unlike
-    # the other bands this bound is not a power of two -- rounding down to
-    # 65536 would give up a measured 1.1x-1.6x across 81920..114688.
+    # Tuned on gfx950 (MI355). Measured at rows_m=2048, the last N where all
+    # three dtypes keep a margin is 114688. Unlike the other bands this bound
+    # is not a power of two; rounding down to 65536 would give up a measured
+    # 1.1x-1.6x across 81920..114688.
     return (
         (4096 <= n < 8192 and rows_m >= 8192)
         or (8192 <= n < 16384 and rows_m >= 4096)
@@ -110,10 +125,7 @@ def _fused_rms_norm_cond(
 def _get_rmsnorm_fwd(input: torch.Tensor):
     global _rmsnorm_fwd
     if _rmsnorm_fwd is None:
-        # Import under the input device guard because the vendored module
-        # resolves the FlyDSL compile backend at import time.
-        with torch.cuda.device(input.device):
-            from .flydsl_rmsnorm_fwd import rmsnorm_fwd
+        from .flydsl_rmsnorm_fwd import rmsnorm_fwd
 
         _rmsnorm_fwd = rmsnorm_fwd
     return _rmsnorm_fwd
@@ -134,7 +146,7 @@ def _fused_rms_norm_impl(
     return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
 
 
-def register_op_override() -> None:
+def register_flydsl_rmsnorm_overrides() -> None:
     # QuACK registers against this symbol too, for NVIDIA. Both registrations
     # coexist: the predicates are mutually exclusive (ROCm versus NVIDIA).
     fu.register_op_override(

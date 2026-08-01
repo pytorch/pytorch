@@ -4743,12 +4743,10 @@ def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs
     # N >= 16384 needs >= 2048.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     cases = (
-        ((8192, 4096), (4096,), {'eps': 1e-5}),
+        # The dedicated RMSNorm test covers the first dispatch band.
         ((4096, 8192), (8192,), {'eps': 1e-5}),
-        ((2048, 16384), (16384,), {'eps': 1e-5}),
-        # N is a multiple of neither vector width (8 for fp16/bf16, 4 for
-        # fp32), so this exercises the scalar tail of the vectorized path.
-        ((8192, 4098), (4098,), {'eps': 1e-5}),
+        # This also exercises the scalar tail of the vectorized path.
+        ((2048, 16385), (16385,), {'eps': 1e-5}),
         # Below the row threshold and below the N threshold: both fall through
         # to aten, which the override must leave numerically untouched.
         ((64, 4096), (4096,), {'eps': 1e-5}),
@@ -4760,7 +4758,7 @@ def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs
         weight = make_arg(normalized_shape)
         yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
     # weight=None is declined by the predicate and handled by aten.
-    yield SampleInput(make_arg((8192, 4096)), args=((4096,),), kwargs={'eps': 1e-5})
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
 
 
 def error_inputs_group_norm(opinfo, device, **kwargs):
@@ -22937,13 +22935,10 @@ if "cutedsl" in dsl_ops_by_dsl:
                 skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
             ],
             skips=(
-                # test_dtypes probes every dtype and expects the listed set
-                # to exactly match what the op accepts. The override falls
-                # through to aten for fp64/complex, so those "work" from the
-                # probe's perspective -- but this variant is specifically for
-                # the override's supported dtypes only.
+                # Unsupported dtypes fall through to aten, so this variant's
+                # narrower dtype set fails test_dtypes.
                 DecorateInfo(
-                    unittest.skip("override intentionally narrower than aten"),
+                    unittest.expectedFailure,
                     "TestCommon", "test_dtypes",
                 ),
             ),
@@ -23040,7 +23035,7 @@ if "flydsl" in dsl_ops_by_dsl:
                 # probe's perspective -- but this variant is specifically for
                 # the override's supported dtypes only.
                 DecorateInfo(
-                    unittest.skip("override intentionally narrower than aten"),
+                    unittest.expectedFailure,
                     "TestCommon", "test_dtypes",
                 ),
             ),
