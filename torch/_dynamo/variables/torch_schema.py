@@ -54,13 +54,8 @@ def torch_function_mutated_arg_infos(
     if schema is not None:
         return _schema_mutated_arg_infos(schema)
 
-    schemas = getattr(fn, "_schemas", None)
-    if schemas is not None:
-        return tuple(
-            info
-            for schema in schemas.values()
-            for info in _schema_mutated_arg_infos(schema)
-        )
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        raise AssertionError("OpOverloadPacket must be resolved before schema lookup")
 
     if getattr(fn, "__module__", None) not in ("torch", "torch._C._nn"):
         return ()
