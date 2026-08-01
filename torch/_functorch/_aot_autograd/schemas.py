@@ -879,13 +879,15 @@ class ViewAndMutationMeta:
         )
 
 
-class InductorFwMetadata:
+class BackendFwMetadata:
     """
     A live proxy over ViewAndMutationMeta that exposes only the fields
-    Inductor needs. Using a proxy (rather than a one-time snapshot) ensures
-    that later mutations to the underlying metadata -- such as the
-    bw_donated_idxs reset in runtime_wrappers.py and the DDPOptimizer
-    per-bucket fw_metadata swap -- are visible to Inductor.
+    that compiler backends (in-tree Inductor and out-of-tree) may depend
+    on via TracingContext.backend_fw_metadata. Using a property-based proxy
+    (rather than a stored snapshot) ensures that later mutations to the
+    underlying metadata -- such as the bw_donated_idxs reset in
+    runtime_wrappers.py and the DDPOptimizer per-bucket fw_metadata swap --
+    are always visible to backends.
 
     See https://github.com/pytorch/pytorch/issues/114403
     """
@@ -916,12 +918,6 @@ class InductorFwMetadata:
     @property
     def bw_donated_idxs(self) -> list[int] | None:
         return self._meta.bw_donated_idxs
-
-    @staticmethod
-    def from_view_and_mutation_meta(
-        meta: ViewAndMutationMeta,
-    ) -> InductorFwMetadata:
-        return InductorFwMetadata(meta)
 
 
 @dataclass(eq=False)

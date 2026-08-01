@@ -83,7 +83,6 @@ from .schemas import (
     AOTState,
     FlatFn,
     FxValue,
-    InductorFwMetadata,
     MutationType,
     SubclassMeta,
     ViewAndMutationMeta,
@@ -2785,10 +2784,8 @@ def _aot_stage2b_compile_forward_or_inference(
 
         # Set tracing context
         if tracing_context := torch._guards.TracingContext.try_get():
-            inner_meta = _get_inner_meta(maybe_subclass_meta, fw_metadata)
-            tracing_context.fw_metadata = inner_meta
-            tracing_context.inductor_fw_metadata = (
-                InductorFwMetadata.from_view_and_mutation_meta(inner_meta)
+            tracing_context.fw_metadata = _get_inner_meta(
+                maybe_subclass_meta, fw_metadata
             )
 
         if config.enable_complex_wrapper:
