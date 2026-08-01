@@ -130,7 +130,12 @@ jobs:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
-    runs-on: ${{ matrix.runner }}
+    # MOCK / DO NOT MERGE: staging runners (c-mt-) live in the
+    # "meta-staging-aws-ue1" runner group, so they must be targeted by group +
+    # label rather than label alone. Non-staging runners keep the plain string
+    # form, so every other job in this PR is unaffected. Revert to
+    # `runs-on: ${{ matrix.runner }}` before merging.
+    runs-on: ${{ startsWith(matrix.runner, 'c-mt-') && fromJSON(format('{{"group":"meta-staging-aws-ue1","labels":["{0}"]}}', matrix.runner)) || matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
       options: "--gpus all"

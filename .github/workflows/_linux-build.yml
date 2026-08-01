@@ -150,7 +150,12 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
+    # MOCK / DO NOT MERGE: staging runners (runner_prefix "c-mt-") live in the
+    # "meta-staging-aws-ue1" runner group and must be targeted by group +
+    # label. Every other prefix keeps the original plain string form, so the
+    # rest of this PR's build jobs are unaffected. Revert to the single-line
+    # `runs-on: ${{ inputs.runner_prefix }}${{ ... }}` before merging.
+    runs-on: ${{ inputs.runner_prefix == 'c-mt-' && fromJSON(format('{{"group":"meta-staging-aws-ue1","labels":["{0}{1}"]}}', inputs.runner_prefix, startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64')) || format('{0}{1}', inputs.runner_prefix, startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64') }}
     container:
       image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
