@@ -257,6 +257,10 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
+# Use slower compare/select reductions for their ordered signed-zero tie behavior.
+# NaNs are propagated regardless of this setting.
+strict_signed_zero = False
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -1132,6 +1136,7 @@ combo_kernel_max_distance: int = -1
 # When True, detect identical sub-kernels in combo groups and generate a single
 # code body with pointer-array indexing instead of if/elif branching.
 # This eliminates register pressure and branching overhead for uniform sub-kernels.
+#
 # Can be forced on via the TORCHINDUCTOR_COMBO_KERNEL_UNIFORM_DISPATCH=1 env var,
 # which the inductor perf dashboard CI uses to A/B uniform dispatch.
 combo_kernel_uniform_dispatch: bool = (

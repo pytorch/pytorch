@@ -403,6 +403,12 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+        # Uniform dispatch intentionally bails under per-subkernel blocks
+        # (_detect_uniform_subkernels returns early), so no uniform kernel is
+        # emitted in that variant; only the correctness check above applies there.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
+
         # Correctness alone is vacuous here: if the pass silently bailed (op-trace
         # mismatch, structural pre-check failure, fallback to sequential dispatch)
         # the output would still be correct. So assert the generated code actually
@@ -494,14 +500,22 @@ class ComboKernelTests(TestCase):
 
         # Prove the uniform-dispatch path was actually taken (not a silent bail),
         # so this genuinely guards the non-persistent uniform-dispatch codegen.
-        uniform_srcs = [
-            c for c in code if "kernel_idx = pid // num_blocks_per_kernel" in c
-        ]
-        self.assertEqual(
-            len(uniform_srcs),
-            1,
-            "expected exactly one generated kernel using uniform dispatch",
-        )
+        #
+        # With per-subkernel blocks each sub-kernel needs its own R0_BLOCK, which
+        # is incompatible with a single shared uniform-dispatch body, so uniform
+        # dispatch does not engage for non-persistent reductions in that mode (it
+        # falls back to sequential dispatch). Only assert uniform engagement when
+        # sub-kernels share block sizes -- the config the OSS dashboard used and
+        # the one that exercised the R0_BLOCK collision.
+        if not self.combo_kernel_per_subkernel_blocks:
+            uniform_srcs = [
+                c for c in code if "kernel_idx = pid // num_blocks_per_kernel" in c
+            ]
+            self.assertEqual(
+                len(uniform_srcs),
+                1,
+                "expected exactly one generated kernel using uniform dispatch",
+            )
 
     @requires_gpu_and_triton
     def test_uniform_dispatch_mixed_persistent_and_non_persistent(self):
@@ -528,6 +542,29 @@ class ComboKernelTests(TestCase):
         # Uniform dispatch must NOT engage for a non-identical (mixed) group.
         full_code = "\n".join(code)
         self.assertNotIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
+
+    @requires_gpu_and_triton
+    def test_uniform_dispatch_mixed_dtype_is_correct(self):
+        # Regression guard for the uniform-dispatch slot-dtype bug.
+        #
+        # Uniform dispatch loads each buffer from a pointer table and casts it to
+        # a SINGLE dtype (tl.pointer_type(dtype)) taken from the first sub-kernel.
+        # If the sub-kernels mapped to a slot differ in dtype, that one cast
+        # reinterprets the other sub-kernels' memory and silently produces wrong
+        # results. The verification must reject such groups (bail to sequential).
+        # Either way, the compiled result must match eager.
+        def fn(a, b):
+            return a * 2, b * 2
+
+        # Identical ops and shape, but different buffer dtypes across sub-kernels.
+        a = torch.rand(2048, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.rand(2048, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(a, b)
+            out_compiled = torch.compile(fn)(a, b)
+
+        self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
     def test_mutated_args(self):

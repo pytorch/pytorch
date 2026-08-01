@@ -994,15 +994,32 @@ class ComboKernel(Kernel):
         ref_buf_refs = buf_refs_per_kernel[0]
         for slot_idx in range(ref_count):
             slot_call_args = []
-            slot_dtype = None
+            slot_dtypes: list[Any] = []
             for refs in buf_refs_per_kernel:
                 inner_name = refs[slot_idx]
                 outer = inner_to_outer.get(inner_name)
                 if outer is None:
                     return False  # can't resolve buffer
                 slot_call_args.append(outer)
-                if slot_dtype is None:
-                    slot_dtype = inner_to_dtype.get(inner_name)
+                slot_dtypes.append(inner_to_dtype.get(inner_name))
+
+            # Fail-closed dtype check. The shared body loads this slot from the
+            # pointer table and casts it to ONE dtype (tl.pointer_type(dtype))
+            # taken from sub-kernel 0. If the sub-kernels' buffers for this slot
+            # do not all share a single known dtype, that single cast would
+            # reinterpret the other sub-kernels' memory and silently produce
+            # wrong results -- so bail to sequential dispatch instead. Making the
+            # verification stricter only falls back to a correct dispatch; it
+            # never regresses correctness.
+            distinct_dtypes = {d for d in slot_dtypes if d is not None}
+            if None in slot_dtypes or len(distinct_dtypes) != 1:
+                log.debug(
+                    "uniform dispatch build: FAILED - slot %d dtype mismatch/missing: %s",
+                    slot_idx,
+                    slot_dtypes,
+                )
+                return False
+            slot_dtype = next(iter(distinct_dtypes))
 
             slots.append({
                 "inner_name": ref_buf_refs[slot_idx],  # name used in the body
