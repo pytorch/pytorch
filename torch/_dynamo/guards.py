@@ -164,6 +164,7 @@ from .source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
     WeakRefCallSource,
 )
 from .types import (  # noqa: F401
@@ -778,6 +779,29 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
+_async_collective_tensor_type: type | None = None
+
+
+def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
+    # Backing callable for UnwrapCollectiveTensorSource: yield an
+    # AsyncCollectiveTensor's inner tensor and leave everything else unchanged,
+    # so a graph traced on an ACT input is guarded against the unwrapped tensor.
+    # Runs on the guard-eval hot path, so memoize the ACT type once resolved.
+    global _async_collective_tensor_type
+    if _async_collective_tensor_type is None:
+        from torch._functorch._aot_autograd.utils import (
+            get_loaded_async_collective_tensor_type,
+        )
+
+        _async_collective_tensor_type = get_loaded_async_collective_tensor_type()
+    if (
+        _async_collective_tensor_type is not None
+        and type(x) is _async_collective_tensor_type
+    ):
+        return x.elem  # type: ignore[attr-defined]
+    return x
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -824,6 +848,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -839,6 +864,7 @@ strip_function_call = torch._C._dynamo.strip_function_call
 
 
 def _safe_type_repr(t: object) -> str:
+    # Check the actual metaclass so a spoofed __class__ cannot reach type.__repr__.
     if not issubclass(type(t), type):
         t = type(t)
     return type.__repr__(cast(type[Any], t))
@@ -1947,6 +1973,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, UnwrapCollectiveTensorSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=unwrap_async_collective_tensor,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -4107,7 +4142,12 @@ class GuardsStatePickler(pickle.Pickler):
         inner_tensors = dict(inner_data)
 
         outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
-        out = type(meta_tensor).__tensor_unflatten__(  # type: ignore[attr-defined]
+        # Use the recorded pytype, not type(meta_tensor): a transparent wrapper
+        # subclass (e.g. AsyncCollectiveTensor) whose __torch_dispatch__ desugars
+        # ops to its inner tensor makes torch.empty_like() return a plain Tensor,
+        # so meta_tensor loses the subclass type and Tensor.__tensor_unflatten__
+        # does not exist.
+        out = pytype.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, ctx, outer_size, outer_stride
         )
         out.pytype = pytype

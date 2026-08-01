@@ -41,6 +41,7 @@ from ..source import (
     AttrSource,
     CellContentsSource,
     ConstDictKeySource,
+    ContextVarGetSource,
     DefaultsSource,
     DictGetItemSource,
     GetItemSource,
@@ -69,6 +70,8 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from torch._guards import Guard
+
     from ..symbolic_convert import InstructionTranslatorBase
 
 
@@ -164,25 +167,38 @@ def vt_identity_compare(
         except (AttributeError, IndexError, KeyError, NameError):
             return NO_SUCH_SUBOBJ
 
+    pending_guards: list[Guard] = []
+
+    def queue_guard(source: Source, guard_type: typing.Any) -> bool:
+        try:
+            pending_guards.append(source.make_guard(guard_type))
+        except NotImplementedError:
+            return False
+        return True
+
+    def guarded_result(value: bool) -> ConstantVariable:
+        install_guard(*pending_guards)
+        return ConstantVariable.create(value)
+
     def source_identity_value_from_source(source: object) -> object:
         if isinstance(
             source,
-            (GlobalSource, LocalSource, TypeSource, NNModuleSource, CellContentsSource),
+            (
+                GlobalSource,
+                LocalSource,
+                TypeSource,
+                NNModuleSource,
+                CellContentsSource,
+                DefaultsSource,
+                DictGetItemSource,
+                ConstDictKeySource,
+                GetItemSource,
+                NonSerializableSetGetItemSource,
+                GuardedIdentitySource,
+                TrustedSkipGuardSource,
+                ContextVarGetSource,
+            ),
         ):
-            return resolve_source_value(source)
-        if isinstance(source, DefaultsSource):
-            return resolve_source_value(source)
-        if isinstance(source, DictGetItemSource):
-            return resolve_source_value(source)
-        if isinstance(source, ConstDictKeySource):
-            return resolve_source_value(source)
-        if isinstance(source, GetItemSource):
-            return resolve_source_value(source)
-        if isinstance(source, NonSerializableSetGetItemSource):
-            return resolve_source_value(source)
-        if isinstance(source, GuardedIdentitySource):
-            return resolve_source_value(source)
-        if isinstance(source, TrustedSkipGuardSource):
             return resolve_source_value(source)
         return NO_SUCH_SUBOBJ
 
@@ -227,7 +243,9 @@ def vt_identity_compare(
     def member_descriptor_source(source: object) -> Source | None:
         if not isinstance(source, AttrSource):
             return None
-        base = tx.output.resolve_source_value(source.base)
+        base = resolve_source_value(source.base)
+        if base is NO_SUCH_SUBOBJ:
+            return None
         static_value = inspect.getattr_static(base, source.member, NO_SUCH_SUBOBJ)
         if (
             type(static_value) is types.MemberDescriptorType
@@ -276,25 +294,24 @@ def vt_identity_compare(
             return True
         if var.source is None:
             return True
+        if (
+            isinstance(var.source, AttrSource)
+            and resolve_source_value(var.source.base) is NO_SUCH_SUBOBJ
+        ):
+            return False
         if isinstance(var.source, AttrSource) and var.source.member == "__func__":
             base_value = source_identity_value_from_source(var.source.base)
             if base_value is not NO_SUCH_SUBOBJ:
-                try:
-                    install_guard(var.source.base.make_guard(GuardBuilder.ID_MATCH))
-                except NotImplementedError:
+                if not queue_guard(var.source.base, GuardBuilder.ID_MATCH):
                     return False
         descriptor_source = member_descriptor_source(var.source)
         if descriptor_source is not None:
-            try:
-                install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
-            except NotImplementedError:
+            if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
                 return False
         guard_type = var.get_id_guard_type()
         if guard_type is None:
             return True
-        try:
-            install_guard(var.source.make_guard(guard_type))
-        except NotImplementedError:
+        if not queue_guard(var.source, guard_type):
             return False
         return True
 
@@ -307,6 +324,11 @@ def vt_identity_compare(
         if var.is_tensor() and not isinstance(other_value, torch.Tensor):
             return True
         return install_identity_guard(var, needs_guard)
+
+    def queue_type_guard(var: VariableTracker, needs_guard: bool) -> bool:
+        if not needs_guard or var.source is None:
+            return True
+        return queue_guard(var.source, GuardBuilder.TYPE_MATCH)
 
     left_val, left_needs_guard, left_absent = source_guarded_value(left)
     right_val, right_needs_guard, right_absent = source_guarded_value(right)
@@ -335,9 +357,7 @@ def vt_identity_compare(
         if isinstance(source_fn, AttrSource) and source_fn.member == "__func__":
             guard_sources.append(source_fn.base)
         for source in guard_sources:
-            try:
-                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            except NotImplementedError:
+            if not queue_guard(source, GuardBuilder.ID_MATCH):
                 return False
         return True
 
@@ -361,13 +381,9 @@ def vt_identity_compare(
             return True
         if name in obj.__dict__:
             return False
-        try:
-            install_guard(
-                source.make_guard(
-                    partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
-                )
-            )
-        except NotImplementedError:
+        if not queue_guard(
+            source, partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        ):
             return False
         return True
 
@@ -399,10 +415,9 @@ def vt_identity_compare(
                 descriptor_source = var.obj.get_source_by_walking_mro(tx, name)
                 if resolve_source_value(descriptor_source) is not var.descriptor:
                     return False
-                try:
-                    install_guard(class_attr_source.make_guard(GuardBuilder.ID_MATCH))
-                    install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
-                except NotImplementedError:
+                if not queue_guard(
+                    class_attr_source, GuardBuilder.ID_MATCH
+                ) or not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
                     return False
                 return True
 
@@ -426,22 +441,21 @@ def vt_identity_compare(
             descriptor_source = var.obj.get_source_by_walking_mro(
                 tx, var.descriptor.__name__
             )
-            if tx.output.resolve_source_value(descriptor_source) is not var.descriptor:
+            if resolve_source_value(descriptor_source) is not var.descriptor:
                 return False
             if var.descriptor.__name__ not in var.obj.value.__dict__:
-                try:
-                    install_guard(
-                        TypeDictSource(obj_source).make_guard(
-                            partial(
-                                GuardBuilder.DICT_NOT_CONTAINS,
-                                key=var.descriptor.__name__,
-                            )
-                        )
-                    )
-                except NotImplementedError:
+                if not queue_guard(
+                    TypeDictSource(obj_source),
+                    partial(
+                        GuardBuilder.DICT_NOT_CONTAINS,
+                        key=var.descriptor.__name__,
+                    ),
+                ):
                     return False
         else:
-            obj = tx.output.resolve_source_value(obj_source)
+            obj = resolve_source_value(obj_source)
+            if obj is NO_SUCH_SUBOBJ:
+                return False
             if not install_instance_shadow_guard(
                 obj_source, var.descriptor.__name__, obj, var.descriptor
             ):
@@ -449,11 +463,9 @@ def vt_identity_compare(
             descriptor_source = AttrSource(
                 TypeSource(obj_source), var.descriptor.__name__
             )
-            if tx.output.resolve_source_value(descriptor_source) is not var.descriptor:
+            if resolve_source_value(descriptor_source) is not var.descriptor:
                 return False
-        try:
-            install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
-        except NotImplementedError:
+        if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
             return False
         return True
 
@@ -470,7 +482,9 @@ def vt_identity_compare(
         ):
             return None
 
-        base = tx.output.resolve_source_value(var.source.base)
+        base = resolve_source_value(var.source.base)
+        if base is NO_SUCH_SUBOBJ:
+            return None
         if "__getattribute__" in type(base).__dict__:
             return None
 
@@ -480,12 +494,12 @@ def vt_identity_compare(
         ):
             return None
 
-        resolved = tx.output.resolve_source_value(var.source)
+        resolved = resolve_source_value(var.source)
         if not isinstance(resolved, (types.BuiltinMethodType, types.MethodWrapperType)):
             return None
 
         descriptor_source = AttrSource(TypeSource(var.source.base), var.name)
-        if tx.output.resolve_source_value(descriptor_source) is not descriptor:
+        if resolve_source_value(descriptor_source) is not descriptor:
             return None
         return var.source.base, base, descriptor_source, descriptor
 
@@ -499,7 +513,7 @@ def vt_identity_compare(
             if not isinstance(var.source, AttrSource) or var.source.member != var.name:
                 return None
             base_source = var.source.base
-            base = tx.output.resolve_source_value(base_source)
+            base = resolve_source_value(base_source)
         else:
             try:
                 base = var.obj.as_python_constant()
@@ -522,9 +536,7 @@ def vt_identity_compare(
         _, base_source = info
         if base_source is None:
             return True
-        try:
-            install_guard(base_source.make_guard(GuardBuilder.ID_MATCH))
-        except NotImplementedError:
+        if not queue_guard(base_source, GuardBuilder.ID_MATCH):
             return False
         return True
 
@@ -535,9 +547,7 @@ def vt_identity_compare(
         base_source, base, descriptor_source, descriptor = info
         if not install_instance_shadow_guard(base_source, name, base, descriptor):
             return False
-        try:
-            install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
-        except NotImplementedError:
+        if not queue_guard(descriptor_source, GuardBuilder.ID_MATCH):
             return False
         return True
 
@@ -550,20 +560,18 @@ def vt_identity_compare(
     def install_weakref_type_guard(var: WeakRefVariable) -> bool:
         if var.weakref_source is None:
             return True
-        try:
-            install_guard(var.weakref_source.make_guard(GuardBuilder.TYPE_MATCH))
-        except NotImplementedError:
+        if not queue_guard(var.weakref_source, GuardBuilder.TYPE_MATCH):
             return False
         return True
 
     if left_val is None and isinstance(right, WeakRefVariable):
         if not install_weakref_type_guard(right):
             return None
-        return ConstantVariable.create(False)
+        return guarded_result(False)
     if right_val is None and isinstance(left, WeakRefVariable):
         if not install_weakref_type_guard(left):
             return None
-        return ConstantVariable.create(False)
+        return guarded_result(False)
 
     if (
         left_known
@@ -575,14 +583,14 @@ def vt_identity_compare(
                 left, left_needs_guard
             ) or not install_identity_guard(right, right_needs_guard):
                 return None
-            return ConstantVariable.create(True)
+            return guarded_result(True)
         if not install_identity_guard_for_false_compare(
             left, left_needs_guard, right_val
         ) or not install_identity_guard_for_false_compare(
             right, right_needs_guard, left_val
         ):
             return None
-        return ConstantVariable.create(False)
+        return guarded_result(False)
 
     left_getattr_info = fresh_descriptor_getattr_info(left)
     right_getattr_info = fresh_descriptor_getattr_info(right)
@@ -655,7 +663,7 @@ def vt_identity_compare(
             and not install_known_value_guard(right)
         ):
             return None
-        return ConstantVariable.create(False)
+        return guarded_result(False)
 
     # Mutable containers created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
@@ -668,27 +676,35 @@ def vt_identity_compare(
     ):
         return ConstantVariable.create(False)
 
+    # Different Python types can never be the same object. Check this before
+    # the concrete-value path so type-disjoint comparisons do not acquire
+    # unnecessary object-identity guards. The source types still need guards:
+    # e.g. a class attribute can be rebound to an object of the other type.
+    try:
+        if left.python_type() is not right.python_type():
+            queued_before_type_proof = len(pending_guards)
+            if queue_type_guard(left, left_needs_guard) and queue_type_guard(
+                right, right_needs_guard
+            ):
+                return guarded_result(False)
+            del pending_guards[queued_before_type_proof:]
+    except NotImplementedError:
+        pass
+
     if left_known and right_known:
         if left_val is right_val:
             if not install_identity_guard(
                 left, left_needs_guard
             ) or not install_identity_guard(right, right_needs_guard):
                 return None
-            return ConstantVariable.create(True)
+            return guarded_result(True)
         if not install_identity_guard_for_false_compare(
             left, left_needs_guard, right_val
         ) or not install_identity_guard_for_false_compare(
             right, right_needs_guard, left_val
         ):
             return None
-        return ConstantVariable.create(False)
-
-    # Different Python types can never be the same object.
-    try:
-        if left.python_type() is not right.python_type():
-            return ConstantVariable.create(False)
-    except NotImplementedError:
-        pass
+        return guarded_result(False)
 
     # One side has a concrete backing object, the other doesn't — they can't
     # be the same object.
@@ -701,7 +717,7 @@ def vt_identity_compare(
             right, right_needs_guard, left_val
         ):
             return None
-        return ConstantVariable.create(False)
+        return guarded_result(False)
 
     # Different exception types are never identical.
     if (
@@ -1306,6 +1322,45 @@ def pynumber_int(
     )
 
 
+def pylong_from_base(
+    tx: "InstructionTranslatorBase", x: VariableTracker, obase: VariableTracker
+) -> VariableTracker | None:
+    """Mirrors the explicit-base path of long_new_impl (int(x, base)).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5879-L5922
+
+    The base is resolved via PyNumber_AsSsize_t, which consults __index__, so
+    any __index__-able object is accepted. Returns None (graph break) when the
+    inputs cannot be resolved to Python constants.
+    """
+    # base = PyNumber_AsSsize_t(obase, NULL) -> nb_index.
+    if obase.is_python_constant() and issubclass(obase.python_type(), int):
+        base_vt = obase
+    elif obase.tp_as_number.nb_index is not None:
+        base_vt = obase.nb_index_impl(tx)
+    else:
+        raise_type_error(
+            tx,
+            f"'{obase.python_type_name()}' object cannot be interpreted as an integer",
+        )
+    if not (base_vt.is_python_constant() and issubclass(base_vt.python_type(), int)):
+        return None
+    base = base_vt.as_python_constant()
+    if (base != 0 and base < 2) or base > 36:
+        raise_observed_exception(
+            ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
+        )
+    if not x.is_python_constant():
+        return None
+    xval = x.as_python_constant()
+    if not isinstance(xval, (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
+    try:
+        return ConstantVariable.create(int(xval, base))
+    except ValueError as e:
+        raise_observed_exception(ValueError, tx, args=list(e.args))
+
+
 def pynumber_float(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
@@ -1349,6 +1404,22 @@ def pynumber_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
+
+
+def getindex(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    arg: VariableTracker,
+) -> VariableTracker:
+    """Mirrors typeobject.c::getindex: calls PyNumber_AsSsize_t then tp_as_sequence.sq_length"""
+    obj_type = maybe_get_python_type(obj)
+
+    i = pynumber_as_ssize_t(tx, arg, err=OverflowError)
+    if i.as_python_constant() < 0:
+        if type_implements_sq_length(obj_type):
+            length = obj.sq_length(tx)
+            i = pynumber_add(tx, i, length)
+    return i
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
