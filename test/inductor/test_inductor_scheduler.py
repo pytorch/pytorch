@@ -18,6 +18,7 @@ from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
+    ForeachKernelSchedulerNode,
     NestedReduction,
     Scheduler,
 )
@@ -34,7 +35,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -93,6 +93,18 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
     def _extern_snode_for_op(self, op_overload, python_kernel_name):
         node = object.__new__(ir.ExternKernel)
         node.op_overload = op_overload
@@ -128,6 +140,64 @@ class TestScheduler(TestCase):
                     torch.ops.aten.relu.out, "extern_kernels.relu"
                 )
             )
+        )
+
+    def test_fuse_two_nodes_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        device = torch.device("cuda", 0)
+        node1 = self._mock_base_snode("node1", device)
+        node2 = self._mock_base_snode("node2", device)
+        node3 = self._mock_base_snode("node3", device)
+        node3.get_nodes.return_value = [node1, node2]
+        backend = Mock()
+        backend.fuse.return_value = node3
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_stream = {node1: 0, node2: 0}
+        scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0)}
+        scheduler.name_to_fused_node = {}
+        fused_nodes = OrderedSet([node1, node2])
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes), node3
+        )
+
+        self.assertEqual(scheduler.node_to_mempool[node3], (7, 0))
+        self.assertEqual(scheduler.node_to_stream[node3], 0)
+        self.assertIn(node3, fused_nodes)
+        self.assertNotIn(node1, fused_nodes)
+        self.assertNotIn(node2, fused_nodes)
+
+    @inductor_config.patch(combo_kernel_max_num_nodes=16)
+    def test_combo_kernel_grouping_respects_mempool(self):
+        scheduler = Mock()
+        device = torch.device("cuda", 0)
+        pool_node1 = self._mock_base_snode("pool_node1", device)
+        pool_node2 = self._mock_base_snode("pool_node2", device)
+        default_node = self._mock_base_snode("default_node", device)
+        other_pool_node = self._mock_base_snode("other_pool_node", device)
+        scheduler._topological_sort_nodes.return_value = [
+            [pool_node1, default_node, pool_node2, other_pool_node]
+        ]
+        scheduler.node_to_stream = {
+            pool_node1: 0,
+            pool_node2: 0,
+            default_node: 0,
+            other_pool_node: 0,
+        }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
+        scheduler.node_to_mempool = {
+            pool_node1: (7, 0),
+            pool_node2: (7, 0),
+            default_node: None,
+            other_pool_node: (8, 0),
+        }
+
+        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
+            scheduler
+        )
+
+        self.assertEqual(
+            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
@@ -532,10 +602,6 @@ class TestScheduler(TestCase):
         torch._logging.set_logs()
 
     @xfailIfNoAcceleratorTriton
-    @skipIfXpu(
-        msg="InvalidModule: Invalid SPIR-V module, "
-        "https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -576,10 +642,12 @@ class TestScheduler(TestCase):
             self.assertEqual(
                 reference_flops,
                 counters["inductor"]["flop_count"],
-                msg=f"op = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
             )
             if op != torch.add:
-                self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
@@ -656,6 +724,88 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    def test_prologue_fusion_uses_template_aliasing_hook(self):
+        def make_prologue_and_template(hook_blocks: bool):
+            prologue_node = Mock()
+            template_node = Mock()
+            template = Mock()
+
+            prologue_node.get_name.return_value = "prologue"
+            template_node.get_name.return_value = "template"
+            prologue_node.is_template.return_value = False
+            template_node.is_template.return_value = True
+            prologue_node.is_reduction.return_value = False
+            prologue_node.ancestors = OrderedSet()
+            template_node.ancestors = OrderedSet(["prologue"])
+            prologue_node.get_operation_names.return_value = OrderedSet(["prologue"])
+            template_node.get_operation_names.return_value = OrderedSet(["template"])
+            prologue_node.get_buffer_names.return_value = OrderedSet(["x"])
+            template_node.get_buffer_names.return_value = OrderedSet(["out"])
+            prologue_node.get_device.return_value = torch.device("cpu")
+            template_node.get_device.return_value = torch.device("cpu")
+            prologue_node.has_aliasing_or_mutation.return_value = False
+            template_node.has_aliasing_or_mutation.return_value = True
+
+            input_node = Mock()
+            input_node.get_name.return_value = "x"
+            template.inputs = [input_node]
+            template.allow_prologue_fusion = True
+            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
+            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+                hook_blocks
+            )
+            template_node.get_template_node.return_value = template
+            template_node.get_template_node_or_throw.return_value = template
+
+            user = Mock()
+            user.node = template_node
+            output = Mock()
+            output.users = [user]
+            prologue_node.outputs = [output]
+            prologue_node.get_nodes.return_value = [prologue_node]
+
+            return prologue_node, template_node, template
+
+        def can_fuse_prologue(hook_blocks: bool) -> bool:
+            scheduler = Scheduler.__new__(Scheduler)
+            scheduler.mutation_renames = {}
+            scheduler._has_multi_stream_nodes = Mock(return_value=False)
+            scheduler._mempool_nodes = False
+            scheduler.node_to_mempool = {}
+            scheduler._nested_index_equivalent_dep_names = Mock(
+                return_value=OrderedSet()
+            )
+            scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
+            scheduler.check_prologue_fusion_heuristics_fusable = Mock(return_value=True)
+            scheduler.can_fuse_vertical = Mock(return_value=True)
+            backend = Mock()
+            backend.can_fuse_vertical.return_value = True
+            backend.can_fuse_horizontal.return_value = True
+            scheduler.get_backend = Mock(return_value=backend)
+
+            choices = Mock()
+            choices.can_fuse.return_value = True
+            choices.can_fuse_vertical.return_value = True
+            choices.can_fuse_horizontal.return_value = True
+
+            graph = Mock()
+            graph.no_fuse_buffer_names = OrderedSet()
+
+            prologue_node, template_node, template = make_prologue_and_template(
+                hook_blocks
+            )
+            with V.set_graph_handler(graph), V.set_choices_handler(choices):
+                result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
+
+            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+                template_node
+            )
+            template_node.has_aliasing_or_mutation.assert_not_called()
+            return result
+
+        self.assertTrue(can_fuse_prologue(hook_blocks=False))
+        self.assertFalse(can_fuse_prologue(hook_blocks=True))
+
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
@@ -692,7 +842,7 @@ class TestScheduler(TestCase):
         # Verify results match (no fusion bug)
         self.assertTrue(
             torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
-            msg=f"index_add_ fusion bug detected: "
+            msg=lambda msg: f"{msg}\nindex_add_ fusion bug detected: "
             f"eager={eager_result.mean().item():.6f}, "
             f"compiled={compiled_result.mean().item():.6f}",
         )
@@ -725,8 +875,117 @@ class TestScheduler(TestCase):
         # This test will FAIL without the fusion prevention fix
         self.assertTrue(
             torch.allclose(expected, result),
-            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+            msg=lambda msg: f"{msg}\nFusion bug detected! Expected {expected}, got {result}",
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_does_not_realize_before_reduction(self):
+        def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
+            input1_selected = torch.index_select(input1, 2, icrd1)
+            input2_selected = torch.index_select(input2, 2, icrd2)
+            weight_selected = torch.index_select(weight, 3, wcrd)
+
+            input1_expanded = input1_selected.view(B, U, 1, 1, -1)
+            input2_expanded = input2_selected.view(B, 1, V, 1, -1)
+            weight_expanded = weight_selected.view(1, U, V, W, -1)
+            meta_expanded = meta.view(1, 1, 1, 1, -1)
+
+            product = (
+                meta_expanded * input1_expanded * input2_expanded * weight_expanded
+            )
+            product = torch.sum(product, dim=(1, 2))
+            output.index_add_(2, ocrd, product)
+            return output
+
+        P = 20
+        M = 10
+        B = 10
+        L = 23
+        U = 4
+        V = 4
+        W = 4
+        device = "cuda"
+
+        torch.manual_seed(0)
+        input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
+        input2 = torch.rand((B, V, L), dtype=torch.float32, device=device)
+        weight = torch.rand((U, V, W, M), dtype=torch.float32, device=device)
+        output = torch.zeros((B, W, L), dtype=torch.float32, device=device)
+        meta = torch.rand((P,), dtype=torch.float32, device=device)
+        icrd1 = torch.randint(L, (P,), device=device)
+        icrd2 = torch.randint(L, (P,), device=device)
+        wcrd = torch.randint(M, (P,), device=device)
+        ocrd = torch.arange(P, device=device)
+
+        expected = fn(
+            icrd1,
+            icrd2,
+            wcrd,
+            ocrd,
+            meta,
+            input1,
+            input2,
+            weight,
+            output.clone(),
+        )
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                icrd1,
+                icrd2,
+                wcrd,
+                ocrd,
+                meta,
+                input1,
+                input2,
+                weight,
+                output.clone(),
+            )
+
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_realizes_in_deterministic_mode(self):
+        def fn(a, b, c, d, e):
+            x = a * b * c * d * e
+            y = x.view(8, 8, 1).expand(8, 8, 16)
+            return y.sum(dim=1)
+
+        def check_realizes():
+            torch._dynamo.reset()
+            metrics.reset()
+            with fresh_inductor_cache():
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+
+            self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+            self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+            self.assertEqual(metrics.generated_kernel_count, 2)
+
+        device = "cuda"
+        torch.manual_seed(0)
+        args = [
+            torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)
+        ]
+        expected = fn(*args)
+
+        prev_deterministic = torch.are_deterministic_algorithms_enabled()
+        prev_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        try:
+            check_realizes()
+        finally:
+            torch.use_deterministic_algorithms(
+                prev_deterministic, warn_only=prev_warn_only
+            )
+
+        with inductor_config.patch(deterministic=True):
+            check_realizes()
 
 
 class TestScoreFusionMemory(TestCase):

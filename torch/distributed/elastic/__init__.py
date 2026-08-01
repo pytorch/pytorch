@@ -28,7 +28,7 @@ provides and what failover mechanism it expects from user workers.
 
 Torchelastic currently supports DDP style applications.  That means that
 TE expects *ALL* workers finish approximately at the same time. In practice,
-it is nearly to impossible to guarantee that all workers in arbitrary
+it is nearly impossible to guarantee that all workers in arbitrary
 DDP application finish at the time, so TE provides a finalization barrier
 that waits for TIMEOUT(5 minutes) for worker finalization.
 

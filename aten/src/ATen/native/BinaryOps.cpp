@@ -12,6 +12,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/TensorWrapper.h>
+#include <c10/core/TensorOptions.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1008,47 +1009,30 @@ Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
 static std::optional<DeviceType> zerotensor_device_type_from_backend(
     c10::BackendComponent backend) {
   switch (backend) {
-    case c10::BackendComponent::CPUBit:
-      return kCPU;
-    case c10::BackendComponent::CUDABit:
-      return kCUDA;
-    case c10::BackendComponent::HIPBit:
-      return kHIP;
-    case c10::BackendComponent::XLABit:
-      return kXLA;
-    case c10::BackendComponent::MPSBit:
-      return kMPS;
-    case c10::BackendComponent::IPUBit:
-      return kIPU;
-    case c10::BackendComponent::XPUBit:
-      return kXPU;
-    case c10::BackendComponent::HPUBit:
-      return kHPU;
-    case c10::BackendComponent::VEBit:
-      return kVE;
-    case c10::BackendComponent::LazyBit:
-      return kLazy;
-    case c10::BackendComponent::MTIABit:
-      return kMTIA;
-    case c10::BackendComponent::MAIABit:
-      return kMAIA;
-    case c10::BackendComponent::PrivateUse1Bit:
-      return kPrivateUse1;
-    case c10::BackendComponent::MetaBit:
-      return kMeta;
-    default:
+    case c10::BackendComponent::InvalidBit:
+    case c10::BackendComponent::PrivateUse2Bit:
+    case c10::BackendComponent::PrivateUse3Bit:
       return std::nullopt;
+    default:
+      return c10::dispatchKeyToDeviceType(
+          c10::toRuntimePerBackendFunctionalityKey(
+              c10::DispatchKey::Dense, backend));
   }
 }
 
 static Device zerotensor_logical_device(const Tensor& tensor) {
+  auto device = tensor.device();
+  // Functorch wrappers retain the logical FakeTensor device, including its
+  // index, while the wrapped FakeTensor reports meta during a meta kernel.
+  if (device.type() != kMeta) {
+    return device;
+  }
   if (const auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor)) {
     return zerotensor_logical_device(wrapper->value());
   }
   if (const auto* batched = at::functorch::maybeGetBatchedImpl(tensor)) {
     return zerotensor_logical_device(batched->value());
   }
-  auto device = tensor.device();
   auto backend_device_type =
       zerotensor_device_type_from_backend(tensor.key_set().highestBackendKey());
   // Python FakeTensor reports meta while running meta kernels, but its backend
@@ -1635,8 +1619,8 @@ static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& othe
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .build();
 
   ldexp_stub(iter.device_type(), iter);
@@ -1648,7 +1632,9 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
               "ldexp can't be cast to the desired output type ", result.scalar_type());
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type())) {
+      isFloatingType(self.scalar_type()) &&
+      result.scalar_type() == self.scalar_type() &&
+      ldexp_stub.is_device_supported(self.device().type())) {
     return _ldexp_int_exponent(self, other, result);
   }
 
@@ -1657,7 +1643,8 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type())) {
+      isFloatingType(self.scalar_type()) &&
+      ldexp_stub.is_device_supported(self.device().type())) {
     Tensor result = at::empty_like(self);
     return _ldexp_int_exponent(self, other, result);
   }

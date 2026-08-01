@@ -136,11 +136,11 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
         )
     _deprecated(
         "reduce_scatter",
-        "torch.distributed._functional_collectives.reduce_scatter_tensor",
+        "torch.distributed._functional_collectives.reduce_scatter_single",
     )
     return _Reduce_Scatter.apply(op, group, output, *input_list)
 
@@ -160,10 +160,10 @@ def all_gather(tensor, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+            suggestion="torch.distributed._functional_collectives.all_gather_single",
         )
     _deprecated(
-        "all_gather", "torch.distributed._functional_collectives.all_gather_tensor"
+        "all_gather", "torch.distributed._functional_collectives.all_gather_single"
     )
     return _AllGather.apply(group, tensor)
 
@@ -297,7 +297,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank(group=group)
+        ctx.global_rank = dist.get_rank()
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -308,7 +308,7 @@ class _Broadcast(Function):
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         gx = _Reduce.apply(ctx.src, ReduceOp.SUM, ctx.group, grad_output)
-        if ctx.src != ctx.rank:
+        if ctx.src != ctx.global_rank:
             gx.zero_()
         return (None, None, gx)
 
