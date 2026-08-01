@@ -74,7 +74,13 @@ class _EventNodeRecorder:
         self._handle: Any = None
 
     def arm(self) -> None:
-        """Register the graph-instantiate hook once (idempotent)."""
+        """Register the graph-instantiate hook once (idempotent).
+
+        Must be called BEFORE the graphs of interest are captured: the hook fires at
+        instantiate, so a graph already instantiated when this runs is never recorded and
+        arming does not backfill it. Records from such a graph's launches then resolve to
+        ``None`` (see :func:`resolve_window`, which refuses to guess) rather than failing.
+        """
         if self._handle is not None:
             return
         from torch.cuda.graphs import register_graph_instantiate_hook
