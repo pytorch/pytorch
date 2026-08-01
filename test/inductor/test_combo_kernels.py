@@ -567,6 +567,27 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
+    def test_uniform_dispatch_mixed_layout_is_correct(self):
+        # Correctness guard: sub-kernels that are the same op on the same logical
+        # shape but DIFFERENT memory layout (contiguous vs channels_last) must not
+        # be fused into one uniform body that indexes them identically. The op-trace
+        # equality check captures the (differing) index expressions, so uniform
+        # dispatch should bail to sequential; either way the result must match eager.
+        def fn(a, b):
+            return a + 1, b + 1
+
+        a = torch.rand(2, 4, 8, 8, device=GPU_TYPE)
+        b = torch.rand(2, 4, 8, 8, device=GPU_TYPE).to(
+            memory_format=torch.channels_last
+        )
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(a, b)
+            out_compiled = torch.compile(fn)(a, b)
+
+        self.assertEqual(out_eager, out_compiled)
+
+    @requires_gpu_and_triton
     def test_mutated_args(self):
         def test_mutated(a, b, c, d):
             a.add_(1)

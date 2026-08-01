@@ -1873,6 +1873,18 @@ class ComboKernel(Kernel):
             code.writeline(
                 "kernel_idx = pid // num_blocks_per_kernel"
             )
+            # Fix (b): clamp kernel_idx into range. The launched grid can exceed
+            # num_blocks_per_kernel * num_kernels (e.g. when combo_grid_meta's
+            # min_blocks inflates it), which would otherwise make tail blocks
+            # index past the _slot_*_ptrs pointer tables -> illegal memory access.
+            # Clamping maps any excess block onto the last valid sub-kernel; since
+            # it recomputes an already-computed output element with the same
+            # inputs, the store is idempotent. In the common case (grid exact)
+            # kernel_idx is always < num_kernels, so this is a no-op.
+            num_uniform_kernels = len(self.sub_kernels)
+            code.writeline(
+                f"kernel_idx = tl.minimum(kernel_idx, {num_uniform_kernels - 1})"
+            )
             code.writeline(
                 "pid_offset = pid % num_blocks_per_kernel"
             )
