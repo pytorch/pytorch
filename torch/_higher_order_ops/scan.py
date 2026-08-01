@@ -4,6 +4,7 @@ import enum
 import functools
 import itertools
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -45,7 +46,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-
 
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
@@ -525,7 +525,11 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
 # associative-scan based parallel backward (ScanAutogradImpl._call_backward_parallel)
 # instead, and/or to override the additional-input gradient chunking constants
 # (see their definitions above).
-_scan_use_parallel_backward = False
+#
+# TORCH_SCAN_PARALLEL_BACKWARD=1 flips this default at import time, so the
+# existing scan test suite can be re-run against the parallel backward
+# (e.g. in a separate CI job) without editing the test files themselves.
+_scan_use_parallel_backward = os.environ.get("TORCH_SCAN_PARALLEL_BACKWARD") == "1"
 
 
 @contextlib.contextmanager
@@ -546,10 +550,7 @@ def scan_backward_mode(
     ``_ADDI_GRAD_CHUNK_BUDGET_ELEMS``/``_ADDI_GRAD_MAX_CHUNKS``); no effect in
     sequential mode. Any argument left as ``None`` keeps its current value.
     """
-    global \
-        _scan_use_parallel_backward, \
-        _ADDI_GRAD_CHUNK_BUDGET_ELEMS, \
-        _ADDI_GRAD_MAX_CHUNKS
+    global _scan_use_parallel_backward, _ADDI_GRAD_CHUNK_BUDGET_ELEMS, _ADDI_GRAD_MAX_CHUNKS
     prev = (
         _scan_use_parallel_backward,
         _ADDI_GRAD_CHUNK_BUDGET_ELEMS,
