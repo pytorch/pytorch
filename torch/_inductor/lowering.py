@@ -6277,9 +6277,6 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
-    if x.get_dtype() == torch.int64:
-        # not supported in eager
-        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     if not (isinstance(x, TensorBox)):
         raise AssertionError("expected: isinstance(x, TensorBox)")
     if len(output_size) != 2:
@@ -6293,13 +6290,18 @@ def _adaptive_avg_pool2d(x, output_size):
 
     h_out, w_out = output_size
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
+
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
+
     # no-op if the same input and output
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
@@ -9402,6 +9404,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state that inductor cannot
+    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
+    # must outlive the op and never be reused for another buffer. We pin the
+    # inputs of every ORDERED op intentionally rather than only those that can
+    # actually retain them: some (aten::_print, aten::_linalg_check_errors) don't,
+    # so this slightly over-pins. There is no reliable "retains inputs" signal to
+    # scope this to: retention happens inside the op's implementation, so it is
+    # not exposed by the schema (even queue_push, which stashes its input, reports
+    # alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect (effects can be
+    # registered manually on any op, so it is neither necessary nor precise).
+    # Under-pinning would silently miscompile by recycling a buffer the op still
+    # holds, so the bounded over-pinning is the intended tradeoff for correctness.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9431,7 +9452,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
