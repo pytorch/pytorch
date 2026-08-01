@@ -1849,6 +1849,11 @@ class MockModule(torch.nn.Module):
 
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
+    def assertStateDictEqual(self, left, right):
+        self.assertEqual(list(left.keys()), list(right.keys()))
+        for key in left:
+            self.assertEqual(left[key], right[key])
+
     def test_nn_module(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1858,6 +1863,914 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(10, 10)
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_state_dict(self):
+        mod = MockModule()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        mod_state_dict = mod.state_dict()
+        opt_mod_state_dict = opt_mod.state_dict()
+
+        self.assertStateDictEqual(opt_mod_state_dict, mod_state_dict)
+        self.assertFalse(
+            any(key.startswith("_orig_mod.") for key in opt_mod_state_dict)
+        )
+        self.assertFalse(
+            any(
+                key == "_orig_mod" or key.startswith("_orig_mod.")
+                for key in opt_mod_state_dict._metadata
+            )
+        )
+
+        destination = collections.OrderedDict()
+        with self.assertWarnsRegex(FutureWarning, "Positional args"):
+            result = opt_mod.state_dict(destination)
+        self.assertIs(result, destination)
+        self.assertStateDictEqual(destination, mod_state_dict)
+
+    def test_state_dict_with_wrapper_state(self):
+        def make_compiled_module(value):
+            opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+            opt_mod.register_parameter(
+                "wrapper_parameter", torch.nn.Parameter(torch.full((), value))
+            )
+            opt_mod.register_buffer("wrapper_buffer", torch.full((), value))
+            opt_mod.add_module("wrapper_module", torch.nn.Linear(1, 1))
+            # Exercise the collision that the legacy `_orig_mod.` prefix disambiguates.
+            opt_mod._parameters["weight"] = torch.nn.Parameter(torch.full((), value))
+            return opt_mod
+
+        opt_mod = make_compiled_module(7.0)
+        state_dict = opt_mod.state_dict()
+        self.assertEqual(
+            list(state_dict),
+            [
+                "wrapper_parameter",
+                "weight",
+                "wrapper_buffer",
+                "_orig_mod.weight",
+                "_orig_mod.bias",
+                "wrapper_module.weight",
+                "wrapper_module.bias",
+            ],
+        )
+
+        loaded = make_compiled_module(0.0)
+        incompatible_keys = loaded.load_state_dict(state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(loaded.state_dict(), state_dict)
+
+        opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        opt_mod.register_parameter("none_parameter", None)
+        opt_mod.register_buffer("cache", torch.ones(()), persistent=False)
+        self.assertEqual(list(opt_mod.state_dict()), ["weight", "bias"])
+
+        opt_mod = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        save_pre_hook_calls = []
+
+        def save_pre_hook(module, prefix, keep_vars):
+            save_pre_hook_calls.append(module)
+            module.register_parameter("late", torch.nn.Parameter(torch.full((), 4.0)))
+
+        opt_mod.register_state_dict_pre_hook(save_pre_hook)
+        state_dict = opt_mod.state_dict()
+        self.assertEqual(save_pre_hook_calls, [opt_mod])
+        self.assertEqual(
+            list(state_dict), ["late", "_orig_mod.weight", "_orig_mod.bias"]
+        )
+
+        loaded = torch.compile(torch.nn.Linear(1, 1), backend="eager")
+        load_pre_hook_calls = []
+
+        def load_pre_hook(
+            module,
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        ):
+            load_pre_hook_calls.append(module)
+            module.register_parameter("late", torch.nn.Parameter(torch.zeros(())))
+
+        loaded.register_load_state_dict_pre_hook(load_pre_hook)
+        incompatible_keys = loaded.load_state_dict(state_dict)
+        self.assertEqual(load_pre_hook_calls, [loaded])
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(loaded._parameters["late"], state_dict["late"])
+
+    def test_load_state_dict(self):
+        mod = MockModule()
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        mod = MockModule()
+        incompatible_keys = mod.load_state_dict(opt_mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(mod.state_dict(), opt_mod.state_dict())
+
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value) for key, value in mod.state_dict().items()
+        )
+        old_style_state_dict._metadata = collections.OrderedDict()
+        old_style_state_dict._metadata[""] = {"version": 99}
+        for key, value in mod.state_dict()._metadata.items():
+            old_style_state_dict._metadata[
+                "_orig_mod" if key == "" else f"_orig_mod.{key}"
+            ] = value
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+    def test_load_state_dict_post_hook_runs_before_size_mismatch_error(self):
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        state_dict = MockModule().state_dict()
+        state_dict["linear.weight"] = torch.randn(1, 1)
+        hook_calls = []
+
+        def post_hook(module, incompatible_keys):
+            hook_calls.append(
+                (
+                    module,
+                    list(incompatible_keys.missing_keys),
+                    list(incompatible_keys.unexpected_keys),
+                )
+            )
+
+        opt_mod.register_load_state_dict_post_hook(post_hook)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+            opt_mod.load_state_dict(state_dict)
+
+        self.assertEqual(hook_calls, [(opt_mod, [], [])])
+
+    def test_load_state_dict_assign_does_not_mutate_metadata(self):
+        state_dict = MockModule().state_dict()
+        metadata_before = deepcopy(state_dict._metadata)
+
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        opt_mod.load_state_dict(state_dict, assign=True)
+
+        self.assertEqual(state_dict._metadata, metadata_before)
+
+    def test_load_state_dict_does_not_call_wrapped_state_dict_hooks(self):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        hook_calls = []
+
+        def state_dict_hook(module, state_dict, prefix, local_metadata):
+            hook_calls.append((module, prefix))
+
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        opt_mod._orig_mod.register_state_dict_post_hook(state_dict_hook)
+        opt_mod.load_state_dict(MockModule().state_dict())
+        self.assertEqual(hook_calls, [])
+
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        opt_mod.mod._orig_mod.register_state_dict_post_hook(state_dict_hook)
+        opt_mod.load_state_dict(NestedModule(MockModule()).state_dict())
+        self.assertEqual(hook_calls, [])
+
+    def test_load_state_dict_custom_save_to_state_dict_key(self):
+        class CustomState(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.loaded = None
+
+            def forward(self, x):
+                return x
+
+            def _save_to_state_dict(self, destination, prefix, keep_vars) -> None:
+                super()._save_to_state_dict(destination, prefix, keep_vars)
+                destination[prefix + "custom"] = torch.ones(())
+
+            def _load_from_state_dict(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ) -> None:
+                key = prefix + "custom"
+                if key in state_dict:
+                    self.loaded = state_dict[key]
+                elif strict:
+                    missing_keys.append(key)
+
+        public_state_dict = collections.OrderedDict([("custom", torch.full((), 2))])
+        opt_mod = torch.compile(CustomState(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(public_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(opt_mod._orig_mod.loaded, public_state_dict["custom"])
+
+        old_style_state_dict = collections.OrderedDict(
+            [("_orig_mod.custom", torch.full((), 3))]
+        )
+        opt_mod = torch.compile(CustomState(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(
+            opt_mod._orig_mod.loaded, old_style_state_dict["_orig_mod.custom"]
+        )
+
+    def test_load_state_dict_legacy_state_dict_hook_key(self):
+        class CustomState(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.loaded = None
+
+            def forward(self, x):
+                return x
+
+        for replace_state_dict in (False, True):
+            with self.subTest(replace_state_dict=replace_state_dict):
+                state_dict_hook_calls = []
+
+                def state_dict_hook(module, state_dict, prefix, local_metadata):
+                    state_dict_hook_calls.append(prefix)
+                    if replace_state_dict:
+                        return collections.OrderedDict(
+                            [(prefix + "custom", torch.ones(()))]
+                        )
+                    state_dict[prefix + "custom"] = torch.ones(())
+
+                def load_state_dict_hook(
+                    module,
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                ):
+                    module.loaded = state_dict.pop(prefix + "custom", None)
+
+                def make_compiled_module():
+                    module = CustomState()
+                    if replace_state_dict:
+                        module._register_state_dict_hook(state_dict_hook)
+                    else:
+                        module.register_state_dict_post_hook(state_dict_hook)
+                    module.register_load_state_dict_pre_hook(load_state_dict_hook)
+                    return torch.compile(module, backend="eager")
+
+                public_value = torch.full((), 2)
+                opt_mod = make_compiled_module()
+                incompatible_keys = opt_mod.load_state_dict(
+                    collections.OrderedDict([("custom", public_value)])
+                )
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(opt_mod._orig_mod.loaded, public_value)
+                self.assertEqual(state_dict_hook_calls, [])
+
+                legacy_value = torch.full((), 3)
+                opt_mod = make_compiled_module()
+                incompatible_keys = opt_mod.load_state_dict(
+                    collections.OrderedDict([("_orig_mod.custom", legacy_value)])
+                )
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(opt_mod._orig_mod.loaded, legacy_value)
+                self.assertEqual(state_dict_hook_calls, [""])
+
+    def test_load_state_dict_legacy_extra_keys(self):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = MockModule()
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value) for key, value in mod.state_dict().items()
+        )
+        old_style_state_dict["extra"] = torch.ones(())
+
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["extra"])
+
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        with self.assertRaises(RuntimeError) as cm:
+            opt_mod.load_state_dict(old_style_state_dict)
+        self.assertIn('"extra"', str(cm.exception))
+        self.assertNotIn("_orig_mod.extra", str(cm.exception))
+
+        mod = NestedModule(MockModule())
+        old_style_state_dict = collections.OrderedDict(
+            (
+                f"mod._orig_mod.{key[len('mod.') :]}",
+                value,
+            )
+            for key, value in mod.state_dict().items()
+        )
+        old_style_state_dict["mod.extra"] = torch.ones(())
+
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["mod.extra"])
+
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        with self.assertRaises(RuntimeError) as cm:
+            opt_mod.load_state_dict(old_style_state_dict)
+        self.assertIn('"mod.extra"', str(cm.exception))
+        self.assertNotIn("mod._orig_mod.extra", str(cm.exception))
+
+    def test_original_module_load_state_dict_post_hook_public_names(self):
+        mod = MockModule()
+        hook_calls = []
+
+        def post_hook(module, incompatible_keys):
+            hook_calls.append(
+                (
+                    module,
+                    list(incompatible_keys.missing_keys),
+                    list(incompatible_keys.unexpected_keys),
+                )
+            )
+
+        mod.register_load_state_dict_post_hook(post_hook)
+        opt_mod = torch.compile(mod, backend="eager")
+        state_dict = MockModule().state_dict()
+        del state_dict["linear.bias"]
+        state_dict["extra"] = torch.ones(())
+
+        incompatible_keys = opt_mod.load_state_dict(state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, ["linear.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["extra"])
+        self.assertEqual(hook_calls, [(mod, ["linear.bias"], ["extra"])])
+
+        mod = MockModule()
+        hook_calls = []
+        mod.register_load_state_dict_post_hook(post_hook)
+        opt_mod = torch.compile(mod, backend="eager")
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value)
+            for key, value in MockModule().state_dict().items()
+            if key != "linear.bias"
+        )
+        old_style_state_dict["_orig_mod.extra"] = torch.ones(())
+
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, ["linear.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["extra"])
+        self.assertEqual(hook_calls, [(mod, ["linear.bias"], ["extra"])])
+
+        mod = MockModule()
+        hook_calls = []
+        mod.linear.register_load_state_dict_post_hook(post_hook)
+        opt_mod = torch.compile(mod, backend="eager")
+        state_dict = MockModule().state_dict()
+        del state_dict["linear.bias"]
+        state_dict["linear.extra"] = torch.ones(())
+
+        incompatible_keys = opt_mod.load_state_dict(state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, ["linear.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["linear.extra"])
+        self.assertEqual(hook_calls, [(mod.linear, ["linear.bias"], ["linear.extra"])])
+
+        mod = MockModule()
+        hook_calls = []
+        mod.linear.register_load_state_dict_post_hook(post_hook)
+        opt_mod = torch.compile(mod, backend="eager")
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value)
+            for key, value in MockModule().state_dict().items()
+            if key != "linear.bias"
+        )
+        old_style_state_dict["_orig_mod.linear.extra"] = torch.ones(())
+
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, ["linear.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["linear.extra"])
+        self.assertEqual(hook_calls, [(mod.linear, ["linear.bias"], ["linear.extra"])])
+
+    def test_descendant_load_state_dict_post_hook_public_names(self):
+        class Pair(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.nn.Linear(1, 1)
+                self.b = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        class Parent(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        for compile_parent in (False, True):
+            with self.subTest(compile_parent=compile_parent):
+                mod = Pair()
+                hook_calls = []
+
+                def post_hook(module, incompatible_keys):
+                    hook_calls.append(
+                        (
+                            module,
+                            list(incompatible_keys.missing_keys),
+                            list(incompatible_keys.unexpected_keys),
+                        )
+                    )
+                    incompatible_keys.missing_keys.clear()
+                    incompatible_keys.unexpected_keys.clear()
+
+                mod.b.register_load_state_dict_post_hook(post_hook)
+                opt_mod = torch.compile(mod, backend="eager")
+                if compile_parent:
+                    opt_mod = torch.compile(Parent(opt_mod), backend="eager")
+                    state_dict = Parent(Pair()).state_dict()
+                    prefix = "mod."
+                else:
+                    state_dict = Pair().state_dict()
+                    prefix = ""
+
+                del state_dict[prefix + "a.bias"]
+                del state_dict[prefix + "b.bias"]
+                state_dict[prefix + "extra"] = torch.ones(())
+
+                incompatible_keys = opt_mod.load_state_dict(state_dict)
+                self.assertEqual(incompatible_keys.missing_keys, [])
+                self.assertEqual(incompatible_keys.unexpected_keys, [])
+                self.assertEqual(
+                    hook_calls,
+                    [
+                        (
+                            mod.b,
+                            [prefix + "a.bias", prefix + "b.bias"],
+                            [prefix + "extra"],
+                        )
+                    ],
+                )
+
+    def test_nested_state_dict(self):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(MockModule())
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+
+        self.assertEqual(
+            list(opt_mod.state_dict().keys()), list(mod.state_dict().keys())
+        )
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+    def test_nested_load_state_dict_metadata(self):
+        class VersionedModule(torch.nn.Module):
+            _version = 3
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(1))
+                self.loaded_version = None
+
+            def forward(self, x):
+                return x * self.param
+
+            def _load_from_state_dict(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ) -> None:
+                self.loaded_version = local_metadata.get("version")
+                super()._load_from_state_dict(
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                )
+
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(VersionedModule())
+        opt_mod = NestedModule(torch.compile(VersionedModule(), backend="eager"))
+
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(opt_mod.mod._orig_mod.loaded_version, 3)
+
+    def test_nested_load_state_dict_metadata_for_descendant(self):
+        class VersionedModule(torch.nn.Module):
+            _version = 3
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(1))
+                self.loaded_version = None
+
+            def forward(self, x):
+                return x * self.param
+
+            def _load_from_state_dict(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ) -> None:
+                self.loaded_version = local_metadata.get("version")
+                super()._load_from_state_dict(
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                )
+
+        class WrappedModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = VersionedModule()
+
+            def forward(self, x):
+                return self.child(x)
+
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(WrappedModule())
+        opt_mod = NestedModule(torch.compile(WrappedModule(), backend="eager"))
+
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(opt_mod.mod._orig_mod.child.loaded_version, 3)
+
+    def test_nested_load_state_dict_metadata_orig_mod_descendant(self):
+        class VersionedModule(torch.nn.Module):
+            _version = 3
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(1))
+                self.loaded_version = None
+
+            def forward(self, x):
+                return x * self.param
+
+            def _load_from_state_dict(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ) -> None:
+                self.loaded_version = local_metadata.get("version")
+                super()._load_from_state_dict(
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                )
+
+        class WrappedModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.add_module("_orig_mod", VersionedModule())
+
+            def forward(self, x):
+                return self._orig_mod(x)
+
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(WrappedModule())
+        opt_mod = NestedModule(torch.compile(WrappedModule(), backend="eager"))
+        state_dict = mod.state_dict()
+        metadata_before = deepcopy(state_dict._metadata)
+
+        incompatible_keys = opt_mod.load_state_dict(state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(opt_mod.mod._orig_mod._orig_mod.loaded_version, 3)
+        self.assertEqual(state_dict._metadata, metadata_before)
+
+    def test_state_dict_with_orig_mod_submodule_name(self):
+        class HasOrigModSubmodule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.add_module("_orig_mod", torch.nn.Linear(10, 10))
+
+            def forward(self, x):
+                return self._orig_mod(x)
+
+        class HasParameterAndOrigModSubmodule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(10, 10))
+                self.add_module("_orig_mod", torch.nn.Linear(10, 10))
+
+            def forward(self, x):
+                return self._orig_mod(x) + self.weight
+
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = HasOrigModSubmodule()
+        opt_mod = torch.compile(HasOrigModSubmodule(), backend="eager")
+        self.assertEqual(
+            list(mod.state_dict().keys()), list(opt_mod.state_dict().keys())
+        )
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value) for key, value in mod.state_dict().items()
+        )
+        opt_mod = torch.compile(HasOrigModSubmodule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+        collision_state_dict = mod.state_dict()
+        collision_state_dict.update(old_style_state_dict)
+        opt_mod = torch.compile(HasOrigModSubmodule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(collision_state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(
+            incompatible_keys.unexpected_keys,
+            ["_orig_mod._orig_mod.weight", "_orig_mod._orig_mod.bias"],
+        )
+
+        mod = HasParameterAndOrigModSubmodule()
+        old_style_state_dict = collections.OrderedDict(
+            (f"_orig_mod.{key}", value) for key, value in mod.state_dict().items()
+        )
+        opt_mod = torch.compile(HasParameterAndOrigModSubmodule(), backend="eager")
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+        opt_mod = torch.compile(HasParameterAndOrigModSubmodule(), backend="eager")
+        root_weight_before = opt_mod._orig_mod.weight.detach().clone()
+        partial_collision_state_dict = collections.OrderedDict(
+            [
+                (
+                    "_orig_mod.weight",
+                    torch.full_like(opt_mod._orig_mod._orig_mod.weight, 7),
+                )
+            ]
+        )
+        incompatible_keys = opt_mod.load_state_dict(
+            partial_collision_state_dict, strict=False
+        )
+        self.assertEqual(incompatible_keys.missing_keys, ["weight", "_orig_mod.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(opt_mod._orig_mod.weight, root_weight_before)
+        self.assertEqual(
+            opt_mod._orig_mod._orig_mod.weight,
+            partial_collision_state_dict["_orig_mod.weight"],
+        )
+
+        mod = NestedModule(HasOrigModSubmodule())
+        opt_mod = NestedModule(torch.compile(HasOrigModSubmodule(), backend="eager"))
+        self.assertEqual(
+            list(mod.state_dict().keys()), list(opt_mod.state_dict().keys())
+        )
+        incompatible_keys = opt_mod.load_state_dict(mod.state_dict())
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+    def test_nested_load_state_dict_legacy_compiled_keys(self):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(MockModule())
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        old_style_state_dict = collections.OrderedDict(
+            (
+                f"mod._orig_mod.{key[len('mod.') :]}",
+                value,
+            )
+            for key, value in mod.state_dict().items()
+        )
+
+        incompatible_keys = opt_mod.load_state_dict(old_style_state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertStateDictEqual(opt_mod.state_dict(), mod.state_dict())
+
+    def test_nested_load_state_dict_incompatible_keys_public_names(self):
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        mod = NestedModule(MockModule())
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        state_dict = mod.state_dict()
+        del state_dict["mod.linear.bias"]
+        state_dict["mod.extra"] = torch.ones(())
+
+        incompatible_keys = opt_mod.load_state_dict(state_dict, strict=False)
+        self.assertEqual(incompatible_keys.missing_keys, ["mod.linear.bias"])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["mod.extra"])
+
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        with self.assertRaises(RuntimeError) as cm:
+            opt_mod.load_state_dict(state_dict)
+        self.assertIn('"mod.linear.bias"', str(cm.exception))
+        self.assertIn('"mod.extra"', str(cm.exception))
+        self.assertNotIn("mod._orig_mod", str(cm.exception))
+
+    def test_state_dict_hooks(self):
+        class VersionedMockModule(MockModule):
+            _version = 7
+
+        mod = VersionedMockModule()
+        opt_mod = torch.compile(mod, backend="eager")
+        hook_calls = []
+
+        def pre_hook(module, prefix, keep_vars):
+            hook_calls.append(("pre", module, prefix, keep_vars))
+
+        def post_hook(module, state_dict, prefix, local_metadata):
+            hook_calls.append(("post", module, prefix, local_metadata.get("version")))
+            state_dict[prefix + "wrapper_marker"] = torch.ones(())
+
+        opt_mod.register_state_dict_pre_hook(pre_hook)
+        opt_mod.register_state_dict_post_hook(post_hook)
+
+        state_dict = opt_mod.state_dict()
+        self.assertEqual(hook_calls[0], ("pre", opt_mod, "", False))
+        self.assertEqual(hook_calls[1], ("post", opt_mod, "", opt_mod._version))
+        self.assertNotEqual(hook_calls[1][-1], mod._version)
+        self.assertStateDictEqual(
+            collections.OrderedDict(
+                (key, value)
+                for key, value in state_dict.items()
+                if key != "wrapper_marker"
+            ),
+            mod.state_dict(),
+        )
+        self.assertEqual(state_dict["wrapper_marker"], torch.ones(()))
+
+        hook_calls.clear()
+        destination = collections.OrderedDict()
+        opt_mod.state_dict(destination=destination)
+        self.assertEqual(hook_calls[0], ("pre", opt_mod, "", False))
+        self.assertEqual(hook_calls[1], ("post", opt_mod, "", opt_mod._version))
+
+    def test_load_state_dict_hooks(self):
+        opt_mod = torch.compile(MockModule(), backend="eager")
+        state_dict = MockModule().state_dict()
+        state_dict["wrapper_extra"] = torch.ones(())
+        hook_calls = []
+
+        def pre_hook(
+            module,
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        ):
+            hook_calls.append(("pre", module, prefix, strict))
+            state_dict.pop(prefix + "wrapper_extra")
+
+        def post_hook(module, incompatible_keys):
+            hook_calls.append(
+                (
+                    "post",
+                    module,
+                    list(incompatible_keys.missing_keys),
+                    list(incompatible_keys.unexpected_keys),
+                )
+            )
+
+        opt_mod.register_load_state_dict_pre_hook(pre_hook)
+        opt_mod.register_load_state_dict_post_hook(post_hook)
+        incompatible_keys = opt_mod.load_state_dict(state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(
+            hook_calls,
+            [
+                ("pre", opt_mod, "", True),
+                ("post", opt_mod, [], []),
+            ],
+        )
+
+        class NestedModule(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x):
+                return self.mod(x)
+
+        opt_mod = NestedModule(torch.compile(MockModule(), backend="eager"))
+        state_dict = NestedModule(MockModule()).state_dict()
+        state_dict["mod.wrapper_extra"] = torch.ones(())
+        hook_calls = []
+        opt_mod.mod.register_load_state_dict_pre_hook(pre_hook)
+        opt_mod.mod.register_load_state_dict_post_hook(post_hook)
+
+        incompatible_keys = opt_mod.load_state_dict(state_dict)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+        self.assertEqual(
+            hook_calls,
+            [
+                ("pre", opt_mod.mod, "mod.", True),
+                ("post", opt_mod.mod, [], []),
+            ],
+        )
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
