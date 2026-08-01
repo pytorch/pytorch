@@ -356,6 +356,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 2)
         self.assertEqual(cnt.frame_count, 2)
 
+        def add_three(cls, x):
+            return x + 3
+
+        Function.add.__func__.__code__ = add_three.__code__
+        self.assertEqual(opt_fn(x), x + 3)
+        self.assertEqual(cnt.frame_count, 3)
+
         saved = Function.add
 
         def compare(x):
@@ -365,6 +372,39 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.Unsupported, "Unresolved GetAttrVariable comparison"
         ):
             torch.compile(compare, backend="eager", fullgraph=True)(x)
+
+    def test_sourceless_static_and_class_methods_compile(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def add(x):
+                return x + 1
+
+            @classmethod
+            def multiply(cls, x):
+                return x * 2
+
+        def fn(x):
+            obj = Function()
+            return obj.add(x) + obj.multiply(x)
+
+        x = torch.randn(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), x * 3 + 1)
+        self.assertEqual(opt_fn(x), x * 3 + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
+        Function.add = staticmethod(lambda x: x + 3)
+        Function.multiply = classmethod(lambda cls, x: x * 4)
+        self.assertEqual(opt_fn(x), x * 5 + 3)
+        self.assertEqual(cnt.frame_count, 2)
+
+        def multiply_five(cls, x):
+            return x * 5
+
+        Function.multiply.__func__.__code__ = multiply_five.__code__
+        self.assertEqual(opt_fn(x), x * 6 + 3)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_staticmethod_identity_recompiles_after_replacement(self):
         from torch.autograd.function import _is_setup_context_defined
@@ -402,6 +442,38 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 1)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_missing_attribute_graph_breaks(self):
+        class Function(torch.autograd.Function):
+            pass
+
+        def fn(x):
+            return x + Function.missing
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Missing attribute on torch.autograd.Function subclass",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_unhashable_staticmethod_graph_breaks(self):
+        class UnhashableCallable:
+            __hash__ = None
+
+            def __call__(self, x):
+                return x + 1
+
+        class Function(torch.autograd.Function):
+            add = staticmethod(UnhashableCallable())
+
+        def fn(x):
+            return Function.add(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported callable in torch.autograd.Function staticmethod",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
     def test_descriptor_getter_does_not_run_during_tracing(self):
         calls = []
 
@@ -417,7 +489,29 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return x + Function.value
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, r"Unsupported python_type\(\) call"
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on torch.autograd.Function subclass",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        self.assertEqual(calls, [])
+
+    def test_staticmethod_subclass_getter_does_not_run_during_tracing(self):
+        calls = []
+
+        class CustomStaticmethod(staticmethod):
+            def __get__(self, obj, owner):
+                calls.append(None)
+                return super().__get__(obj, owner)
+
+        class Function(torch.autograd.Function):
+            add = CustomStaticmethod(lambda x: x + 1)
+
+        def fn(x):
+            return Function.add(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on torch.autograd.Function subclass",
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
         self.assertEqual(calls, [])
@@ -1417,6 +1511,38 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad.shape, x.shape)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_needs_input_grad_setter_roundtrip(self):
+        # When backward is traced by Dynamo, a store to ctx.needs_input_grad
+        # must be honored on subsequent reads. Regression test for the read
+        # short-circuiting to the construction-time value and dropping the store.
+        sentinel = ([False, True],)
+        seen = {}
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            @torch.compile(backend="eager", fullgraph=True)
+            def backward(ctx, grad_output):
+                seen["original"] = ctx.needs_input_grad
+                ctx.needs_input_grad = sentinel
+                seen["after_set"] = ctx.needs_input_grad
+                ctx.needs_input_grad = None
+                seen["after_none"] = ctx.needs_input_grad
+                ctx.needs_input_grad = seen["original"]
+                seen["after_restore"] = ctx.needs_input_grad
+                return grad_output, None
+
+        x = torch.randn(3, requires_grad=True)
+        Foo.apply(x, torch.randn(3)).sum().backward()
+        self.assertEqual(seen["original"], (True, False))
+        self.assertIs(seen["after_set"], sentinel)
+        self.assertIsNone(seen["after_none"])
+        self.assertIs(seen["after_restore"], seen["original"])
+        self.assertEqual(x.grad, torch.ones_like(x))
 
     def test_repeated_save_for_backward_calls(self):
         from torch.autograd import Function

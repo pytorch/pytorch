@@ -2487,9 +2487,7 @@ Tensor max_pool_double_backward(
     auto size = indices.sym_sizes().slice(0, indices.dim() - dim).vec();
     size.emplace_back(-1);
     auto indices_view = indices.view_symint(size);
-    const auto memory_format = indices.suggest_memory_format();
-    return grad.contiguous(memory_format)
-        .view_symint(size)
+    return grad.reshape_symint(size)
         .gather(-1, indices_view)
         .view_symint(indices.sym_sizes());
   }
@@ -5079,17 +5077,32 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
+  Tensor mean;
+  Tensor invstd;
+  if (training) {
+    mean = toNonOptTensor(save_mean).to(input.scalar_type());
+    invstd = toNonOptTensor(save_invstd).to(input.scalar_type());
+    if (at::GradMode::is_enabled() && input.requires_grad()) {
+      auto node = c10::make_intrusive<DelayedError>(
+          "batch_norm does not support 3rd+ order derivatives.",
+          /* num inputs */ 3);
+      // input is passed so the node is executable: save_mean/save_invstd do
+      // not require grad, so without a grad-requiring input wrap_outputs would
+      // mark the node non-executable and never install the Error grad_fn. Its
+      // wrapped output (result[2]) is unused.
+      auto result = node->apply({mean, invstd, input});
+      mean = std::move(result[0]);
+      invstd = std::move(result[1]);
+    }
+  } else {
+    mean = toNonOptTensor(running_mean);
+    invstd = toNonOptTensor(running_var).add(Scalar(eps)).pow_(-0.5);
+  }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(
-      training ? toNonOptTensor(save_mean).to(input.scalar_type())
-               : toNonOptTensor(running_mean),
-      input);
+  auto mu = unsqueeze_dim1(mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? toNonOptTensor(save_invstd).to(input.scalar_type())
-               : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
-      input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(invstd, input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
