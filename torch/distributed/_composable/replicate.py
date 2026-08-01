@@ -22,7 +22,7 @@ class _ReplicateState(_State):
         self.module: nn.Module = nn.ParameterList()
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()
-        # TODO(@fegin): this variable is originally create for testing, we
+        # TODO(@fegin): this variable is originally created for testing, we
         # should remove this if possible.
         self._orig_module = self.module
         self._param_names: list[str] = []

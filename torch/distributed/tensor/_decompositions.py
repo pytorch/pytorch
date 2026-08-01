@@ -16,7 +16,7 @@ import torch
 from torch._decomp import decomposition_table
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, RuntimeSchemaInfo
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import (
@@ -63,6 +63,8 @@ from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._ops import OpOverload
     from torch.distributed.tensor._sharding_prop import ShardingPropagator
 
@@ -191,6 +193,7 @@ class DecompShardingStrategy:
     def propagate_strategy(
         self,
         op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
     ) -> OpStrategy | None:
         if not tree_any(
             lambda x: isinstance(x, DTensorSpec),
@@ -239,7 +242,11 @@ class DecompShardingStrategy:
         from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
         return expand_to_full_mesh_op_strategy(
-            mesh, strategy_schema, single_dim_strategies, input_index=n_outputs
+            mesh,
+            strategy_schema,
+            single_dim_strategies,
+            input_index=n_outputs,
+            output_tensor_meta=output_tensor_meta,
         )
 
     def _propagate_through_decomp(
