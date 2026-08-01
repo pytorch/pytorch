@@ -93,6 +93,8 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_full_version }}
       CUDA_VERSION_SHORT: ${{ matrix.cuda }}
       CUDNN_VERSION: ${{ matrix.cudnn_version }}
+      ROCM_VERSION: ${{ matrix.rocm_full_version }}
+      ROCM_VERSION_SHORT: ${{ matrix.rocm }}
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

@@ -41,6 +41,7 @@ RUN git submodule update --init --recursive
 FROM python-deps as pytorch-installs
 ARG CUDA_PATH=cu121
 ARG INSTALL_CHANNEL=whl/nightly
+ARG ROCM_VERSION=
 # Automatically set by buildx
 ARG TARGETPLATFORM
 
@@ -49,7 +50,10 @@ ARG TARGETPLATFORM
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
          *) \
-             if [ "${CUDA_PATH}" = "cu132" ]; then \
+             if [ -n "${ROCM_VERSION}" ]; then \
+                 ROCM_PATH="rocm$(echo ${ROCM_VERSION} | cut -d'.' -f1,2)"; \
+                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${ROCM_PATH}/ torch torchvision torchaudio; \
+             elif [ "${CUDA_PATH}" = "cu132" ]; then \
                  pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision; \
              else \
                  pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision torchaudio; \
@@ -86,10 +90,12 @@ RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
         rm -rf /var/lib/apt/lists/*; \
     fi
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+ARG ROCM_VERSION=
+ENV NVIDIA_VISIBLE_DEVICES ${ROCM_VERSION:+}${ROCM_VERSION:-all}
+ENV NVIDIA_DRIVER_CAPABILITIES ${ROCM_VERSION:+}${ROCM_VERSION:-compute,utility}
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+ENV ROCM_VERSION ${ROCM_VERSION}
 ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 
@@ -99,7 +105,7 @@ ARG BUILD_TYPE
 
 # Install CUDA toolkit for devel images
 # Only runs when building devel-image target (BUILD_TYPE != official)
-RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ]; then \
+RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ] && [ -z "${ROCM_VERSION}" ]; then \
     apt-get update && apt-get install -y --no-install-recommends \
         wget gnupg2 ca-certificates && \
     # Add NVIDIA repository

@@ -415,6 +415,16 @@ You can also pull a pre-built docker image from Docker Hub and run with docker v
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
+**ROCm (AMD GPUs):**
+```bash
+docker run --device=/dev/kfd --device=/dev/dri --rm -ti --ipc=host pytorch/pytorch:-rocm-runtime
+```
+
+For example:
+```bash
+docker run --device=/dev/kfd --device=/dev/dri --rm -ti --ipc=host pytorch/pytorch:2.13.0-rocm7.2-runtime
+```
+
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
@@ -424,6 +434,11 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 **NOTE:** Must be built with a Docker version >= 23.0
 
 The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
+To build a ROCm image, pass `ROCM_VERSION` and `ROCM_VERSION_SHORT`:
+```bash
+make -f docker.Makefile runtime-image ROCM_VERSION=7.2.3 ROCM_VERSION_SHORT=7.2
+# images are tagged as docker.io/${your_docker_username}/pytorch:<version>-rocm7.2-runtime
+```
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default, as the Dockerfile uses system Python.
 
