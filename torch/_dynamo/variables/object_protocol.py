@@ -977,9 +977,15 @@ def generic_getiter(
         res = obj.tp_iter_impl(tx)
         res_T = maybe_get_python_type(res)
         if not pyiter_check(res_T):
+            if sys.version_info < (3, 15):
+                err_str = (
+                    f"iter() returned non-iterator of type '{res.python_type_name()}'"
+                )
+            else:
+                err_str = f"{obj.python_qualified_name()}.__iter__() must return an iterator, not {res.python_qualified_name()}"
             raise_type_error(
                 tx,
-                f"iter() returned non-iterator of type '{res.python_type_name()}'",
+                err_str,
             )
         return res
     elif pysequence_check(T):

@@ -1774,6 +1774,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return "<unknown type>"
 
+    def python_qualified_name(self) -> str:
+        """
+        Equivalent to _PyType_GetFullyQualifiedName
+
+        See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+        """
+        type_ = self.python_type()
+        mod = type_.__module__
+        qn = type_.__qualname__
+        if isinstance(mod, str) and mod not in ("__main__", "builtins"):
+            return f"{mod}.{qn}"
+        else:
+            return f"{qn}"
+
     def as_python_constant(self) -> Any:
         """For constants"""
         raise AsPythonConstantNotImplementedError(self)
