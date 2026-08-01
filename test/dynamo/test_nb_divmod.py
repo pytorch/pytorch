@@ -2,12 +2,17 @@
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbDivmod(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Integer divmod ---
     @make_dynamo_test
     def test_divmod_integers(self):

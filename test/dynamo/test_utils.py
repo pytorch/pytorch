@@ -16,6 +16,7 @@ from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     TEST_WITH_ASAN,
@@ -28,6 +29,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
         # cleared before the weakref callback fires the hook. The hook must not
@@ -355,6 +358,8 @@ class TestDynamoTimed(TestCase):
     """
     Test utilities surrounding dynamo_timed.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1299,6 +1304,8 @@ class TestDynamoTimed(TestCase):
 
 
 class TestTimedSync(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_timed_syncs_on_accelerator(self, device):
         if torch.device(device).type == "cpu":
             self.skipTest("sync only triggered for non-CPU devices")
@@ -1325,6 +1332,8 @@ class TestInductorConfigParsingForLogging(TestCase):
     """
     Test for parsing inductor config for logging in CompilationMetrics.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     class TestObject:
         def __init__(self, a, b):
@@ -1392,6 +1401,8 @@ class TestInductorConfigParsingForLogging(TestCase):
 
 
 class TestFunctorchConfigParsingForLogging(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functorch_config_jsonify(self):
         functorch_config_json = utils._functorch_config_for_logging()
         self.assertIsInstance(functorch_config_json, str)
