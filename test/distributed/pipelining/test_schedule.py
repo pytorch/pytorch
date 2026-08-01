@@ -54,9 +54,10 @@ from torch.distributed.pipelining.stage import (
     _RecvInfo,
     PipelineStage,
 )
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -67,11 +68,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -147,6 +143,8 @@ def _run_adjacency_validation(stage, num_stages):
 
 
 class ScheduleTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_schedule_class(self):
         # List of all expected schedule names
         schedule_names = [
@@ -599,6 +597,8 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class TestSchedulePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
@@ -765,6 +765,8 @@ instantiate_parametrized_tests(TestSchedulePlan)
 
 
 class TestScheduleCsv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "ScheduleClass,csv_name",
         [
@@ -808,11 +810,15 @@ class TestScheduleCsv(TestCase):
 instantiate_parametrized_tests(TestScheduleCsv)
 
 
-class TestScheduleLowering(TestCase):
-    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
-
+class ScheduleLoweringTestBase(TestCase):
     def _parse_actions(self, actions: list[str]) -> list[_Action]:
         return [_Action.from_str(s) for s in actions]
+
+
+class TestScheduleLowering(ScheduleLoweringTestBase):
+    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "action_str_and_ref",
@@ -1635,8 +1641,11 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_v_schedule(self):
+
+class TestScheduleLoweringDevice(ScheduleLoweringTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_grad_with_v_schedule(self, device):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
         E.g.
@@ -1753,8 +1762,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_grad_with_split_b_w(self):
+    def test_grad_with_split_b_w(self, device):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
         This test runs on a single rank and just tests a single stage with 2 microbatches with separate B, W operations.
@@ -1863,7 +1871,17 @@ class TestScheduleLowering(TestCase):
         torch.distributed.destroy_process_group()
 
 
+instantiate_device_type_tests(
+    TestScheduleLoweringDevice,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+
 class TestValidateSchedule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid_schedule(self):
         schedule_actions = [
             {
@@ -1904,6 +1922,8 @@ class TestValidateSchedule(TestCase):
 
 
 class ScheduleUtilTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_generate_stage_to_rank_mapping(self):
         stage_to_rank = generate_stage_to_rank_mapping(2, 2)
         self.assertEqual(
@@ -1977,6 +1997,8 @@ instantiate_parametrized_tests(TestScheduleLowering)
 class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()
