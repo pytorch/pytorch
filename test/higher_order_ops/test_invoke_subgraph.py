@@ -3975,6 +3975,15 @@ class GraphModule(torch.nn.Module):
             for ri, ei in zip(r, e):
                 self.assertEqual(ri, ei)
 
+    def _cleanup_pytree_registration(self, cls):
+        # _deregister_pytree_node raises KeyError for classes registered
+        # without serialized_type_name (they share a sentinel key in
+        # SERIALIZED_TYPE_TO_PYTHON_TYPE), so pop the registries directly
+        # instead, as in test_activation_checkpointing.py.
+        pytree.SUPPORTED_NODES.pop(cls, None)
+        pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+        pytree.CONSTANT_NODES.discard(cls)
+
     def test_subgraph_reuse_dataclass_pytree_arg(self):
         """Reuse must work for args that are registered pytree dataclasses.
 
@@ -3987,7 +3996,8 @@ class GraphModule(torch.nn.Module):
         Note: this also passes on the pre-fix implementation (reuse already
         worked, just slowly by re-tracing pytree.tree_flatten's dispatch on
         every call) -- this guards the fingerprinting correctness, not the
-        compile-time regression fixed alongside it.
+        compile-time regression fixed alongside it (see
+        test_subgraph_reuse_pytree_avoids_retracing_tree_flatten).
         """
         import dataclasses
 
@@ -4000,7 +4010,7 @@ class GraphModule(torch.nn.Module):
             lambda value: ([value.hidden], None),
             lambda children, _: RegionInput(*children),
         )
-        self.addCleanup(pytree._deregister_pytree_node, RegionInput)
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
 
         @nested_compile_region
         def gn(inp):
@@ -4020,6 +4030,115 @@ class GraphModule(torch.nn.Module):
 
         # Same treespec/leaf types on every call -> single trace, rest reused.
         self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_avoids_retracing_tree_flatten(self):
+        """Regression test for the #191809 compile-time blowup.
+
+        build_input_fingerprint used to call
+        _make_inlined(tx, pytree.tree_flatten) on every single reuse-lookup
+        (i.e. once per region invocation, not once per compile), making
+        Dynamo bytecode-trace tree_flatten's own recursive dispatch from
+        scratch every time. Only the leaf-level flatten_fn of each container
+        node should be inlined/traced now, so _make_inlined must never be
+        called with pytree.tree_flatten itself for a plain dataclass arg.
+        """
+        import dataclasses
+
+        from torch._dynamo.variables import invoke_subgraph as invoke_subgraph_mod
+
+        def flatten_fn(value):
+            return ([value.hidden], None)
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput, flatten_fn, lambda children, _: RegionInput(*children)
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(8):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+
+        orig_make_inlined = invoke_subgraph_mod._make_inlined
+        inlined_fns = []
+
+        def _tracking_make_inlined(tx, f):
+            inlined_fns.append(f)
+            return orig_make_inlined(tx, f)
+
+        with (
+            mock.patch.object(
+                invoke_subgraph_mod, "_make_inlined", _tracking_make_inlined
+            ),
+            self._count_speculate_calls() as count,
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # Reuse must still work (same treespec/tags on every call).
+        self.assertEqual(count(), 1)
+        # The dataclass's own flatten_fn must have been inlined at least
+        # once, to confirm this test actually reaches
+        # build_fingerprint_with_pytree rather than passing vacuously (e.g.
+        # if a future change routed this case through the flat-leaf fast
+        # path instead).
+        self.assertIn(flatten_fn, inlined_fns)
+        # But the *generic recursive dispatch* must not be re-traced on
+        # every call -- that's the bug being fixed.
+        self.assertNotIn(pytree.tree_flatten, inlined_fns)
+
+    def test_subgraph_reuse_pytree_partial_flatten_fn(self):
+        """flatten_fn need not be a plain function -- e.g. functools.partial.
+
+        _make_inlined only supports plain Python functions (it always wraps
+        its argument in a UserFunctionVariable, which graph-breaks on
+        anything else). build_input_fingerprint must fall back rather than
+        call _make_inlined directly on a non-function flatten_fn.
+        """
+        import dataclasses
+        import functools
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        def _flatten_impl(config_flag, value):
+            return ([value.hidden], config_flag)
+
+        pytree.register_pytree_node(
+            RegionInput,
+            functools.partial(_flatten_impl, "cfg"),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.cos()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+        # fullgraph=True raises on any graph break instead of silently
+        # falling back, so this proves the partial flatten_fn doesn't
+        # graph-break.
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
 
     def test_subgraph_reuse_namedtuple_arg(self):
@@ -4053,6 +4172,154 @@ class GraphModule(torch.nn.Module):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_two_distinct_namedtuple_types(self):
+        """Two different namedtuple types must not be conflated by reuse.
+
+        Both types normalize to the same registry key (collections.
+        namedtuple), so correctness depends on the concrete class surviving
+        in the TreeSpec context (set by pytree._namedtuple_flatten, which
+        returns type(d)) rather than being lost during normalization.
+        """
+        import collections
+
+        Left = collections.namedtuple("Left", ["hidden"])
+        Right = collections.namedtuple("Right", ["hidden"])
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x, y):
+            a = gn(Left(x))
+            b = gn(Right(y))
+            # A second Left(...) call should hit the cache from the first,
+            # proving reuse isn't simply broken outright (which would also
+            # produce two traces, same as the false Left/Right conflation
+            # this test is meant to catch).
+            c = gn(Left(y))
+            return a, b, c
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        ref = fn(x, y)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        # Left and Right each need their own trace (2), but the second Left
+        # call reuses the first rather than adding a third trace.
+        self.assertEqual(count(), 2)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_dataclass_pytree_kwarg(self):
+        """Reuse must work for pytree dataclasses passed as kwargs.
+
+        build_input_fingerprint's fast path only applies when there are no
+        kwargs (build_input_fingerprint:217), so the pytree-flatten path
+        (exercised here with a kwarg) is the one primarily exercised by
+        real callers of nested_compile_region.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(*, inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(inp=RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_nested_pytree_arg(self):
+        """Reuse must work for multi-level nested pytree structures.
+
+        Exercises the recursive `flatten(child)` call for a dict containing
+        a tuple of a tensor and a registered dataclass, rather than only a
+        depth-1 structure.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Wrapper:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            Wrapper,
+            lambda value: ([value.hidden], None),
+            lambda children, _: Wrapper(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, Wrapper)
+
+        @nested_compile_region
+        def gn(d):
+            b_tensor, wrapper = d["b"]
+            return d["a"].sin() + b_tensor.cos() + wrapper.hidden.relu()
+
+        def fn(x, y, z):
+            out = x
+            for _ in range(4):
+                out = gn({"a": out, "b": (y, Wrapper(z))})
+            return out
+
+        x, y, z = torch.randn(8), torch.randn(8), torch.randn(8)
+        ref = fn(x, y, z)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_unsupported_leaf(self):
+        """An arg containing an opaque/unregistered object must not crash.
+
+        build_input_fingerprint's has_unknown flag is set instead, which
+        gates reuse off for that call (the region is simply retraced) rather
+        than raising or misclassifying the object.
+        """
+
+        class Opaque:
+            def __init__(self, v):
+                self.v = v
+
+        @nested_compile_region
+        def gn(pair):
+            t, _opaque = pair
+            return t.sin()
+
+        def fn(pair):
+            out = pair[0]
+            for _ in range(4):
+                out = gn((out, pair[1]))
+            return out
+
+        opaque = Opaque(1)
+        x = torch.randn(8)
+        ref = fn((x, opaque))
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
         self.assertEqual(ref, res)
 
     def test_subgraph_reuse_different_constants_retrace(self):

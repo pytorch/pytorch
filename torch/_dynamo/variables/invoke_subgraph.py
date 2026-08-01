@@ -4,6 +4,7 @@ supporting helpers for subgraph reuse (auto-cache) in Dynamo's invoke_subgraph
 higher-order operator.
 """
 
+import collections
 import enum
 import logging
 import traceback
@@ -205,13 +206,12 @@ def build_input_fingerprint(
 ) -> InputFingerprint:
     """Build an InputFingerprint by flattening (args, kwargs) via pytree.
 
-    Uses _make_inlined(tx, pytree.tree_flatten) to recursively flatten
-    the argument structure into leaf VTs, classifying each leaf as
+    Flattens the argument structure into leaf VTs, classifying each leaf as
     tensor/symnode/constant/module. Also records the TreeSpec so that
     cache lookups can verify structural equivalence.
 
     Fast path: when kwargs is empty and all args are already leaf VTs
-    (tensor/symnode/constant/module), skip the expensive pytree flatten.
+    (tensor/symnode/constant/module), skip the pytree flatten entirely.
     """
     # Fast path: flat args, no kwargs — skip pytree machinery.
     if not kwargs:
@@ -250,25 +250,35 @@ def build_fingerprint_with_pytree(
 ) -> InputFingerprint:
     """Build fingerprint via pytree flatten for nested/kwargs cases.
 
-    Recurses over the pytree structure natively (untraced) instead of calling
-    ``_make_inlined(tx, pytree.tree_flatten)``, which used to bytecode-trace
-    pytree.tree_flatten's own recursive dispatch from scratch on every
-    reuse-lookup (i.e. once per region invocation, not once per compile).
-    Only the leaf-level ``flatten_fn`` of each container node is still
-    inlined/traced, same as before.
+    Recurses over the pytree structure natively (untraced), inlining/tracing
+    only each container node's own ``flatten_fn`` rather than the full
+    recursive tree_flatten dispatch around it. This is safe because node-type
+    classification only depends on ``type()``, never on tensor values.
 
-    Note: since the node-type/registry dispatch (tree_is_leaf,
-    SUPPORTED_NODES lookup) is no longer traced, it no longer installs
-    guards on the pytree registry itself. This is safe: this flatten is
-    purely internal reuse bookkeeping, and a stale/mismatched registry can
-    only make a cached subgraph ineligible for reuse (has_unknown / treespec
-    mismatch), never silently wrong.
+    Note: skipping the traced registry dispatch also means we no longer
+    install guards on the pytree registry itself. That's fine here: this
+    fingerprint is built fresh from the live registry on every reuse-lookup
+    (register_pytree_node isn't traceable, so the registry can't change
+    mid-trace), and reuse is separately gated on treespec/tag equality. So a
+    registry change between compiles can only make a cached subgraph
+    ineligible for reuse (has_unknown / treespec mismatch), never silently
+    wrong.
     """
     from torch._dynamo.variables.builder import SourcelessBuilder
 
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     has_unknown = False
+
+    def add_leaf(vt: VariableTracker) -> None:
+        nonlocal has_unknown
+        tag = classify_vt(vt)
+        if tag is None:
+            has_unknown = True
+        else:
+            flat_vts.append((tag, vt))
+            # Always append (even None) to keep positional alignment with flat_vts.
+            arg_sources.append(getattr(vt, "source", None))
 
     def flatten(node_vt: VariableTracker) -> pytree.TreeSpec:
         nonlocal has_unknown
@@ -279,19 +289,27 @@ def build_fingerprint_with_pytree(
             return pytree.treespec_leaf()
         # Keep in sync with pytree._get_node_type.
         if pytree.is_namedtuple_class(node_type):
-            node_type = pytree.namedtuple
+            node_type = collections.namedtuple
 
         if node_type not in pytree.SUPPORTED_NODES:
-            tag = classify_vt(node_vt)
-            if tag is None:
-                has_unknown = True
-            else:
-                flat_vts.append((tag, node_vt))
-                # Always append (even None) to keep positional alignment with flat_vts.
-                arg_sources.append(getattr(node_vt, "source", None))
+            add_leaf(node_vt)
             return pytree.treespec_leaf()
 
         flatten_fn = pytree.SUPPORTED_NODES[node_type].flatten_fn
+        if not isinstance(flatten_fn, types.FunctionType):
+            # _make_inlined only supports plain Python functions (it always
+            # wraps its argument in a UserFunctionVariable). A flatten_fn
+            # registered as e.g. a functools.partial, bound method, or
+            # callable object can't go through it directly. Fall back to
+            # tracing the full recursive tree_flatten for this subtree, which
+            # dispatches calls generically and so handles any callable.
+            leaves_vt, treespec_vt = unpack_iterable(
+                tx, _make_inlined(tx, pytree.tree_flatten)(node_vt)
+            )
+            for leaf_vt in unpack_iterable(tx, leaves_vt):
+                add_leaf(leaf_vt)
+            return treespec_vt.as_python_constant()
+
         children_vt, context_vt = unpack_iterable(
             tx, _make_inlined(tx, flatten_fn)(node_vt)
         )
