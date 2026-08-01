@@ -13,17 +13,31 @@ The join is instead POSITIONAL, per launch, from records that already flow:
   * A graph launch's graphed kernel/memset records share the launch's ``correlation_id`` and
     carry the exec graph id in the upper 32 bits of their ``graph_node_id``. So per launch,
     ``correlation_id -> exec_graph_id``.
-  * The same launch's ``CUDA_EVENT`` records share that ``correlation_id`` and appear in
-    execution order (increasing ``cuda_event_sync_id``).
+  * The same launch's ``CUDA_EVENT`` records share that ``correlation_id`` and carry an
+    increasing ``cuda_event_sync_id`` that follows NODE-ID order.
   * :func:`arm_event_node_recording` records, at graph instantiate, each graph's ``event_record``
-    node ids in execution order (from ``get_graph_data()``).
+    node ids in node-id order (from ``get_graph_data()``).
 
-The k-th ``CUDA_EVENT`` record of a launch (by sync id) is the k-th ordered event node of that
-launch's graph. Resolution keys on POSITION, never on ``event_id``: a producer like NCCL/FSDP
-recycles one ``cudaEvent_t`` across many event-record nodes, so ``event_id`` is stable but not
-unique to a node -- keying on it would collapse every recycled record onto a single node. A
-launch is resolved only when its event-record count matches the graph's ordered node count and
-that graph is totally ordered; otherwise its records resolve to ``None``, never guessed.
+The invariant the join rests on:
+
+    The k-th ``CUDA_EVENT`` record of a launch, by sync id, is the k-th ``event_record``
+    node of that launch's graph, by node id.
+
+Node ids are assigned in node-CREATION order, which is also the order ``get_graph_data()``
+returns nodes in, so no sorting is needed. Note this is deliberately NOT execution order:
+on a graph with concurrent branches the branches' event nodes execute in an order that
+varies run to run, while ``cuda_event_sync_id`` stays fixed to node-id order. Ordering by
+anything derived from the DAG (dependency depth, topological rank) therefore mislabels
+nodes on any ordinary fork/join graph.
+
+Resolution keys on POSITION, never on ``event_id``: a producer like NCCL/FSDP recycles one
+``cudaEvent_t`` across many event-record nodes, so ``event_id`` is stable but not unique to
+a node -- keying on it would collapse every recycled record onto a single node. A launch is
+resolved only when its event-record count matches the graph's node count; otherwise its
+records resolve to ``None``, never guessed.
+
+(If CUPTI ever adds ``graphNodeId`` to ``CUpti_ActivityCudaEvent`` this whole module goes
+away -- the record would join like any other graphed activity.)
 """
 
 from __future__ import annotations
@@ -31,46 +45,25 @@ from __future__ import annotations
 from typing import Any
 
 
-def order_event_nodes(nodes: list[dict[str, Any]]) -> list[int] | None:
-    """Return one graph's ``event_record`` node ``tools_id``s in execution order, or ``None``
-    when they are not totally ordered (so the caller must not resolve against that graph).
-
-    ``nodes`` is ``get_graph_data()["nodes"]``. Order is by longest-dependency-path depth over
-    the whole DAG; distinct depths for every event node is the (conservative) proxy for "these
-    execute in a fixed serial order", which is what lets a launch's records match by position.
-    """
-    n = len(nodes)
-    depth = [-1] * n
-
-    def node_depth(i: int) -> int:
-        d = depth[i]
-        if d >= 0:
-            return d
-        deps = nodes[i]["dependencies"]
-        d = 0 if not deps else 1 + max(node_depth(j) for j in deps)
-        depth[i] = d
-        return d
-
-    event_idx = [i for i, nd in enumerate(nodes) if nd["node_type"] == "event_record"]
-    if not event_idx:
-        return []
-    depths = [node_depth(i) for i in event_idx]
-    if len(set(depths)) != len(event_idx):
-        return None  # not totally ordered -> ambiguous, refuse to resolve
-    return [nodes[i]["tools_id"] for i in sorted(event_idx, key=lambda i: depth[i])]
+# Node kinds whose bodies get_graph_data() does not descend into. Their event nodes are
+# invisible here, and at replay CUPTI reports nested nodes under the parent exec graph id
+# with ids appended after the top-level ones -- so a nested event node would sort last by
+# node id regardless of when it ran, and a conditional body executes a variable number of
+# times per launch. Refuse to resolve against such a graph rather than mis-assign.
+_OPAQUE_BODY_NODE_TYPES = ("child_graph", "conditional")
 
 
 class _EventNodeRecorder:
-    """Process-global record of each CUDA graph's ordered event-record nodes.
+    """Process-global record of each CUDA graph's event-record nodes, in node-id order.
 
     Armed once via :meth:`arm` (before graphs are captured), like the graph-dependency
-    recorder. :attr:`graph_event_nodes` maps ``exec_graph_id -> ordered event-node tools_ids``
-    (``None`` for graphs whose event nodes are not totally ordered). Resolution is positional
-    against this map (see :func:`resolve_window`); there is no learned ``event_id`` map.
+    recorder. :attr:`graph_event_nodes` maps ``exec_graph_id -> event-node tools_ids`` in
+    node-id order. Resolution is positional against this map (see :func:`resolve_window`);
+    there is no learned ``event_id`` map.
     """
 
     def __init__(self) -> None:
-        self.graph_event_nodes: dict[int, list[int] | None] = {}
+        self.graph_event_nodes: dict[int, list[int]] = {}
         self._handle: Any = None
 
     def arm(self) -> None:
@@ -96,11 +89,14 @@ class _EventNodeRecorder:
             exec_graph_id = data["exec_graph_id"]
         except (RuntimeError, AttributeError, KeyError):
             return
-        ordered = order_event_nodes(nodes)
-        if ordered == []:  # no event nodes -> nothing to track
+        if any(n["node_type"] in _OPAQUE_BODY_NODE_TYPES for n in nodes):
             return
-        # ordered is a list (resolvable) or None (event nodes present but not totally ordered,
-        # so we refuse to resolve against this graph). Track the exec id for destroy-time purge.
+        # get_graph_data() returns nodes in node-id order, which is node-creation order, so
+        # filtering preserves it -- no sort.
+        ordered = [n["tools_id"] for n in nodes if n["node_type"] == "event_record"]
+        if not ordered:  # no event nodes -> nothing to track
+            return
+        # Track the exec id so the destroy hook can purge this entry.
         self.graph_event_nodes[exec_graph_id] = ordered
         torch_cuda_graph._recorded_exec_ids.add(exec_graph_id)
 
@@ -123,10 +119,11 @@ def resolve_window(
     ``event_rows``. Pure: the numpy marshalling stays in the observer.
 
     Resolution is positional per launch: within a launch (one ``correlation_id``) the records
-    are sorted by sync id (== execution order) and the k-th record is assigned the k-th ordered
-    event node of that launch's exec graph. A launch resolves only when its record count matches
-    the graph's ordered node count; otherwise its records stay ``None``. This never keys on the
-    CUDA event object, so it is correct when a producer recycles one ``cudaEvent_t`` across nodes.
+    are sorted by sync id and the k-th record is assigned the k-th event node of that launch's
+    exec graph, by node id. A launch resolves only when its record count matches the graph's
+    node count; that count check is the safety net against nested bodies, dropped records, and
+    launches split across export windows. This never keys on the CUDA event object, so it is
+    correct when a producer recycles one ``cudaEvent_t`` across nodes.
     """
     corr_to_exec: dict[int, int] = {}
     for corr, gnid in corr_exec_pairs:
@@ -143,7 +140,7 @@ def resolve_window(
         ordered = recorder.graph_event_nodes.get(exec_id)
         if not ordered or len(ordered) != len(rows):
             continue
-        rows.sort()  # by sync id == execution order within the launch
+        rows.sort()  # by sync id, which follows node-id order within the launch
         for pos, (_sid, i) in enumerate(rows):
             resolved[i] = ordered[pos]
     return resolved
