@@ -1945,59 +1945,57 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-    )
-    def test_max_autotune_decompose_k_dynamic_input_bwd(self):
+        use_fast_triton_launcher=False,
         # UT specific change to force testing decompose K feature on ROCm until
         # enabled by default, same strategy as #169948
-        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+        **_DECOMPOSE_K_PATCH_ROCM,
+    )
+    def test_max_autotune_decompose_k_dynamic_input_bwd(self):
+        def f(a, b):
+            # 256 * s0
+            a_in = torch.cat([a for _ in range(256)], dim=0)
+            return (a_in @ b).relu().sum()
 
-            def f(a, b):
-                # 256 * s0
-                a_in = torch.cat([a for _ in range(256)], dim=0)
-                return (a_in @ b).relu().sum()
+        a, b = self._make_matrices(
+            M=8,
+            K=64,
+            N=32768,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
+        )
 
-            a, b = self._make_matrices(
-                M=8,
-                K=64,
-                N=32768,
-                dtype=torch.bfloat16,
-                device=GPU_TYPE,
-                requires_grad=True,
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+        res = compiled_func(a, b)
+        res.backward()
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
             )
 
-            torch._dynamo.reset()
-            torch._dynamo.maybe_mark_dynamic(a, 0)
-            compiled_func = torch.compile(f)
-            res = compiled_func(a, b)
-            res.backward()
+            out, code = run_and_get_code(compiled_func, a, b)
+            out.backward()
 
-            with mock.patch(
-                "torch._inductor.kernel.mm.use_decompose_k_choice"
-            ) as decomp_mock:
-                decomp_mock.side_effect = (
-                    lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
-                )
-
-                out, code = run_and_get_code(compiled_func, a, b)
-                out.backward()
-
-                # code[1] in this case given backwards
-                if config.cpp_wrapper:
-                    FileCheck().check_regex(
-                        "triton_.*_fused_.*_result = runTritonKernelWithAutotune"
-                    ).check_regex(r"int64_t s[0-9]+;").check_regex(
-                        r"aoti_torch_item_int64.*, &s[0-9]+"
-                    ).check("decompose_k").check_regex(r"256L\*s[0-9]+").check(
-                        "aoti_torch_cuda_bmm_dtype_out"
-                    ).check_regex(r"s[0-9]+ = 8").run(code[1])
-                else:
-                    FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                        "triton_.*_fused_.*.run"
-                    ).check("decompose_k").check_regex(
-                        r"s[0-9]+ = s[0-9]+"
-                    ).check_regex(r"256\*s[0-9]+").check_regex("s[0-9]+ = 8").run(
-                        code[1]
-                    )
+            # code[1] in this case given backwards
+            if config.cpp_wrapper:
+                FileCheck().check_regex(
+                    "triton_.*_fused_.*_result = runTritonKernelWithAutotune"
+                ).check_regex(r"int64_t s[0-9]+;").check_regex(
+                    r"aoti_torch_item_int64.*, &s[0-9]+"
+                ).check("decompose_k").check_regex(r"256L\*s[0-9]+").check(
+                    "aoti_torch_cuda_bmm_dtype_out"
+                ).check_regex(r"s[0-9]+ = 8").run(code[1])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_.*.run"
+                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                    r"256\*s[0-9]+"
+                ).check_regex("s[0-9]+ = 8").run(code[1])
 
     @unittest.skipIf(
         config.triton.native_matmul,

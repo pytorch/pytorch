@@ -1489,7 +1489,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
             FlexGemmLocalReduceStore,
@@ -1538,6 +1538,47 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmOutputLocalReducePlan(match, feeds_main=True),
         )
 
+    def test_output_plan_uses_shared_reduction_plan(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceGeometry,
+        )
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmLocalReduceMatch,
+            FlexGemmLocalReduceStore,
+            FlexGemmOutputLocalReducePlan,
+            FlexGemmOutputPlan,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        graph = torch.fx.Graph()
+        output = graph.placeholder("output")
+        reduced = graph.placeholder("reduced")
+        match = FlexGemmLocalReduceMatch(
+            reduced, FlexGemmLocalReduceGeometry(8, 0), "max"
+        )
+        outputs = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                match,
+                store=FlexGemmLocalReduceStore(reduced, 0),
+                feeds_main=True,
+            ),
+        )
+
+        self.assertEqual(
+            outputs.reduction_plan,
+            GemmReductionPlan(
+                "reduced",
+                8,
+                0,
+                "max",
+                "identity",
+                "output",
+                feeds_main=True,
+                feed_output="output",
+            ),
+        )
+
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
 
@@ -1553,7 +1594,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueEmitter
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmEpilogueEmitter,
+        )
 
         graph = torch.fx.Graph()
         aux = graph.placeholder("aux")
@@ -2973,7 +3016,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_config_key,
             log_flex_gemm_artifact,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
