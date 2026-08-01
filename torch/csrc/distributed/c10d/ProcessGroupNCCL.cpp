@@ -999,6 +999,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
   }
 
+  // groupRanks() maps this group's ranks onto world ranks, so
+  // groupRanks()[rank_] is this process's global rank. Compute it here, before
+  // the watchdog and heartbeat monitor threads that read it are started, so
+  // globalRank() is a pure read of state published by thread creation. A merged
+  // group inherits its parent's (shorter) global_ranks_in_group, so fall back
+  // to rank_ instead of reading out of bounds.
+  const auto& ranks = groupRanks();
+  globalRank_ = rank_ < static_cast<int>(ranks.size())
+      ? static_cast<int>(ranks[rank_])
+      : rank_;
+
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
   // environment variables from config file, which can race with getenv from
@@ -2706,8 +2717,14 @@ const std::string& ProcessGroupNCCL::logPrefix() const {
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
-  static int globalRank = rank_;
-  return globalRank;
+  // This must NOT be a function-local static. A static is seeded by whichever
+  // ProcessGroupNCCL is constructed first in the process -- the constructor
+  // calls globalRank() while logging -- and never updated, so if that first
+  // group is a subgroup whose group-local rank differs from the world rank,
+  // every later group reports the wrong global rank: flight recorder dumps
+  // land in another rank's file, broadcastSignal(kStoreDumpKey) names the wrong
+  // rank, and guessDeviceId() (used by split()) picks the wrong CUDA device.
+  return globalRank_;
 }
 
 const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {

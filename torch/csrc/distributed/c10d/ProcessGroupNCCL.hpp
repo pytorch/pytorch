@@ -1236,10 +1236,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
-  // Returns the global rank of the device. This function assumes that users
-  // always create a default global process group(PG) which includes all
-  // devices. It is called in the constructor of ProcessGroupNCCL, so it always
-  // return the rank_ of the very first PG created, aka, default global PG.
+  // Returns this process's rank in the world, i.e. this group's rank_ mapped
+  // through groupRanks(). Computed per instance in the constructor.
   const int& globalRank() const;
 
   const c10::intrusive_ptr<Store>& globalStore() const;
@@ -1490,6 +1488,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Identity rank mapping [0, size_), used by groupRanks() when
   // options_->global_ranks_in_group is empty. Filled in the constructor.
   std::vector<uint64_t> defaultRanks_;
+
+  // This process's rank in the world, i.e. groupRanks()[rank_]. Filled in the
+  // constructor; see globalRank().
+  int globalRank_{};
 
   std::string logPrefix_;
 
