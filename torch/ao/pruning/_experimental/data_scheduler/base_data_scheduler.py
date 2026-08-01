@@ -90,7 +90,7 @@ class BaseDataScheduler:
     def get_schedule_param(self):
         r"""
         Abstract method that needs to be implemented by the child class.
-        The expected return type should is a dictionary of name to schedule_param value
+        The expected return type should be a dictionary of name to schedule_param value
         The returned values will be updated in sparsifier when the scheduler step() function
         is called.
 

@@ -28,7 +28,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
       c10::Device /*device*/) override {}
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    ProfilerStateBase* tls = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
