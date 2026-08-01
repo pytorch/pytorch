@@ -12,6 +12,7 @@ import torch
 import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
@@ -96,7 +97,9 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
-    """Remove identity arithmetic operations: (+ 0, - 0, * 1, / 1)."""
+    """
+    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
@@ -120,6 +123,9 @@ def remove_no_ops(
                             return True
             return False
 
+        def isScalarValue(arg):
+            return isinstance(arg, (int, float))
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -127,7 +133,10 @@ def remove_no_ops(
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
-                return
+                if all(isScalarValue(arg) for arg in node.args) or not isinstance(
+                    replacement, torch.fx.Node
+                ):
+                    return
 
             # https://github.com/pytorch/pytorch/issues/174187
             # Don't replace if the replacement value is mutated in-place.
@@ -155,34 +164,61 @@ def remove_no_ops(
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
-            # TODO handle Tensor-Scalar adds, it's a different schema
             if len(node.args) == 2:
                 if (
-                    not any(e in zeros for e in node.args)
+                    not any(
+                        e in zeros or (isScalarValue(e) and e == 0) for e in node.args
+                    )
                     or node.kwargs.get("alpha", 1) != 1
                 ):
                     continue
 
-                replace_index = 1 if node.args[0] in zeros else 0
+                replace_index = (
+                    1
+                    if node.args[0] in zeros
+                    or (isScalarValue(node.args[0]) and node.args[0] == 0)
+                    else 0
+                )
+                replacement = node.args[replace_index]
+                if isinstance(replacement, torch.fx.Node):
+                    val = replacement.meta.get("val")
+                    if isinstance(val, torch.Tensor) and val.is_conj():
+                        continue
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
             if len(node.args) == 2:
-                if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
+                if (
+                    not (
+                        node.args[1] in zeros
+                        or (isScalarValue(node.args[1]) and node.args[1] == 0)
+                    )
+                    or node.kwargs.get("alpha", 1) != 1
+                ):
                     continue
 
                 replace_no_op(node, 0)
 
         for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
             if len(node.args) == 2:
-                if not any(e in ones for e in node.args):
+                if not any(
+                    e in ones or (isScalarValue(e) and e == 1) for e in node.args
+                ):
                     continue
 
-                replace_input_index = 1 if node.args[0] in ones else 0
+                replace_input_index = (
+                    1
+                    if node.args[0] in ones
+                    or (isScalarValue(node.args[0]) and node.args[0] == 1)
+                    else 0
+                )
                 replace_no_op(node, replace_input_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
-            if len(node.args) == 2 and node.args[1] in ones:
+            if len(node.args) == 2 and (
+                node.args[1] in ones
+                or (isScalarValue(node.args[1]) and node.args[1] == 1)
+            ):
                 replace_no_op(node, 0)
 
         # meta tensors returned from the graph have no data and can be replaced with empty_strided
@@ -326,6 +362,13 @@ class UniformValueConstantFolder(ConstantFolder):
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
+            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
+            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
+            # known to be finite.
+            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
                 continue
 
             t = torch.full(
@@ -494,14 +537,13 @@ def _zero_bias_sdpa_replacement_args(
     ):
         return None
 
-    query_arg, key_arg, value_arg = node.args[:3]
-    if not all(
-        isinstance(arg, torch.fx.Node) for arg in (query_arg, key_arg, value_arg)
+    query, key, value = node.args[:3]
+    if not (
+        isinstance(query, torch.fx.Node)
+        and isinstance(key, torch.fx.Node)
+        and isinstance(value, torch.fx.Node)
     ):
         return None
-    query = typing.cast(torch.fx.Node, query_arg)
-    key = typing.cast(torch.fx.Node, key_arg)
-    value = typing.cast(torch.fx.Node, value_arg)
 
     dropout_p = (
         node.args[5] if len(node.args) > 5 else node.kwargs.get("dropout_p", 0.0)
@@ -698,6 +740,14 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 if _has_self_referential_shape(shapes, node):
                     continue
 
+                dense_numel = functools.reduce(operator.mul, fake_tensor.shape, 1)
+                if _is_direct_graph_output(gm, node) and not statically_known_true(
+                    dense_numel != 0
+                ):
+                    # The backing storage and strides of an empty view are
+                    # observable but cannot be inferred from its layout.
+                    continue
+
                 full_shapes = shapes
                 full_meta_val = None
                 as_strided_args = None
@@ -707,7 +757,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     if strides is None or storage_offset is None:
                         continue
 
-                    dense_numel = functools.reduce(operator.mul, fake_tensor.shape, 1)
                     required_storage_len = 0
                     if not guard_or_false(dense_numel == 0):
                         required_storage_len = (
@@ -722,16 +771,13 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                         )
 
                     full_storage_len = replace_symint(required_storage_len)
-                    if full_storage_len is not None:
-                        full_shapes = [full_storage_len]
-                        full_meta_shape = (required_storage_len,)
-                    elif not (
-                        value in (0, 1)
-                        and guard_or_true(required_storage_len <= dense_numel)
-                    ):
-                        continue
-                    else:
-                        full_meta_shape = fake_tensor.shape
+                    if full_storage_len is None:
+                        with graph.inserting_before(node):
+                            full_storage_len = graph.materialize_symint(
+                                required_storage_len
+                            )
+                    full_shapes = [full_storage_len]
+                    full_meta_shape = (required_storage_len,)
 
                     full_meta_val = fake_tensor.new_empty(full_meta_shape)
 
@@ -1140,6 +1186,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # See Note [Preserving FlexGEMM body GEMMs].
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)

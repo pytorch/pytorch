@@ -85,6 +85,7 @@ from .runtime_wrappers import (
     SubclassMeta,
 )
 from .schemas import (
+    ActInputPaths,
     AOTAutogradCacheInfo,
     AOTConfig,
     CacheableAOTConfig,
@@ -501,10 +502,12 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         example_inputs: Sequence[Any],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
+        act_input_paths: ActInputPaths = (),
     ) -> None:
         # FxGraphHashDetails contains all the keys related to inductor. Also
         # includes some system info.
         self.aot_config = aot_config
+        self.act_input_paths = tuple(act_input_paths)
         self._record_runtime_state(gm)
         self.saved_tensors_hooks_fx_wrap_cache_hashes = (
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
@@ -647,14 +650,14 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
     def _stable_hash_for_cache_value(self, obj: Any) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(obj, "_stable_hash_for_caching"):
             return obj._stable_hash_for_caching()
         if isinstance(obj, torch.Tensor) and is_traceable_wrapper_subclass(obj):
             return self._default_stable_hash_for_caching(obj)
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             # Opaque objects are runtime pass-throughs; only the type matters
             # for cache key purposes, not the instance identity or value.
             return self._hash_bytes_for_cache(type(obj).__qualname__.encode())
@@ -691,9 +694,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return inner_hashes
 
     def _stabilize_tensor_subclass_metadata(self, obj: Any) -> Any:
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
 
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             return type(obj).__qualname__
         if isinstance(obj, tuple):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
@@ -864,6 +867,7 @@ def autograd_cache_key(
     example_inputs: Sequence[Any],
     config: AOTConfig,
     compiler_config_extra: CompilerConfigExtra | None = None,
+    act_input_paths: ActInputPaths = (),
     # TODO: add args and parameters
 ) -> tuple[str, list[str]]:
     """
@@ -876,7 +880,11 @@ def autograd_cache_key(
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
-                gm, example_inputs, config, create_fx_config(compiler_config_extra)
+                gm,
+                example_inputs,
+                config,
+                create_fx_config(compiler_config_extra),
+                act_input_paths,
             )
             pickler = AOTAutogradCachePickler(gm)
             # The prefix distinguishes among the other kinds of objects we cache
@@ -994,6 +1002,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         compiler_config_extra: CompilerConfigExtra | None,
         local: bool,
         remote: bool,
+        act_input_paths: ActInputPaths = (),
         compile_region_name: str | None = None,
     ) -> tuple[Callable[..., Any] | None, AOTConfig]:
         """
@@ -1009,7 +1018,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         cache_state = None
         try:
             cache_key, debug_lines = autograd_cache_key(
-                mod, args, aot_config, compiler_config_extra
+                mod, args, aot_config, compiler_config_extra, act_input_paths
             )
             result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
                 AOTAutogradCache._lookup(
