@@ -3689,6 +3689,7 @@
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
+    MPS: logspace_out_mps
     XPU: logspace_xpu_out
 
 - func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)

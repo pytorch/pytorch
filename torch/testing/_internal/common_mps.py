@@ -307,6 +307,8 @@ if torch.backends.mps.is_available():
             "logical_not",
             "logical_or",
             "logical_xor",
+            "logspace",
+            "logspacetensor_overload",
             "logsumexp",
             "long",
             "masked.cumsum",
@@ -365,8 +367,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
-            "logspace": None,
-            "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
