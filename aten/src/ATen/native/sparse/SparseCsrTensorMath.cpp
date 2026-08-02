@@ -980,11 +980,15 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
-    // out is resized in place, so operate on clones of any input aliasing it.
-    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
-    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
-    at::native::resize_as_sparse_compressed_(out, self_);
-    sparse::impl::cpu::add_out_sparse_csr(self_, other_, alpha, out);
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      sparse::impl::add_out_sparse_compressed_blocked(self, other, alpha, out);
+    } else {
+      // out is resized in place, so operate on clones of any input aliasing it.
+      const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+      const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+      at::native::resize_as_sparse_compressed_(out, self_);
+      sparse::impl::cpu::add_out_sparse_csr(self_, other_, alpha, out);
+    }
   }
   return out;
 }
