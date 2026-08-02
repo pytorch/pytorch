@@ -31,6 +31,15 @@ Tensors to a new device ("new" meaning not belonging to the set of
 output compared to non-checkpointed passes is never guaranteed.
 ```
 
+`checkpoint` may also be called without a function to produce a decorator. This
+keeps checkpoint configuration separate from the keyword arguments passed to the
+checkpointed function:
+
+```python
+checkpointed_fn = checkpoint(use_reentrant=False, preserve_rng_state=False)(fn)
+out = checkpointed_fn(*args, **kwargs)
+```
+
 ```{eval-rst}
 .. currentmodule:: torch.utils.checkpoint
 .. autofunction:: checkpoint
@@ -40,4 +49,6 @@ output compared to non-checkpointed passes is never guaranteed.
 .. autoclass:: SelectiveCheckpointContext
 .. autofunction:: create_selective_checkpoint_contexts
 .. autoclass:: GraphExecGroup
+.. autofunction:: set_checkpoint_early_stop
+.. autofunction:: set_device_states
 ```

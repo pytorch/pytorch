@@ -44,8 +44,8 @@ def validate_input_col(fn: Callable, input_col: int | tuple | list | None) -> No
         >>> assert validate_input_col(f_def, [1, 2])
 
     Notes:
-        If the function contains variable positional (`inspect.VAR_POSITIONAL`) arguments,
-        for example, f(a, *args), the validator will accept any size of input column
+        If the function contains variable positional (``inspect.VAR_POSITIONAL``) arguments,
+        for example, ``f(a, *args)``, the validator will accept any size of input column
         greater than or equal to the number of positional arguments.
         (in this case, 1).
 

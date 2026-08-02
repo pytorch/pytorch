@@ -159,11 +159,28 @@ class LocalSource(Source):
     # or `co_freevars`.
     is_derefed_cell_contents: bool = False
 
+    # Whether this local is the function's varargs (``*args``) parameter.
+    # Set from ``co_flags & CO_VARARGS`` at frame-entry time. Element accesses
+    # like ``args[N]`` produce a ``GetItemSource`` whose base has this flag.
+    # Useful for distinguishing ``*args`` from a regular list-typed input.
+    # ``repr=False`` so the vast majority of locals (which are not varargs) do
+    # not get a noisy ``is_varargs=False`` in every debug string.
+    is_varargs: bool = dataclasses.field(default=False, repr=False)
+
+    # Whether this local is the function's varkw (``**kwargs``) parameter.
+    # Set from ``co_flags & CO_VARKEYWORDS`` at frame-entry time. Element
+    # accesses like ``kwargs["k"]`` produce a ``DictGetItemSource`` whose base
+    # has this flag. ``repr=False`` for the same reason as ``is_varargs``.
+    is_varkw: bool = dataclasses.field(default=False, repr=False)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_derefed_cell_contents:
             codegen.load_deref(self.local_name)
         else:
             codegen.append_output(codegen.create_load(self.local_name))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.local_name
 
     @property
     def guard_source(self) -> GuardSource:
@@ -234,6 +251,9 @@ class GlobalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.global_name
+
     @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
@@ -299,6 +319,13 @@ class AttrSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
+        if self.member.isidentifier():
+            return f"{base}.{self.member}"
+        else:
+            return f"getattr({base}, {self.member!r})"
+
     @functools.cached_property
     def _name_template(self) -> str:
         if not self.member.isidentifier():
@@ -362,9 +389,9 @@ class TypeDictSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
-        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
-        # registers that its working on a dict object.
+        # registers that it's working on a dict object.
         return "dict({0}.__dict__)"
 
 
@@ -790,10 +817,24 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = utils.set_getitem(
+            self.base.get_value(globals, locals, cache), self.index
+        )
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
+        return f"___set_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
     def is_dict_key(self) -> bool:
         return False
@@ -827,6 +868,14 @@ class DictGetItemSource(ChainedSource):
         else:
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
+        if isinstance(self.index, ConstDictKeySource):
+            index = self.index.reconstruct_pycode(codegen)
+        else:
+            index = repr(self.index)
+        return f"{base}[{index}]"
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -1000,6 +1049,9 @@ class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.base.reconstruct_pycode(codegen)
+
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source]
@@ -1047,11 +1099,6 @@ class ImportSource(Source):
     in case the user has overridden the module name in their local namespace"""
 
     module_name: str
-
-    def __post_init__(self) -> None:
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -1136,6 +1183,27 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+# Guard-only source that yields the inner tensor of an AsyncCollectiveTensor
+# (ACT) and the base value unchanged for a plain Tensor. Used to guard on the
+# unwrapped tensor so a graph traced on an ACT can be reused when the resolved
+# plain Tensor is passed at runtime. See
+# torch._dynamo.variables.builder.VariableBuilder.wrap_tensor.
+@dataclass_with_cached_hash(frozen=True)
+class UnwrapCollectiveTensorSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.guards", "unwrap_async_collective_tensor"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "___unwrap_async_collective_tensor({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)
@@ -1150,6 +1218,30 @@ class CallMethodItemSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         return "{0}.item()"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarGetSource(ChainedSource):
+    has_default: bool = False
+    default_value: Any = None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_get_method():
+            codegen(self.base)
+            codegen.extend_output(codegen.create_load_attrs("get"))
+
+        codegen.add_push_null(load_get_method)
+        if self.has_default:
+            codegen.append_output(codegen.create_load_const(self.default_value))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            codegen.extend_output(create_call_function(0, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        if self.has_default:
+            return f"{{0}}.get({_esc_str(self.default_value, apply_repr=True)})"
+        return "{0}.get()"
 
 
 # This is a synthetic source that is associated with the singleton

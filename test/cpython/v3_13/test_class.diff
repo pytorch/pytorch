@@ -1,0 +1,85 @@
+diff --git a/test/cpython/v3_13/test_class.py b/test/cpython/v3_13/test_class.py
+index d2df6228ec4..6e2caf35bf0 100644
+--- a/test/cpython/v3_13/test_class.py
++++ b/test/cpython/v3_13/test_class.py
+@@ -1,6 +1,25 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_class.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
++
++# ======= END DYNAMO PATCH =======
++
+ "Test the functionality of Python classes implementing operators."
+ 
+ import unittest
++from test import support
+ from test.support import cpython_only, import_helper, script_helper
+ 
+ testmeths = [
+@@ -134,8 +153,9 @@ for method in testmeths:
+ AllTests = type("AllTests", (object,), d)
+ del d, statictests, method, method_template
+ 
+-class ClassTests(unittest.TestCase):
++class ClassTests(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         callLst[:] = []
+ 
+     def assertCallStack(self, expected_calls):
+@@ -838,8 +858,24 @@ class ClassTests(unittest.TestCase):
+             Type(i)
+         self.assertEqual(calls, 100)
+ 
++    def test_specialization_class_call_doesnt_crash(self):
++        # gh-123185
++
++        class Foo:
++            def __init__(self, arg):
++                pass
++
++        for _ in range(8):
++            try:
++                Foo()
++            except:
++                pass
++
+ 
+-from _testinternalcapi import has_inline_values
++try:
++    from _testinternalcapi import has_inline_values
++except ImportError:
++    has_inline_values = None
+ 
+ Py_TPFLAGS_MANAGED_DICT = (1 << 2)
+ 
+@@ -856,7 +892,8 @@ class WithAttrs:
+         self.d = 4
+ 
+ 
+-class TestInlineValues(unittest.TestCase):
++@skipIfTorchDynamo("CPython only")
++class TestInlineValues(CPythonTestCase):
+ 
+     def test_flags(self):
+         self.assertEqual(Plain.__flags__ & Py_TPFLAGS_MANAGED_DICT, Py_TPFLAGS_MANAGED_DICT)
+@@ -1001,5 +1038,5 @@ class TestInlineValues(unittest.TestCase):
+         self.assertFalse(out, msg=out.decode('utf-8'))
+         self.assertFalse(err, msg=err.decode('utf-8'))
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()
