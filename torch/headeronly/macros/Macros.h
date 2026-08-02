@@ -555,40 +555,51 @@ __host__ __device__
   }
 #else
 #if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
-template <unsigned N, unsigned F, unsigned M>
-__device__ __attribute__((flatten)) void c10_rocm_assert_literal(
-    const char (&prefix)[N],
-    const char (&func)[F],
-    const char (&suffix)[M]) {
+#include <cstddef>
+
+// Merge prefix + __func__ + suffix at the macro call site (not via helper params).
+template <std::size_t N1, std::size_t N2, std::size_t N3,
+          std::size_t Out = N1 + N2 + N3 - 2>
+constexpr auto c10_rocm_assert_concat(const char (&a)[N1], const char (&b)[N2],
+                                      const char (&c)[N3]) {
+  struct {
+    char data[Out];
+  } msg{};
+  std::size_t i = 0;
+  for (std::size_t j = 0; j < N1 - 1; ++j) {
+    msg.data[i++] = a[j];
+  }
+  for (std::size_t j = 0; j < N2 - 1; ++j) {
+    msg.data[i++] = b[j];
+  }
+  for (std::size_t j = 0; j < N3; ++j) {
+    msg.data[i++] = c[j];
+  }
+  return msg;
+}
+
+template <unsigned N>
+__device__ __attribute__((flatten)) void c10_rocm_assert_one_shot(
+    const char (&msg)[N]) {
   auto d = __ockl_fprintf_stderr_begin();
-  __ockl_fprintf_append_string_n(d, prefix, N - 1, 0);
-  __ockl_fprintf_append_string_n(d, func, F - 1, 0);
-  __ockl_fprintf_append_string_n(d, suffix, M - 1, 1);
+  __ockl_fprintf_append_string_n(d, msg, N - 1, 1);
   __builtin_trap();
 }
 
-template <unsigned P, unsigned F, unsigned S>
-__host__ __device__ inline void c10_rocm_kernel_assert(
-    const char* cond,
-    const char* file,
-    unsigned int line,
-    const char (&func)[F],
-    const char (&prefix)[P],
-    const char (&suffix)[S]) {
 #if defined(__HIP_DEVICE_COMPILE__)
-  (void)cond;
-  (void)file;
-  (void)line;
-  c10_rocm_assert_literal(prefix, func, suffix);
-#else
-  (void)prefix;
-  (void)suffix;
-  __assert_fail(cond, file, line, func);
-#endif
-}
-
 #define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
-  c10_rocm_kernel_assert(cond, file, line, func, prefix, suffix)
+  do {                                                                       \
+    (void)cond;                                                              \
+    (void)file;                                                              \
+    (void)line;                                                              \
+    constexpr auto _c10_assert_msg =                                         \
+        c10_rocm_assert_concat(prefix, func, suffix);                        \
+    c10_rocm_assert_one_shot(_c10_assert_msg.data);                          \
+  } while (0)
+#else
+#define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
+  __assert_fail(cond, file, line, func)
+#endif
 #else
 #define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
   __assert_fail(cond, file, line, func)
