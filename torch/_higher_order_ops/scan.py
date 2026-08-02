@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
-import contextlib
 import enum
 import functools
 import itertools
 import logging
-import os
+import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 import torch._prims_common as utils
@@ -58,9 +57,29 @@ aten = torch._ops.ops.aten
 # the chunk cap keeps the reduction parallel: n_chunks grows with both scan_length
 # and addi size, and past a few dozen chunks the extra passes cost far more time
 # than they save memory (measured 10x slower for ~4MB on a 1024-step scan).
-# Override via scan_backward_mode(), not by assigning these directly.
-_ADDI_GRAD_CHUNK_BUDGET_ELEMS = 2**22
-_ADDI_GRAD_MAX_CHUNKS = 16
+
+
+class _ScanBackwardConfig(NamedTuple):
+    parallel_backward: bool
+    addi_grad_chunk_budget_elems: int
+    addi_grad_max_chunks: int
+
+
+# Never mutated; scan()'s signature is the single source of truth for defaults.
+_DEFAULT_SCAN_BACKWARD_CONFIG = _ScanBackwardConfig(False, 2**22, 16)
+
+# Carries scan()'s backward config across the scan_op HOP dispatch boundary into
+# scan_autograd(), since scan_op's schema (shared by all dispatch keys) has no
+# room for autograd-only settings. scan() saves/restores this around its own
+# call, per-thread (not a contextvars.ContextVar: Dynamo traces scan()'s own
+# body and does not support ContextVar.set()); scan_autograd() reads it and
+# captures it on the autograd.Function's ctx before returning, so later
+# backward() calls don't depend on this thread-local.
+_scan_backward_config_local = threading.local()
+
+
+def _get_scan_backward_config() -> _ScanBackwardConfig:
+    return getattr(_scan_backward_config_local, "config", _DEFAULT_SCAN_BACKWARD_CONFIG)
 
 
 def wrap_combine_fn_flat(
@@ -103,6 +122,9 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    parallel_backward: bool = False,
+    addi_grad_chunk_budget_elems: int = 2**22,
+    addi_grad_max_chunks: int = 16,
 ) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
@@ -130,6 +152,18 @@ def scan(
     Kwargs:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        parallel_backward (bool): selects the backward algorithm: the default sequential reversed-scan
+            (``False``), or an associative-scan based parallel backward (``True``). The parallel backward
+            trades memory that grows with the scan length for a backward pass whose wall-clock time does
+            not scale with it, so it's only worth it for long scans; see the associative_scan-based
+            implementation in ``ScanAutogradImpl._call_backward_parallel`` for details.
+        addi_grad_chunk_budget_elems (int): only used when ``parallel_backward=True``. The parallel
+            backward's additional-inputs gradient is reduced over time in chunks to bound a
+            ``[scan_length, additional_inputs_numel]`` temporary; below this many total elements, no
+            chunking is applied. Default ``2**22``.
+        addi_grad_max_chunks (int): only used when ``parallel_backward=True``. Caps the number of chunks
+            used by the reduction above so that too many small chunks don't cost more in extra passes than
+            they save in memory. Default ``16``.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -227,12 +261,24 @@ def scan(
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
         return scan_op(combine_fn, leaves_init, leaves_xs, ())
 
-    carry, out = _maybe_compile_and_run_fn(
-        run_flattened_scan,
-        combine_fn,
-        leaves_init,
-        leaves_xs,
+    # scan_op's schema is shared by every dispatch key (Proxy, FakeTensor,
+    # functionalize, Vmap, ...), none of which care how the backward is
+    # computed, so this config rides along on a thread-local instead: only
+    # scan_autograd() (the Autograd dispatch key's impl) reads it, and it does
+    # so before returning, capturing it for this call's backward.
+    prev_backward_config = _get_scan_backward_config()
+    _scan_backward_config_local.config = _ScanBackwardConfig(
+        parallel_backward, addi_grad_chunk_budget_elems, addi_grad_max_chunks
     )
+    try:
+        carry, out = _maybe_compile_and_run_fn(
+            run_flattened_scan,
+            combine_fn,
+            leaves_init,
+            leaves_xs,
+        )
+    finally:
+        _scan_backward_config_local.config = prev_backward_config
 
     if reverse:
         out = pytree.tree_map(lambda elem: elem.flip([0]), out)
@@ -520,62 +566,6 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
     return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
 
-# torch.scan's backward defaults to the original sequential reversed-scan
-# algorithm (ScanAutogradImpl._call_backward_sequential), matching upstream
-# behavior. Use scan_backward_mode(parallel=True) to opt into the
-# associative-scan based parallel backward (ScanAutogradImpl._call_backward_parallel)
-# instead, and/or to override the additional-input gradient chunking constants
-# (see their definitions above).
-#
-# TORCH_SCAN_PARALLEL_BACKWARD=1 flips this default at import time, so the
-# existing scan test suite can be re-run against the parallel backward
-# (e.g. in a separate CI job) without editing the test files themselves.
-_scan_use_parallel_backward = os.environ.get("TORCH_SCAN_PARALLEL_BACKWARD") == "1"
-
-
-@contextlib.contextmanager
-def scan_backward_mode(
-    parallel: bool | None = None,
-    *,
-    addi_grad_chunk_budget_elems: int | None = None,
-    addi_grad_max_chunks: int | None = None,
-):
-    """Temporarily configure torch.scan's backward.
-
-    ``parallel``: select the original sequential reversed-scan backward
-    (default, ``False``) or the associative-scan based parallel backward
-    (``True``).
-
-    ``addi_grad_chunk_budget_elems``/``addi_grad_max_chunks``: override the
-    parallel backward's additional-input gradient chunking (see
-    ``_ADDI_GRAD_CHUNK_BUDGET_ELEMS``/``_ADDI_GRAD_MAX_CHUNKS``); no effect in
-    sequential mode. Any argument left as ``None`` keeps its current value.
-    """
-    global \
-        _scan_use_parallel_backward, \
-        _ADDI_GRAD_CHUNK_BUDGET_ELEMS, \
-        _ADDI_GRAD_MAX_CHUNKS
-    prev = (
-        _scan_use_parallel_backward,
-        _ADDI_GRAD_CHUNK_BUDGET_ELEMS,
-        _ADDI_GRAD_MAX_CHUNKS,
-    )
-    if parallel is not None:
-        _scan_use_parallel_backward = parallel
-    if addi_grad_chunk_budget_elems is not None:
-        _ADDI_GRAD_CHUNK_BUDGET_ELEMS = addi_grad_chunk_budget_elems
-    if addi_grad_max_chunks is not None:
-        _ADDI_GRAD_MAX_CHUNKS = addi_grad_max_chunks
-    try:
-        yield
-    finally:
-        (
-            _scan_use_parallel_backward,
-            _ADDI_GRAD_CHUNK_BUDGET_ELEMS,
-            _ADDI_GRAD_MAX_CHUNKS,
-        ) = prev
-
-
 class ScanAutogradOp(torch.autograd.Function):
     """
     NOTE: [scan partial grad handling]
@@ -598,13 +588,22 @@ class ScanAutogradOp(torch.autograd.Function):
         n_init,
         n_xs,
         n_additional_inputs,
+        parallel_backward,
+        addi_grad_chunk_budget_elems,
+        addi_grad_max_chunks,
         *operands,
     ):
         init, xs, additional_inputs = split_into_chunks(
             operands, [n_init, n_xs, n_additional_inputs]
         )
         ctx._scan_impl = ScanAutogradImpl(
-            hop_partitioned_graph, init, xs, additional_inputs
+            hop_partitioned_graph,
+            init,
+            xs,
+            additional_inputs,
+            parallel_backward,
+            addi_grad_chunk_budget_elems,
+            addi_grad_max_chunks,
         )
         with torch._C._AutoDispatchBelowAutograd():
             return ctx._scan_impl.call_forward()
@@ -612,6 +611,9 @@ class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_fw_outputs):
         return (
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -655,12 +657,22 @@ class ScanAutogradImpl:
     """
 
     def __init__(
-        self, hop_partitioned_graph: HopPartitionedGraph, init, xs, additional_inputs
+        self,
+        hop_partitioned_graph: HopPartitionedGraph,
+        init,
+        xs,
+        additional_inputs,
+        parallel_backward: bool = False,
+        addi_grad_chunk_budget_elems: int = 2**22,
+        addi_grad_max_chunks: int = 16,
     ):
         self.hop_partitioned_graph = hop_partitioned_graph
         self.init = init
         self.xs = xs
         self.additional_inputs = additional_inputs
+        self.parallel_backward = parallel_backward
+        self.addi_grad_chunk_budget_elems = addi_grad_chunk_budget_elems
+        self.addi_grad_max_chunks = addi_grad_max_chunks
         self.forward_intermediates_handling_policies: list[
             ScanForwardIntermediatesHandlingPolicy
         ] = []
@@ -856,7 +868,7 @@ class ScanAutogradImpl:
         and returns (*grad_init, *grad_xs, *grad_additional_inputs).
 
         Dispatches to the parallel (associative-scan) or sequential (reversed
-        torch.scan) backward below, selected via `scan_backward_mode()`.
+        torch.scan) backward below, selected via scan()'s parallel_backward argument.
         """
         n_carry = len(self.init)
         grad_carry, grad_ys = grad_fw_outputs[:n_carry], grad_fw_outputs[n_carry:]
@@ -882,7 +894,7 @@ class ScanAutogradImpl:
 
         impl = (
             self._call_backward_parallel
-            if _scan_use_parallel_backward
+            if self.parallel_backward
             else self._call_backward_sequential
         )
         return impl(grad_carry, grad_ys, additional_inputs_tensor_masks, scan_length)
@@ -1112,8 +1124,8 @@ class ScanAutogradImpl:
             chunk = min(
                 scan_length,
                 max(
-                    -(-scan_length // _ADDI_GRAD_MAX_CHUNKS),
-                    _ADDI_GRAD_CHUNK_BUDGET_ELEMS // addi_numel,
+                    -(-scan_length // self.addi_grad_max_chunks),
+                    self.addi_grad_chunk_budget_elems // addi_numel,
                 ),
             )
 
@@ -1295,6 +1307,7 @@ class ScanAutogradImpl:
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
+    backward_config = _get_scan_backward_config()
     with disable_proxy_modes_tracing():
         # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
@@ -1326,6 +1339,9 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
         len(init),
         len(xs),
         len(additional_inputs),
+        backward_config.parallel_backward,
+        backward_config.addi_grad_chunk_budget_elems,
+        backward_config.addi_grad_max_chunks,
         *init,
         *xs,
         *additional_inputs,
