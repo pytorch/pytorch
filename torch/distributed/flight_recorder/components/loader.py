@@ -28,7 +28,7 @@ logger: FlightRecorderLogger = FlightRecorderLogger()
 def read_dump(prefix: str, filename: str) -> dict[str, str | int | list[Any]]:
     basename = os.path.basename(filename)
 
-    rank = int(basename[len(prefix) :])
+    rank = int(basename[len(prefix):])
     host_name = f"host_rank{rank}"
 
     with open(filename, "rb") as infile:
@@ -73,28 +73,36 @@ def _determine_prefix(files: list[str]) -> str:
 
 
 def read_dir(args: argparse.Namespace) -> tuple[dict[str, dict[str, Any]], str]:
+    # Disable GC while loading large pickle files for performance, but restore
+    # the caller's previous GC state unconditionally on both success and failure
+    # paths (resolves #191396 -- previously GC was left permanently disabled).
+    gc_was_enabled = gc.isenabled()
     gc.disable()
-    prefix = args.prefix
-    details = {}
-    t0 = time.time()
-    version = ""
-    filecount = 0
-    if not os.path.isdir(args.trace_dir):
-        raise AssertionError(f"folder {args.trace_dir} does not exist")
-    for root, _, files in os.walk(args.trace_dir):
-        if prefix is None:
-            prefix = _determine_prefix(files)
-        for f in files:
-            if (offset := f.find(prefix)) == -1:
-                continue
-            details[f] = read_dump(f[:offset] + prefix, os.path.join(root, f))
-            filecount += 1
-            if not version:
-                version = str(details[f]["version"])
-    tb = time.time()
-    if len(details) <= 0:
-        raise AssertionError(
-            f"no files loaded from {args.trace_dir} with prefix {prefix}"
-        )
-    logger.debug("loaded %s files in %ss", filecount, tb - t0)
-    return details, version
+    try:
+        prefix = args.prefix
+        details = {}
+        t0 = time.time()
+        version = ""
+        filecount = 0
+        if not os.path.isdir(args.trace_dir):
+            raise AssertionError(f"folder {args.trace_dir} does not exist")
+        for root, _, files in os.walk(args.trace_dir):
+            if prefix is None:
+                prefix = _determine_prefix(files)
+            for f in files:
+                if (offset := f.find(prefix)) == -1:
+                    continue
+                details[f] = read_dump(f[:offset] + prefix, os.path.join(root, f))
+                filecount += 1
+                if not version:
+                    version = str(details[f]["version"])
+        tb = time.time()
+        if len(details) <= 0:
+            raise AssertionError(
+                f"no files loaded from {args.trace_dir} with prefix {prefix}"
+            )
+        logger.debug("loaded %s files in %ss", filecount, tb - t0)
+        return details, version
+    finally:
+        if gc_was_enabled:
+            gc.enable()
