@@ -962,6 +962,18 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(ValueError, err):
             torch.nn.LPPool3d(norm_type=0, kernel_size=3)
 
+    def test_LPPool1d_tuple_kernel_size(self, device):
+        x = torch.rand(20, 16, 50, device=device)
+        ref = F.lp_pool1d(x, 2, 2)
+        res_tuple = F.lp_pool1d(x, 2, (2,))
+        res_list = F.lp_pool1d(x, 2, [2])
+        res_mod_tuple = torch.nn.LPPool1d(2, (2,)).to(device)(x)
+        res_mod_list = torch.nn.LPPool1d(2, [2]).to(device)(x)
+        self.assertEqual(ref, res_tuple)
+        self.assertEqual(ref, res_list)
+        self.assertEqual(ref, res_mod_tuple)
+        self.assertEqual(ref, res_mod_list)
+
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
