@@ -964,6 +964,16 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
+            # masked.median raises ValueError for fully-masked rows on
+            # non-floating dtypes, but the trivial 0-d sample exercised by
+            # test_dtypes succeeds for ints / bool / complex64, fooling the
+            # detector into believing these dtypes are supported.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_dtypes",
+                device_type="mps",
+            ),
         ),
         sample_inputs_func=partial(
             sample_inputs_masked_softmax, use_zero_dimensions=False
@@ -1327,12 +1337,6 @@ op_db: list[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,

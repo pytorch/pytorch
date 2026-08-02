@@ -11,12 +11,14 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 get_pip_version() {
-  conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}'
+  env_run pip list | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
 if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
+  # XPU believes new ninja is bad, see https://github.com/intel/intel-xpu-backend-for-triton/commit/fe21682167b831e48bba2544712012abe2f74bb1
+  pip_install ninja==1.11.1.4
 elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
@@ -66,15 +68,15 @@ if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" 
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
-  CXX=g++-9 conda_run python -m build --wheel --no-isolation
+  CXX=g++-9 env_run python -m build --wheel --no-isolation
 elif [ -n "${UBUNTU_VERSION}" ] && [ -n "${CLANG_VERSION}" ]; then
   # Triton needs <filesystem> which surprisingly is not available with clang-9 toolchain
   add-apt-repository -y ppa:ubuntu-toolchain-r/test
   apt-get install -y g++-9
 
-  CXX=g++-9 conda_run python -m build --wheel --no-isolation
+  CXX=g++-9 env_run python -m build --wheel --no-isolation
 else
-  conda_run python -m build --wheel --no-isolation
+  env_run python -m build --wheel --no-isolation
 fi
 
 # Copy the wheel to /opt for multi stage docker builds

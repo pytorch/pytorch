@@ -626,7 +626,7 @@ void eq_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_V2(iter.common_dtype(), "eq_cpu", AT_WRAP([&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> bool { return a == b; });
-    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
   } else {
     AT_DISPATCH_V2(iter.common_dtype(), "eq_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
@@ -636,7 +636,7 @@ void eq_kernel(TensorIteratorBase& iter) {
           },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               -> Vectorized<scalar_t> { return a.eq(b); });
-    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBComplex32, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
   }
 }
 
@@ -645,7 +645,7 @@ void ne_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_V2(iter.common_dtype(), "ne_cpu", AT_WRAP([&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> bool { return a != b; });
-    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
   } else {
     AT_DISPATCH_V2(iter.common_dtype(), "ne_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
@@ -655,7 +655,7 @@ void ne_kernel(TensorIteratorBase& iter) {
           },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               -> Vectorized<scalar_t> { return a.ne(b); });
-    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBComplex32, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
   }
 }
 
@@ -663,14 +663,14 @@ void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a || b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "maximum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::maximum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -698,14 +698,14 @@ void minimum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a && b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "minimum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::minimum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,

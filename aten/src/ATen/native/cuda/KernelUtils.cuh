@@ -90,10 +90,11 @@ idx(const size_t nc,
 }
 
 // for channels-last
-__device__ __forceinline__ size_t
+template <typename index_t = size_t>
+__device__ __forceinline__ index_t
 idx_cl(
-  const size_t n, const size_t h, const size_t w, const size_t c,
-  const size_t height, const size_t width, const size_t channel
+  const index_t n, const index_t h, const index_t w, const index_t c,
+  const index_t height, const index_t width, const index_t channel
 ) {
   return ((n * height + h) * width + w) * channel + c;
 }
@@ -257,9 +258,12 @@ __device__ inline void cmtdStore(void* address, T value) {
       if constexpr (wait_for_commit)
       {
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
-#ifdef __gfx1250__
-        asm volatile("s_wait_loadcnt(0)" ::: "memory");
+#if defined(__GFX12__)
+        asm volatile("s_wait_storecnt(0)" ::: "memory");
+#elif defined(__GFX10__) || defined(__GFX11__)
+        asm volatile("s_waitcnt_vscnt null, 0" ::: "memory");
 #else
+        // Older architectures have only 'vmcnt' counter.
         asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
 #endif
         __atomic_signal_fence(__ATOMIC_SEQ_CST);

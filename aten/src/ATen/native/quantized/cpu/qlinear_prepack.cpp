@@ -97,8 +97,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     }
   }
 
-  int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
+  const int8_t* weight_ptr_int8 =
+      reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
 
   std::vector<int32_t> col_offsets(N);
   calc_col_offsets_transpose(
@@ -198,7 +198,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   at::Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  const float* weight_contig_ptr = weight_contig.const_data_ptr<float>();
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -590,8 +590,11 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -602,7 +605,8 @@ class QLinearPackWeightInt8 final {
     }
 #endif
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
     }
 #endif // #if AT_MKLDNN_ENABLED()
