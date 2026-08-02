@@ -1673,9 +1673,9 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   const auto dtypeStr = scalarToMetalTypeString(out);
   auto factorDiagonalPSO =
-      lib.getPipelineStateForFunc(fmt::format("factorDiagonalBlock{}_{}", upper ? "U" : "L", dtypeStr));
-  auto applyTRSMPSO = lib.getPipelineStateForFunc(fmt::format("applyTRSM{}_{}", upper ? "U" : "L", dtypeStr));
-  auto applySYRKPSO = lib.getPipelineStateForFunc(fmt::format("applySYRK{}_{}", upper ? "U" : "L", dtypeStr));
+      lib.getPipelineStateForFunc(fmt::format("factorDiagonalBlock{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applyTRSMPSO = lib.getPipelineStateForFunc(fmt::format("applyTRSM{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applySYRKPSO = lib.getPipelineStateForFunc(fmt::format("applySYRK{}_{}", upper ? 'U' : 'L', dtypeStr));
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
