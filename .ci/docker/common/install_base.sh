@@ -20,6 +20,12 @@ install_ubuntu() {
     exit 1
   fi
 
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    valgrind="" # it's not available on riscv64 yet
+  else
+    valgrind="valgrind"
+  fi
+
   # Install common dependencies
   apt-get update
   # Install prerequisites for add-apt-repository (needs gpg-agent for PPA key import)
@@ -34,6 +40,7 @@ install_ubuntu() {
     $numpy_deps \
     ${deploy_deps} \
     ${cmake3} \
+    ${valgrind} \
     apt-transport-https \
     autoconf \
     automake \
@@ -62,12 +69,19 @@ install_ubuntu() {
     gpg-agent \
     gdb \
     bc \
-    zip \
-    valgrind
+    zip
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
+
+  GIT_VERSION=$(git --version | awk '{print $3}')
+  GIT_MAJOR=${GIT_VERSION%%.*}
+  GIT_MINOR=${GIT_VERSION#*.}; GIT_MINOR=${GIT_MINOR%%.*}
+  if (( GIT_MAJOR < 2 || (GIT_MAJOR == 2 && GIT_MINOR < 36) )); then
+    echo "ERROR: git ${GIT_VERSION} is too old; need >= 2.36" >&2
+    exit 1
+  fi
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean

@@ -75,9 +75,10 @@ struct TORCH_API PyCompilerInterface {
       size_t hook_input_id) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
+  virtual at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
@@ -1060,7 +1061,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
@@ -1157,7 +1158,7 @@ struct IValuePacker {
       // Unfortunately, we don't know how to handle this type yet.
       // To get this new type to work with Compiled Autograd, please
       // either change it to be an IValue-constructible type, or
-      // define how to pack and unpack an object of this time into an IValue
+      // define how to pack and unpack an object of this type into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
       TORCH_CHECK_NOT_IMPLEMENTED(
@@ -1337,11 +1338,11 @@ struct IValuePacker<TypeAndSize> {
     return tuple;
   }
   static TypeAndSize unpack(const at::IValue& t) {
-    auto tuple =
+    auto [sym_sizes, options] =
         t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
     TypeAndSize result;
-    result.sym_sizes = std::get<0>(tuple);
-    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    result.sym_sizes = std::move(sym_sizes);
+    result.options = unpack_TensorOptions(options);
     return result;
   }
   static at::TypePtr packed_type() {

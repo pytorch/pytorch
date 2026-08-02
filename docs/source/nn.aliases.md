@@ -334,6 +334,16 @@ The following are aliases to their counterparts in ``torch.nn`` in the ``torch.n
 
 ```
 
+## torch.nn.modules.utils
+
+```{eval-rst}
+.. currentmodule:: torch.nn.modules.utils
+```
+
+```{eval-rst}
+.. autofunction:: consume_prefix_in_state_dict_if_present
+```
+
 ## torch.nn.utils
 
 The following are aliases to their counterparts in ``torch.nn.utils`` in nested namespaces.

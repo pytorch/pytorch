@@ -414,7 +414,7 @@ ExprPtr PolynomialTransformer::mutate(const AddPtr& v) {
   }
 
   // If this is a floating point Add then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Add>(lhs_new, rhs_new);
@@ -598,7 +598,7 @@ ExprPtr PolynomialTransformer::mutate(const SubPtr& v) {
   }
 
   // If this is a floating point Sub then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Sub>(lhs_new, rhs_new);
@@ -938,7 +938,7 @@ ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
   }
 
   // If this is a floating point Mul then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Mul>(lhs_new, rhs_new);
@@ -1089,7 +1089,7 @@ ExprPtr PolynomialTransformer::mutate(const DivPtr& v) {
   }
 
   // If this is a floating point Div then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Div>(lhs_new, rhs_new);
