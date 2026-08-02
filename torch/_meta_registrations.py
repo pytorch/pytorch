@@ -2736,6 +2736,31 @@ def calc_conv_nd_return_shape(
             ),
         )
 
+    elif output_padding_list:
+        # Mirrors C++ check_shape_forward (Convolution.cpp) and
+        # slow_conv_transpose2d_shape_check (NaiveConvolutionTranspose2d.cpp).
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        torch._check(
+            sym_and(*[op >= 0 for op in output_padding_list]),
+            lambda: "negative output_padding is not supported",
+        )
+        torch._check(
+            sym_and(
+                *[
+                    sym_or(op < s, op < d)
+                    for op, s, d in zip(
+                        output_padding_list, stride, dilation, strict=True
+                    )
+                ]
+            ),
+            lambda: (
+                f"output padding must be smaller than either stride or dilation, "
+                f"but got output_padding: {output_padding_list}, "
+                f"stride: {stride}, dilation: {dilation}"
+            ),
+        )
+
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
         if output_padding_list:
