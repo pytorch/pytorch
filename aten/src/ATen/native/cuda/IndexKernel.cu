@@ -306,14 +306,14 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
   });
 }
 
-template <typename scalar_t, typename index_t, typename func_t>
+template <typename scalar_t, typename index_t, typename index_value_t, typename func_t>
 void cuda_take_put_kernel(
   TensorIterator& iter,
   const TensorBase& indexed,
   const func_t& f) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      cuda_take_put_kernel<scalar_t, index_t>(sub_iter, indexed, f);
+      cuda_take_put_kernel<scalar_t, index_t, index_value_t>(sub_iter, indexed, f);
     }
     return;
   }
@@ -339,7 +339,7 @@ void cuda_take_put_kernel(
     const auto offsets = offset_calc.get(i);
 
     auto& iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0]);
-    const auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    const auto idx = static_cast<int64_t>(*reinterpret_cast<index_value_t*>(idx_ptr + offsets[1]));
     CUDA_KERNEL_ASSERT(idx < numel && idx >= -numel && "cuda_take_put_kernel() index out of bounds");
     index_t offset = static_cast<index_t>(idx);
     if (offset < 0) {
@@ -362,13 +362,13 @@ void put_kernel(TensorIterator& iter, const TensorBase& output, const bool accum
            auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
              index_t numel = output.numel();
-             cuda_take_put_kernel<scalar_t, index_t>(iter, output,
+             cuda_take_put_kernel<scalar_t, index_t, int64_t>(iter, output,
                  [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
                  });
            }
            else {
-             cuda_take_put_kernel<scalar_t, index_t>(iter, output,
+             cuda_take_put_kernel<scalar_t, index_t, int64_t>(iter, output,
                  [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    indexed_ptr[offset] = iterated;
                  });
@@ -385,10 +385,17 @@ void take_kernel(
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
          const auto* __restrict__ indexed_ptr = input.template const_data_ptr<scalar_t>();
-         cuda_take_put_kernel<scalar_t, index_t>(iter, input,
-            [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
-               iterated = indexed_ptr[offset];
-             });
+         if (iter.input_dtype(0) == ScalarType::Byte) {
+           cuda_take_put_kernel<scalar_t, index_t, uint8_t>(iter, input,
+              [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
+                 iterated = indexed_ptr[offset];
+               });
+         } else {
+           cuda_take_put_kernel<scalar_t, index_t, int64_t>(iter, input,
+              [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
+                 iterated = indexed_ptr[offset];
+               });
+         }
      });
   });
 }
