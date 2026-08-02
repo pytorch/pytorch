@@ -3761,7 +3761,7 @@ inline C10_HOST_DEVICE void temme_ik(T mu, T x, T* K_mu, T* K_mu1) {
     T gp = std::expm1(std::lgamma(T(1.0) + mu));
     T gm = std::expm1(std::lgamma(T(1.0) - mu));
 
-    T a = std::log(x / T(2.0));
+    T a = std::log(x) - c10::ln_2<T>;
     T b = std::exp(mu * a);
     T sigma = -a * mu;
 

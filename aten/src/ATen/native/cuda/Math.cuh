@@ -3141,7 +3141,8 @@ const auto modified_bessel_k_string = modified_bessel_i_string + modified_bessel
         T gp = expm1(lgamma(T(1.0) + mu));
         T gm = expm1(lgamma(T(1.0) - mu));
 
-        T a = log(x / T(2.0));
+        constexpr T ln_2 = T(0.693147180559945309417232121458176);
+        T a = log(x) - ln_2;
         T b = exp(mu * a);
         T sigma = -a * mu;
 
