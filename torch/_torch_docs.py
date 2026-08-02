@@ -11742,8 +11742,8 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    index (LongTensor or ByteTensor): the indices into tensor. ByteTensor indices are
-        supported on CPU and CUDA.
+    index (Tensor): a non-boolean integral tensor containing the indices. On devices
+        other than CPU and CUDA, ``torch.int64`` is required.
 
 Example::
 

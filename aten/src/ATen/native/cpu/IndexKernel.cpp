@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <type_traits>
 
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
@@ -89,19 +90,32 @@ void cpu_take_put_kernel(
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
     for ([[maybe_unused]] const auto elem : c10::irange(n)) {
-      auto idx = static_cast<int64_t>(*reinterpret_cast<index_t*>(index_data_bytes));
+      const auto index_value =
+          *reinterpret_cast<index_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
-      TORCH_CHECK_INDEX(idx >= -numel && idx < numel,
-                        "out of range: tried to access index ",
-                        idx, " on a tensor of ", numel, " elements.");
-      if (idx < 0) {
-        idx += numel;
+      int64_t offset;
+      if constexpr (std::is_unsigned_v<index_t>) {
+        const auto idx = static_cast<uint64_t>(index_value);
+        TORCH_CHECK_INDEX(
+            idx < static_cast<uint64_t>(numel),
+            "out of range: tried to access index ",
+            idx, " on a tensor of ", numel, " elements.");
+        offset = static_cast<int64_t>(idx);
+      } else {
+        auto idx = static_cast<int64_t>(index_value);
+        TORCH_CHECK_INDEX(idx >= -numel && idx < numel,
+                          "out of range: tried to access index ",
+                          idx, " on a tensor of ", numel, " elements.");
+        if (idx < 0) {
+          idx += numel;
+        }
+        offset = idx;
       }
       if (!is_contiguous) {
-        idx = offset_indexed.get(idx);
+        offset = offset_indexed.get(offset);
       }
-      f(iterated, indexed_data, idx);
+      f(iterated, indexed_data, offset);
       iterated_data_bytes += strides[0];
       index_data_bytes += strides[1];
     }
@@ -156,17 +170,17 @@ void take_kernel(
   const TensorBase & input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_cpu", [&] {
-      if (iter.input_dtype(0) == ScalarType::Byte) {
-        cpu_take_put_kernel<scalar_t, uint8_t>(iter, input, false,
-            [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
+      using value_t = scalar_t;
+      AT_DISPATCH_V2(
+        iter.input_dtype(0),
+        "take_cpu_index",
+        AT_WRAP([&] {
+          cpu_take_put_kernel<value_t, scalar_t>(iter, input, false,
+            [](value_t& iterated, const value_t* indexed, const int64_t idx) {
                 iterated = c10::load(&(indexed[idx]));
               });
-      } else {
-        cpu_take_put_kernel<scalar_t, int64_t>(iter, input, false,
-            [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
-                iterated = c10::load(&(indexed[idx]));
-              });
-      }
+        }),
+        AT_EXPAND(AT_INTEGRAL_TYPES_V2));
     });
 }
 

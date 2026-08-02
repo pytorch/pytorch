@@ -3512,16 +3512,60 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(out.item(), source.item())
 
     @onlyOn(["cpu", "cuda"])
-    def test_take_uint8_index(self, device):
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index(self, device, index_dtype):
         source = torch.arange(256, device=device).reshape(16, 16).t()
-        index = torch.tensor([[0, 127], [64, 255]], device=device, dtype=torch.uint8).t()
+        last_index = -1 if torch.iinfo(index_dtype).min < 0 else 255
+        index = torch.tensor(
+            [[0, 127], [64, last_index]], device=device, dtype=index_dtype
+        ).t()
         expected = torch.take(source, index.to(torch.long))
 
+        self.assertFalse(source.is_contiguous())
+        self.assertFalse(index.is_contiguous())
         self.assertEqual(torch.take(source, index), expected)
 
         out = torch.empty_like(index, dtype=source.dtype)
         self.assertEqual(torch.take(source, index, out=out), expected)
         self.assertEqual(out, expected)
+
+    @onlyCPU
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index_out_of_bounds(self, device, index_dtype):
+        source = torch.arange(16, device=device)
+        dtype_info = torch.iinfo(index_dtype)
+        invalid_indices = [source.numel(), dtype_info.max]
+        if dtype_info.min < 0:
+            invalid_indices.extend([-source.numel() - 1, dtype_info.min])
+
+        for invalid_index in invalid_indices:
+            index = torch.tensor([invalid_index], device=device, dtype=index_dtype)
+            with self.assertRaisesRegex(IndexError, "out of range"):
+                torch.take(source, index)
 
     # FIXME: find a test suite for the put operator
     # The bool instance does not work on GPU. See

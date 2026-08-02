@@ -1026,12 +1026,13 @@ Tensor& _index_put_impl_(
 
 Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   // Type and device checks
-  const bool supports_byte_indices =
+  const bool supports_integral_indices =
       index.device().is_cpu() || index.device().is_cuda();
   TORCH_CHECK(
       index.scalar_type() == ScalarType::Long ||
-          (index.scalar_type() == ScalarType::Byte && supports_byte_indices),
-      "take(): Expected a long tensor for index, or a byte tensor on CPU or CUDA, but got ",
+          (supports_integral_indices &&
+           isIntegralType(index.scalar_type(), /*includeBool=*/false)),
+      "take(): Expected a long tensor for index on all devices, or any non-boolean integral tensor on CPU or CUDA, but got ",
       index.scalar_type())
   TORCH_CHECK(
       self.scalar_type() == out.scalar_type(),

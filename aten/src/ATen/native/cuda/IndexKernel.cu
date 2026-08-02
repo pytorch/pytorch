@@ -339,11 +339,24 @@ void cuda_take_put_kernel(
     const auto offsets = offset_calc.get(i);
 
     auto& iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0]);
-    const auto idx = static_cast<int64_t>(*reinterpret_cast<index_value_t*>(idx_ptr + offsets[1]));
-    CUDA_KERNEL_ASSERT(idx < numel && idx >= -numel && "cuda_take_put_kernel() index out of bounds");
-    index_t offset = static_cast<index_t>(idx);
-    if (offset < 0) {
-      offset += numel;
+    const auto index_value =
+        *reinterpret_cast<index_value_t*>(idx_ptr + offsets[1]);
+    index_t offset;
+    if constexpr (std::is_unsigned_v<index_value_t>) {
+      const auto idx = static_cast<uint64_t>(index_value);
+      CUDA_KERNEL_ASSERT(
+          idx < static_cast<uint64_t>(numel) &&
+          "cuda_take_put_kernel() index out of bounds");
+      offset = static_cast<index_t>(idx);
+    } else {
+      const auto idx = static_cast<int64_t>(index_value);
+      CUDA_KERNEL_ASSERT(
+          idx < numel && idx >= -numel &&
+          "cuda_take_put_kernel() index out of bounds");
+      offset = static_cast<index_t>(idx);
+      if (offset < 0) {
+        offset += numel;
+      }
     }
     if (!is_contiguous) {
       offset = offset_indexed.get(offset)[0];
@@ -381,21 +394,22 @@ void take_kernel(
   TensorIterator& iter,
   const TensorBase& input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "take_cuda", [&] {
+    using value_t = scalar_t;
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template const_data_ptr<scalar_t>();
-         if (iter.input_dtype(0) == ScalarType::Byte) {
-           cuda_take_put_kernel<scalar_t, index_t, uint8_t>(iter, input,
-              [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
-                 iterated = indexed_ptr[offset];
-               });
-         } else {
-           cuda_take_put_kernel<scalar_t, index_t, int64_t>(iter, input,
-              [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
-                 iterated = indexed_ptr[offset];
-               });
-         }
+         using offset_t = index_t;
+         const auto* __restrict__ indexed_ptr = input.template const_data_ptr<value_t>();
+         AT_DISPATCH_V2(
+           iter.input_dtype(0),
+           "take_cuda_index_value",
+           AT_WRAP([&] {
+             cuda_take_put_kernel<value_t, offset_t, scalar_t>(iter, input,
+                [indexed_ptr] __device__(value_t& iterated, const offset_t offset) {
+                   iterated = indexed_ptr[offset];
+                 });
+           }),
+           AT_EXPAND(AT_INTEGRAL_TYPES_V2));
      });
   });
 }
