@@ -700,9 +700,13 @@ void check_rnn_cell_forward_input(const Tensor& input, const c10::SymInt& input_
 
 void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const c10::SymInt& hidden_size, const c10::SymInt& hidden_label) {
   TORCH_CHECK(
-    input.dim() == hx.dim(),
-    "Expected input and hidden", hidden_label, " to have the same number of "
-    "dimensions, but got input.dim()=", input.dim(), " and hidden.dim()=", hx.dim());
+    input.dim() == 2,
+    "Expected 2D input (batch x feature), but got ", input.dim(), "D input");
+
+  TORCH_CHECK(
+    hx.dim() == 2,
+    "Expected 2D hidden", hidden_label, " (batch x hidden_size), but got ",
+    hx.dim(), "D tensor");
 
   TORCH_CHECK(
     input.sym_size(0) == hx.sym_size(0),
