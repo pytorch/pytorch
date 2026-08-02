@@ -3720,7 +3720,7 @@ inline C10_HOST_DEVICE bool bessel_is_integer(T x) {
 // DLMF 10.40.2 asymptotic expansion for K_nu(x), optimally truncated
 template<typename T>
 inline C10_HOST_DEVICE T bessel_k_asymptotic(T x, T nu) {
-    const T pi = c10::pi<T>;
+    constexpr T pi = c10::pi<T>;
     T mu = T(4.0) * nu * nu;
 
     T sum_val = T(1.0);
@@ -3752,10 +3752,10 @@ inline C10_HOST_DEVICE T bessel_k_asymptotic(T x, T nu) {
 // Threshold x <= 2.0 follows Boost.Math (bessel_ik.hpp) and GSL (bessel_Knu.c).
 template<typename T>
 inline C10_HOST_DEVICE void temme_ik(T mu, T x, T* K_mu, T* K_mu1) {
-    const T pi = c10::pi<T>;
-    const T euler_gamma = c10::euler<T>;
-    const int max_iter = 100;
-    const T tol = std::numeric_limits<T>::epsilon() * T(10.0);
+    constexpr T pi = c10::pi<T>;
+    constexpr T euler_gamma = c10::euler<T>;
+    constexpr int max_iter = 100;
+    constexpr T tol = std::numeric_limits<T>::epsilon() * T(10.0);
 
     // Gamma(1+v) - 1 via expm1(lgamma) to avoid cancellation near v=0.
     T gp = std::expm1(std::lgamma(T(1.0) + mu));
@@ -3805,7 +3805,7 @@ inline C10_HOST_DEVICE void temme_ik(T mu, T x, T* K_mu, T* K_mu1) {
     T sum1 = coef * h;
 
     T x2_4 = x * x / T(4.0);
-    const T denom_floor = sizeof(T) >= 8 ? T(1e-300) : T(1e-38);
+    constexpr T denom_floor = sizeof(T) >= 8 ? T(1e-300) : T(1e-38);
 
     for (int k = 1; k < max_iter; k++) {
         T k_T = T(k);
@@ -3892,7 +3892,7 @@ inline C10_HOST_DEVICE void CF2_ik(T mu, T x, T* K_mu, T* K_mu1) {
 // DLMF 10.40.1 asymptotic expansion for I_nu(x), optimally truncated
 template<typename T>
 inline C10_HOST_DEVICE T bessel_i_asymptotic(T x, T nu) {
-    const T pi = c10::pi<T>;
+    constexpr T pi = c10::pi<T>;
     T mu = T(4.0) * nu * nu;
 
     T sum_val = T(1.0);
@@ -3920,7 +3920,7 @@ inline C10_HOST_DEVICE T bessel_i_asymptotic(T x, T nu) {
 // with eta and p from 10.41.7-10.41.8 and U_1..U_3 from 10.41.10.
 template<typename T>
 inline C10_HOST_DEVICE T bessel_i_uniform_asymptotic(T x, T nu) {
-    const T pi = c10::pi<T>;
+    constexpr T pi = c10::pi<T>;
     T z = x / nu;
     T z2 = z * z;
     T w = std::sqrt(T(1.0) + z2);
@@ -4076,7 +4076,7 @@ inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
     if (nu < T(0.0) && bessel_is_integer(nu_abs)) {
         nu = nu_abs;
     } else if (nu < T(0.0)) {
-        const double pi = c10::pi<double>;
+        constexpr double pi = c10::pi<double>;
         const double x_acc = static_cast<double>(x);
         const double nu_acc = static_cast<double>(nu_abs);
         const double nearest = std::floor(nu_acc + 0.5);
@@ -4107,7 +4107,7 @@ inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
 // with eta and p from 10.41.7-10.41.8 and U_1..U_3 from 10.41.10.
 template<typename T>
 inline C10_HOST_DEVICE T bessel_k_uniform_asymptotic(T x, T nu) {
-    const T pi = c10::pi<T>;
+    constexpr T pi = c10::pi<T>;
     T z = x / nu;
     T z2 = z * z;
     T w = std::sqrt(T(1.0) + z2);
