@@ -15,7 +15,7 @@
 #define HAS_WARP_MERGE_SORT() (ROCM_VERSION >= 70000)
 #else
 // CUDA: WarpMergeSort available since CUDA 11.6
-#define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
+#define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 11060)
 #endif
 
 

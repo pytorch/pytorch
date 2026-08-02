@@ -3,12 +3,13 @@
 import collections
 import contextlib
 import dis
+import sys
 import unittest
 
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import IS_FBCODE
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
@@ -501,7 +502,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(gn(inp), inp + 3)
 
-    @requires_triton()
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "Test requires triton.tools.experimental_descriptor API",
@@ -526,7 +527,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         res = torch.compile(create_tma, backend="eager")(x)
         self.assertEqual(ref[1].desc, res[1].desc)
 
-    @requires_triton()
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "Tensor in TensorDescriptor not comparable in Python 3.13+",
+    )
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @unittest.skipIf(
         not has_triton_tensor_descriptor_host_tma(),
         "Test requires triton.tools.tensor_descriptor API",
@@ -662,10 +667,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """TSOV.as_python_constant must succeed for reference-type opaque
         objects. Without this, __eq__ between two opaque objects graph breaks.
         """
+        import torch._custom_class_base
         import torch._library.opaque_object
-        import torch._opaque_base
 
-        class Config(torch._opaque_base.OpaqueBase):
+        class Config(torch._custom_class_base.CustomClassBase):
             def __init__(self, v):
                 self.v = v
 
@@ -678,7 +683,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def __hash__(self):
                 return hash(self.v)
 
-        torch._library.opaque_object.register_opaque_type(Config, typ="reference")
+        torch._library.opaque_object.register_custom_class(Config, typ="symbolic")
 
         cfg = Config(42)
 

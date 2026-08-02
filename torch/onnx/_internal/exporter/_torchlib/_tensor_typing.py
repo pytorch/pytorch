@@ -21,7 +21,7 @@ from onnxscript import (
 )
 
 
-# NOTE: We do not care about unsigned types beyond UINT8 because PyTorch does not us them.
+# NOTE: We do not care about unsigned types beyond UINT8 because PyTorch does not use them.
 # More detail can be found: https://pytorch.org/docs/stable/tensors.html
 
 TensorType = Union[  # noqa: UP007
