@@ -11742,7 +11742,8 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    index (LongTensor): the indices into tensor
+    index (LongTensor or ByteTensor): the indices into tensor. ByteTensor indices are
+        supported on CPU and CUDA.
 
 Example::
 

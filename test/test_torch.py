@@ -51,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA, onlyCPU, onlyOn,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA)
@@ -3510,6 +3510,18 @@ class TestTorchDeviceType(TestCase):
             idx = make_idx(size_i, high=1)
             out = source.take(idx)
             self.assertEqual(out.item(), source.item())
+
+    @onlyOn(["cpu", "cuda"])
+    def test_take_uint8_index(self, device):
+        source = torch.arange(256, device=device).reshape(16, 16).t()
+        index = torch.tensor([[0, 127], [64, 255]], device=device, dtype=torch.uint8).t()
+        expected = torch.take(source, index.to(torch.long))
+
+        self.assertEqual(torch.take(source, index), expected)
+
+        out = torch.empty_like(index, dtype=source.dtype)
+        self.assertEqual(torch.take(source, index, out=out), expected)
+        self.assertEqual(out, expected)
 
     # FIXME: find a test suite for the put operator
     # The bool instance does not work on GPU. See
