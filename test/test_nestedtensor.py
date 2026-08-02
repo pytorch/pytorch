@@ -8407,6 +8407,191 @@ torch.cuda.synchronize()
         output = torch.compile(f, fullgraph=True)(values, offsets)
         self.assertEqual(output, expected)
 
+    @onlyCUDA
+    def test_rms_norm_njt_dispatches_to_fused(self, device):
+        # See https://github.com/pytorch/pytorch/issues/191739
+        # CUDA fused kernel path is the issue's main concern; CPU falls back
+        # through composite even for dense inputs.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class OpLog(TorchDispatchMode):
+            def __init__(self):
+                self.ops = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(func._overloadpacket.__name__)
+                return func(*args, **(kwargs or {}))
+
+        dim = 64
+        values = torch.randn(200, dim, device=device)
+        offsets = torch.tensor([0, 50, 120, 200], device=device)
+        njt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        weight = torch.ones(dim, device=device)
+
+        with OpLog() as dense_log:
+            F.rms_norm(values, (dim,), weight=weight, eps=1e-6)
+        with OpLog() as njt_log:
+            F.rms_norm(njt, (dim,), weight=weight, eps=1e-6)
+
+        self.assertIn("_fused_rms_norm", dense_log.ops)
+        self.assertIn("_fused_rms_norm", njt_log.ops)
+        self.assertNotIn("mean", njt_log.ops)
+        self.assertNotIn("rsqrt", njt_log.ops)
+
+    def test_rms_norm_njt_matches_dense_values(self, device):
+        dim = 64
+        values = torch.randn(200, dim, device=device)
+        offsets = torch.tensor([0, 50, 120, 200], device=device)
+        njt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        weight = torch.randn(dim, device=device)
+
+        out_dense = F.rms_norm(values, (dim,), weight=weight, eps=1e-6)
+        out_njt = F.rms_norm(njt, (dim,), weight=weight, eps=1e-6)
+
+        self.assertTrue(out_njt.is_nested)
+        self.assertEqual(out_njt.offsets(), njt.offsets())
+        self.assertEqual(out_njt.values(), out_dense)
+        if torch.device(device).type == "cuda":
+            out_fused, _ = torch.ops.aten._fused_rms_norm(values, [dim], weight, 1e-6)
+            self.assertEqual(out_njt.values(), out_fused)
+
+    def test_rms_norm_njt_autograd_matches_dense(self, device):
+        # NestedTensor public API (sum/backward) must remain differentiable,
+        # not only the private _values buffer.
+        dim = 32
+        values = torch.randn(100, dim, device=device, requires_grad=True)
+        offsets = torch.tensor([0, 25, 50, 75, 100], device=device)
+        weight = torch.randn(dim, device=device, requires_grad=True)
+        njt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+
+        v_ref = values.detach().clone().requires_grad_(True)
+        w_ref = weight.detach().clone().requires_grad_(True)
+        F.rms_norm(v_ref, (dim,), weight=w_ref, eps=1e-6).sum().backward()
+
+        out = F.rms_norm(njt, (dim,), weight=weight, eps=1e-6)
+        self.assertTrue(out.requires_grad)
+        self.assertIsNotNone(out.grad_fn)
+        out.sum().backward()
+
+        self.assertEqual(values.grad, v_ref.grad)
+        self.assertEqual(weight.grad, w_ref.grad)
+
+    def test_rms_norm_njt_public_autograd_surfaces(self, device):
+        # Broader coverage for the NestedTensor-facing autograd surface that
+        # broke when rewrapping with NestedTensor(...) instead of nested views.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class OpLog(TorchDispatchMode):
+            def __init__(self):
+                self.ops = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(func._overloadpacket.__name__)
+                return func(*args, **(kwargs or {}))
+
+        dim = 32
+        offsets = torch.tensor([0, 20, 50, 80, 100], device=device)
+
+        def _run_case(*, with_weight: bool, with_lengths: bool):
+            values = torch.randn(100, dim, device=device, requires_grad=True)
+            weight = (
+                torch.randn(dim, device=device, requires_grad=True)
+                if with_weight
+                else None
+            )
+            if with_lengths:
+                lengths = torch.tensor([15, 25, 20, 15], device=device)
+                njt = torch.nested.nested_tensor_from_jagged(
+                    values, offsets=offsets, lengths=lengths
+                )
+            else:
+                lengths = None
+                njt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+
+            with OpLog() as log:
+                out = F.rms_norm(njt, (dim,), weight=weight, eps=1e-6)
+
+            if torch.device(device).type == "cuda":
+                self.assertIn("_fused_rms_norm", log.ops)
+                self.assertNotIn("mean", log.ops)
+            self.assertTrue(out.is_nested)
+            self.assertTrue(out.requires_grad)
+            self.assertIsNotNone(out.grad_fn)
+            self.assertEqual(out.offsets(), offsets)
+            if lengths is not None:
+                self.assertEqual(out.lengths(), lengths)
+
+            # Public API backward (this is what NestedTensor(...) broke).
+            out.sum().backward()
+            self.assertIsNotNone(values.grad)
+            self.assertTrue(torch.isfinite(values.grad).all())
+            if weight is not None:
+                self.assertIsNotNone(weight.grad)
+                self.assertTrue(torch.isfinite(weight.grad).all())
+
+            # Dense parity on a fresh graph.
+            values2 = values.detach().clone().requires_grad_(True)
+            weight2 = (
+                weight.detach().clone().requires_grad_(True)
+                if weight is not None
+                else None
+            )
+            njt2 = (
+                torch.nested.nested_tensor_from_jagged(
+                    values2, offsets=offsets, lengths=lengths
+                )
+                if lengths is not None
+                else torch.nested.nested_tensor_from_jagged(values2, offsets=offsets)
+            )
+            out_njt = F.rms_norm(njt2, (dim,), weight=weight2, eps=1e-6)
+            out_dense = F.rms_norm(values2, (dim,), weight=weight2, eps=1e-6)
+            self.assertEqual(out_njt.values(), out_dense)
+
+            g_values_ref = torch.autograd.grad(
+                out_dense.sum(),
+                (values2,) + ((weight2,) if weight2 is not None else ()),
+                retain_graph=True,
+            )
+            g_values_njt = torch.autograd.grad(
+                out_njt.sum(),
+                (values2,) + ((weight2,) if weight2 is not None else ()),
+            )
+            for g_njt, g_ref in zip(g_values_njt, g_values_ref):
+                self.assertEqual(g_njt, g_ref)
+
+            # unbind-based reduction should also flow grads
+            values3 = values.detach().clone().requires_grad_(True)
+            weight3 = (
+                weight.detach().clone().requires_grad_(True)
+                if weight is not None
+                else None
+            )
+            njt3 = (
+                torch.nested.nested_tensor_from_jagged(
+                    values3, offsets=offsets, lengths=lengths
+                )
+                if lengths is not None
+                else torch.nested.nested_tensor_from_jagged(values3, offsets=offsets)
+            )
+            out3 = F.rms_norm(njt3, (dim,), weight=weight3, eps=1e-6)
+            torch.stack([t.sum() for t in out3.unbind()]).sum().backward()
+            self.assertIsNotNone(values3.grad)
+            if weight3 is not None:
+                self.assertIsNotNone(weight3.grad)
+
+        for with_weight in (True, False):
+            for with_lengths in (True, False):
+                with self.subTest(with_weight=with_weight, with_lengths=with_lengths):
+                    _run_case(with_weight=with_weight, with_lengths=with_lengths)
+
+    def test_rms_norm_njt_rejects_ragged_dim(self, device):
+        values = torch.randn(100, 32, device=device)
+        offsets = torch.tensor([0, 25, 50, 75, 100], device=device)
+        njt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        # can't normalize over the ragged dim (yet)
+        with self.assertRaisesRegex(ValueError, "ragged dim"):
+            F.rms_norm(njt, njt.shape[1:], eps=1e-6)
+
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that
 # these are attempted to be matched from top to bottom and only one at most will
@@ -8845,12 +9030,12 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_ragged_dim_reduction",
     ),
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="reducing across the ragged dimension is not supported for non-contiguous",
+    # Redispatching rms_norm through the jagged values buffer includes hole
+    # elements in weight gradients; the unbind-based OpInfo reference does not.
+    SkipRule(
         op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
-        name="rms_norm_noncontig_holes_ragged_dim_reduction",
+        name="rms_norm_noncontig_holes_values_buffer_grad_mismatch",
     ),
     # expected: autodiff on complex dtype is not supported
     XFailRule(

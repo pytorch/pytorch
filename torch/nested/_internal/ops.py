@@ -8,7 +8,12 @@ import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import _jagged_numel, NestedTensor
+from .nested_tensor import (
+    _jagged_numel,
+    NestedTensor,
+    nested_view_from_values_offsets,
+    nested_view_from_values_offsets_lengths,
+)
 
 
 __all__: list[Any] = []
@@ -458,7 +463,11 @@ def jagged_torch_function(func, *args, **kwargs):
             for name in names
         )
 
-    # Handle nested-specific input validation for CompositeImplicit rms_norm
+    # Handle nested-specific input validation for CompositeImplicit rms_norm.
+    # Redispatch to dense rms_norm on the jagged values buffer so we can hit
+    # _fused_rms_norm when normalizing only over trailing dense dims.
+    # Use nested view constructors (not NestedTensor(...)) so autograd stays
+    # wired through the NestedTensor public API, matching the old decomp path.
     if func.__name__ == "rms_norm":
 
         def _rms_norm_sig(input, normalized_shape, weight=None, eps=None) -> None:
@@ -478,8 +487,25 @@ def jagged_torch_function(func, *args, **kwargs):
                 "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
             )
 
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **kwargs)
+        # Use values() (not _values) so autograd treats the NestedTensor input as
+        # used in the graph; OpInfo backward diffs w.r.t. the NJT itself.
+        out_values = torch.rms_norm(inp.values(), normalized_shape, **new_kwargs)
+        if inp._lengths is not None:
+            return nested_view_from_values_offsets_lengths(
+                out_values,
+                inp.offsets(),
+                inp.lengths(),
+                ragged_idx=inp._ragged_idx,
+                min_seqlen=inp._maybe_min_seqlen,
+                max_seqlen=inp._maybe_max_seqlen,
+            )
+        return nested_view_from_values_offsets(
+            out_values,
+            inp.offsets(),
+            ragged_idx=inp._ragged_idx,
+            min_seqlen=inp._maybe_min_seqlen,
+            max_seqlen=inp._maybe_max_seqlen,
+        )
 
     raise NotImplementedError(func)
 
