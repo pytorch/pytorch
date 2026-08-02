@@ -3567,6 +3567,49 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(IndexError, "out of range"):
                 torch.take(source, index)
 
+    @onlyCUDA
+    @slowTest
+    @parametrize(
+        "index_dtype,invalid_index",
+        (
+            (torch.uint8, 16),
+            (torch.uint64, torch.iinfo(torch.uint64).max),
+        ),
+    )
+    def test_take_integer_index_out_of_bounds_cuda(
+        self, device, index_dtype, invalid_index
+    ):
+        # Run in a subprocess because a CUDA device-side assert poisons the
+        # process and makes subsequent CUDA tests fail.
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestTakeOutOfBounds(TestCase):
+    def test_take_out_of_bounds(self):
+        source = torch.arange(16, device={device!r})
+        index = torch.tensor(
+            [{invalid_index}], device={device!r}, dtype={index_dtype}
+        )
+        torch.take(source, index)
+        torch.cuda.synchronize()
+
+if __name__ == "__main__":
+    run_tests()
+""")
+        has_cuda_assert = "device-side assert triggered" in stderr
+        has_hip_assert = (
+            "launch failure" in stderr
+            or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+            or "illegal memory access" in stderr
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
     # FIXME: find a test suite for the put operator
     # The bool instance does not work on GPU. See
     # https://github.com/pytorch/pytorch/issues/54317

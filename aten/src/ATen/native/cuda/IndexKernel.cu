@@ -306,14 +306,14 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
   });
 }
 
-template <typename scalar_t, typename index_t, typename index_value_t, typename func_t>
+template <typename scalar_t, typename offset_t, typename index_value_t, typename func_t>
 void cuda_take_put_kernel(
   TensorIterator& iter,
   const TensorBase& indexed,
   const func_t& f) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      cuda_take_put_kernel<scalar_t, index_t, index_value_t>(sub_iter, indexed, f);
+      cuda_take_put_kernel<scalar_t, offset_t, index_value_t>(sub_iter, indexed, f);
     }
     return;
   }
@@ -325,7 +325,12 @@ void cuda_take_put_kernel(
   char* const __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
 
   const auto offset_calc = make_offset_calculator<2>(iter);
-  using uindex_t = std::make_unsigned_t<index_t>;
+  using uindex_t = std::make_unsigned_t<offset_t>;
+  using bounds_t = std::conditional_t<
+      std::numeric_limits<index_value_t>::digits <=
+          std::numeric_limits<offset_t>::digits,
+      offset_t,
+      std::conditional_t<std::is_unsigned_v<index_value_t>, uint64_t, int64_t>>;
 
   // OffsetCalculator needs the sizes and strides reversed
   const auto indexed_sizes = std::vector<int64_t>(indexed.sizes().rbegin(), indexed.sizes().rend());
@@ -341,21 +346,21 @@ void cuda_take_put_kernel(
     auto& iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0]);
     const auto index_value =
         *reinterpret_cast<index_value_t*>(idx_ptr + offsets[1]);
-    index_t offset;
+    const auto idx = static_cast<bounds_t>(index_value);
+    const auto indexed_numel = static_cast<bounds_t>(numel);
+    offset_t offset;
     if constexpr (std::is_unsigned_v<index_value_t>) {
-      const auto idx = static_cast<uint64_t>(index_value);
       CUDA_KERNEL_ASSERT(
-          idx < static_cast<uint64_t>(numel) &&
+          idx < indexed_numel &&
           "cuda_take_put_kernel() index out of bounds");
-      offset = static_cast<index_t>(idx);
+      offset = static_cast<offset_t>(idx);
     } else {
-      const auto idx = static_cast<int64_t>(index_value);
       CUDA_KERNEL_ASSERT(
-          idx < numel && idx >= -numel &&
+          idx < indexed_numel && idx >= -indexed_numel &&
           "cuda_take_put_kernel() index out of bounds");
-      offset = static_cast<index_t>(idx);
+      offset = static_cast<offset_t>(idx);
       if (offset < 0) {
-        offset += numel;
+        offset += indexed_numel;
       }
     }
     if (!is_contiguous) {
