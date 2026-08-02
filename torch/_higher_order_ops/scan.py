@@ -47,6 +47,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
 
@@ -550,7 +551,10 @@ def scan_backward_mode(
     ``_ADDI_GRAD_CHUNK_BUDGET_ELEMS``/``_ADDI_GRAD_MAX_CHUNKS``); no effect in
     sequential mode. Any argument left as ``None`` keeps its current value.
     """
-    global _scan_use_parallel_backward, _ADDI_GRAD_CHUNK_BUDGET_ELEMS, _ADDI_GRAD_MAX_CHUNKS
+    global \
+        _scan_use_parallel_backward, \
+        _ADDI_GRAD_CHUNK_BUDGET_ELEMS, \
+        _ADDI_GRAD_MAX_CHUNKS
     prev = (
         _scan_use_parallel_backward,
         _ADDI_GRAD_CHUNK_BUDGET_ELEMS,
