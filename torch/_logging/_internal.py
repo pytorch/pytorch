@@ -58,6 +58,15 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
 
+# Callbacks registered via register_log_init_callback, invoked at the end of
+# every _init_logs() call so backends with a C++ logging subsystem can sync
+# their state to the Python-side log_state.
+_log_init_callbacks: list[Callable[[], None]] = []
+
+# Additional environment variable names registered via register_log_env_var.
+# Checked alongside LOG_ENV_VAR; LOG_ENV_VAR itself is never modified.
+_extra_log_env_vars: list[str] = []
+
 LOG_PREFIX = "dedicated_log_torch_trace_"
 
 
@@ -493,11 +502,13 @@ def set_logs(
         >>> torch._logging.set_logs(modules={"unregistered.module.name": logging.DEBUG})
     """
     # ignore if env var is set
-    if LOG_ENV_VAR in os.environ:
-        log.warning(
-            "Using TORCH_LOGS environment variable for log settings, ignoring call to set_logs"
-        )
-        return
+    for env_var in [LOG_ENV_VAR, *_extra_log_env_vars]:
+        if env_var in os.environ:
+            log.warning(
+                "Using %s environment variable for log settings, ignoring call to set_logs",
+                env_var,
+            )
+            return
 
     log_state.clear()
 
@@ -619,6 +630,31 @@ def register_log(setting_name, log_name) -> None:
         log_name:  the log name that the setting_name is associated with
     """
     log_registry.register_log(setting_name, log_name)
+
+
+def register_log_init_callback(callback: Callable[[], None]) -> None:
+    """
+    Registers a callback to be invoked after every _init_logs() call, e.g. to
+    let a backend with a C++ logging subsystem sync its state from
+    torch._logging._internal.log_state. Called with no arguments. Exceptions
+    raised by the callback are caught and logged as a warning; other
+    registered callbacks still run.
+    """
+    _log_init_callbacks.append(callback)
+
+
+def register_log_env_var(env_var_name: str) -> None:
+    """
+    Registers an additional environment variable name to be checked
+    alongside LOG_ENV_VAR (TORCH_LOGS) by _init_logs()/set_logs(), without
+    modifying LOG_ENV_VAR itself. If env_var_name is already set in
+    os.environ, _init_logs() is re-invoked immediately so late registration
+    (e.g. a backend imported after `import torch` has already run
+    _init_logs() once) still takes effect.
+    """
+    _extra_log_env_vars.append(env_var_name)
+    if env_var_name in os.environ:
+        _init_logs()
 
 
 def register_artifact(
@@ -901,9 +937,11 @@ def _get_module_and_submodules(qname: str) -> Sequence[str] | None:
 
 def _update_log_state_from_env() -> None:
     global log_state
-    log_setting = os.environ.get(LOG_ENV_VAR, None)
-    if log_setting is not None:
-        log_state = _parse_log_settings(log_setting)
+    for env_var in [LOG_ENV_VAR, *_extra_log_env_vars]:
+        log_setting = os.environ.get(env_var, None)
+        if log_setting is not None:
+            log_state = _parse_log_settings(log_setting)
+            break
 
 
 def _has_registered_parent(log_qname) -> bool:
@@ -1241,6 +1279,14 @@ def _init_logs(log_file_name=None) -> None:
     trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
+
+    for cb in _log_init_callbacks:
+        try:
+            cb()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "_init_logs callback %s raised an exception", cb, exc_info=True
+            )
 
 
 class LazyTraceHandler(logging.StreamHandler):
