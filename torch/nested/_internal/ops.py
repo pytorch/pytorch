@@ -299,6 +299,24 @@ def extract_kwargs(arg):
     return kwargs
 
 
+def nested_view_from_values_like(values, nt):
+    """Rewrap ``values`` with ``nt``'s jagged metadata via nested views.
+
+    Prefer this over ``NestedTensor(values, **extract_kwargs(nt))`` when the
+    result must remain differentiable through the NestedTensor public API.
+    """
+    view_kwargs = {
+        "ragged_idx": nt._ragged_idx,
+        "min_seqlen": nt._maybe_min_seqlen,
+        "max_seqlen": nt._maybe_max_seqlen,
+    }
+    if nt._lengths is not None:
+        return nested_view_from_values_offsets_lengths(
+            values, nt.offsets(), nt.lengths(), **view_kwargs
+        )
+    return nested_view_from_values_offsets(values, nt.offsets(), **view_kwargs)
+
+
 def jagged_unary_pointwise(func, *args, **kwargs):
     # assume if we get here that there is a single NJT input in the args
     njt = next(arg for arg in args if isinstance(arg, NestedTensor))
@@ -463,11 +481,9 @@ def jagged_torch_function(func, *args, **kwargs):
             for name in names
         )
 
-    # Handle nested-specific input validation for CompositeImplicit rms_norm.
-    # Redispatch to dense rms_norm on the jagged values buffer so we can hit
-    # _fused_rms_norm when normalizing only over trailing dense dims.
-    # Use nested view constructors (not NestedTensor(...)) so autograd stays
-    # wired through the NestedTensor public API, matching the old decomp path.
+    # CompositeImplicit rms_norm: validate ragged dim, then redispatch on
+    # values() so CUDA hits _fused_rms_norm; rewrap with nested views for
+    # NestedTensor autograd (values() keeps the NJT in the graph for OpInfo).
     if func.__name__ == "rms_norm":
 
         def _rms_norm_sig(input, normalized_shape, weight=None, eps=None) -> None:
@@ -476,36 +492,17 @@ def jagged_torch_function(func, *args, **kwargs):
         _, new_kwargs = normalize_function(  # type: ignore[misc]
             _rms_norm_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
         )
-
         inp = new_kwargs.pop("input")
         normalized_shape = new_kwargs.pop("normalized_shape")
 
         # can't normalize over the ragged dim (yet)
-        max_normalizable = inp.dim() - inp._ragged_idx - 1
-        if len(normalized_shape) > max_normalizable:
+        if len(normalized_shape) > inp.dim() - inp._ragged_idx - 1:
             raise ValueError(
                 "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
             )
 
-        # Use values() (not _values) so autograd treats the NestedTensor input as
-        # used in the graph; OpInfo backward diffs w.r.t. the NJT itself.
         out_values = torch.rms_norm(inp.values(), normalized_shape, **new_kwargs)
-        if inp._lengths is not None:
-            return nested_view_from_values_offsets_lengths(
-                out_values,
-                inp.offsets(),
-                inp.lengths(),
-                ragged_idx=inp._ragged_idx,
-                min_seqlen=inp._maybe_min_seqlen,
-                max_seqlen=inp._maybe_max_seqlen,
-            )
-        return nested_view_from_values_offsets(
-            out_values,
-            inp.offsets(),
-            ragged_idx=inp._ragged_idx,
-            min_seqlen=inp._maybe_min_seqlen,
-            max_seqlen=inp._maybe_max_seqlen,
-        )
+        return nested_view_from_values_like(out_values, inp)
 
     raise NotImplementedError(func)
 
