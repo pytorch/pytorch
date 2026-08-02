@@ -7443,20 +7443,21 @@ class TestMPS(TestCaseMPS):
             check(make(shape), dim)
         check(make(strided_shape)[:, ::2], -1)
 
-    def test_linalg_cholesky(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_cholesky(self, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_cholesky_test(size, *batch_dims, upper=False, check_errors=False):
             if check_errors:
                 # expect failure for non-positive definite matrix
-                input_mps = torch.eye(size, dtype=torch.float32, device="mps")
+                input_mps = torch.eye(size, dtype=dtype, device="mps")
                 input_mps[0, 0] = -1
                 error_msg = r'The factorization could not be completed because the input is not positive-definite'
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
                 return
             # output checks for positive definite matrix
-            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=dtype, device="cpu")
             input_mps = input_cpu.to('mps')
             output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
             output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
