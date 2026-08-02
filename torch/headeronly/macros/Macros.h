@@ -555,24 +555,22 @@ __host__ __device__
   }
 #else
 #if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
-#include <cstddef>
-
 // Merge prefix + __func__ + suffix at the macro call site (not via helper params).
-template <std::size_t N1, std::size_t N2, std::size_t N3,
-          std::size_t Out = N1 + N2 + N3 - 2>
+template <unsigned N1, unsigned N2, unsigned N3,
+          unsigned Out = N1 + N2 + N3 - 2>
 constexpr auto c10_rocm_assert_concat(const char (&a)[N1], const char (&b)[N2],
                                       const char (&c)[N3]) {
   struct {
     char data[Out];
   } msg{};
-  std::size_t i = 0;
-  for (std::size_t j = 0; j < N1 - 1; ++j) {
+  unsigned i = 0;
+  for (unsigned j = 0; j < N1 - 1; ++j) {
     msg.data[i++] = a[j];
   }
-  for (std::size_t j = 0; j < N2 - 1; ++j) {
+  for (unsigned j = 0; j < N2 - 1; ++j) {
     msg.data[i++] = b[j];
   }
-  for (std::size_t j = 0; j < N3; ++j) {
+  for (unsigned j = 0; j < N3; ++j) {
     msg.data[i++] = c[j];
   }
   return msg;
