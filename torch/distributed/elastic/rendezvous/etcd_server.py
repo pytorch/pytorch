@@ -53,13 +53,18 @@ def find_free_port():
 
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None  # initialise before try so that except can safely reference it
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
+            # Only close the socket if it was successfully created (resolves
+            # #191395 -- previously s.close() raised UnboundLocalError when
+            # socket.socket() itself failed, masking the real error).
+            if s is not None:
+                s.close()
             print(f"Socket creation attempt failed: {e}")
     raise RuntimeError("Failed to create a socket")
 
@@ -230,7 +235,6 @@ class EtcdServer:
 
         while time.time() < max_time:
             if self._get_etcd_server_process().poll() is not None:
-                # etcd server process finished
                 exitcode = self._get_etcd_server_process().returncode
                 raise RuntimeError(
                     f"Etcd server process exited with the code: {exitcode}"
