@@ -3331,7 +3331,9 @@ def _find_names(obj):
 
     frame = inspect.currentframe()
     while frame is not None:
-        frame.f_locals
+        # accessing f_locals materializes the frame's locals dict so
+        # gc.get_referrers below can find obj inside it
+        _ = frame.f_locals
         frame = frame.f_back
     obj_names = []
     for referrer in gc.get_referrers(obj):
