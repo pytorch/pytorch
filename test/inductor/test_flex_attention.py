@@ -2926,6 +2926,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             fa._WARNINGS_SHOWN.clear()
             fa._WARNINGS_SHOWN.update(original_shown)
 
+    # https://github.com/pytorch/pytorch/issues/191552: fails on MI200 (gfx90a)
+    @skipIfRocmArch(MI200_ARCH)
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
@@ -10167,6 +10169,8 @@ class TestLearnableBiases(InductorTestCase):
             device,
         )
 
+    # https://github.com/pytorch/pytorch/issues/191552: fails on MI200 (gfx90a)
+    @skipIfRocmArch(MI200_ARCH)
     @supported_platform
     @skip_on_cpu
     def test_comparison_vs_sdpa_with_learnable_bias(self, device):
