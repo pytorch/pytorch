@@ -989,8 +989,12 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      sparse::impl::add_out_sparse_compressed_blocked(self, other, alpha, out);
+    } else {
+      at::native::resize_as_sparse_compressed_(out, self);
+      sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    }
   }
   return out;
 }

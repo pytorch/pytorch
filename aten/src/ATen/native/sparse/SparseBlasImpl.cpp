@@ -13,8 +13,15 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Operators.h>
 #else
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/equal.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/searchsorted.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -297,6 +304,148 @@ Tensor& _compressed_row_strided_addmm_out(
   }
 
   return result;
+}
+
+/*
+  Computes result <- mat1 + alpha*mat2 for 2D BSR/BSC operands.
+
+  Built from dispatched ATen ops so one implementation serves CPU and CUDA.
+  The vendor libraries cannot do this: cuSPARSE has no bsrgeam and the MKL
+  wrapper only exports CSR results (no export_bsr).
+
+  The block grid is treated as a CSR pattern: each stored block gets a
+  linearized int64 key compressed_idx * n_plain + plain_idx. Row-major block
+  order makes both key sets sorted ascending, so the union is a merge driven by
+  searchsorted rather than a sort, and the same insertion points place the
+  values. Operands sharing a block pattern, or whose patterns nest, skip the
+  merge entirely.
+*/
+void add_out_sparse_compressed_blocked(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Tensor& result) {
+  const auto layout = mat1.layout();
+  const auto layout_str = at::sparse_csr::layoutToString(layout);
+  // Ensure both input operands (mat1 and mat2) use the exact same sparse layout (e.g., both BSR).
+  TORCH_CHECK(mat2.layout() == layout,
+      "torch.add(", layout_str, ", ", at::sparse_csr::layoutToString(mat2.layout()),
+      "): expected both operands to have the same layout.");
+  // If a pre-allocated 'out' tensor is provided, ensure its layout matches the input matrices.
+  TORCH_CHECK(result.layout() == layout,
+      "torch.add: expected 'out' to have ", layout_str, " layout, but got ",
+      at::sparse_csr::layoutToString(result.layout()));
+  // Ensure the inputs are strictly 2D matrices, as batched (3D+) operations are not supported here.
+  TORCH_CHECK(mat1.dim() == 2,
+      "torch.add(", layout_str, ", ", layout_str, "): batched inputs are not supported.");
+  const auto blocksize = at::sparse_csr::getBlockSize(mat1);
+  const auto blocksize2 = at::sparse_csr::getBlockSize(mat2);
+  // Ensure the dense blocks inside both sparse matrices have the exact same dimensions (e.g., both use 2x2 blocks).
+  TORCH_CHECK(blocksize == blocksize2,
+      "torch.add(", layout_str, ", ", layout_str,
+      "): expected both operands to have the same block size, but got (",
+      blocksize[0], ", ", blocksize[1], ") and (", blocksize2[0], ", ", blocksize2[1], ").");
+
+  const auto commonDtype = at::result_type(mat1, mat2);
+  const auto out_dtype = result.scalar_type();
+  // Ensure the mathematical result can be safely written into the destination tensor's data type without illegal data loss.
+  TORCH_CHECK(canCast(commonDtype, out_dtype),
+      "Can't convert result type ", commonDtype, " to output ", out_dtype, " in add operation");
+  auto* result_impl = static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl());
+
+  auto [compressed1, plain1] = at::sparse_csr::getCompressedPlainIndices(mat1);
+  auto [compressed2, plain2] = at::sparse_csr::getCompressedPlainIndices(mat2);
+
+  // Check if the second matrix is completely empty or being multiplied by zero.
+  // If so, skip all math and just copy the first matrix directly into the output tensor.
+  if (mat2._nnz() == 0 || alpha.toComplexDouble() == 0.) {
+    auto out_values = mat1.values().to(out_dtype, /*non_blocking=*/false, /*copy=*/true);
+    result_impl->set_member_tensors(compressed1, plain1, out_values, mat1.sizes());
+    return;
+  }
+  // Check if the first matrix is completely empty.
+  // If so, copy the second matrix into the output tensor, applying the scalar multiplier (alpha) to its values.
+  if (mat1._nnz() == 0) {
+    auto out_values = mat2.values().to(out_dtype, /*non_blocking=*/false, /*copy=*/true).mul_(alpha);
+    result_impl->set_member_tensors(compressed2, plain2, out_values, mat2.sizes());
+    return;
+  }
+
+  // Fast-path to check if both matrices share the exact same sparsity structure (same number of blocks at the same coordinates).
+  // If so, bypass the complex searchsorted merge entirely and just do a fast element-wise addition of their value arrays.
+  if (mat1._nnz() == mat2._nnz() &&
+      compressed1.scalar_type() == compressed2.scalar_type() &&
+      at::equal(compressed1, compressed2) && at::equal(plain1, plain2)) {
+    auto out_values = mat1.values().to(out_dtype).add(mat2.values().to(out_dtype), alpha);
+    result_impl->set_member_tensors(compressed1, plain1, out_values, mat1.sizes());
+    return;
+  }
+
+  const auto n_compressed = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "add_out_sparse_compressed_blocked",
+      [&] { return mat1.size(0) / blocksize[0]; },
+      [&] { return mat1.size(1) / blocksize[1]; });
+  const auto n_plain = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "add_out_sparse_compressed_blocked",
+      [&] { return mat1.size(1) / blocksize[1]; },
+      [&] { return mat1.size(0) / blocksize[0]; });
+
+  // Keys are built in int64: compressed_idx * n_plain overflows int32 on
+  // large inputs even when the stored index dtype is int32.
+  const auto coo1 = at::_convert_indices_from_csr_to_coo(compressed1, plain1).select(0, 0);
+  const auto coo2 = at::_convert_indices_from_csr_to_coo(compressed2, plain2).select(0, 0);
+  const auto key1 = coo1.mul(n_plain).add_(plain1.to(kLong));
+  const auto key2 = coo2.mul(n_plain).add_(plain2.to(kLong));
+  const auto n1 = mat1._nnz();
+  const auto values2 = mat2.values().to(out_dtype);
+
+  // Both key sets are already sorted ascending (row-major block order is
+  // exactly ascending key order), so the union is a merge, not a sort. pos[j]
+  // is where mat2's block j belongs in mat1's key list; it coincides with an
+  // existing block when the key there matches.
+  const auto pos = at::searchsorted(key1, key2, /*out_int32=*/false, /*right=*/false);
+  const auto matched = key1.index_select(0, pos.clamp_max(n1 - 1)).eq(key2);
+  const auto unmatched = matched.logical_not().to(kLong);
+  const auto n_new = unmatched.sum().item<int64_t>();
+  const auto nnz = n1 + n_new;
+
+  // Fast-path to check if all of mat2's blocks fit perfectly inside mat1's existing structure (no brand new blocks introduced).
+  // If so, reuse mat1's unmodified index tensors and simply add mat2's values on top of mat1's overlapping values using index_add_ to avoid any additional memory allocation.
+  if (n_new == 0) {
+    auto out_values = mat1.values().to(out_dtype, /*non_blocking=*/false, /*copy=*/true);
+    out_values.index_add_(0, pos, values2, alpha);
+    result_impl->set_member_tensors(compressed1, plain1, out_values, mat1.sizes());
+    return;
+  }
+
+  // shift[i] = how many mat2-only blocks sort before mat1's block i, so mat1's
+  // block i lands at i + shift[i] in the merged result.
+  auto shift = at::zeros({n1 + 1}, key1.options());
+  shift.index_add_(0, pos, unmatched);
+  const auto out1 = at::arange(n1, key1.options()).add_(shift.cumsum(0).narrow(0, 0, n1));
+  // For mat2's block j, cumsum(unmatched)[j] counts exactly the mat2-only
+  // blocks that sort before its merged slot (keys are sorted, so they all have
+  // smaller j); an unmatched block also counts itself, hence the subtraction.
+  const auto out2 = pos.add(unmatched.cumsum(0)).sub_(unmatched);
+
+  // mat1's blocks land in distinct slots, so they are copied rather than
+  // accumulated; only mat2 needs a read-modify-write pass.
+  const auto values1 = mat1.values().to(out_dtype);
+  auto out_values = at::zeros({nnz, blocksize[0], blocksize[1]}, values1.options());
+  out_values.index_copy_(0, out1, values1);
+  out_values.index_add_(0, out2, values2, alpha);
+
+  // Duplicate writes land only on matched slots, where both operands store the
+  // same block coordinates.
+  const auto index_dtype = promoteTypes(compressed1.scalar_type(), compressed2.scalar_type());
+  auto out_plain = at::empty({nnz}, plain1.options().dtype(index_dtype));
+  out_plain.index_copy_(0, out1, plain1.to(index_dtype));
+  out_plain.index_copy_(0, out2, plain2.to(index_dtype));
+  auto out_rows = at::empty({nnz}, key1.options());
+  out_rows.index_copy_(0, out1, coo1);
+  out_rows.index_copy_(0, out2, coo2);
+  auto out_compressed = at::_convert_indices_from_coo_to_csr(out_rows, n_compressed, index_dtype == ScalarType::Int);
+  result_impl->set_member_tensors(out_compressed, out_plain, out_values, mat1.sizes());
 }
 
 namespace cpu {
