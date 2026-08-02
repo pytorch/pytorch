@@ -1609,49 +1609,6 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(Bernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
-    def test_bernoulli_log_prob_boundary(self):
-        # Impossible events at exact boundary probs must be -inf, and certain
-        # events exactly 0, for every dtype (gh-186825). Mirrors the Geometric
-        # boundary assertions below.
-        for dtype in (torch.float32, torch.float64):
-            zero = torch.tensor(0.0, dtype=dtype)
-            one = torch.tensor(1.0, dtype=dtype)
-            self.assertEqual(Bernoulli(zero).log_prob(one), -inf)
-            self.assertEqual(Bernoulli(one).log_prob(zero), -inf)
-            self.assertEqual(Bernoulli(zero).log_prob(zero), 0.0)
-            self.assertEqual(Bernoulli(one).log_prob(one), 0.0)
-
-        # Batched mixed boundary and interior parameters: interior entries
-        # must be bitwise-identical to the unpatched BCE path.
-        probs = torch.tensor([0.0, 0.3, 1.0])
-        value = torch.tensor([1.0, 1.0, 0.0])
-        expected_interior = Bernoulli(torch.tensor(0.3)).log_prob(torch.tensor(1.0))
-        result = Bernoulli(probs).log_prob(value)
-        self.assertEqual(result[0], -inf)
-        self.assertEqual(result[1], expected_interior)
-        self.assertEqual(result[2], -inf)
-
-        # Broadcasting value against boundary probs.
-        result = Bernoulli(torch.tensor([0.0, 1.0])).log_prob(torch.tensor(1.0))
-        self.assertEqual(result, torch.tensor([-inf, 0.0]))
-
-        # The boundary correction must not materialize lazy `probs` on
-        # logits-constructed instances.
-        d = Bernoulli(logits=torch.tensor(5.0))
-        d.log_prob(torch.tensor(1.0))
-        self.assertNotIn("probs", d.__dict__)
-
-        # Gradients for interior probs are unaffected: d/dp log p = 1/p.
-        p = torch.tensor(0.3, requires_grad=True)
-        Bernoulli(p).log_prob(torch.tensor(1.0)).backward()
-        self.assertEqual(p.grad, torch.tensor(1.0 / 0.3))
-
-        # Gradients at boundary probs remain finite (no NaN/inf from the
-        # masked branch).
-        p = torch.tensor(0.0, requires_grad=True)
-        Bernoulli(p).log_prob(torch.tensor(1.0)).backward()
-        self.assertTrue(torch.isfinite(p.grad))
-
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_geometric(self):

@@ -136,10 +136,8 @@ class Bernoulli(ExponentialFamily):
             boundary = (probs == 0) | (probs == 1)
             impossible = boundary & (probs != value)
             certain = boundary & (probs == value)
-            result = torch.where(
-                impossible, torch.full_like(result, -torch.inf), result
-            )
-            result = torch.where(certain, torch.zeros_like(result), result)
+            result = result.masked_fill(impossible, -torch.inf)
+            result = result.masked_fill(certain, 0.0)
         return result
 
     def entropy(self):
