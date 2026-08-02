@@ -118,6 +118,5 @@ DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_u_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_v_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_w_stub)
 DECLARE_DISPATCH(ldexp_fn, ldexp_stub)
-DECLARE_DISPATCH(structured_binary_fn, divmod_stub)
 
 } // namespace at::native

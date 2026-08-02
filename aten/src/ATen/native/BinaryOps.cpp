@@ -430,7 +430,6 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
 DEFINE_DISPATCH(ldexp_stub);
-DEFINE_DISPATCH(divmod_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1400,27 +1399,27 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
   return at::bitwise_right_shift(wrapped_scalar_tensor(self), other);
 }
 
-Tensor divmod(const Scalar& self, const Tensor& other) {
+std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
   // Returns a tuple (quotient, remainder) as per Python divmod semantics
   auto scaler_tensor = wrapped_scalar_tensor(self);
-  auto quotient = at::div(scaler_tensor, other, "trunc");
+  auto quotient = at::floor_divide(scaler_tensor, other);
   auto remainder = at::remainder(scaler_tensor, other);
-  return at::stack({quotient, remainder}); // Returns stacked tensor, will be unpacked in Python binding
+  return std::make_tuple(quotient, remainder);
 }
 
-Tensor divmod(const Tensor& self, const Scalar& other) {
+std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Scalar& other) {
   // Returns a tuple (quotient, remainder) as per Python divmod semantics
   auto scaler_tensor = wrapped_scalar_tensor(other);
-  auto quotient = at::div(self, scaler_tensor, "trunc");
+  auto quotient = at::floor_divide(self, scaler_tensor);
   auto remainder = at::remainder(self, scaler_tensor);
-  return at::stack({quotient, remainder}); // Returns stacked tensor, will be unpacked in Python binding
+  return std::make_tuple(quotient, remainder);
 }
 
-Tensor divmod(const Tensor& self, const Tensor& other) {
+std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Tensor& other) {
   // Returns a tuple (quotient, remainder) as per Python divmod semantics
-  auto quotient = at::div(self, other, "trunc");
+  auto quotient = at::floor_divide(self, other);
   auto remainder = at::remainder(self, other);
-  return at::stack({quotient, remainder}); // Returns stacked tensor, will be unpacked in Python binding
+  return std::make_tuple(quotient, remainder);
 }
 
 template <typename Stub>

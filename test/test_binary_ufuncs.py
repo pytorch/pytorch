@@ -4618,9 +4618,10 @@ tensor_binary_ops = [
     "__or__",
     "__ror__",
     "__ior__",
+    "__divmod__",
+    "__rdivmod__",
     # Unsupported operators
     # '__imatmul__',
-    # '__divmod__', '__rdivmod__', '__idivmod__',
 ]
 
 
