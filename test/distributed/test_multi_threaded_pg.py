@@ -311,7 +311,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 result = rank * 2
 
                 ctx.save_for_backward(result, rank)
-                assert int(rank.item()) == dist.get_rank()
+                if int(rank.item()) != dist.get_rank():
+                    raise AssertionError(
+                        f"Expected rank.item() == dist.get_rank(), got {int(rank.item())} vs {dist.get_rank()}"
+                    )
                 return result
 
             @staticmethod
@@ -322,7 +325,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 self.assertEqual(
                     fwd_tid,
                     bwd_tid,
-                    f"bwd not running in the same thread a fwd for rank {rank.item()}",
+                    lambda msg: f"{msg}\nbwd not running in the same thread a fwd for rank {rank.item()}",
                 )
                 self.assertTrue(dist.is_initialized())
                 self.assertEqual(int(rank.item()), dist.get_rank())

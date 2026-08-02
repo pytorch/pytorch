@@ -1,22 +1,30 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
 import warnings
-from collections.abc import KeysView
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
-from .schemas import AOTConfig, FakifiedFlatArgs
+from .schemas import ActInputPath, AOTConfig, FakifiedFlatArgs
+from .utils import get_loaded_async_collective_tensor_type
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, KeysView
+
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -28,12 +36,59 @@ def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
+    shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> FakifiedFlatArgs:
+) -> tuple[FakifiedFlatArgs, list[ActInputPath]]:
+    """Convert real tensor inputs into fake tensors for AOT autograd tracing.
+
+    Called at compile time (not runtime) to produce the fake inputs that AOT
+    autograd traces through. Each real tensor is converted to a FakeTensor
+    via ``fake_mode.from_tensor``, preserving shape, dtype, device, and
+    symbolic shape information from the ShapeEnv. Non-tensor inputs (ints,
+    SymInts, ScriptObjects) are converted or passed through as appropriate.
+
+    Tensor subclass inputs (DTensor, etc.) are fakified recursively by walking
+    their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are resolved via
+    ``trigger_wait()`` before fakification so they don't appear in the traced
+    metadata (see below).
+
+    Called from ``aot_function``, ``aot_module_simplified``, and
+    ``aot_export_module`` — anywhere AOT autograd needs fake inputs before
+    graph capture.
+
+    Returns:
+        A tuple of (fakified_args, act_input_paths) where act_input_paths records
+        which input paths held AsyncCollectiveTensors. The paths are stored on
+        ViewAndMutationMeta so the runtime wrapper can re-wait those positions.
+    """
+    # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
+    # eager-mode wrappers for async collective overlap; if they leak into the
+    # traced graph as input types, AOT autograd records them in
+    # SubclassCreationMeta for output tangent metadata. At runtime, autograd
+    # produces plain tensor tangents, causing a type mismatch. Unwrapping
+    # here prevents ACT from appearing in the traced metadata.
+    AsyncCollectiveTensor = get_loaded_async_collective_tensor_type()
+    act_input_paths: list[ActInputPath] = []
+    if AsyncCollectiveTensor is not None:
+        tracing_context = torch._guards.TracingContext.try_get()
+        for i, a in enumerate(flat_args):
+            resolved_arg = _resolve_input_async_collectives(
+                a, i, (), act_input_paths, AsyncCollectiveTensor
+            )
+            # Rebuilt wrapper inputs must keep Dynamo's symbolic context so
+            # fakeification does not allocate source-less shape symbols.
+            if resolved_arg is not a and isinstance(resolved_arg, torch.Tensor):
+                if tracing_context is not None:
+                    if a in tracing_context.tensor_to_context:
+                        tracing_context.tensor_to_context[resolved_arg] = (
+                            tracing_context.tensor_to_context[a]
+                        )
+            flat_args[i] = resolved_arg
+
     with fake_mode:
 
-        def convert(idx, x):
+        def convert(idx: int, x: Any) -> Any:
+            nonlocal ignore_shape_env
             if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
@@ -47,27 +102,44 @@ def process_inputs(
                         hint=x,
                         source=source,
                     )
-            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
+            if isinstance(x, torch.ScriptObject) or is_custom_class(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
             if not isinstance(x, torch.Tensor):
                 return x
-            if isinstance(x, FakeTensor):
+            if is_fake_tensor(x):
                 # In the case of cross compilation we will have example inputs
                 # with a different fake mode than our tracing fake mode.
                 # In these cases we want to clone the fake tensor into our
                 # inner fake mode.
-                if x.fake_mode is not fake_mode:
+                if maybe_get_fake_mode(x) is not fake_mode:
                     return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
-                        return x
-                    # FakeTensor subclass from a different mode.
-                    # Fall through to refakify.
+                # See if all inner tensors are FakeTensors from this mode
+                all_this_fake = True
+                for a in attrs:
+                    match getattr(x, a):
+                        case FakeTensor() as v:
+                            if v.fake_mode is not fake_mode:
+                                # FakeTensor subclass from a different mode.
+                                # Fall through to refakify.
+                                all_this_fake = False
+                                break
+                        case torch.Tensor():
+                            all_this_fake = False
+                            break
+                        case CustomClassBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
+                            )
+
+                if all_this_fake:
+                    return x
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
@@ -98,12 +170,62 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
+        return FakifiedFlatArgs(
+            [convert(idx, x) for idx, x in enumerate(flat_args)]
+        ), act_input_paths
+
+
+def _resolve_input_async_collectives(
+    x: object,
+    idx: int,
+    attr_path: tuple[str, ...],
+    act_input_paths: list[ActInputPath],
+    AsyncCollectiveTensor: type[AsyncCollectiveTensor],
+) -> object:
+    """Wait on ACT inputs, recording each top-level or wrapper-subclass path."""
+    if isinstance(x, AsyncCollectiveTensor):
+        act_input_paths.append((idx, attr_path))
+        return x.trigger_wait()
+
+    if not is_traceable_wrapper_subclass(x):
+        return x
+
+    attrs, meta = x.__tensor_flatten__()
+    inner_tensors: dict[str, Any] | None = None
+    for attr in attrs:
+        inner = getattr(x, attr)
+        match inner:
+            case CustomClassBase():
+                continue
+            case torch.Tensor():
+                resolved_inner = _resolve_input_async_collectives(
+                    inner,
+                    idx,
+                    (*attr_path, attr),
+                    act_input_paths,
+                    AsyncCollectiveTensor,
+                )
+            case _:
+                raise AssertionError(
+                    f"expected Tensor or CustomClassBase, got {type(inner)}"
+                )
+
+        if resolved_inner is not inner:
+            if inner_tensors is None:
+                inner_tensors = {a: getattr(x, a) for a in attrs}
+            inner_tensors[attr] = resolved_inner
+
+    if inner_tensors is None:
+        return x
+
+    return type(x).__tensor_unflatten__(  # type: ignore[attr-defined]
+        inner_tensors, meta, x.size(), x.stride()
+    )
 
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> tuple[FakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -118,7 +240,7 @@ def _try_get_metadata_from_dynamo(
     param_keys: KeysView[str],
     full_args_num: int,
     full_args_descs: list[DifferentiableAOTInput],
-) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
+) -> tuple[list[torch._guards.Source | None] | None, list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -151,16 +273,22 @@ def _try_get_metadata_from_dynamo(
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
     # Additionally, we mark static indices for cudagraphs.
-    param_name_to_source = mod._param_name_to_source
+    param_name_to_source = cast(
+        dict[str, torch._guards.Source], mod._param_name_to_source
+    )
     seen_sources = set()
 
-    aot_autograd_arg_pos_to_source = []
+    aot_autograd_arg_pos_to_source: list[torch._guards.Source | None] = []
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
+        if name not in param_name_to_source:
+            raise AssertionError(f"{name} not found in param_name_to_source")
         source = param_name_to_source[name]
-        assert source not in seen_sources, source
+        if source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
+        if source is None:
+            raise AssertionError(f"source must not be None for {name}")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -170,12 +298,14 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
+        if not hasattr(node, "_dynamo_source"):
+            raise AssertionError(f"node {node} must have _dynamo_source attribute")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources, source
+        if source is not None and source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
@@ -198,12 +328,15 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    if full_args_num != len(aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
+        )
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 
 @contextmanager
-def _detect_attribute_assignment(mod: torch.nn.Module):
+def _detect_attribute_assignment(mod: torch.nn.Module) -> Generator[None, None, None]:
     # Do not allow assignment of tensor attributes during export unless
     # the attribute is registered as a buffer.
 
@@ -235,18 +368,20 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         *NN_MODULE_LAZY_STD_ATTRS,
     }
 
-    def _get_attributes(mod):
+    def _get_attributes(mod: torch.nn.Module) -> dict[str, Any]:
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
-    def _get_all_module_attributes(mod):
+    def _get_all_module_attributes(mod: torch.nn.Module) -> dict[str, dict[str, Any]]:
         # return attributes from all modules and submodules
         result = {}
         for name, submodule in mod.named_modules():
             result[name] = _get_attributes(submodule)
         return result
 
-    def _restore_all_module_attributes(mod, snapshot):
+    def _restore_all_module_attributes(
+        mod: torch.nn.Module, snapshot: dict[str, dict[str, Any]]
+    ) -> None:
         # restore attributes to all modules and submodules
         for name, submodule in mod.named_modules():
             if name in snapshot:
@@ -264,10 +399,12 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         # after exit, compare state of attributes with snapshot
         # to detect which tensor attributes were assigned
 
-        def _collect_assigned_tensor_attributes(snapshot, new_attrs):
+        def _collect_assigned_tensor_attributes(
+            snapshot: dict[str, dict[str, Any]], new_attrs: dict[str, dict[str, Any]]
+        ) -> list[str]:
             assigned_tensor_attributes = []
 
-            def _compare_values(path, old_val, new_val):
+            def _compare_values(path: str, old_val: Any, new_val: Any) -> None:
                 """Recursively compare values, handling containers."""
                 # Same object, no change
                 if old_val is new_val:

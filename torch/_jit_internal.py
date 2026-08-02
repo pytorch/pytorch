@@ -10,6 +10,7 @@ import builtins
 import collections
 import contextlib
 import enum
+import functools
 import inspect
 import io
 import pickle
@@ -376,8 +377,7 @@ def get_closure(fn):
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
-# variables. In Python 2.x, type annotations are in comments, leading to a
-# similar situation where their definitions are not available. We anticipate
+# variables. We anticipate
 # that most users will not run into this issue because their modules and
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
@@ -409,6 +409,7 @@ def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
+@functools.cache
 def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
@@ -549,7 +550,7 @@ def get_type_hint_captures(fn):
 
         # Insert {arg_annotation_str: type} into annotation_to_type if possible. One reason arg_name may not
         # be present in name_to_type is that the annotation itself is a string and not a type object
-        # (common for self-refential annotations in classes). Once again, let ScriptTypeParser handle this.
+        # (common for self-referential annotations in classes). Once again, let ScriptTypeParser handle this.
         arg_name = arg.arg
         if arg_name in name_to_type:
             annotation_to_type[arg_annotation_str] = name_to_type[arg_name]
@@ -585,7 +586,14 @@ def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if not inspect.isbuiltin(fn) and hasattr(fn, "__globals__")]
+    # Skip __annotate__ added by PEP 649 for deferred annotation evaluation
+    fns = [
+        fn
+        for fn in fns
+        if not inspect.isbuiltin(fn)
+        and hasattr(fn, "__globals__")
+        and fn.__name__ != "__annotate__"
+    ]
     captures = {}
 
     for fn in fns:
@@ -665,7 +673,7 @@ class FunctionModifiers:
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from a exported function / forward)"
+    DEFAULT = "default (compile if called from an exported function / forward)"
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
@@ -676,6 +684,9 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
+
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
 
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
@@ -791,6 +802,9 @@ def ignore(drop=False, **kwargs):
     your model that is not yet TorchScript compatible. If called from TorchScript,
     ignored functions will dispatch the call to the Python interpreter. Models with ignored
     functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
+
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -1030,7 +1044,7 @@ def _check_overload_body(func):
         raise RuntimeError(msg)
 
 
-def _overload(func):
+def _overload(func: Callable[_P, _R]) -> Callable[_P, _R]:
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
@@ -1083,8 +1097,25 @@ _overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
-def _overload_method(func):
-    _check_overload_body(func)
+def _overload_method(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    try:
+        _check_overload_body(func)
+    except IndentationError:
+        # CPython 3.13.8 has a bug (https://github.com/python/cpython/issues/139783)
+        # where inspect.getsourcelines() returns truncated source when a decorator
+        # is followed by a comment, causing ast.parse() to fail with IndentationError.
+        # Fixed in 3.13.9. Swallow the error on affected versions; re-raise otherwise.
+        if sys.version_info[:3] == (3, 13, 8):
+            import warnings
+
+            warnings.warn(
+                "Skipping overload body check due to a known CPython 3.13.8 bug "
+                "(https://github.com/python/cpython/issues/139783). "
+                "Consider upgrading to Python 3.13.9+.",
+                stacklevel=2,
+            )
+        else:
+            raise
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name)
@@ -1348,8 +1379,7 @@ def _disable_emit_hooks():
         torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
-    # noqa: F841
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:
     def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)

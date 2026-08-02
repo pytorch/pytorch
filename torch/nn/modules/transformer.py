@@ -88,9 +88,11 @@ class Transformer(Module):
             bias. Default: ``True``.
 
     Examples:
-        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
-        >>> src = torch.rand((10, 32, 512))
-        >>> tgt = torch.rand((20, 32, 512))
+        >>> transformer_model = nn.Transformer(
+        ...     nhead=16, num_encoder_layers=12, batch_first=True
+        ... )
+        >>> src = torch.rand((32, 10, 512))
+        >>> tgt = torch.rand((32, 20, 512))
         >>> out = transformer_model(src, tgt)
 
     Note: A full example to apply nn.Transformer module for the word language model is available in
@@ -138,7 +140,6 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore [bad-argument-type]
                 **factory_kwargs,
             )
             self.encoder = TransformerEncoder(
@@ -164,7 +165,6 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore [bad-argument-type]
                 **factory_kwargs,
             )
             self.decoder = TransformerDecoder(
@@ -311,7 +311,7 @@ class Transformer(Module):
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self) -> None:
-        r"""Initiate parameters in the transformer model."""
+        r"""Initialize parameters in the transformer model."""
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)
@@ -342,9 +342,11 @@ class TransformerEncoder(Module):
             TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
 
     Examples:
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        >>> encoder_layer = nn.TransformerEncoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        >>> src = torch.rand(10, 32, 512)
+        >>> src = torch.rand(32, 10, 512)
         >>> out = transformer_encoder(src)
     """
 
@@ -363,7 +365,7 @@ class TransformerEncoder(Module):
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
-        # this attribute saves the value providedat object construction
+        # this attribute saves the value provided at object construction
         self.enable_nested_tensor = enable_nested_tensor
         # this attribute controls whether nested tensors are used
         self.use_nested_tensor = enable_nested_tensor
@@ -770,9 +772,7 @@ class TransformerEncoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
@@ -1065,11 +1065,8 @@ class TransformerDecoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
         self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)

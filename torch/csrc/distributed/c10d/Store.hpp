@@ -83,7 +83,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       WatchKeyCallback /* unused */) {
     C10_THROW_ERROR(
         NotImplementedError,
-        "watchKey is deprecated, no implementation support it.");
+        "watchKey is deprecated, no implementation supports it.");
   }
 
   virtual void append(
@@ -117,6 +117,19 @@ class TORCH_API Store : public torch::CustomClassHolder {
   virtual std::vector<std::string> listKeys() {
     C10_THROW_ERROR(
         NotImplementedError, "listKeys support is not implemented.");
+  }
+
+  // Barrier operation that blocks until world_size workers have reached it.
+  // This is an optimized operation that combines increment and wait into a
+  // single operation, reducing network round trips compared to using
+  // separate add() and wait() calls.
+  virtual void barrier(
+      const std::string& key,
+      int64_t world_size,
+      const std::chrono::milliseconds& timeout);
+
+  void barrier(const std::string& key, int64_t world_size) {
+    barrier(key, world_size, timeout_);
   }
 
  protected:

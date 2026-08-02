@@ -31,14 +31,12 @@ void initializeMemoryFormats() {
 
   auto add_memory_format = [&](at::MemoryFormat format, const char* name) {
     std::string module_name = "torch.";
-    PyObject* memory_format = THPMemoryFormat_New(format, module_name + name);
-    Py_INCREF(memory_format);
-    if (PyModule_AddObject(torch_module, name, memory_format) != 0) {
-      Py_DECREF(memory_format);
+    THPObjectPtr memory_format(THPMemoryFormat_New(format, module_name + name));
+    if (PyModule_AddObjectRef(torch_module, name, memory_format.get()) != 0) {
       throw python_error();
     }
-    Py_INCREF(memory_format);
-    memory_format_registry[static_cast<size_t>(format)] = memory_format;
+    memory_format_registry[static_cast<size_t>(format)] =
+        memory_format.release();
   };
 
   add_memory_format(at::MemoryFormat::Preserve, "preserve_format");

@@ -9,10 +9,6 @@
 
 namespace torch::jit {
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(
@@ -30,6 +26,8 @@ class DeadCodeEliminator {
   void run(Block* block, bool recurse) {
     // clean up unused fork inputs before starting the main algorithm
     eliminateDeadForkInputs(block, recurse);
+
+    memo_.reserve(block->owningGraph()->numNodes());
 
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());

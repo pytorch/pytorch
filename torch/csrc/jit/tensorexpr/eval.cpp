@@ -20,7 +20,6 @@ int64_t InterpValue::intValue() const {
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
-  return 0;
 }
 
 template <typename T>
@@ -662,14 +661,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       default:
         throw unsupported_dtype();
     }
-    return {};
   }
 
   void check_bounds_throw(int64_t idx, int64_t bound, const BufPtr& buf) {
     std::stringstream ss;
     ss << "Index out of bounds in check_bounds. Index: " << idx
        << "; bounds: [0, " << bound << ").";
-    throw malformed_input(ss.str(), buf);
+    throw malformed_input(std::move(ss).str(), buf);
   }
 
   void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {

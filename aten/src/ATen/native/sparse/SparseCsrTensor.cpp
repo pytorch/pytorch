@@ -189,8 +189,10 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
               batch_ndim, " + ", block_ndim, ") but got ", values.dim());
 
   // 3.5
-  TORCH_CHECK(plain_indices.stride(-1) == 1,
-              "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  if (plain_indices.numel() != 0) {
+    TORCH_CHECK(plain_indices.stride(-1) == 1,
+                "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  }
 
   // 3.6
   TORCH_CHECK(compressed_indices.stride(-1) == 1,
@@ -469,7 +471,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, C10_AS_INTARRAYREF_SLOW(size), layout_, true);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
@@ -493,7 +495,7 @@ static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed
                                                  std::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
   TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_, true);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
@@ -549,7 +551,10 @@ static DimVector _estimate_sparse_compressed_tensor_size(
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 1)) : 1),
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1)
   };
-  DimVector size = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
+  const auto batch_sizes = compressed_indices.sizes().slice(0, batch_ndim);
+  DimVector size;
+  size.reserve(batch_sizes.size() + 2);
+  size.append(batch_sizes.begin(), batch_sizes.end());
   int64_t compressed_dim_size = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
   int64_t plain_dim_size = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
                                                       [&]() -> int64_t {

@@ -29,7 +29,7 @@ __all__: list[str] = [
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
-# This only effects users of bias subclasses
+# This only affects users of bias subclasses
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
 # To set this to True, run
@@ -194,4 +194,4 @@ current_flash_attention_impl.__module__ = __name__
 restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
-from . import _fa4  # noqa: F401
+from . import _fa3, _fa4

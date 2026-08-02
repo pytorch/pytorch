@@ -2,7 +2,6 @@
 
 import itertools
 import sys
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -15,7 +14,7 @@ from torch.distributed.fsdp.wrap import (
     wrap,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -129,7 +128,8 @@ def _init_with_torchdistX(module: nn.Module):
     torchdistX-based deferred module initialization function example
     using ``materialize_module``.
     """
-    assert _TORCHDISTX_AVAIL
+    if not _TORCHDISTX_AVAIL:
+        raise AssertionError("Expected _TORCHDISTX_AVAIL to be True")
 
     def check_fn(k):
         return not isinstance(k, FSDP)
@@ -137,7 +137,7 @@ def _init_with_torchdistX(module: nn.Module):
     deferred_init.materialize_module(module, check_fn=check_fn)
 
 
-class TestFSDPWithMetaDevice(FSDPTest):
+class TestFSDPWithMetaDevice(FSDPTestContinuous):
     @property
     def world_size(self):
         return 2
@@ -150,7 +150,9 @@ class TestFSDPWithMetaDevice(FSDPTest):
         with FSDP.summon_full_params(fsdp1):
             with FSDP.summon_full_params(fsdp2):
                 for p1, p2 in zip(fsdp1.parameters(), fsdp2.parameters()):
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+                    self.assertTrue(
+                        torch.allclose(p1, p2), lambda msg: f"{msg}\n{p1} vs {p2}"
+                    )
 
     def _test_simple_model_with_meta_device(self, meta_module_fn, init_fn=None):
         # Create model on meta device and wrap with FSDP.
@@ -373,7 +375,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
         class FakeLinear(nn.Module):
             def __init__(
-                self, in_dim: int, out_dim: int, device: Union[torch.device, str]
+                self, in_dim: int, out_dim: int, device: torch.device | str
             ) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(

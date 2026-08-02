@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -29,8 +28,8 @@ class FakeTensorProp(torch.fx.Interpreter):
     """
 
     def __init__(
-        self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None
-    ):
+        self, module: torch.fx.GraphModule, mode: FakeTensorMode | None = None
+    ) -> None:
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
@@ -39,7 +38,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         mode.reset_nt_tensor_id_counter()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
-    def run_node(self, n: Node):
+    def run_node(self, n: Node) -> Any:
         from torch.fx.experimental.symbolic_shapes import (
             compute_unbacked_bindings,
             rebind_unbacked,
@@ -56,17 +55,22 @@ class FakeTensorProp(torch.fx.Interpreter):
             # which goes through super.run_node and caches the fake tensor prop.
             # Therefore, we are propagating fake tensor through the subgraphs
             # twice.
-            assert isinstance(n.args[1], str)
-            assert (
+            if not isinstance(n.args[1], str):
+                raise AssertionError(f"Expected str, got {type(n.args[1])}")
+            if not (
                 isinstance(n.args[0], torch.fx.Node)
                 and n.args[0].op == "get_attr"
                 and isinstance(n.args[0].target, str)
-            )
+            ):
+                raise AssertionError(
+                    "Expected n.args[0] to be a get_attr Node with str target"
+                )
             self.seen_subgraphs.add(n.args[1])
             operands = n.args[2:]
             example_inputs = []
             for operand in operands:
-                assert isinstance(operand, torch.fx.Node) and "val" in operand.meta
+                if not (isinstance(operand, torch.fx.Node) and "val" in operand.meta):
+                    raise AssertionError("Expected Node with 'val' in meta")
                 example_inputs.append(operand.meta["val"])
             return FakeTensorProp(
                 getattr(self.module, n.args[0].target), mode=self._mode
@@ -75,14 +79,14 @@ class FakeTensorProp(torch.fx.Interpreter):
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
 
-        def extract_val(obj):
-            if isinstance(obj, FakeTensor):
+        def extract_val(obj: Any) -> Any:
+            if is_fake_tensor(obj):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
-            elif isinstance(obj, py_sym_types):
+            elif isinstance(obj, (*py_sym_types, int, float, bool)):
                 return obj
             else:
                 return None
@@ -97,13 +101,25 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         return result
 
-    def propagate(self, *args):
+    def propagate(self, *args: object) -> Any:
         fake_args = [
             self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
             for a in args
         ]
         return self.propagate_dont_convert_inputs(*fake_args)
 
-    def propagate_dont_convert_inputs(self, *args):
+    def propagate_dont_convert_inputs(self, *args: object) -> Any:
+        # In-place ops like shallow_copy_data_ can mutate fake_device on
+        # input FakeTensors during propagation. Save and restore so the
+        # caller's inputs are not permanently corrupted.
+        saved_devices = [
+            (a, a.fake_device)
+            for a in args
+            if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        ]
         with self._mode:
-            return super().run(*args)
+            try:
+                return super().run(*args)
+            finally:
+                for fake, device in saved_devices:
+                    fake.fake_device = device

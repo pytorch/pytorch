@@ -10,7 +10,12 @@ from tqdm import tqdm
 import torch
 import torch.utils.benchmark as benchmark
 from torch._inductor.utils import do_bench_using_profiling
-from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+    sdpa_kernel,
+    SDPBackend,
+)
 from torch.nn.functional import scaled_dot_product_attention
 
 
@@ -45,6 +50,7 @@ class ExperimentConfig:
     is_causal: bool
     dtype: torch.dtype
     backend: SDPBackend
+    flash_impl: str | None = None  # None/"FA2" for default, "FA3", or "FA4"
     device: torch.device = torch.device("cuda")
 
     @property
@@ -160,22 +166,44 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     context = (
         sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
-    with context:
-        forward_time = benchmark_cuda_function_in_microseconds(
-            scaled_dot_product_attention,
-            q,
-            k,
-            v,
-            is_causal=is_causal,
-            attn_mask=None,
-        )
-        out_torch = scaled_dot_product_attention(
-            q, k, v, is_causal=is_causal, attn_mask=None
-        )
-        d_out = torch.randn_like(out_torch)
-        backward_time = benchmark_cuda_function_in_microseconds(
-            out_torch.backward, d_out, retain_graph=True
-        )
+
+    # Activate flash attention implementation if specified
+    if config.backend is SDPBackend.FLASH_ATTENTION and config.flash_impl in (
+        "FA3",
+        "FA4",
+    ):
+        try:
+            activate_flash_attention_impl(config.flash_impl)
+        except ImportError as e:
+            raise RuntimeError(
+                f"Failed to activate {config.flash_impl}: {e}\n"
+                f"Please install the required flash attention library or run with default configuration (without --flash_test)."
+            ) from e
+
+    try:
+        with context:
+            forward_time = benchmark_cuda_function_in_microseconds(
+                scaled_dot_product_attention,
+                q,
+                k,
+                v,
+                is_causal=is_causal,
+                attn_mask=None,
+            )
+            out_torch = scaled_dot_product_attention(
+                q, k, v, is_causal=is_causal, attn_mask=None
+            )
+            d_out = torch.randn_like(out_torch)
+            backward_time = benchmark_cuda_function_in_microseconds(
+                out_torch.backward, d_out, retain_graph=True
+            )
+    finally:
+        # Restore default FA2 implementation if we activated a different one
+        if config.backend is SDPBackend.FLASH_ATTENTION and config.flash_impl in (
+            "FA3",
+            "FA4",
+        ):
+            restore_flash_attention_impl()
 
     # Calculate TFLOPS for forward and backward passes
     sparsity = 0.5 if is_causal else 0.0
@@ -200,6 +228,8 @@ def print_results(experiments: list[Experiment]):
     del table_data["device"]
     if table_data["backend"][0] is None:
         del table_data["backend"]
+    if table_data["flash_impl"][0] is None:
+        del table_data["flash_impl"]
     print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
 
@@ -280,11 +310,76 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
     return all_configs
 
 
+def generate_experiment_configs_with_flash() -> list[ExperimentConfig]:
+    batch_sizes = [1, 8, 16]
+    num_heads = [16]
+    q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
+    embed_dims = [2048]
+    backends = [
+        SDPBackend.FLASH_ATTENTION,
+    ]
+    dtypes = [
+        torch.bfloat16,
+    ]
+    is_causal = [True, False]
+    # FA2 (default), "FA3", "FA4" for the alternative implementations
+    flash_impls = ["FA2", "FA3"]
+    all_configs = []
+    for (
+        bsz,
+        heads,
+        (q_seq_len, kv_seq_len),
+        embed_dim,
+        causal,
+        dtype,
+        backend,
+        flash_impl,
+    ) in itertools.product(
+        batch_sizes,
+        num_heads,
+        q_kv_seq_lens,
+        embed_dims,
+        is_causal,
+        dtypes,
+        backends,
+        flash_impls,
+    ):
+        all_configs.append(
+            ExperimentConfig(
+                batch_size=bsz,
+                num_heads=heads,
+                q_seq_len=q_seq_len,
+                kv_seq_len=kv_seq_len,
+                embed_dim=embed_dim,
+                is_causal=causal,
+                dtype=dtype,
+                backend=backend,
+                flash_impl=flash_impl,
+            )
+        )
+
+    return all_configs
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="SDPA benchmark runner")
+    parser.add_argument(
+        "--flash_test",
+        action="store_true",
+        help="Use flash attention configs (generate_experiment_configs_with_flash)",
+    )
+    args = parser.parse_args()
+
     seed = 123
     torch.manual_seed(seed)
     results = []
-    for config in tqdm(generate_experiment_configs()):
+    if args.flash_test:
+        configs = generate_experiment_configs_with_flash()
+    else:
+        configs = generate_experiment_configs()
+    for config in tqdm(configs):
         results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)

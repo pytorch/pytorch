@@ -386,7 +386,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(ElementType);
   }
-  Vectorized() {}
+  Vectorized() = default;
 
   C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(const vinner_data& v)
@@ -1043,14 +1043,25 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> sin() const {
     return mapSleef(Sleef_sinf4_u10, Sleef_sind2_u10);
   }
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
   Vectorized<T> sinh() const {
-    return mapSleef(Sleef_sinhf4_u10, Sleef_sinhd2_u10);
+    if constexpr (std::is_same_v<T, float>) {
+      return mapOrdinary(std::sinh);
+    } else {
+      return mapSleef(Sleef_sinhf4_u10, Sleef_sinhd2_u10);
+    }
   }
   Vectorized<T> cos() const {
     return mapSleef(Sleef_cosf4_u10, Sleef_cosd2_u10);
   }
   Vectorized<T> cosh() const {
-    return mapSleef(Sleef_coshf4_u10, Sleef_coshd2_u10);
+    if constexpr (std::is_same_v<T, float>) {
+      return mapOrdinary(std::cosh);
+    } else {
+      return mapSleef(Sleef_coshf4_u10, Sleef_coshd2_u10);
+    }
   }
 
   Vectorized<T> tan() const {
@@ -1781,7 +1792,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   vinner_type _vec;
 
  public:
-  Vectorized() {}
+  Vectorized() = default;
 
   explicit C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
   Vectorized(const T& val) : _vec(val.val_) {}
@@ -2250,7 +2261,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   vinner_type _vec;
 
  public:
-  Vectorized() {}
+  Vectorized() = default;
 
   C10_ALWAYS_INLINE Vectorized(const vinner_data& v)
       : _vec{v.first, v.second} {}

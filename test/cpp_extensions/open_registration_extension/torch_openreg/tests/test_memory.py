@@ -13,6 +13,7 @@ class TestDeviceAllocator(TestCase):
 
     def setUp(self):
         """Reset memory state before each test."""
+        super().setUp()
         # Force garbage collection to ensure clean state
         gc.collect()
         # Note: We can't directly reset allocator stats without C++ API,
@@ -66,6 +67,23 @@ class TestDeviceAllocator(TestCase):
         cloned = openreg_tensor.clone()
         self.assertEqual(cloned.device.type, "openreg")
         self.assertTrue(torch.allclose(openreg_tensor.cpu(), cloned.cpu()))
+
+    def test_tensor_shallow_copy(self):
+        # set_data from openreg to cpu
+        self_t = torch.randn(4, 4)
+        from_t = torch.randn(4, 4, device="openreg")
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
+
+        # set_data from cpu to openreg
+        self_t = torch.randn(4, 4, device="openreg")
+        from_t = torch.randn(4, 4)
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
 
     def test_inplace_operations(self):
         """Test memory stability during inplace operations."""
@@ -207,6 +225,7 @@ class TestMemoryLeaks(TestCase):
 
     def setUp(self):
         """Reset memory state before each test."""
+        super().setUp()
         gc.collect()
         time.sleep(0.1)  # Allow time for cleanup
 
@@ -453,6 +472,7 @@ class TestMultiDeviceAllocation(TestCase):
     """Test basic multi-device allocation functionality."""
 
     def setUp(self):
+        super().setUp()
         self.device_count = torch.openreg.device_count()
         self.assertEqual(self.device_count, 2, "This test requires 2 OpenReg devices")
         gc.collect()
@@ -517,6 +537,7 @@ class TestCrossDeviceOperations(TestCase):
     """Test cross-device tensor operations."""
 
     def setUp(self):
+        super().setUp()
         self.device_count = torch.openreg.device_count()
         self.assertEqual(self.device_count, 2)
         gc.collect()

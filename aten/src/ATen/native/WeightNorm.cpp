@@ -59,7 +59,7 @@ std::tuple<Tensor,Tensor> weight_norm_cpu(
   auto norm = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(dtype));
   weight_norm_stub(kCPU, w, norm, v, g, dim);
 
-  return std::tuple<Tensor, Tensor>{w, norm};
+  return std::tuple<Tensor, Tensor>{std::move(w), std::move(norm)};
 }
 
 std::tuple<Tensor, Tensor> weight_norm_backward_cpu(
@@ -76,7 +76,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cpu(
   auto grad_g = at::empty_like(saved_g, at::MemoryFormat::Contiguous);
   weight_norm_backward_stub(kCPU, grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, dim);
 
-  return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+  return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
 }
 
 Tensor _weight_norm
@@ -146,13 +146,13 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
     auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
     auto grad_g = per_dim_sums/norms;
-    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+    return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
   } else { // dim == last_dim
     bcast_size[last_dim] = last_size;
     auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
     auto grad_g = per_dim_sums/norms;
-    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+    return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
   }
 }
 

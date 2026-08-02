@@ -49,6 +49,8 @@ class Weights {
       std::shared_ptr<std::unordered_map<
           std::string,
           std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta =
+          nullptr,
+      const std::unordered_map<std::string, at::Tensor>* cachedWeights =
           nullptr);
 
   at::Tensor at(const std::string& name) const;
@@ -107,6 +109,21 @@ class Weights {
     constFoldedValues_.insert_or_assign(n, std::move(iv));
   }
 
+  bool hasCachedWeights() const {
+    return hasCachedWeights_;
+  }
+
+  // AOTI constant name mapping (original FQN → AOTI constant name).
+  // Set by the parent process after reading from the AOTI model,
+  // serialized with weight export, and used by the child to create
+  // the AOTI container with external constants (zero GPU allocation).
+  const std::unordered_map<std::string, std::string>& getAotiNameMap() const {
+    return aotiNameMap_;
+  }
+  void setAotiNameMap(std::unordered_map<std::string, std::string> map) {
+    aotiNameMap_ = std::move(map);
+  }
+
   std::string toString() const;
 
   WeightVersion version() const {
@@ -140,6 +157,10 @@ class Weights {
 
   // every instance of Weight has a unique version number
   static WeightVersion globalVersion_;
+
+  bool hasCachedWeights_ = false;
+
+  std::unordered_map<std::string, std::string> aotiNameMap_;
 
   std::function<bool(const std::string&)> skipSizeCheck_;
   std::function<bool(const std::string&)> skipDtypeCheck_;

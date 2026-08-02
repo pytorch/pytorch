@@ -130,10 +130,6 @@ phlippe_resnet,pass,6
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
-
-
-
 pytorch_stargan,pass,6
 
 
@@ -174,6 +170,10 @@ soft_actor_critic,pass,6
 
 
 
+speech_transformer,pass,16
+
+
+
 squeezenet1_1,pass,6
 
 
@@ -194,7 +194,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_to_run,37
+vision_maskrcnn,fail_to_run,38
 
 
 

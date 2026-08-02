@@ -13,6 +13,7 @@ from torch._subclasses.complex_tensor._ops.common import (
     COMPLEX_OPS_TABLE,
     COMPLEX_TO_REAL,
     FORCE_TEST_LIST,
+    is_binary_nonlinear_op,
     OpOverloadPacket,
 )
 from torch.autograd.gradcheck import gradcheck
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from torch.testing._internal.opinfo.core import OpInfo
 
 COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
+
+# Native complex BLAS uses a single GEMM; ComplexTensor uses four real GEMMs.
+BINARY_NONLINEAR_CUDA_TOL = {"rtol": 5e-6, "atol": 2e-5}
 
 
 class Variant(Enum):
@@ -89,14 +93,14 @@ class TestCase(PytorchTestCase):
         try:
             result_e = expected()
             exception_e = None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result_e = None
             exception_e = e
 
         try:
             result_a = actual()
             exception_a = None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result_a = None
             exception_a = e
 
@@ -106,7 +110,7 @@ class TestCase(PytorchTestCase):
             self.assertIs(
                 type(exception_e),
                 type(exception_a),
-                f"\n{exception_e=}\n{exception_a=}",
+                lambda msg: f"{msg}\n{exception_e=}\n{exception_a=}",
             )
 
         if exception_e is None:
@@ -143,14 +147,22 @@ class TestCase(PytorchTestCase):
             if extra_info.matches(desc):
                 return extra_kw
 
+        if (
+            desc.device_type == "cuda"
+            and desc.variant in {Variant.Op, Variant.Distributed}
+            and is_binary_nonlinear_op(desc.op)
+        ):
+            return BINARY_NONLINEAR_CUDA_TOL
+
         return {}
 
     def check_consistency(
         self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
     ) -> None:
-        assert variant in {Variant.Op, Variant.Distributed}, (
-            "`check_consistency` called with the wrong `variant`."
-        )
+        if variant not in {Variant.Op, Variant.Distributed}:
+            raise AssertionError(
+                f"`check_consistency` called with the wrong `variant`: {variant}"
+            )
         desc = Descriptor(
             op=get_overload_packet_from_name(op.name),
             device_type=torch.device(device).type,

@@ -3,6 +3,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
+#include <c10/core/AutogradState.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
@@ -19,7 +20,9 @@
 namespace torch::autograd {
 
 #define CHECK_RESULT(RESULT, VAR)                                          \
-  if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
+  if (c10::AutogradState::get_tls_state()                                  \
+          .get_grad_layout_enforcement_enabled() &&                        \
+      !(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
         VAR.is_sparse_csr())) {                                            \
     if (!utils::obeys_layout_contract(RESULT, VAR)) {                      \
       TORCH_WARN_ONCE(                                                     \
@@ -41,6 +44,11 @@ struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
   variable_list apply(variable_list&& grads) override;
+
+  void release_resources() override {
+    variable.reset();
+    Node::release_resources();
+  }
 
   std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
       override {
@@ -108,7 +116,7 @@ struct TORCH_API AccumulateGrad : public Node {
   //     . We aren't setting up for double-backward.
   //     . No other user-visible tensor references new_grad.
   //     . new_grad obeys the "Gradient Layout Contract", there has a special
-  //       case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
+  //       case, For MKLDNN tensor, which is an opaque tensor, assuming it obeys
   //       layout_contract.
   //   - Case 1.2: Stealable sparse new_grad
   //     . Can't detach sparse tensor (since metadata changes are not allowed
@@ -184,6 +192,8 @@ struct TORCH_API AccumulateGrad : public Node {
               new_grad,
               num_expected_refs + at::caching::is_cached_tensor(new_grad)) &&
           (new_grad.is_mkldnn() ||
+           !c10::AutogradState::get_tls_state()
+                .get_grad_layout_enforcement_enabled() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // See Case 1.1: Stealable dense new_grad
         update_grad(new_grad.detach());

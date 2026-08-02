@@ -241,17 +241,19 @@ with torch.no_grad():
         )
 
     def _aoti_check_relu_repro(self, res):
-        assert res is not None
+        if res is None:
+            raise AssertionError("res is None")
         ep_file_path = res.get_exported_program_path()
-        assert ep_file_path is not None
+        if ep_file_path is None:
+            raise AssertionError("ep_file_path is None")
         gm = export_load(ep_file_path).module(check_guards=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
+def forward(self, linear_default):
+    linear_default, = fx_pytree.tree_flatten_spec(([linear_default], {}), self._in_spec)
+    relu_default = torch.ops.aten.relu.default(linear_default);  linear_default = None
+    return pytree.tree_unflatten((relu_default,), self._out_spec)""",
         )
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")

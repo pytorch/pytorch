@@ -538,7 +538,7 @@ std::tuple<PackedSequence, Tensor> RNNImpl::forward_with_packed_input(
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -619,7 +619,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
          max_batch_size,
          options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
-    hx = std::make_tuple(h_zeros, c_zeros);
+    hx = std::make_tuple(std::move(h_zeros), std::move(c_zeros));
   } else {
     hx = hx_opt.value();
     // Each batch of the hidden state should match the input sequence that
@@ -632,7 +632,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   if (!batch_sizes.defined()) {
     result = torch::lstm(
         input,
-        {std::get<0>(hx), std::get<1>(hx)},
+        {std::move(std::get<0>(hx)), std::move(std::get<1>(hx))},
         flat_weights_,
         options.bias(),
         options.num_layers(),
@@ -644,7 +644,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     result = torch::lstm(
         input,
         batch_sizes,
-        {std::get<0>(hx), std::get<1>(hx)},
+        {std::move(std::get<0>(hx)), std::move(std::get<1>(hx))},
         flat_weights_,
         options.bias(),
         options.num_layers(),
@@ -652,10 +652,11 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
         this->is_training(),
         options.bidirectional());
   }
-  auto output = std::get<0>(result);
-  auto hidden = std::make_tuple(std::get<1>(result), std::get<2>(result));
+  auto output = std::move(std::get<0>(result));
+  auto hidden = std::make_tuple(
+      std::move(std::get<1>(result)), std::move(std::get<2>(result)));
 
-  return std::make_tuple(output, hidden);
+  return std::make_tuple(std::move(output), std::move(hidden));
 }
 
 std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
@@ -689,7 +690,7 @@ std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> LSTMImpl::
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -782,7 +783,7 @@ std::tuple<PackedSequence, Tensor> GRUImpl::forward_with_packed_input(
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCellImplBase

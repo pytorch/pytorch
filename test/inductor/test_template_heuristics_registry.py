@@ -1,12 +1,17 @@
 # Owner(s): ["module: inductor"]
-from torch._inductor.template_heuristics.base import TemplateConfigHeuristics
-from torch._inductor.template_heuristics.registry import (
+import torch
+from torch._inductor.heuristics.registry import (
     _TEMPLATE_HEURISTIC_REGISTRY,
     clear_registry,
     get_template_heuristic,
     register_template_heuristic,
 )
-from torch._inductor.template_heuristics.triton import BlackwellGPUGemmConfig
+from torch._inductor.heuristics.template.base import TemplateConfigHeuristics
+from torch._inductor.heuristics.template.triton import (
+    BlackwellGPUGemmConfig,
+    CUDAConfigHeuristic,
+    FlexConfig,
+)
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -30,7 +35,7 @@ class TestBlackwellGPUGemmConfig(TestCase):
         self.assertEqual(config.num_warps, 8)
 
         # Verify new BlackwellGPUGemmConfig-specific fields with default values
-        self.assertFalse(config.epilogue_subtile)  # default=False
+        self.assertEqual(config.epilogue_subtile, 1)  # default=1
         self.assertTrue(config.warp_specialize)  # default=True
         self.assertTrue(config.flatten)  # default=True
 
@@ -42,12 +47,12 @@ class TestBlackwellGPUGemmConfig(TestCase):
             block_k=32,
             num_stages=2,
             num_warps=4,
-            epilogue_subtile=True,
+            epilogue_subtile=2,
             warp_specialize=False,
             flatten=False,
         )
         # Verify custom values are set correctly
-        self.assertTrue(config.epilogue_subtile)
+        self.assertEqual(config.epilogue_subtile, 2)
         self.assertFalse(config.warp_specialize)
         self.assertFalse(config.flatten)
 
@@ -208,6 +213,29 @@ class TestTemplateHeuristicsRegistry(TestCase):
         heuristic4 = get_template_heuristic("unknown_template", "cuda", "unknown_op")
         self.assertIsInstance(heuristic4, _NewlyRegisteredHeuristic)
         self.assertIs(heuristic3, heuristic4)  # Should be same cached instance
+
+
+class TestA100DefaultFlexConfig(TestCase):
+    def test_head_dim_192_entries(self):
+        """``(bf16, 192)`` and ``(fp16, 192)`` entries are required for
+        DeepSeek V3 MLA (qk_nope_head_dim=128 + qk_rope_head_dim=64 = 192,
+        v_head_dim=128) on every ``capability >= (8, 0)`` board.
+
+        Without these entries, dispatch falls through to
+        ``FlexConfig(64, 64, 3, 4)``, which exceeds the 99 KiB per-block
+        shared-memory opt-in budget on sm_8.6 / sm_8.9 (A10G, L40, A2)
+        and fails compilation with "No valid triton configs."
+
+        The pinned tile fits the sm_8.6 budget with margin and was the
+        empirical fastest among the candidates on A2, L40, and A100. If
+        you want to retune, please re-validate on a real sm_8.6 board
+        before changing this value (the formula-based SMEM estimate alone
+        is not a reliable proxy for what triton actually allocates).
+        """
+        expected = FlexConfig(128, 32, 2, 8)
+        h = CUDAConfigHeuristic()
+        self.assertEqual(h.a100_default_flex_config[(torch.bfloat16, 192)], expected)
+        self.assertEqual(h.a100_default_flex_config[(torch.float16, 192)], expected)
 
 
 if __name__ == "__main__":

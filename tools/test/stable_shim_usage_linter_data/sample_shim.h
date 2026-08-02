@@ -98,6 +98,41 @@ AOTI_TORCH_EXPORT int primary_path(int arg);
 AOTI_TORCH_EXPORT int secondary_path(int arg);
 #endif
 
+
+// Function with a return type that consists of multiple words.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT const char* function_that_returns_constchar();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Test a function where the name is longer and the linter
+// places the function name on the next line, this tests the
+// case where 'AOTI_TORCH_EXPORT AOTITorchError' was gobbled
+// up by the parser.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT AOTITorchError
+this_is_a_very_long_function(StableIValue** ret_value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// And with a comment... should also match.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT AOTITorchError // This is a really long function
+this_is_a_very_long_function2(StableIValue** ret_value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Functions with their version names in them for readable tests.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+AOTI_TORCH_EXPORT void function_2_11_0();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_1
+AOTI_TORCH_EXPORT void function_2_12_1();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_1
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_2
+AOTI_TORCH_EXPORT void function_2_13_2();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_2
+
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

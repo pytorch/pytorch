@@ -17,11 +17,11 @@ Tensor my_empty(
   return empty(size, dtype, layout, device, pin_memory, memory_format);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_empty(int[] size, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_empty", TORCH_BOX(&my_empty));
 }

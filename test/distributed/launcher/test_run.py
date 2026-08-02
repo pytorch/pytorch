@@ -19,6 +19,9 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest import mock, skipIf
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
@@ -67,6 +70,7 @@ class MockException(Exception):
 
 class ElasticLaunchTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables
@@ -254,7 +258,8 @@ class ElasticLaunchTest(TestCase):
     )
     @patch("torch.cuda.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
-        self._test_nproc_launch_configuration("auto", os.cpu_count())
+        expected = torch._utils.cpu_count()
+        self._test_nproc_launch_configuration("auto", expected)
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
@@ -682,6 +687,11 @@ class ElasticLaunchTest(TestCase):
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
     @skipIf(not TEST_CUDA, "requires CUDA")
+    # ElasticLaunchTest is a plain TestCase, but this test launches
+    # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
+    # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
+    # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
+    @pytest.mark.multigpu
     def test_virtual_local_rank(self):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.

@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -28,6 +27,7 @@ register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
+register_log("flex_gemm", "torch._inductor.kernel.flex_gemm.debug")
 
 register_artifact(
     "cudagraphs",
@@ -47,6 +47,7 @@ register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
+register_log("native_dsl", "torch._native")
 register_log(
     "export",
     [
@@ -217,6 +218,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "overlap_scheduling",
+    "Detailed Inductor overlap scheduling pass information",
+    off_by_default=True,
+)
+register_artifact(
     "sym_node",
     "Logs extra info for various SymNode operations",
     off_by_default=True,
@@ -237,6 +243,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
+    off_by_default=True,
+)
+register_artifact(
     "node_runtime_estimation",
     "Node runtime estimation for compile-time optimization decisions.",
     off_by_default=True,
@@ -244,6 +255,11 @@ register_artifact(
 register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+    off_by_default=True,
+)
+register_artifact(
+    "autotuning_inputs",
+    "Per-kernel input tensor shapes/dtypes/strides logged during autotuning.",
     off_by_default=True,
 )
 register_artifact(

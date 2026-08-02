@@ -1,9 +1,14 @@
 # Owner(s): ["module: dynamo"]
-from typing import Optional
+
+import importlib.util
+import os
+import sys
+import tempfile
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 
 
@@ -13,7 +18,7 @@ except ImportError:
     import utils
 
 
-class Pair:  # noqa: B903
+class Pair:
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -185,7 +190,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_1(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
+            def __init__(self, value: torch.Tensor, name: str | None = None):
                 self.value = value
                 self.name = name or fresh_name()
 
@@ -205,12 +210,12 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_2(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
+            def __init__(self, value: torch.Tensor, name: str | None = None):
                 self.value = value
                 self.name = name or fresh_name()
 
             @staticmethod
-            def constant(value: torch.Tensor, name: Optional[str] = None):
+            def constant(value: torch.Tensor, name: str | None = None):
                 return Variable(value, name)
 
         def fn(a, b):
@@ -232,13 +237,13 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         except ImportError:
             import mock_store_global_crossfile_inline
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def fn(x):
             mock_store_global_crossfile_inline.set_flag_true()
             mock_store_global_crossfile_inline.set_flag_false()
             return x + 1
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def fn_set_true(x):
             mock_store_global_crossfile_inline.set_flag_true()
             return x + 1
@@ -247,6 +252,85 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         self.assertTrue(mock_store_global_crossfile_inline.global_flag)
         fn(torch.ones(2, 2))
         self.assertFalse(mock_store_global_crossfile_inline.global_flag)
+
+    def test_unregistered_importlib_module_globals(self):
+        module_name = "test_dynamo_unregistered_module_181243"
+        self.assertNotIn(module_name, sys.modules)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            module_path = os.path.join(tmpdir, f"{module_name}.py")
+            with open(module_path, "w") as f:
+                f.write(
+                    """
+import functools
+import torch
+
+
+def _helper(x, scale):
+    return x.sin() * scale
+
+
+def my_fn(x, scale):
+    return _helper(x, scale)
+
+
+fn = functools.partial(my_fn, scale=2)
+"""
+                )
+
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            self.assertNotIn(module_name, sys.modules)
+
+            x = torch.randn(4, 4)
+            compiled = torch.compile(mod.fn, backend="eager", fullgraph=True)
+            self.assertTrue(same(compiled(x), mod.fn(x)))
+
+    def test_store_global_in_unregistered_importlib_module(self):
+        module_name = "test_dynamo_unregistered_store_global_181243"
+        self.assertNotIn(module_name, sys.modules)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            module_path = os.path.join(tmpdir, f"{module_name}.py")
+            with open(module_path, "w") as f:
+                f.write(
+                    """
+import functools
+
+
+flag = 0
+
+
+def my_fn(x, scale):
+    global flag
+    flag = scale
+    return x + flag
+
+
+fn = functools.partial(my_fn, scale=2)
+"""
+                )
+
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            self.assertNotIn(module_name, sys.modules)
+
+            x = torch.randn(4, 4)
+            with self.assertRaisesRegex(
+                Unsupported, "STORE_GLOBAL in non-module globals"
+            ):
+                torch.compile(mod.fn, backend="eager", fullgraph=True)(x)
+
+            mod.flag = 0
+            compiled = torch.compile(mod.fn, backend="eager")
+            self.assertTrue(same(compiled(x), x + 2))
+            self.assertEqual(mod.flag, 2)
 
 
 if __name__ == "__main__":

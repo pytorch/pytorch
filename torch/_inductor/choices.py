@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -13,21 +13,23 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs  # noqa: TC001
+from .heuristics.template import get_template_heuristic
+from .heuristics.template.triton import (
+    _origami_enabled,
+    BaseConfigHeuristic,
+    CPUConfigHeuristic,
+    CUDAConfigHeuristic,
+    IS_ROCM,
+    MTIAConfigHeuristic,
+    ROCmConfigHeuristic,
+    XPUConfigHeuristic,
+)
+from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .template_heuristics import get_template_heuristic
-from .template_heuristics.triton import (
-    BaseConfigHeuristic,
-    CPUConfigHeuristic,
-    CUDAConfigHeuristic,
-    MTIAConfigHeuristic,
-    ROCmConfigHeuristic,
-    XPUConfigHeuristic,
-)
 from .utils import _use_autotune_backend
 from .virtualized import V
 
@@ -47,6 +49,21 @@ if TYPE_CHECKING:
     from torch.utils._ordered_set import OrderedSet  # isort: skip
 
 
+if TYPE_CHECKING or not config.is_fbcode():
+
+    def _maybe_log_inductor_mm_shape(
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        context_fn: Any = None,
+    ) -> None:
+        return
+
+else:
+    from torch._inductor.fb.shape_logging import (
+        log_inductor_mm_shape as _maybe_log_inductor_mm_shape,
+    )
+
+
 class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
@@ -56,14 +73,21 @@ class Sortable(typing.Protocol):
 @dataclasses.dataclass
 class FusionScore:
     template_score: int
-    node_type_score: bool
+    node_type_score: int
     memory_score: int
+    buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
-        node_type_score has higher priority than memory_score unless
-        the memory_score differs too much
+        node_type_score orders same-kind fusions above mixed-kind fusions unless
+        the memory_score differs too much. Nested reduction candidates use -1
+        so they rank below ordinary mixed-kind fusions; mix-order reductions
+        are still scored through memory_score.
+
+        buffer_overlap_score is prioritized below memory_score so that
+        strict global memory savings (exact dep matches) are preferred
+        over buffer overlap scoring (same buffer, different indexing).
         """
         threshold = 16
         if self.template_score != other.template_score:
@@ -75,16 +99,22 @@ class FusionScore:
         ):
             return self.memory_score < other.memory_score
 
-        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+        return (
+            self.node_type_score,
+            self.memory_score,
+            self.buffer_overlap_score,
+            self.proximity_score,
+        ) < (
             other.node_type_score,
             other.memory_score,
+            other.buffer_overlap_score,
             other.proximity_score,
         )
 
 
 class InductorChoices:
     """
-    This class contains a collection of default heuristics that effect performance of our generated
+    This class contains a collection of default heuristics that affect performance of our generated
     code.  We try to not put correctness requirements in this file.
 
     You can override the choices made here by doing:
@@ -93,10 +123,13 @@ class InductorChoices:
                 ...
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
+
+    Subclasses used with inductor_choices_class must implement uuid() for
+    cache key computation.
     """
 
     def get_config_heuristics(
-        self, device_type: Optional[str] = "cuda"
+        self, device_type: str | None = "cuda"
     ) -> BaseConfigHeuristic:
         if device_type == "cuda":
             if torch.version.hip is None:
@@ -114,38 +147,68 @@ class InductorChoices:
 
     # Conv configs
     def get_conv_configs(
-        self, device_type: Optional[str] = "cuda"
+        self, device_type: str | None = "cuda"
     ) -> partial[Generator[TritonConfig, None, None]]:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
 
+    def get_depthwise_conv_configs(self, device_type: str | None = "cuda") -> list[Any]:
+        heuristics = self.get_config_heuristics(device_type)
+        return heuristics.get_depthwise_conv_configs()
+
     # Flex attention configs
     # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
 
     def get_flex_decode_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def append_flex_attention_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+    ) -> list[Any]:
+        """Append backend-specific flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
+
+    def _logging_context(self) -> dict[str, Any]:
+        """Extra fields for the per-shape log row. Subclasses may override."""
+        return {}
 
     def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[KernelTemplateChoice]:
         """
         This method can be subclassed to perform any override/modification of the choices.
@@ -166,6 +229,10 @@ class InductorChoices:
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
         """
+        if isinstance(kernel_inputs, MMKernelInputs):
+            _maybe_log_inductor_mm_shape(
+                kernel_inputs, op_name, context_fn=self._logging_context
+            )
         choices: list[KernelTemplateChoice] = []
         for choice_gen in template_choices.values():
             choices.extend(choice_gen)
@@ -174,9 +241,9 @@ class InductorChoices:
     def get_ktc(
         self,
         kernel_inputs: KernelInputs,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        template: KernelTemplate | ExternKernelChoice,
         op_name: str,
-        kwarg_overrides: Optional[dict[str, Any]] = None,
+        kwarg_overrides: dict[str, Any] | None = None,
     ) -> Generator[KernelTemplateChoice, None, None]:
         """
         Utility to get the KernelTemplateChoice generator for a specific input.
@@ -186,7 +253,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -216,15 +284,7 @@ class InductorChoices:
         adjusted_choices: list[KernelTemplateChoice],
         op_name: str,
     ) -> bool:
-        """
-        Check if we need to fix the layout instead of keeping it flexible
-
-        Args:
-            ktc: KernelTemplateChoice object
-
-        Returns:
-            True if we need to fix the layout, False otherwise
-        """
+        """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -235,6 +295,18 @@ class InductorChoices:
             ]:
                 return True
 
+        # Origami requires fixed layouts (grid/workgroup mappings depend on exact
+        # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
+        # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
+        # origami only contributes Triton GEMM configs under autotuning, so with it
+        # off there is nothing that needs fixed strides and flexible layouts should
+        # be preserved (matches non-origami behavior).
+        if (
+            _origami_enabled()
+            and IS_ROCM
+            and (config.max_autotune or config.max_autotune_gemm)
+        ):
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
@@ -269,9 +341,9 @@ class InductorChoices:
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[ChoiceCaller]:
         """
         Get list of ChoiceCallers for MM templates using template-specific heuristics.
@@ -332,18 +404,29 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
+    def override_best_choice(
+        self,
+        best_choice: ChoiceCaller,
+        timings: dict[ChoiceCaller, float],
+    ) -> ChoiceCaller:
+        """Hook to override the autotuning best choice after benchmarking."""
+        return best_choice
+
+    def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
+        """Hook to transform fused kernel names during codegen"""
+        return fused_name
+
     @staticmethod
-    def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
+    def should_use_cooperative_reduction(
+        device: torch.device, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
         if config.triton.force_cooperative_reductions:
             return True
-        if (
-            not config.triton.cooperative_reductions
-            or V.graph.get_current_device_or_throw().type == "cpu"
-        ):
+        if not config.triton.cooperative_reductions or device.type == "cpu":
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -351,24 +434,26 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
-        return V.graph.sizevars.statically_known_geq(
-            features.reduction_numel, threshold
-        )
+        # TODO(laith) What if hint(reduction_numel) >= threshold ?
+        # shall we compare hints instead
+        return V.graph.sizevars.statically_known_geq(reduction_numel, threshold)
 
     @staticmethod
     def should_use_persistent_reduction(
-        features: SIMDKernelFeatures, cooperative_reduction: bool
+        features: SIMDKernelFeatures,
+        cooperative_reduction: bool,
     ) -> bool:
         """
         Heuristic to decide if a persistent reduction should be used.
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
@@ -379,7 +464,7 @@ class InductorChoices:
             if not all(
                 (
                     (isinstance(bound, int) or bound.is_constant())
-                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                    and not torch.utils._sympy.numbers.is_infinite(bound)
                 )
                 for bound in (lower, upper)
             ):
@@ -388,7 +473,7 @@ class InductorChoices:
             lower = next_power_of_2(int(lower))
             upper = next_power_of_2(int(upper))
 
-            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # If we are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
             # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
@@ -398,12 +483,11 @@ class InductorChoices:
 
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
-            try:
-                threshold *= 32 // min(
-                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
-                )
-            except ValueError:
-                pass  # unbacked symint
+            # The default fallback will be used if optimizations hint is not provided. The default fallback
+            # is >> 32.
+            threshold *= 32 // min(
+                V.graph.sizevars.optimization_hint(features.numel), 32
+            )
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
@@ -416,8 +500,31 @@ class InductorChoices:
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
 
-    @staticmethod
+    def _inner_reduction_no_split_threshold(
+        self,
+        props: DeviceProperties,
+        xnumel: int,
+        num_sm: int,
+    ) -> int:
+        # Benchmark results from two scenarios:
+        # (1) Standalone ops/small models: CPU wall time measures end-to-end
+        #     latency and generally prefers a large no-split threshold.
+        # (2) Sections inside large compiled models: kernel/device time is the
+        #     local codegen signal and prefers the smaller xnumel-dependent
+        #     threshold. Kernel launch overhead is amortized by cuda-graph.
+        # Benchmarked ops: sum, entropy, RMSNorm, Welford, GroupNorm(+SiLU),
+        # plus Stable Diffusion v1.5 UNet batch-1/8 validation.
+        # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
+        # Reducing these thresholds further did not improve scenario (2), but
+        # hurts scenario (1).
+        if props.major is not None and props.major >= 10:
+            if xnumel < num_sm:
+                return 32768
+            return 40960
+        return 8192
+
     def reduction_split_factor(
+        self,
         device: torch.device,
         reduction_numel_hint: int,
         numel_hint: int,
@@ -428,20 +535,29 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        min_elements_per_thread = 32
+        warp_size = props.warp_size_or_default
+        max_threads_per_sm = (
+            props.max_threads_per_multi_processor
+            if props.max_threads_per_multi_processor is not None
+            else 2048
+        )
+        min_elements_per_thread = warp_size
         max_elements_per_thread = 512
-        threads_per_sm = 2048
+        threads_per_sm = max_threads_per_sm
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
-        num_threads = 32 * num_warps
+        num_threads = warp_size * num_warps
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            if reduction_numel_hint <= 8192:
+            no_split_threshold = self._inner_reduction_no_split_threshold(
+                props, numel_hint, num_sm
+            )
+            if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
                 split_size = min_elements_per_thread
@@ -454,7 +570,7 @@ class InductorChoices:
                 divisors = sympy.divisors(reduction_numel_hint)
                 closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
                 if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
+                    # prefer even splits, but never smaller than min_elements_per_thread
                     split_size = max(closest, min_elements_per_thread)
                 else:
                     split_size = tmp_split_size
@@ -621,11 +737,10 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, is_mix_order_reduction = typing.cast(
-            tuple[int, bool],
+        memory_score, buffer_overlap_score, is_mix_order_reduction = (
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
-            ),
+            )
         )
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
@@ -641,11 +756,26 @@ class InductorChoices:
                 and memory_score > 0
             )
 
-        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        node_type_score = int(
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        )
+        if (
+            config.triton.nested_reduction
+            and node1.is_reduction()
+            and node2.is_reduction()
+            and node1.get_operation_names() & node2.ancestors
+        ):
+            # Mix-order reductions are sibling reductions. Only dependent
+            # cross-reduction-size reductions get the lower nested score here.
+            _, (_, rnumel1) = node1.group
+            _, (_, rnumel2) = node2.group
+            if not V.graph.sizevars.statically_known_equals(rnumel1, rnumel2):
+                node_type_score = -1
 
         return FusionScore(
             template_score,
-            type_score,
+            node_type_score,
             memory_score,
+            buffer_overlap_score,
             proximity_score,
         )

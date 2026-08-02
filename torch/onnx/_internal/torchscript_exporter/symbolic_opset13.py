@@ -151,7 +151,8 @@ def tensor_split(
         if split_val.dim() > 0:
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             res = []
-            assert _outputs is not None
+            if _outputs is None:
+                raise AssertionError("_outputs must be non-None")
             for i in range(_outputs - 1):
                 end = g.op(
                     "Gather",
@@ -640,7 +641,7 @@ def repeat_interleave(
 
         # Check if repeats is dynamic
         # As repeats is dynamic, we use a where node as a substitute for the if statement
-        # If repests_dim = 1, expand repeats otherwise use original tensor
+        # If repeats_dim = 1, expand repeats otherwise use original tensor
         if cond_dynamic_repeats:
             repeat_dim = symbolic_helper._size_helper(
                 g, repeats, g.op("Constant", value_t=torch.LongTensor([0]))

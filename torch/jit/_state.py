@@ -3,7 +3,7 @@
 
 This module stores various pieces of Python-global state relating to the JIT.
 
-This is not intended to be imported directly; please the exposed
+This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
@@ -124,5 +124,6 @@ def _try_get_jit_cached_function(key):
 
 def _set_jit_function_cache(key, value) -> None:
     # only free functions currently supported
-    assert isinstance(value, torch.jit.ScriptFunction)
+    if not isinstance(value, torch.jit.ScriptFunction):
+        raise AssertionError(f"Expected ScriptFunction, got {type(value)}")
     _jit_caching_layer[key] = value.qualified_name

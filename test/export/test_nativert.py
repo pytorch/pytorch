@@ -100,6 +100,9 @@ def run_with_nativert(ep):
         torch.export.pt2_archive._package.package_pt2(
             f, exported_programs={MODEL_NAME: ep_infer}
         )
+        # Flush so PyModelRunner, which reopens the file by name below, sees the
+        # fully written archive (the zip central directory is written last).
+        f.flush()
         filename = f.name
 
         try:
@@ -125,18 +128,34 @@ def run_with_nativert(ep):
                     *pytree.tree_leaves((ep_args, ep_kwargs))
                 )
             flat_results = pytree.tree_leaves(results)
-            assert len(flat_results) == len(flat_expected)
+            if len(flat_results) != len(flat_expected):
+                raise AssertionError(
+                    f"Expected {len(flat_expected)} results, got {len(flat_results)}"
+                )
             for result, expected in zip(flat_results, flat_expected):
-                assert type(result) is type(expected)
+                if type(result) is not type(expected):
+                    raise AssertionError(
+                        f"Expected type {type(expected)}, got {type(result)}"
+                    )
                 if isinstance(result, torch.Tensor) and isinstance(
                     expected, torch.Tensor
                 ):
-                    assert result.shape == expected.shape
-                    assert result.dtype == expected.dtype
-                    assert result.device == expected.device
+                    if result.shape != expected.shape:
+                        raise AssertionError(
+                            f"Expected shape {expected.shape}, got {result.shape}"
+                        )
+                    if result.dtype != expected.dtype:
+                        raise AssertionError(
+                            f"Expected dtype {expected.dtype}, got {result.dtype}"
+                        )
+                    if result.device != expected.device:
+                        raise AssertionError(
+                            f"Expected device {expected.device}, got {result.device}"
+                        )
                     torch.testing.assert_close(result, expected, equal_nan=True)
                 else:
-                    assert result == expected
+                    if result != expected:
+                        raise AssertionError(f"Expected {expected}, got {result}")
         except RuntimeError as e:
             # User need to register pytree type on the cpp side, which
             # cannot be tested in python unittest.
@@ -320,18 +339,34 @@ class TestNativeRT(TestCase):
                         *pytree.tree_leaves((ep_args, ep_kwargs))
                     )
                 flat_results = pytree.tree_leaves(results)
-                assert len(flat_results) == len(flat_expected)
+                if len(flat_results) != len(flat_expected):
+                    raise AssertionError(
+                        f"Expected {len(flat_expected)} results, got {len(flat_results)}"
+                    )
                 for result, expected in zip(flat_results, flat_expected):
-                    assert type(result) is type(expected)
+                    if type(result) is not type(expected):
+                        raise AssertionError(
+                            f"Expected type {type(expected)}, got {type(result)}"
+                        )
                     if isinstance(result, torch.Tensor) and isinstance(
                         expected, torch.Tensor
                     ):
-                        assert result.shape == expected.shape
-                        assert result.dtype == expected.dtype
-                        assert result.device == expected.device
+                        if result.shape != expected.shape:
+                            raise AssertionError(
+                                f"Expected shape {expected.shape}, got {result.shape}"
+                            )
+                        if result.dtype != expected.dtype:
+                            raise AssertionError(
+                                f"Expected dtype {expected.dtype}, got {result.dtype}"
+                            )
+                        if result.device != expected.device:
+                            raise AssertionError(
+                                f"Expected device {expected.device}, got {result.device}"
+                            )
                         torch.testing.assert_close(result, expected, equal_nan=True)
                     else:
-                        assert result == expected
+                        if result != expected:
+                            raise AssertionError(f"Expected {expected}, got {result}")
             except RuntimeError as e:
                 # User need to register pytree type on the cpp side, which
                 # cannot be tested in python unittest.
@@ -339,6 +374,38 @@ class TestNativeRT(TestCase):
                     pass
                 else:
                     raise e
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
+class TestSelectScalarOverload(TestCase):
+    def test_floor_divide_default_scalar(self) -> None:
+        # PT2 export lowers `x // 10` to aten.floor_divide.default with a scalar
+        # Int argument (the #90923 Scalar->Tensor broadcast).  Its default
+        # schema is (Tensor, Tensor), so nativert's boxed C10Kernel dispatch
+        # raises "Expected Tensor but got Int" unless selectScalarOverload
+        # rewrites the node to floor_divide.Scalar during load.  Running the
+        # exported program through nativert exercises that pass end to end.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.floor_divide(x, 10)
+
+        ep = export(M(), (torch.randint(0, 1000, (999,), dtype=torch.long),))
+        # The export must actually produce the .default overload this fixes.
+        self.assertTrue(
+            any(
+                n.op == "call_function"
+                and n.target is torch.ops.aten.floor_divide.default
+                for n in ep.graph.nodes
+            )
+        )
+
+        # Run the exported program through nativert -- which applies
+        # selectScalarOverload on load -- and compare against eager.  Without
+        # the pass, boxed C10Kernel dispatch raises "Expected Tensor but got
+        # Int" on the floor_divide.default node.
+        run_with_nativert(ep)
 
 
 if is_fbcode():

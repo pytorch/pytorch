@@ -29,7 +29,8 @@ def magic_trace(
         subprocess.run(["chmod", "+x", magic_trace_cache])
     args = [magic_trace_cache, "attach", "-pid", str(pid), "-o", output]
     p = subprocess.Popen(args, stderr=subprocess.PIPE, encoding="utf-8")
-    assert p.stderr is not None
+    if p.stderr is None:
+        raise AssertionError("Expected stderr to be non-None")
     while True:
         x = p.stderr.readline()
         print(x)

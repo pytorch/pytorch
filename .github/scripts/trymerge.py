@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 
-# NB: the following functions are used in Meta-internal workflows
-# (github_first_try_merge/my_handler.py) and thus have functionality limitations
-# (no `git` command access, no network access besides the strict allow list):
-#
-# find_matching_merge_rule
-# read_merge_rules
-#
-# Also any signature changes of these functions, as well as changes to the `GitHubPR`
-# class, will likely require corresponding changes for the internal workflows.
+from __future__ import annotations
 
 import base64
 import json
@@ -17,12 +9,11 @@ import re
 import time
 import urllib.parse
 from collections import defaultdict
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from warnings import warn
 
 import yaml
@@ -32,6 +23,7 @@ from github_utils import (
     gh_fetch_merge_base,
     gh_fetch_url,
     gh_graphql,
+    gh_merge_pr,
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
@@ -54,6 +46,10 @@ from label_utils import (
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
 MERGE_COMPLETE_LABEL = "merged"
@@ -62,22 +58,22 @@ MERGE_COMPLETE_LABEL = "merged"
 class JobCheckState(NamedTuple):
     name: str
     url: str
-    status: Optional[str]
-    classification: Optional[str]
-    job_id: Optional[int]
-    title: Optional[str]
-    summary: Optional[str]
+    status: str | None
+    classification: str | None
+    job_id: int | None
+    title: str | None
+    summary: str | None
 
 
 JobNameToStateDict = dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, run_id: int, status: Optional[str]):
+    def __init__(self, name: str, url: str, run_id: int, status: str | None):
         self.name: str = name
         self.url: str = url
         self.run_id: int = run_id
-        self.status: Optional[str] = status
+        self.status: str | None = status
         self.jobs: JobNameToStateDict = {}
 
 
@@ -450,6 +446,18 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
+# CI docker images are keyed by the git tree hash of the .ci/docker directory
+# (see .github/workflows/docker-builds.yml, which tags the images it builds with
+# `git rev-parse HEAD:.ci/docker`).  A PR that touches these files must have its
+# images pre-built and pushed to ECR by the docker-builds (ciflow/docker)
+# workflow, and the .ci/docker tree hash of the merge commit must match the tree
+# hash that was actually built.  If another docker-affecting PR lands in the
+# skew window, the merge commit would reference an image tag that was never
+# built, leaving every downstream trunk job unable to find its image (see the
+# #190927 / #186302 land race).
+DOCKER_CI_PATH = ".ci/docker"
+DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+
 
 def iter_issue_timeline_until_comment(
     org: str, repo: str, issue_number: int, target_comment_id: int, max_pages: int = 200
@@ -489,12 +497,12 @@ def iter_issue_timeline_until_comment(
     )
 
 
-def sha_from_committed_event(ev: dict[str, Any]) -> Optional[str]:
+def sha_from_committed_event(ev: dict[str, Any]) -> str | None:
     """Extract SHA from committed event in timeline"""
     return ev.get("sha")
 
 
-def sha_from_force_push_after(ev: dict[str, Any]) -> Optional[str]:
+def sha_from_force_push_after(ev: dict[str, Any]) -> str | None:
     """Extract SHA from force push event in timeline"""
     # The current GitHub API format
     commit_id = ev.get("commit_id")
@@ -542,8 +550,28 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
         return f"{workflow_run['workflow']['name']} / "
 
 
-def is_passing_status(status: Optional[str]) -> bool:
+def is_passing_status(status: str | None) -> bool:
     return status is not None and status.upper() in ["SUCCESS", "SKIPPED", "NEUTRAL"]
+
+
+def is_docker_affecting_files(files: Iterable[str]) -> bool:
+    """Whether any of the given files change the CI docker image tree hash.
+
+    The docker image tag is derived purely from the .ci/docker tree, so only
+    changes under that directory matter (changes to docker-builds.yml or
+    .lintrunner.toml re-trigger the build workflow but do not change the tag).
+    """
+    return any(f == DOCKER_CI_PATH or f.startswith(f"{DOCKER_CI_PATH}/") for f in files)
+
+
+def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
+    """Return the subset of checks that belong to the docker-builds workflow."""
+    return {
+        name: check
+        for name, check in checks.items()
+        if name == DOCKER_BUILDS_WORKFLOW_NAME
+        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+    }
 
 
 def add_workflow_conclusions(
@@ -664,21 +692,24 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -> bool:
+def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> bool:
     if comment_id is None:
         return False
     comment = pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
         return False
-    return comment.author_login == "facebook-github-bot"
+    if comment.author_login == "facebook-github-bot":
+        return True
+    # facebook-github-tools is a GitHub App; identify by its app URL.
+    return comment.author_url == "https://github.com/apps/facebook-github-tools"
 
 
 def _revlist_to_prs(
     repo: GitRepo,
-    pr: "GitHubPR",
+    pr: GitHubPR,
     rev_list: Iterable[str],
-    should_skip: Optional[Callable[[int, "GitHubPR"], bool]] = None,
-) -> list[tuple["GitHubPR", str]]:
+    should_skip: Callable[[int, GitHubPR], bool] | None = None,
+) -> list[tuple[GitHubPR, str]]:
     rc: list[tuple[GitHubPR, str]] = []
     for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
@@ -706,8 +737,8 @@ def _revlist_to_prs(
 
 
 def get_ghstack_prs(
-    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
-) -> list[tuple["GitHubPR", str]]:
+    repo: GitRepo, pr: GitHubPR, open_only: bool = True
+) -> list[tuple[GitHubPR, str]]:
     """
     Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
     @:param open_only: Only return open PRs
@@ -716,7 +747,7 @@ def get_ghstack_prs(
     orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
     rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
 
-    def skip_func(idx: int, candidate: "GitHubPR") -> bool:
+    def skip_func(idx: int, candidate: GitHubPR) -> bool:
         if not open_only or not candidate.is_closed():
             return False
         print(
@@ -761,14 +792,14 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
-        self.changed_files: Optional[list[str]] = None
-        self.labels: Optional[list[str]] = None
-        self.conclusions: Optional[JobNameToStateDict] = None
-        self.comments: Optional[list[GitHubComment]] = None
-        self._authors: Optional[list[tuple[str, str]]] = None
-        self._reviews: Optional[list[tuple[str, str]]] = None
-        self.merge_base: Optional[str] = None
-        self.submodules: Optional[list[str]] = None
+        self.changed_files: list[str] | None = None
+        self.labels: list[str] | None = None
+        self.conclusions: JobNameToStateDict | None = None
+        self.comments: list[GitHubComment] | None = None
+        self._authors: list[tuple[str, str]] | None = None
+        self._reviews: list[tuple[str, str]] | None = None
+        self.merge_base: str | None = None
+        self.submodules: list[str] | None = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -804,7 +835,7 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def last_commit_sha(self, default: Optional[str] = None) -> str:
+    def last_commit_sha(self, default: str | None = None) -> str:
         # for commits, the oid is the sha
 
         if default is None:
@@ -868,6 +899,10 @@ class GitHubPR:
         submodules = self.get_submodules()
         return [f for f in self.get_changed_files() if f in submodules]
 
+    def is_docker_affecting(self) -> bool:
+        """Whether this PR modifies files that change the CI docker image tag."""
+        return is_docker_affecting_files(self.get_changed_files())
+
     def has_invalid_submodule_updates(self) -> bool:
         """Submodule updates in PR are invalid if submodule keyword
         is not mentioned in neither the title nor body/description
@@ -910,7 +945,7 @@ class GitHubPR:
     def get_commit_count(self) -> int:
         return int(self.info["commits_with_authors"]["totalCount"])
 
-    def get_commit_sha_at_comment(self, comment_id: int) -> Optional[str]:
+    def get_commit_sha_at_comment(self, comment_id: int) -> str | None:
         """
         Get the PR head commit SHA that was present when a specific comment was posted.
         This ensures we only merge the state of the PR at the time the merge command was issued,
@@ -950,6 +985,9 @@ class GitHubPR:
 
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
+
+    def is_dependabot_pr(self) -> bool:
+        return self.get_pr_creator_login() == "dependabot[bot]"
 
     def _fetch_authors(self) -> list[tuple[str, str]]:
         if self._authors is not None:
@@ -1057,11 +1095,10 @@ class GitHubPR:
                     summary=None,
                 )
 
-        # Making an exception for Apply lint auggestions/autoformat because the
-        # bot adds a merged label -> triggers workflow -> sometimes needs
-        # approval -> is read as failure, which results in a blocked merge, but
-        # this workflow doesn't provide mergability info
-        self.conclusions.pop("Apply lint suggestions", None)
+        # Same issue for Claude Code: triggered by comment events, uses a
+        # protected environment (bedrock), resulting in ACTION_REQUIRED
+        # check suite conclusions that block merges
+        self.conclusions.pop("Claude Code", None)
 
         return self.conclusions
 
@@ -1089,7 +1126,7 @@ class GitHubPR:
     def get_body(self) -> str:
         return cast(str, self.info["body"])
 
-    def get_merge_commit(self) -> Optional[str]:
+    def get_merge_commit(self) -> str | None:
         mc = self.info["mergeCommit"]
         return mc["oid"] if mc is not None else None
 
@@ -1158,7 +1195,7 @@ class GitHubPR:
 
         raise RuntimeError(f"Comment with id {database_id} not found")
 
-    def get_diff_revision(self) -> Optional[str]:
+    def get_diff_revision(self) -> str | None:
         rc = RE_DIFF_REV.search(self.get_body())
         return rc.group(1) if rc is not None else None
 
@@ -1182,16 +1219,18 @@ class GitHubPR:
         self,
         repo: GitRepo,
         skip_mandatory_checks: bool,
-        comment_id: Optional[int] = None,
+        comment_id: int | None = None,
         skip_all_rule_checks: bool = False,
-    ) -> list["GitHubPR"]:
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+    ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
                 f"merge_ghstack_into called on non-ghstack PR #{self.pr_num}"
             )
-        ghstack_prs = get_ghstack_prs(
-            repo, self, open_only=False
-        )  # raises error if out of sync
+        if ghstack_prs is None:
+            ghstack_prs = get_ghstack_prs(
+                repo, self, open_only=False
+            )  # raises error if out of sync
         pr_dependencies = []
         for pr, rev in ghstack_prs:
             if pr.is_closed():
@@ -1202,13 +1241,18 @@ class GitHubPR:
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
             if pr.pr_num != self.pr_num and not skip_all_rule_checks:
-                # Raises exception if matching rule is not found
-                find_matching_merge_rule(
-                    pr,
-                    repo,
-                    skip_mandatory_checks=skip_mandatory_checks,
-                    skip_internal_checks=can_skip_internal_checks(self, comment_id),
-                )
+                try:
+                    find_matching_merge_rule(
+                        pr,
+                        repo,
+                        skip_mandatory_checks=skip_mandatory_checks,
+                        skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                    )
+                except MergeRuleFailedError as ex:
+                    raise type(ex)(
+                        f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
+                        ex.rule,
+                    ) from ex
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
             pr_dependencies.append(pr)
@@ -1217,7 +1261,7 @@ class GitHubPR:
     def gen_commit_message(
         self,
         filter_ghstack: bool = False,
-        ghstack_deps: Optional[list["GitHubPR"]] = None,
+        ghstack_deps: list[GitHubPR] | None = None,
     ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
@@ -1269,7 +1313,7 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
         comment_id: int,
-        ignore_current_checks: Optional[list[str]] = None,
+        ignore_current_checks: list[str] | None = None,
     ) -> None:
         # Raises exception if matching rule is not found
         (
@@ -1284,19 +1328,47 @@ class GitHubPR:
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             ignore_current_checks=ignore_current_checks,
         )
-        additional_merged_prs = self.merge_changes_locally(
-            repo, skip_mandatory_checks, comment_id
-        )
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None
+        prs_to_merge = [self]
+        if self.is_ghstack_pr():
+            ghstack_prs = get_ghstack_prs(repo, self, open_only=False)
+            prs_to_merge = [pr for pr, _ in ghstack_prs if not pr.is_closed()]
 
-        repo.push(self.default_branch(), dry_run)
+        # A ghstack merge lands all open PRs below this one. Use the topmost
+        # docker-affecting PR because its cumulative head has the final docker
+        # tree for which images must have been built. Enforced even on force
+        # merges.
+        docker_pr = get_topmost_docker_pr(prs_to_merge)
+        if docker_pr is not None:
+            check_docker_builds_ready(docker_pr)
+
+        # Dependabot commits are authored/signed by the bot; merge them through
+        # GitHub's squash+merge API so that signature is preserved and dependabot
+        # can track the merge, instead of re-authoring a squash commit locally.
+        if self.is_dependabot_pr():
+            additional_merged_prs: list[GitHubPR] = []
+            merge_commit_sha = self.merge_via_github_api(dry_run)
+        else:
+            additional_merged_prs = self.merge_changes_locally(
+                repo,
+                skip_mandatory_checks,
+                comment_id,
+                ghstack_prs=ghstack_prs,
+            )
+
+            # Now that the merge commit exists locally, make sure it doesn't
+            # reference docker images that were never built due to a land race.
+            if docker_pr is not None:
+                check_no_docker_merge_skew(repo, docker_pr)
+
+            repo.push(self.default_branch(), dry_run)
+            # When the merge process reaches this part, we can assume that the
+            # commit has been successfully pushed to trunk
+            merge_commit_sha = repo.rev_parse(name=self.default_branch())
         if not dry_run:
             self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
             for pr in additional_merged_prs:
                 pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
-
-        # When the merge process reaches this part, we can assume that the commit
-        # has been successfully pushed to trunk
-        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
         if comment_id and self.pr_num:
             # Finally, upload the record to s3. The list of pending and failed
@@ -1334,14 +1406,31 @@ class GitHubPR:
             dry_run=dry_run,
         )
 
+    def merge_via_github_api(self, dry_run: bool = False) -> str:
+        """Squash-and-merge this PR through GitHub's merge API, pinned to the
+        commit that was reviewed, and return the resulting merge commit sha."""
+        msg = self.gen_commit_message()
+        title, _, body = msg.partition("\n\n")
+        return gh_merge_pr(
+            self.org,
+            self.project,
+            self.pr_num,
+            merge_method="squash",
+            commit_title=title,
+            commit_message=body,
+            sha=self.last_commit_sha(),
+            dry_run=dry_run,
+        )
+
     def merge_changes_locally(
         self,
         repo: GitRepo,
         skip_mandatory_checks: bool = False,
-        comment_id: Optional[int] = None,
-        branch: Optional[str] = None,
+        comment_id: int | None = None,
+        branch: str | None = None,
         skip_all_rule_checks: bool = False,
-    ) -> list["GitHubPR"]:
+        ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+    ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
@@ -1357,6 +1446,7 @@ class GitHubPR:
                 skip_mandatory_checks,
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
+                ghstack_prs=ghstack_prs,
             )
 
         msg = self.gen_commit_message()
@@ -1403,7 +1493,7 @@ class GitHubPR:
 
 
 class MergeRuleFailedError(RuntimeError):
-    def __init__(self, message: str, rule: Optional["MergeRule"] = None) -> None:
+    def __init__(self, message: str, rule: MergeRule | None = None) -> None:
         super().__init__(message)
         self.rule = rule
 
@@ -1421,7 +1511,7 @@ class MergeRule:
     name: str
     patterns: list[str]
     approved_by: list[str]
-    mandatory_checks_name: Optional[list[str]]
+    mandatory_checks_name: list[str] | None
     ignore_flaky_failures: bool = True
 
 
@@ -1436,9 +1526,7 @@ def gen_new_issue_link(
     )
 
 
-def read_merge_rules(
-    repo: Optional[GitRepo], org: str, project: str
-) -> list[MergeRule]:
+def read_merge_rules(repo: GitRepo | None, org: str, project: str) -> list[MergeRule]:
     """Returns the list of all merge rules for the repo or project.
 
     NB: this function is used in Meta-internal workflows, see the comment
@@ -1463,16 +1551,33 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
+def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]:
+    """Return files that do not match the given patterns.
+
+    Patterns prefixed with '-' are exclusions: a file matches the rule if it
+    matches at least one positive pattern AND does not match any negative one.
+    """
+    positive = [p for p in patterns if not p.startswith("-")]
+    negative = [p[1:] for p in patterns if p.startswith("-")]
+    patterns_re = patterns_to_regex(positive)
+    exclude_re = patterns_to_regex(negative) if negative else None
+    return [
+        f
+        for f in files
+        if not patterns_re.match(f) or (exclude_re is not None and exclude_re.match(f))
+    ]
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
-    repo: Optional[GitRepo] = None,
+    repo: GitRepo | None = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: Optional[list[str]] = None,
+    ignore_current_checks: list[str] | None = None,
 ) -> tuple[
     MergeRule,
-    list[tuple[str, Optional[str], Optional[int]]],
-    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, str | None, int | None]],
+    list[tuple[str, str | None, int | None]],
     dict[str, list[Any]],
 ]:
     """
@@ -1523,13 +1628,7 @@ def find_matching_merge_rule(
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
-        patterns_re = patterns_to_regex(rule.patterns)
-        non_matching_files = []
-
-        # Does this rule apply to all the files?
-        for fname in changed_files:
-            if not patterns_re.match(fname):
-                non_matching_files.append(fname)
+        non_matching_files = _find_non_matching_files(rule.patterns, changed_files)
         if len(non_matching_files) > 0:
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
@@ -1660,12 +1759,112 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
-def checks_to_str(checks: list[tuple[str, Optional[str]]]) -> str:
+def get_topmost_docker_pr(prs: list[GitHubPR]) -> GitHubPR | None:
+    """Find the highest docker-affecting PR in a bottom-to-top stack."""
+    return next((pr for pr in reversed(prs) if pr.is_docker_affecting()), None)
+
+
+def check_docker_builds_ready(pr: GitHubPR) -> None:
+    """Block merge of a docker-affecting PR unless its docker images have been
+    pre-built.
+
+    PRs that change .ci/docker must run the docker-builds (ciflow/docker)
+    workflow so the images are built and pushed to ECR before landing.  If they
+    aren't, every trunk job that needs one of those images fails because it
+    can't find the image (see the #190927 / #186302 land race).  This gate is
+    enforced even for force merges, since -f is exactly what bypassed it before.
+    """
+    if not pr.is_docker_affecting():
+        return
+
+    docker_checks = get_docker_build_checks(pr.get_checkrun_conclusions())
+
+    if not docker_checks:
+        raise MergeRuleFailedError(
+            f"This PR changes files under {DOCKER_CI_PATH}/, but the "
+            f"`{DOCKER_BUILDS_WORKFLOW_NAME}` workflow has not run on it. The CI "
+            "docker images must be pre-built and pushed to ECR before this lands, "
+            "otherwise trunk jobs will not be able to find the image they need. "
+            "Please add the `ciflow/docker` label to this PR, wait for the docker "
+            "builds to finish, and then re-issue the merge command."
+        )
+
+    pending = sorted(name for name, c in docker_checks.items() if c.status is None)
+    failed = sorted(
+        name
+        for name, c in docker_checks.items()
+        if c.status is not None and not is_passing_status(c.status)
+    )
+
+    if pending:
+        # Raise MandatoryChecksMissingError so that a normal (non-force) merge
+        # keeps retrying until the docker builds finish, mirroring how other
+        # mandatory checks are waited on.
+        raise MandatoryChecksMissingError(
+            f"This PR changes files under {DOCKER_CI_PATH}/, so the "
+            f"`{DOCKER_BUILDS_WORKFLOW_NAME}` builds must finish before merging. "
+            f"Still waiting for {len(pending)} docker build job(s), the first few "
+            f"are: {', '.join(pending[:5])}"
+        )
+
+    if failed:
+        raise MergeRuleFailedError(
+            f"This PR changes files under {DOCKER_CI_PATH}/, so the "
+            f"`{DOCKER_BUILDS_WORKFLOW_NAME}` builds must all pass before merging, "
+            f"but {len(failed)} of them failed, the first few are: "
+            f"{', '.join(failed[:5])}. The docker images could not be built, so "
+            "trunk jobs would be unable to find them. Please fix the docker build "
+            "and re-run `ciflow/docker` before merging."
+        )
+
+
+def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
+    """Block merge if a docker-affecting PR raced with another docker change.
+
+    The CI docker images are tagged by the git tree hash of .ci/docker.  The
+    images built and tested on the PR head are tagged with the PR head's tree
+    hash, but trunk jobs after the merge request the tree hash of the *merge*
+    commit.  If another docker-affecting PR landed on the base branch after this
+    PR's images were built, those two hashes disagree and the images trunk needs
+    were never built or tested.  Refuse the merge and ask for a rebase, which
+    re-runs ciflow/docker against the new base.
+
+    Must be called after the merge commit has been created locally but before it
+    is pushed.
+    """
+    if not pr.is_docker_affecting():
+        return
+
+    # HEAD is the freshly created (squash/cherry-picked) merge commit.
+    # A wholesale deletion of the directory intentionally fails this lookup.
+    merge_commit_tree = repo.rev_parse(f"HEAD:{DOCKER_CI_PATH}")
+
+    # Compare against the tree that CI actually built and tested on the PR head.
+    pr_head_sha = pr.last_commit_sha()
+    # The PR head commit may not be present locally (for example, for a fork
+    # PR), so make sure we have the object before reading its tree.
+    repo.fetch(pr_head_sha)
+    pr_head_tree = repo.rev_parse(f"{pr_head_sha}:{DOCKER_CI_PATH}")
+
+    if merge_commit_tree != pr_head_tree:
+        raise MergeRuleFailedError(
+            "Refusing to merge: this PR modifies the CI docker images, but the "
+            f"{DOCKER_CI_PATH} tree of the merge commit ({merge_commit_tree}) does "
+            f"not match the tree that ciflow/docker built and tested on the PR "
+            f"head ({pr_head_tree}). Another docker-affecting change landed on the "
+            "base branch after your docker images were built, so the images "
+            "required after this merge were never built or tested (a land race). "
+            "Please rebase this PR (e.g. `@pytorchbot rebase`), let the "
+            "`ciflow/docker` builds re-run, and then merge again."
+        )
+
+
+def checks_to_str(checks: list[tuple[str, str | None]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
 def checks_to_markdown_bullets(
-    checks: list[tuple[str, Optional[str], Optional[int]]],
+    checks: list[tuple[str, str | None, int | None]],
 ) -> list[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
@@ -1677,9 +1876,7 @@ def post_starting_merge_comment(
     pr: GitHubPR,
     explainer: TryMergeExplainer,
     dry_run: bool,
-    ignore_current_checks_info: Optional[
-        list[tuple[str, Optional[str], Optional[int]]]
-    ] = None,
+    ignore_current_checks_info: list[tuple[str, str | None, int | None]] | None = None,
 ) -> None:
     """Post the initial merge starting message on the PR. Also post a short
     message on all PRs in the stack."""
@@ -1737,12 +1934,12 @@ def save_merge_record(
     owner: str,
     project: str,
     author: str,
-    pending_checks: list[tuple[str, Optional[str], Optional[int]]],
-    failed_checks: list[tuple[str, Optional[str], Optional[int]]],
-    ignore_current_checks: list[tuple[str, Optional[str], Optional[int]]],
-    broken_trunk_checks: list[tuple[str, Optional[str], Optional[int]]],
-    flaky_checks: list[tuple[str, Optional[str], Optional[int]]],
-    unstable_checks: list[tuple[str, Optional[str], Optional[int]]],
+    pending_checks: list[tuple[str, str | None, int | None]],
+    failed_checks: list[tuple[str, str | None, int | None]],
+    ignore_current_checks: list[tuple[str, str | None, int | None]],
+    broken_trunk_checks: list[tuple[str, str | None, int | None]],
+    flaky_checks: list[tuple[str, str | None, int | None]],
+    unstable_checks: list[tuple[str, str | None, int | None]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1875,7 +2072,7 @@ def is_flaky(
 
 def is_invalid_cancel(
     name: str,
-    conclusion: Optional[str],
+    conclusion: str | None,
     drci_classifications: Any,
 ) -> bool:
     """
@@ -1891,10 +2088,34 @@ def is_invalid_cancel(
     ):
         return False
 
-    # If a job is cancelled and not listed as a failure by Dr.CI, it's an
-    # invalid signal and can be ignored
+    # If a job is cancelled and not listed as a failure or unclassified failure
+    # by Dr.CI, it's an invalid signal and can be ignored. UNKNOWN covers jobs
+    # whose workflow did not run on the merge base, so Dr.CI has no signal to
+    # tell whether the failure is pre-existing -- those should still block merge.
     return all(
-        name != failure["name"] for failure in drci_classifications.get("FAILED", [])
+        name != failure["name"]
+        for failure in drci_classifications.get("FAILED", [])
+        + drci_classifications.get("UNKNOWN", [])
+    )
+
+
+def is_crcr_l3(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this check is a non-blocking CRCR L3 failure.
+
+    Dr.CI is the classification authority. A check is L3 non-blocking when
+    Dr.CI returns it under the ``CRCR_L3`` category. CRCR (cross-repo CI
+    relay) L3 check runs are named ``crcr/<owner>/<repo>/<workflow>`` and will be
+    classified as CRCR_L3 by Dr.CI when their downstream_repo_level is L3.
+    """
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
+    return any(
+        name == crcr["name"] or (job_id and job_id == crcr["id"])
+        for crcr in drci_classifications.get("CRCR_L3", [])
     )
 
 
@@ -1902,7 +2123,7 @@ def get_classifications(
     pr_num: int,
     project: str,
     checks: dict[str, JobCheckState],
-    ignore_current_checks: Optional[list[str]],
+    ignore_current_checks: list[str] | None,
 ) -> dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
@@ -1996,6 +2217,18 @@ def get_classifications(
             )
             continue
 
+        elif is_crcr_l3(check, drci_classifications):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "CRCR_L3",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
         if ignore_current_checks is not None and name in ignore_current_checks:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -2011,7 +2244,7 @@ def get_classifications(
 
 
 def filter_checks_with_lambda(
-    checks: JobNameToStateDict, status_filter: Callable[[Optional[str]], bool]
+    checks: JobNameToStateDict, status_filter: Callable[[str | None], bool]
 ) -> list[JobCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
 
@@ -2027,7 +2260,7 @@ def get_pr_commit_sha(repo: GitRepo, pr: GitHubPR) -> str:
 
 
 def validate_revert(
-    repo: GitRepo, pr: GitHubPR, *, comment_id: Optional[int] = None
+    repo: GitRepo, pr: GitHubPR, *, comment_id: int | None = None
 ) -> tuple[str, str]:
     comment = (
         pr.get_last_comment()
@@ -2044,9 +2277,14 @@ def validate_revert(
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     if pr.is_base_repo_private():
         allowed_reverters.append("CONTRIBUTOR")
-    # Special case the pytorch-auto-revert app, whose does not have association
-    # But should be able to issue revert command
-    if comment.author_url == "https://github.com/apps/pytorch-auto-revert":
+    # Special case GitHub Apps that don't have a repo association
+    # but should be able to issue revert commands
+    allowed_apps = {
+        "https://github.com/apps/pytorch-auto-revert",
+        "https://github.com/apps/facebook-github-tools",
+        "https://github.com/apps/meta-codesync",
+    }
+    if comment.author_url in allowed_apps:
         allowed_reverters.append("NONE")
 
     if author_association not in allowed_reverters:
@@ -2158,8 +2396,8 @@ def try_revert(
     pr: GitHubPR,
     *,
     dry_run: bool = False,
-    comment_id: Optional[int] = None,
-    reason: Optional[str] = None,
+    comment_id: int | None = None,
+    reason: str | None = None,
 ) -> None:
     try:
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
@@ -2183,6 +2421,13 @@ def try_revert(
             print(
                 f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
             )
+
+    if not shas_and_prs:
+        raise RuntimeError(
+            f"No revertable PRs found in ghstack for #{pr.pr_num}. "
+            f"This typically means the PR is still open (not merged) or "
+            f"its GitHub state is inconsistent. Only closed/merged PRs can be reverted."
+        )
 
     do_revert_prs(
         repo,
@@ -2228,10 +2473,10 @@ def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: list[str],
-    ok_failed_checks_threshold: Optional[int] = None,
+    ok_failed_checks_threshold: int | None = None,
 ) -> tuple[
-    list[tuple[str, Optional[str], Optional[int]]],
-    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, str | None, int | None]],
+    list[tuple[str, str | None, int | None]],
     dict[str, list[Any]],
 ]:
     """
@@ -2239,8 +2484,8 @@ def categorize_checks(
     failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
     is not set (unlimited)
     """
-    pending_checks: list[tuple[str, Optional[str], Optional[int]]] = []
-    failed_checks: list[tuple[str, Optional[str], Optional[int]]] = []
+    pending_checks: list[tuple[str, str | None, int | None]] = []
+    failed_checks: list[tuple[str, str | None, int | None]] = []
 
     # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on s3
     failed_checks_categorization: dict[str, list[Any]] = defaultdict(list)
@@ -2273,7 +2518,13 @@ def categorize_checks(
             target = (
                 failed_checks_categorization[classification]
                 if classification
-                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
+                in (
+                    "IGNORE_CURRENT_CHECK",
+                    "BROKEN_TRUNK",
+                    "FLAKY",
+                    "UNSTABLE",
+                    "CRCR_L3",
+                )
                 else failed_checks
             )
             target.append((checkname, url, job_id))

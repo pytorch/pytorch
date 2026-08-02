@@ -1,7 +1,9 @@
 """
 Update committed CSV files used as reference points by dynamo/inductor CI.
 
-Currently only cares about graph breaks, so only saves those columns.
+Saves the dynamo metric columns tracked by check_graph_breaks.py (graph_breaks
+plus the coverage metrics calls_captured/unique_graphs/fallbacks_to_eager when
+the run produced them).
 
 Hardcodes a list of job names and artifacts per job, but builds the lookup
 by querying github sha and finding associated github actions workflow ID and CI jobs,
@@ -21,6 +23,7 @@ import os
 import subprocess
 import sys
 import urllib
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import BytesIO
 from itertools import product
 from pathlib import Path
@@ -74,6 +77,19 @@ CSV_LINTER = str(
     Path(__file__).absolute().parents[3]
     / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
 )
+
+# Integer dynamo metric columns saved to the reference CSVs, in output order.
+# Keep in sync with TRACKED_METRICS in benchmarks/dynamo/check_graph_breaks.py
+# (the CI checker). graph_breaks is always present; calls_captured and
+# fallbacks_to_eager appear only once the benchmark run's get_dynamo_stats writes
+# them, and check_graph_breaks skips any metric absent from the baseline, so
+# older CSVs stay valid. unique_graphs is deliberately not saved/gated -- a
+# change in it is ambiguous (fewer graphs can mean merging, not less capture).
+METRIC_COLUMNS = [
+    "graph_breaks",
+    "calls_captured",
+    "fallbacks_to_eager",
+]
 
 
 def query_job_sha(repo, sha):
@@ -163,50 +179,71 @@ def normalize_suite_filename(suite_name):
     return subsuite
 
 
+def download_single_artifact(suite, shard, url_candidates):
+    """Download a single artifact, trying each URL candidate until one succeeds.
+
+    Returns a tuple of (suite, shard, result_dict) where result_dict maps
+    (suite, phase) -> DataFrame, or None if download failed.
+    """
+    subsuite = normalize_suite_filename(suite)
+    for url in url_candidates:
+        try:
+            resp = urlopen(url)
+            artifact = ZipFile(BytesIO(resp.read()))
+            result = {}
+            for phase in ("training", "inference"):
+                # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
+                possible_names = [
+                    f"test/test-reports/{phase}_{subsuite}.csv",
+                    f"test-reports/{phase}_{subsuite}.csv",
+                ]
+                found = False
+                for name in possible_names:
+                    try:
+                        df = pd.read_csv(artifact.open(name))
+                        for col in METRIC_COLUMNS:
+                            if col in df.columns:
+                                df[col] = df[col].fillna(0).astype(int)
+                        result[(suite, phase)] = df
+                        found = True
+                        break
+                    except KeyError:
+                        continue
+                if not found and phase == "inference":
+                    # No warning for training, since it's expected to be missing for some tests
+                    print(
+                        f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
+                    )
+            return (suite, shard, result)
+        except urllib.error.HTTPError:
+            continue  # Try next candidate URL
+    return (suite, shard, None)
+
+
 def download_artifacts_and_extract_csvs(urls):
     dataframes = {}
-    for (suite, shard), url_candidates in urls.items():
-        # Try each URL candidate (oldest first) until one succeeds
-        downloaded = False
-        for url in url_candidates:
-            try:
-                resp = urlopen(url)
-                subsuite = normalize_suite_filename(suite)
-                artifact = ZipFile(BytesIO(resp.read()))
-                for phase in ("training", "inference"):
-                    # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
-                    possible_names = [
-                        f"test/test-reports/{phase}_{subsuite}.csv",
-                        f"test-reports/{phase}_{subsuite}.csv",
-                    ]
-                    found = False
-                    for name in possible_names:
-                        try:
-                            df = pd.read_csv(artifact.open(name))
-                            df["graph_breaks"] = (
-                                df["graph_breaks"].fillna(0).astype(int)
-                            )
-                            prev_df = dataframes.get((suite, phase), None)
-                            dataframes[(suite, phase)] = (
-                                pd.concat([prev_df, df]) if prev_df is not None else df
-                            )
-                            found = True
-                            break
-                        except KeyError:
-                            continue
-                    if not found and phase == "inference":
-                        # No warning for training, since it's expected to be missing for some tests
-                        print(
-                            f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
-                        )
-                downloaded = True
-                break  # Successfully downloaded, no need to try other candidates
-            except urllib.error.HTTPError:
-                continue  # Try next candidate URL
-        if not downloaded:
-            print(
-                f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs"
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = {
+            executor.submit(download_single_artifact, suite, shard, url_candidates): (
+                suite,
+                shard,
+                url_candidates,
             )
+            for (suite, shard), url_candidates in urls.items()
+        }
+        for future in as_completed(futures):
+            suite, shard, url_candidates = futures[future]
+            suite_result, shard_result, result = future.result()
+            if result is None:
+                print(
+                    f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs"
+                )
+            else:
+                for (s, phase), df in result.items():
+                    prev_df = dataframes.get((s, phase), None)
+                    dataframes[(s, phase)] = (
+                        pd.concat([prev_df, df]) if prev_df is not None else df
+                    )
 
     return dataframes
 
@@ -226,7 +263,13 @@ def write_filtered_csvs(root_path, dataframes):
             # Add any new entries from df that weren't in existing
             df = existing_df.combine_first(df).reset_index()
         df = df.sort_values(by="name")
-        df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
+        # Save every metric column present in the run. Entries carried over
+        # from a prior CSV that predates a column are NaN after the merge;
+        # backfill them to 0 so the column stays integer-typed.
+        metric_columns = [c for c in METRIC_COLUMNS if c in df.columns]
+        for col in metric_columns:
+            df[col] = df[col].fillna(0).astype(int)
+        df.to_csv(out_fn, index=False, columns=["name", "accuracy", *metric_columns])
         apply_lints(out_fn)
 
 
@@ -275,20 +318,30 @@ if __name__ == "__main__":
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
-    assert os.path.exists(root_path), f"cd <pytorch root> and ensure {root_path} exists"
+    if not os.path.exists(root_path):
+        raise AssertionError(f"cd <pytorch root> and ensure {root_path} exists")
     rocm_path = "benchmarks/dynamo/ci_expected_accuracy/rocm/"
-    assert os.path.exists(rocm_path), f"cd <pytorch root> and ensure {rocm_path} exists"
+    if not os.path.exists(rocm_path):
+        raise AssertionError(f"cd <pytorch root> and ensure {rocm_path} exists")
 
     results = query_job_sha(repo, args.sha)
 
-    print("Processing CUDA jobs...")
+    # Get URLs for both CUDA and ROCm
     cuda_urls = get_artifacts_urls(results, suites, is_rocm=False)
-    cuda_dataframes = download_artifacts_and_extract_csvs(cuda_urls)
+    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
+
+    # Download CUDA and ROCm artifacts in parallel
+    print("Downloading CUDA and ROCm artifacts in parallel...")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cuda_future = executor.submit(download_artifacts_and_extract_csvs, cuda_urls)
+        rocm_future = executor.submit(download_artifacts_and_extract_csvs, rocm_urls)
+        cuda_dataframes = cuda_future.result()
+        rocm_dataframes = rocm_future.result()
+
+    print("Writing CUDA CSVs...")
     write_filtered_csvs(root_path, cuda_dataframes)
 
-    print("Processing ROCm jobs...")
-    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
-    rocm_dataframes = download_artifacts_and_extract_csvs(rocm_urls)
+    print("Writing ROCm CSVs...")
     write_filtered_csvs(rocm_path, rocm_dataframes)
 
     print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")

@@ -3,6 +3,11 @@
 
 namespace c10 {
 
+void* Stream::native_handle() const {
+  impl::VirtualGuardImpl impl{device_.type()};
+  return impl.getStreamNativeHandle(*this);
+}
+
 // Return whether all asynchronous work previously enqueued on this stream
 // has completed running on the device.
 bool Stream::query() const {
@@ -15,6 +20,12 @@ bool Stream::query() const {
 void Stream::synchronize() const {
   impl::VirtualGuardImpl impl{device_.type()};
   impl.synchronizeStream(*this);
+}
+
+// Return whether this stream is currently under graph capturing mode.
+bool Stream::is_capturing() const {
+  impl::VirtualGuardImpl impl{device_.type()};
+  return impl.isStreamCapturing(*this);
 }
 
 // Not very parsable, but I don't know a good compact syntax for streams.

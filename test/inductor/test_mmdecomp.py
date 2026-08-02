@@ -2,11 +2,11 @@
 
 import math
 import unittest
-from typing import Union
 
 import torch
 from torch._inductor import config
-from torch._inductor.decomposition import mm
+from torch._inductor.decomposition import bmm as decomp_bmm, mm
+from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -16,7 +16,12 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    TEST_XPU,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -33,7 +38,7 @@ default_rtol = {
 
 
 def rand_math_tensor(
-    shape: tuple[Union[int, list[int]]],
+    shape: tuple[int | list[int]],
     device: str,
     dtype: torch.dtype,
     requires_grad: bool = False,
@@ -133,7 +138,113 @@ class TestDecomp(NNTestCase):
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
-        "dtype", [torch.float, torch.bfloat16] if SM80OrLater else [torch.float]
+        "dtype",
+        [torch.float, torch.float16, torch.bfloat16]
+        if SM80OrLater or TEST_XPU
+        else [torch.float],
+    )
+    @parametrize("m", [256, 4096])
+    @parametrize("k,n", [(2, 3), (3, 4), (4, 4)])
+    def test_small_mm_pointwise(self, device, dtype, m, k, n):
+        if device == "cpu":
+            self.skipTest("small-dim mm pointwise is GPU-only")
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+        torch._dynamo.reset()
+        atol = {torch.float32: 1e-4, torch.float16: 1e-2, torch.bfloat16: 1e-1}[dtype]
+        rtol = {torch.float32: 1.3e-5, torch.float16: 1e-2, torch.bfloat16: 1.6e-2}[
+            dtype
+        ]
+        t1 = rand_math_tensor((m, k), dtype=dtype, device=device)
+        t2 = rand_math_tensor((k, n), dtype=dtype, device=device)
+        with fresh_cache():
+            run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @parametrize(
+        "dtype",
+        [torch.float, torch.float16, torch.bfloat16]
+        if SM80OrLater or TEST_XPU
+        else [torch.float],
+    )
+    @parametrize("m", [256, 4096])
+    @parametrize("k,n", [(2, 3), (3, 4), (4, 4)])
+    @parametrize("transpose", ["lhs", "rhs", "both"])
+    def test_small_mm_pointwise_transposed(self, device, dtype, m, k, n, transpose):
+        if device == "cpu":
+            self.skipTest("small-dim mm pointwise is GPU-only")
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+        torch._dynamo.reset()
+        atol = {torch.float32: 1e-4, torch.float16: 1e-2, torch.bfloat16: 1e-1}[dtype]
+        rtol = {torch.float32: 1.3e-5, torch.float16: 1e-2, torch.bfloat16: 1.6e-2}[
+            dtype
+        ]
+        if transpose == "lhs":
+            t1 = rand_math_tensor((k, m), dtype=dtype, device=device)
+            t2 = rand_math_tensor((k, n), dtype=dtype, device=device)
+
+            def fn(a, b):
+                return torch.mm(a.T, b)
+
+        elif transpose == "rhs":
+            t1 = rand_math_tensor((m, k), dtype=dtype, device=device)
+            t2 = rand_math_tensor((n, k), dtype=dtype, device=device)
+
+            def fn(a, b):
+                return torch.mm(a, b.T)
+
+        else:
+            t1 = rand_math_tensor((k, m), dtype=dtype, device=device)
+            t2 = rand_math_tensor((n, k), dtype=dtype, device=device)
+
+            def fn(a, b):
+                return torch.mm(a.T, b.T)
+
+        with fresh_cache():
+            run_comp_nocomp(fn, t1, t2, rtol=rtol, atol=atol)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    def test_small_mm_no_pointwise_for_large_dims(self, device):
+        if device == "cpu":
+            self.skipTest("GPU-only test")
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(256, 5, device=device)
+        b = torch.randn(5, 5, device=device)
+        torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @config.patch(max_autotune_gemm=True)
+    def test_small_mm_no_pointwise_under_max_autotune(self, device):
+        if device == "cpu":
+            self.skipTest("GPU-only test")
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(256, 3, device=device)
+        b = torch.randn(3, 4, device=device)
+        torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @parametrize(
+        "dtype",
+        [torch.float, torch.bfloat16] if SM80OrLater or TEST_XPU else [torch.float],
     )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):
@@ -167,6 +278,84 @@ class TestDecomp(NNTestCase):
         t2 = torch.randn(1, 2, 1, device=device)
 
         run_comp_nocomp(torch_bmm, t1, t2, rtol=rtol, atol=atol)
+
+    @config.patch(coordinate_descent_tuning=False)
+    def test_bmm_outer_product_k_is_one(self, device):
+        t1 = torch.randn(32, 8, 1, device=device)
+        t2 = torch.randn(32, 1, 256, device=device)
+        expected = torch.bmm(t1, t2)
+
+        out = decomp_bmm(t1, t2)
+
+        self.assertIsNot(out, NotImplemented)
+        self.assertEqual(expected, out)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    def test_bmm_outer_product_k_is_one_with_unbacked_k(self, device):
+        if device == "cpu":
+            self.skipTest("unbacked symints require GPU fake tensors")
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            b, m, n = [shape_env.create_unbacked_symint() for _ in range(3)]
+            lhs_k_unbacked, rhs_k_unbacked = [
+                shape_env.create_unbacked_symint() for _ in range(2)
+            ]
+
+            lhs_static_k = torch.empty((b, m, 1), device=device)
+            rhs_static_k = torch.empty((b, 1, n), device=device)
+            lhs_unbacked_k = torch.empty((b, m, lhs_k_unbacked), device=device)
+            rhs_unbacked_k = torch.empty((b, rhs_k_unbacked, n), device=device)
+
+            self.assertIsNot(
+                decomp_bmm(lhs_static_k, rhs_static_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_static_k, rhs_unbacked_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_unbacked_k, rhs_static_k),
+                NotImplemented,
+            )
+            self.assertIs(
+                decomp_bmm(lhs_unbacked_k, rhs_unbacked_k),
+                NotImplemented,
+            )
+
+    @config.patch(coordinate_descent_tuning=False)
+    def test_bmm_outer_product_permuted_inputs(self, device):
+        B, M, N = 4, 8, 16
+
+        cases = [
+            # LHS: batch dim permuted
+            (
+                torch.randn(M, B, 1, device=device).permute(1, 0, 2),
+                torch.randn(B, 1, N, device=device),
+            ),
+            # RHS: batch dim permuted
+            (
+                torch.randn(B, M, 1, device=device),
+                torch.randn(N, B, 1, device=device).permute(1, 2, 0),
+            ),
+            # Both permuted
+            (
+                torch.randn(M, B, 1, device=device).permute(1, 0, 2),
+                torch.randn(N, B, 1, device=device).permute(1, 2, 0),
+            ),
+            # LHS: fully transposed [1, M, B] -> [B, M, 1]
+            (
+                torch.randn(1, M, B, device=device).permute(2, 1, 0),
+                torch.randn(B, 1, N, device=device),
+            ),
+        ]
+
+        for t1, t2 in cases:
+            expected = torch.bmm(t1, t2)
+            out = decomp_bmm(t1, t2)
+            self.assertIsNot(out, NotImplemented)
+            self.assertEqual(expected, out, exact_stride=True)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
@@ -274,7 +463,9 @@ class TestDecomp(NNTestCase):
 
 
 device_types = ("cpu", GPU_TYPE)
-instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
+instantiate_device_type_tests(
+    TestDecomp, globals(), only_for=device_types, allow_xpu=True
+)
 
 if __name__ == "__main__":
     # We don't support torch.compile() on Windows

@@ -209,6 +209,7 @@ def conv1d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(33, 16, 3, dtype=torch.float)
         >>> inputs = torch.randn(20, 16, 50, dtype=torch.float)
@@ -221,7 +222,7 @@ def conv1d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv1d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -281,6 +282,7 @@ def conv2d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
@@ -293,7 +295,7 @@ def conv2d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv2d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -357,6 +359,7 @@ def conv3d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)
@@ -369,7 +372,7 @@ def conv3d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv3d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:

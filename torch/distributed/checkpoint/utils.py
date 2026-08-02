@@ -23,6 +23,7 @@ from .api import (
     WRAPPED_EXCEPTION,
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
+from .protocol import _get_checkpointable_tensor_shard, _is_checkpointable_tensor
 
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
@@ -76,7 +77,7 @@ class _DistWrapper:
     """
     This is a wrapper around PG that provides a series of features around object collectives.
 
-    It works without distributed initialized, where most collectives turns into nops.
+    It works without distributed initialized, where most collectives turn into nops.
 
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
@@ -191,7 +192,7 @@ class _DistWrapper:
         local_data: WRAPPED_EXCEPTION | T
         try:
             local_data = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -208,7 +209,7 @@ class _DistWrapper:
                         list[R | CheckpointException],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -239,7 +240,7 @@ class _DistWrapper:
         local_data: T | WRAPPED_EXCEPTION
         try:
             local_data = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -251,7 +252,7 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -261,6 +262,7 @@ class _DistWrapper:
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(R, final_result)
 
     def all_gather(
@@ -278,7 +280,7 @@ class _DistWrapper:
         result: T | WRAPPED_EXCEPTION
         try:
             result = map_fun()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -304,12 +306,13 @@ class _DistWrapper:
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:  # noqa: B036
+            except BaseException as e:
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(T, final_result)
 
     def barrier(self) -> None:
@@ -348,6 +351,8 @@ def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tenso
     if hasattr(tensor, "__get_tensor_shard__"):
         # DTensor implements _Checkpointable
         return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+    if _is_checkpointable_tensor(tensor):
+        return _get_checkpointable_tensor_shard(tensor, index)
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:

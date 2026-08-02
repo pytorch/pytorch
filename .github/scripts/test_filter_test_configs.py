@@ -10,6 +10,7 @@ import yaml
 from filter_test_configs import (
     filter,
     filter_selected_test_configs,
+    get_ghstack_below_count,
     get_labels,
     mark_unstable_jobs,
     parse_reenabled_issues,
@@ -376,12 +377,28 @@ class TestConfigFilter(TestCase):
             scheduled_test_matrix = set_periodic_modes(test_matrix, job_name)
 
             expected_modes = [
-                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name)
+                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name, None)
             ]
             self.assertEqual(
                 len(test_matrix["include"]) * len(expected_modes),
                 len(scheduled_test_matrix["include"]),
             )
+
+    def test_set_periodic_modes_gpu_runner(self) -> None:
+        """Job name without 'cuda' but runner indicates a CUDA job (e.g. inductor-unittest)."""
+        test_matrix = yaml.safe_load(
+            "{include: ["
+            '{config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}, '
+            '{config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}'
+            "]}"
+        )
+        scheduled = set_periodic_modes(test_matrix, "inductor-build / build")
+
+        modes_per_config = [
+            entry.get("rerun_disabled_tests") for entry in scheduled["include"]
+        ]
+        self.assertIn("rerun_disabled_tests", modes_per_config)
+        self.assertEqual(len(scheduled["include"]), 2)
 
     @mock.patch("filter_test_configs.download_json")
     def test_remove_disabled_jobs(self, mock_download_json: Any) -> None:
@@ -815,6 +832,29 @@ class TestConfigFilter(TestCase):
 
         pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
+
+    def test_get_ghstack_below_count(self) -> None:
+        # Not a ghstack body.
+        self.assertEqual(get_ghstack_below_count(""), 0)
+        self.assertEqual(get_ghstack_below_count("just a regular PR"), 0)
+
+        # Top of a 4-deep stack: 3 entries below the marker.
+        top_body = (
+            "Stack from ghstack (oldest at bottom):\n* __->__ #4\n* #3\n* #2\n* #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(top_body), 3)
+
+        # Middle of the same stack: 1 entry below the marker.
+        mid_body = (
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* __->__ #2\n* #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(mid_body), 1)
+
+        # Bottom of the stack: 0 entries below the marker.
+        bottom_body = (
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
+        )
+        self.assertEqual(get_ghstack_below_count(bottom_body), 0)
 
 
 if __name__ == "__main__":

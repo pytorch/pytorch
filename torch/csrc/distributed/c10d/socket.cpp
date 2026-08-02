@@ -191,7 +191,7 @@ class SocketImpl {
 };
 
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
-  // It can be be very slow to repeatedly hit DNS resolution failure, but its
+  // It can be very slow to repeatedly hit DNS resolution failure, but its
   // very helpful to have DNS names in logs by default. So we try to use DNS but
   // if we hit a transient failure we just disable it for the remainder of the
   // job, logging IP addresses instead. See

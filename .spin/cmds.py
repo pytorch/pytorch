@@ -1,4 +1,7 @@
 import hashlib
+import importlib.util
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +9,18 @@ from tempfile import mktemp
 
 import click
 import spin
+
+
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+
+CWD = Path(__file__).absolute().parent.parent
+sys.path.insert(0, str(CWD))  # this only affects the current process
+from tools.clean import clean as _clean
 
 
 def file_digest(file, algorithm: str):
@@ -133,7 +148,6 @@ def regenerate_clangtidy_files():
 #: These linters are expected to need less than 3s cpu time total
 VERY_FAST_LINTERS = {
     "ATEN_CPU_GPU_AGNOSTIC",
-    "BAZEL_LINTER",
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
@@ -147,6 +161,7 @@ VERY_FAST_LINTERS = {
     "HEADER_ONLY_LINTER",
     "IMPORT_LINTER",
     "INCLUDE",
+    "ISINSTANCE_FAKE_TENSOR",
     "LINTRUNNER_VERSION",
     "MERGE_CONFLICTLESS_CSV",
     "META_NO_CREATE_UNBACKED",
@@ -160,21 +175,26 @@ VERY_FAST_LINTERS = {
     "PYPROJECT",
     "RAWCUDA",
     "RAWCUDADEVICE",
+    "RAWTHROW",
     "ROOT_LOGGING",
+    "SYMPY_MINMAX",
     "TABS",
     "TESTOWNERS",
     "TYPEIGNORE",
     "TYPENOSKIP",
+    "UNSPECIFIED_BACKEND",
     "WORKFLOWSYNC",
 }
 
 
 #: These linters are expected to take a few seconds, but less than 10s cpu time total
 FAST_LINTERS = {
+    "CLANGTIDY_EXECUTORCH_COMPATIBILITY",
     "CMAKE",
     "DOCSTRING_LINTER",
     "GHA",
     "NATIVEFUNCTIONS",
+    "PYREFLY",
     "RUFF",
     "SET_LINTER",
     "SHELLCHECK",
@@ -191,10 +211,13 @@ SLOW_LINTERS = {
     "CODESPELL",
     "FLAKE8",
     "GB_REGISTRY",
+    "GENERATED_SHIMS_VERSION",
     "PYFMT",
-    "PYREFLY",
+    "STABLE_SHIM_USAGE",
+    "STABLE_SHIM_VERSION",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
+    "SCOPED_LIBRARY",
 }
 
 
@@ -219,6 +242,31 @@ LINTRUNNER_BASE_CMD = [
 ]
 
 
+def _check_linter_python_versions():
+    invalid_linters = []
+
+    with Path(".lintrunner.toml").open("rb") as config_file:
+        config = tomllib.load(config_file)
+    for linter in config["linter"]:
+        command = linter.get("command", [])
+        if command[:2] != ["uv", "run"] or "--script" not in command:
+            continue
+        try:
+            python_index = command.index("--python")
+        except ValueError:
+            python_index = -1
+        if python_index == -1 or command[python_index + 1 : python_index + 2] != [
+            "3.10"
+        ]:
+            invalid_linters.append(linter["code"])
+
+    if invalid_linters:
+        raise click.ClickException(
+            "Linters using `uv run --script` must specify `--python 3.10`: "
+            + ", ".join(invalid_linters)
+        )
+
+
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
@@ -227,22 +275,21 @@ def setup_lint():
 
 
 def _check_linters():
+    _check_linter_python_versions()
     cmd = LINTRUNNER_BASE_CMD + ["list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
     unknown_linters = linters - ALL_LINTERS
     missing_linters = ALL_LINTERS - linters
     if unknown_linters:
-        click.secho(
+        raise click.ClickException(
             f"Unknown linters found; please add them to the correct category "
-            f"in .spin/cmds.py: {', '.join(unknown_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(unknown_linters))}"
         )
     if missing_linters:
-        click.secho(
+        raise click.ClickException(
             f"Missing linters found; please update the corresponding category "
-            f"in .spin/cmds.py: {', '.join(missing_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(missing_linters))}"
         )
     return unknown_linters, missing_linters
 
@@ -281,26 +328,40 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
     _check_linters()
 
 
-def _extract_take_skip_tee(lintrunner_args):
+def _check_arg(check_arg, arg, args_iter):
+    if arg.startswith(check_arg):
+        found_arg, sep, value = arg.partition("=")
+        if sep == "=":
+            if found_arg == check_arg:
+                return value.strip()
+        else:
+            if arg == check_arg:
+                return next(args_iter).strip()
+    return None
+
+
+def _process_lintrunner_args(lintrunner_args):
     take = None
     skip = None
-    args_iter = iter(lintrunner_args)
+    args_iter = iter(arg.strip() for arg in lintrunner_args)
     remaining_args = []
     tee_file = None
+    has_paths = False
+    has_all_files = False
     for arg in args_iter:
-        if arg == "--take":
-            take = set(next(args_iter).split(","))
-        elif arg == "--skip":
-            skip = set(next(args_iter).split(","))
-        elif arg.startswith("--tee-json"):
-            _, sep, tee_file = arg.partition("=")
-            if sep == "":
-                tee_file = next(args_iter)
-            elif sep == "=":
-                tee_file = tee_file.trim()
+        if _take := _check_arg("--take", arg, args_iter):
+            take = set(_take.split(","))
+        elif _skip := _check_arg("--skip", arg, args_iter):
+            skip = set(_skip.split(","))
+        elif _tee_file := _check_arg("--tee-json", arg, args_iter):
+            tee_file = _tee_file.strip()
+        elif arg == "--all-files":
+            has_all_files = True
         else:
+            if not arg.startswith("-"):
+                has_paths = True
             remaining_args.append(arg)
-    return remaining_args, take, skip, tee_file
+    return remaining_args, take, skip, tee_file, has_paths, has_all_files
 
 
 def _run_lintrunner(
@@ -324,25 +385,34 @@ def _run_lintrunner(
         linters &= take
     if skip is not None:
         linters -= skip
-    full_cmd = (
-        cmd
-        + tee_cmd
-        + [
-            "--take",
-            ",".join(linters),
-        ]
-        + (["--apply-patches"] if apply_patches else [])
-        + (["--all-files"] if all_files else [])
-        + (list(lintrunner_args) if lintrunner_args else [])
-    )
-    p = spin.util.run(full_cmd, sys_exit=False)
-    lint_found = not bool(p.returncode)
-    if tee_file:
-        tee_path = Path(tee_file)
-        json_output = tee_path.read_text()
-        tee_path.unlink()
+    if not linters:
+        click.echo("No linters to run after applying --take/--skip filters.")
+        click.echo("Skipping lintrunner execution.")
+        lint_found = False
+        if return_json_output:
+            json_output = ""
+        else:
+            json_output = None
     else:
-        json_output = None
+        full_cmd = (
+            cmd
+            + tee_cmd
+            + [
+                "--take",
+                ",".join(linters),
+            ]
+            + (["--apply-patches"] if apply_patches else [])
+            + (["--all-files"] if all_files else [])
+            + (list(lintrunner_args) if lintrunner_args else [])
+        )
+        p = spin.util.run(full_cmd, sys_exit=False)
+        lint_found = bool(p.returncode)
+        if tee_file:
+            tee_path = Path(tee_file)
+            json_output = tee_path.read_text()
+            tee_path.unlink()
+        else:
+            json_output = None
     return lint_found, json_output
 
 
@@ -353,7 +423,10 @@ def _run_lintrunner(
 def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
-    lintrunner_args, take, skip, tee_file = _extract_take_skip_tee(lintrunner_args)
+    lintrunner_args, take, skip, tee_file, has_paths, has_all_files = (
+        _process_lintrunner_args(lintrunner_args)
+    )
+    all_files = has_all_files or not has_paths
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
     write_json_output = bool(tee_file)
@@ -362,16 +435,19 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=True,
+        all_files=all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    # Slow linters default to changed files only so a bare `spin lint` stays
+    # fast locally, but must honor an explicit --all-files (e.g. trunk CI) so
+    # they continuously check the whole tree rather than just the merge-base diff.
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=False,
+        all_files=has_all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
@@ -379,6 +455,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     if write_json_output:
         Path(tee_file).write_text(json_output_all + json_output_changed)
     if lint_found:
+        click.secho("Lint failed!", fg="red")
         raise SystemExit(1)
 
 
@@ -412,7 +489,153 @@ def quickfix(ctx, *, lintrunner_args, **kwargs):
 
 
 @click.command()
+def clean():
+    """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
+    _clean()
+
+
+@click.command()
 def regenerate_github_workflows():
     """Regenerate GitHub workflows from templates."""
     cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
     spin.util.run(cmd, cwd="./.github")
+
+
+#: Canary imports for the docs build environment. If any of these are missing
+#: in the active env, the `make` invocation in spin docs would fail deep inside
+#: a Sphinx extension or a figure-generation script with an unhelpful traceback.
+#: Listing them up-front lets us surface a single actionable hint instead.
+_DOCS_DEP_CANARIES = ("sphinx", "matplotlib")
+
+
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.argument("make_args", nargs=-1, type=click.UNPROCESSED)
+def docs(make_args):
+    """Build documentation.
+
+    Wraps `make` in `docs/`. With no arguments runs `make html`. Pass any
+    Make target or argument through, e.g.
+
+    \b
+        spin docs                     # html (default)
+        spin docs doctest             # run doctests
+        spin docs coverage            # API coverage report
+        spin docs html-stable         # release-style build
+        spin docs serve               # local http server on build/html
+        spin docs html O="-D katex_prerender=0"  # no Node.js needed
+
+    Requires the docs build dependencies (`docs/requirements.txt`) to be
+    installed in the active environment. The default build also prerenders
+    math with KaTeX, which needs Node.js (`node`) on PATH; pass
+    `O="-D katex_prerender=0"` to render math in the browser instead. (Use
+    `O=` rather than `SPHINXOPTS=` so the Makefile's default options are kept.)
+    """
+    missing = [
+        name for name in _DOCS_DEP_CANARIES if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        raise click.ClickException(
+            f"Docs build dependencies missing: {', '.join(missing)}.\n"
+            f"Install them with:\n\n"
+            f"    pip install -r docs/requirements.txt"
+        )
+
+    # docs/source/conf.py sets katex_prerender=True, so sphinxcontrib-katex
+    # spawns a Node.js server to prerender math. Missing node otherwise fails
+    # deep in the Sphinx run with a bare "No such file or directory: 'node'".
+    # Only a warning: node is unnecessary when the user disables prerender.
+    prerender_disabled = any("katex_prerender=0" in arg for arg in make_args)
+    if not prerender_disabled and shutil.which("node") is None:
+        click.echo(
+            "Warning: `node` not found on PATH. The docs build prerenders math "
+            "with KaTeX (katex_prerender=True), which needs Node.js. Either "
+            "install nodejs, or skip prerender with:\n\n"
+            '    spin docs html O="-D katex_prerender=0"\n',
+            err=True,
+        )
+    cmd = ["make", *(make_args or ("html",))]
+    spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
+
+
+PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
+PYREFLY_CONFIG = CWD / "pyrefly.toml"
+
+
+def _pyrefly_version() -> str:
+    """Read the pyrefly version pinned in the linter adapter so spin stays in sync."""
+    text = PYREFLY_LINTER_SCRIPT.read_text()
+    match = re.search(r'"pyrefly==([^"]+)"', text)
+    if not match:
+        raise RuntimeError(
+            f"Could not find pinned pyrefly version in {PYREFLY_LINTER_SCRIPT}"
+        )
+    return match.group(1)
+
+
+def _pyrefly_base_cmd() -> list[str]:
+    return ["uvx", "--python", "3.12", f"pyrefly@{_pyrefly_version()}"]
+
+
+def _pyrefly_init():
+    cmd = _pyrefly_base_cmd() + ["init"]
+    spin.util.run(cmd)
+
+
+@click.group()
+def pyrefly():
+    """Commands for managing PyRefly stubs and checks."""
+    click.echo("Starting Pyrefly...")
+
+
+@pyrefly.command()
+@click.argument("files", metavar="", nargs=-1)
+def infer(files):
+    """Infer type annotations using `pyrefly infer`.
+
+    Note: pyrefly's `infer` is still under development and has a known bug
+    around imports. Review generated annotations before committing.
+    """
+    click.echo(
+        "Warning: `pyrefly infer` is experimental and has a known bug with "
+        "imports. Review the generated annotations carefully."
+    )
+    cmd = _pyrefly_base_cmd() + ["infer", "--config", str(PYREFLY_CONFIG)] + list(files)
+    spin.util.run(cmd)

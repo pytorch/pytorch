@@ -131,8 +131,9 @@ class C10_API DataPtr {
   }
   // Unsafely mutates the device on a DataPtr.  Under normal use,
   // you should never actually need to call this function.
-  // We need this for the implementation of the hack detailed
-  // in Note [Masquerading as CUDA]
+  // We used to need this for the implementation of the hack detailed
+  // in Note [Masquerading as CUDA], but that hack has been removed.
+  // Other uses of this function now exist so it cannot be deprecated.
   void unsafe_set_device(Device device) {
     device_ = device;
   }
@@ -443,7 +444,7 @@ inline std::string format_size(uint64_t size) {
     os << static_cast<double>(size) / 1073741824.0;
     os << " GiB";
   }
-  return os.str();
+  return std::move(os).str();
 }
 
 } // namespace CachingAllocator

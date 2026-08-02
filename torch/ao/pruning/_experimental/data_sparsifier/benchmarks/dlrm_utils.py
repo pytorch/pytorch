@@ -20,17 +20,12 @@ class SparseDLRM(DLRM_Net):
     """
 
     def forward(self, dense_x, lS_o, lS_i):
-        # pyrefly: ignore [missing-attribute]
         x = self.apply_mlp(dense_x, self.bot_l)  # dense features
-        # pyrefly: ignore [missing-attribute]
         ly = self.apply_emb(lS_o, lS_i, self.emb_l, self.v_W_l)  # apply embedding bag
-        # pyrefly: ignore [missing-attribute]
         z = self.interact_features(x, ly)
 
         z = z.to_sparse_coo()
-        # pyrefly: ignore [missing-attribute]
         z = torch.mm(z, self.top_l[0].weight.T).add(self.top_l[0].bias)
-        # pyrefly: ignore [missing-attribute]
         for layer in self.top_l[1:]:
             z = layer(z)
 

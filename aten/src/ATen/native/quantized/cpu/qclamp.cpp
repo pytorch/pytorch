@@ -72,7 +72,7 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
     clamp_op,
     input_contig.size(0), // batch_size
-    (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input_data
+    reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()), // input_data
     num_elems, // input_stride
     (uint8_t*)qy.data_ptr<c10::quint8>(), // output_data
     num_elems); // output_stride

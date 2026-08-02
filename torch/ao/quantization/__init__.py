@@ -2,14 +2,13 @@
 
 import sys
 from collections.abc import Callable
-from typing import Optional, Union
 from typing_extensions import TypeAliasType
 
 import torch
 from torch import Tensor
 
 from .fake_quantize import *  # noqa: F403
-from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
+from .fuse_modules import fuse_modules, fuse_modules_qat
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403
@@ -35,6 +34,7 @@ __all__ = [
     "FixedQParamsObserver",
     "FusedMovingAvgObsFakeQuantize",
     "HistogramObserver",
+    # pyrefly: ignore [bad-dunder-all]
     "MatchAllNode",
     "MinMaxObserver",
     "MovingAverageMinMaxObserver",
@@ -42,6 +42,7 @@ __all__ = [
     "NoopObserver",
     "ObserverBase",
     "ObserverOrFakeQuantize",
+    # pyrefly: ignore [bad-dunder-all]
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -101,6 +102,7 @@ __all__ = [
     "fuse_modules_qat",
     "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
     "fused_wt_fake_quant_range_neg_127_to_127",
+    # pyrefly: ignore [bad-dunder-all]
     "get_combined_dict",
     "get_default_compare_output_module_list",
     "get_default_custom_config_dict",

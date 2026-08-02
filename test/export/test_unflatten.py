@@ -9,7 +9,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export, FlatArgsAdapter, unflatten
-from torch.export.unflatten import _disable_interpreter
+from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -177,6 +177,75 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "0")),
             id(getattr(unflattened_module.sub_net, "2")),
         )
+
+    def test_unflatten_shared_submodule_reorder(self):
+        """Test that _reorder_submodules handles @N-suffixed FQNs correctly.
+
+        When modules are shared (aliased), PyTorch assigns @N suffixes to
+        duplicate entries in _modules. The fqn_order dict (built from
+        fqn_list) filters out @N entries, so _reorder_submodules must fall
+        back to the base FQN for ordering.
+        """
+
+        class Block(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                shared_block = Block()
+                self.blocks = torch.nn.Sequential(
+                    shared_block,
+                    torch.nn.ReLU(),
+                    shared_block,
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.blocks(x)
+
+        eager_module = Model()
+        inps = (torch.rand(2, 10),)
+        export_module = export(eager_module, inps, {}, strict=True)
+        unflattened_module = unflatten(export_module)
+        self.compare_outputs(eager_module, unflattened_module, inps)
+        # Verify shared identity is preserved
+        self.assertEqual(
+            id(getattr(unflattened_module.blocks, "0")),
+            id(getattr(unflattened_module.blocks, "2")),
+        )
+
+    def test_assign_attr_noncontiguous_call_indices(self):
+        """_assign_attr must populate every @N call-name variant present in
+        _modules, even when the indices are non-contiguous.
+
+        When a multi-called submodule has some calls inside a torch.no_grad() /
+        set_grad_enabled region, replace_set_grad_with_hop_pass relocates those
+        intermediate call copies (e.g. @1, @2) into a wrap_with_set_grad_enabled
+        HOP subgraph, leaving non-contiguous indices at the top level (e.g. base
+        + @3). A contiguous scan starting at @1 stops at the first gap and never
+        reaches the surviving @3 copy, leaving its parameters unassigned; that
+        copy later fails in _sink_params with a missing-attribute error.
+        """
+        for attr_kind, make_obj in (
+            (_AttrKind.PARAMETER, lambda: torch.nn.Parameter(torch.randn(4))),
+            (_AttrKind.BUFFER, lambda: torch.ones(4)),
+        ):
+            root = torch.nn.Module()
+            # base + @3, with @1/@2 absent (relocated into a HOP subgraph).
+            root._modules["leaf"] = torch.nn.Module()
+            root._modules["leaf@3"] = torch.nn.Module()
+
+            obj = make_obj()
+            _assign_attr(obj, root, "leaf.bias", attr_kind)
+
+            self.assertIs(root._modules["leaf"].bias, obj)
+            self.assertIs(root._modules["leaf@3"].bias, obj)
 
     def test_assert_tensor_metadata_stack(self):
         class N(torch.nn.Module):

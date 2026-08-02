@@ -61,7 +61,7 @@ Here are some output descriptors you might find on the Joint FX graph:
   the joint graph, clone all outputs before returning from the graph.
 
 * SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), idx="inner") - this
-  tensor correspondings to the inner tensor of the first original output which
+  tensor corresponds to the inner tensor of the first original output which
   is a tensor subclass.  This and other subclass components of that output will
   get repacked into a tensor subclass.
 
@@ -578,7 +578,10 @@ class TangentAOTInput(DifferentiableAOTInput):
     output: DifferentiableAOTOutput
 
     def __post_init__(self) -> None:
-        assert isinstance(self.output, DifferentiableAOTOutput)
+        if not isinstance(self.output, DifferentiableAOTOutput):
+            raise AssertionError(
+                f"expected output to be DifferentiableAOTOutput, got {type(self.output)}"
+            )
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
@@ -645,7 +648,10 @@ class GradAOTOutput(DifferentiableAOTOutput):
     grad_of: DifferentiableAOTInput
 
     def __post_init__(self) -> None:
-        assert isinstance(self.grad_of, DifferentiableAOTInput)
+        if not isinstance(self.grad_of, DifferentiableAOTInput):
+            raise AssertionError(
+                f"expected grad_of to be DifferentiableAOTInput, got {type(self.grad_of)}"
+            )
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"

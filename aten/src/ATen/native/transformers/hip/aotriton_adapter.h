@@ -8,6 +8,12 @@
 #include <aotriton/util.h>
 #include <aotriton/config.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
+#include <tuple>
+#include <optional>
+
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+#define AOTRITON_V2_API_FLASH_ATTN_H  // Suppress the include of deprecated flash/v2.h
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
@@ -125,8 +131,17 @@ struct LazyTensorContext {
 
 template<int kRank, bool kRequireZeros>
 struct LazyTensorFunctions : public LazyTensorContext {
-  static aotriton::TensorView<kRank> acquire(void* cookie) {
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+  using HolderType = aotriton::LazyTensor<kRank>;
+#else
+  using HolderType = void;
+#endif
+  static aotriton::TensorView<kRank> acquire(HolderType* self) {
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+    auto ctx = (LazyTensorContext*)self->cookie;
+#else
     auto ctx = (LazyTensorContext*)cookie;
+#endif
     if (!ctx->tensor.defined()) {
       auto q = ctx->like_tensor;
       if constexpr (kRequireZeros) {
@@ -139,7 +154,7 @@ struct LazyTensorFunctions : public LazyTensorContext {
     return mk_aotensor<kRank>(ctx->tensor, ctx->tensor_name);
   }
 
-  static void dispose(void* cookie) {
+  static void dispose(HolderType* cookie) {
   }
 };
 
@@ -167,6 +182,23 @@ auto mklazy_fp32zeros(LazyTensorContext* cookie)
 {
   return mklazy_common<kRank, true>(cookie);
 }
+
+inline auto parse_window_size(std::optional<int64_t> window_size_left,
+                              std::optional<int64_t> window_size_right)
+{
+  const int fa_left = window_size_left.value_or(-1);
+  const int fa_right = window_size_right.value_or(-1);
+  auto get_window_value = [](const int window) -> std::optional<int64_t> {
+    if (window < 0) {
+      return std::nullopt;
+    }
+    return window;
+  };
+  const auto window_left = get_window_value(fa_left);
+  const auto window_right = get_window_value(fa_right);
+  return std::make_tuple(window_left, window_right);
+}
+
 
 #endif  // >= 0.11
 

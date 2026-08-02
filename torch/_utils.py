@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import _compat_pickle
 import copyreg
 import functools
 import importlib
@@ -77,6 +78,8 @@ def _to(self, device, non_blocking=False):
     if device.type == "cpu":
         pin_memory = non_blocking and self.device.type in (
             "cuda",
+            "xpu",
+            "mtia",
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
@@ -284,18 +287,26 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 # The same procedure must be followed by _load() in serialization.py because due
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
-def _validate_loaded_sparse_tensors():
-    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
-        # Skip sparse tensor invariants validation for better
-        # performance. See check_sparse_tensor_invariants
-        # documentation for how to control sparse tensor invariants
-        # checking.
-        _sparse_tensors_to_validate.clear()
-        return
+def _validate_loaded_sparse_tensors(weights_only=False):
+    # In weights_only mode we always validate: malformed sparse indices can
+    # cause out-of-bounds reads later (e.g. in to_dense()), and an untrusted
+    # checkpoint must not be able to slip those through. Otherwise we fall back
+    # to the global check_sparse_tensor_invariants setting.
     try:
+        if not _sparse_tensors_to_validate:
+            return
+        if weights_only:
+            warnings.warn(
+                "Validating sparse tensor invariants because weights_only=True; "
+                "this is an O(nnz) scan per sparse tensor and may be slow for "
+                "large checkpoints.",
+                stacklevel=2,
+            )
+        elif not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+            return
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
-        # anywhy when loading sparse data from external sources.
+        # anyway when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
@@ -456,6 +467,24 @@ def _rebuild_qtensor(
         )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
+        # The C++ constructor does not bound-check axis or the
+        # scales/zero_points length against size; values arriving from an
+        # untrusted weights_only checkpoint can otherwise be arbitrary.
+        if not 0 <= axis < len(size):
+            raise ValueError(
+                f"_rebuild_qtensor: per_channel axis {axis} out of range for size {tuple(size)}"
+            )
+        expected_len = int(size[axis])
+        scales_len = len(scales) if isinstance(scales, list) else scales.numel()
+        zero_points_len = (
+            len(zero_points) if isinstance(zero_points, list) else zero_points.numel()
+        )
+        if scales_len != expected_len or zero_points_len != expected_len:
+            raise ValueError(
+                "_rebuild_qtensor: per_channel scales/zero_points length must equal "
+                f"size[axis]={expected_len}, got scales={scales_len}, "
+                f"zero_points={zero_points_len}"
+            )
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
@@ -703,17 +732,6 @@ def _take_tensors(tensors, size_limit):
             yield buf
 
 
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
-
-
 def render_call(fn, args, kwargs):
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
@@ -783,6 +801,19 @@ class ExceptionWrapper:
             # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
+
+
+def cpu_count() -> int | None:
+    """Return the number of CPUs available to the current process.
+
+    Prefers ``os.sched_getaffinity`` (respects cgroups / taskset) and
+    falls back to ``os.cpu_count``.
+    """
+    # os.process_cpu_count was added in CPython 3.13, see
+    # https://docs.python.org/3/library/os.html#os.process_cpu_count
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
 
 
 def _get_available_device_type():
@@ -1127,6 +1158,42 @@ NAME_MAPPING = {
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
 
+# Protocol 2 pickle (torch.save's default) maps builtin exceptions to the
+# Python 2 "exceptions" module via REVERSE_NAME_MAPPING; map them back so
+# allowlisted exception types resolve under their builtins.* names.
+NAME_MAPPING.update(
+    {
+        ("exceptions", name): ("builtins", name)
+        for name in _compat_pickle.PYTHON2_EXCEPTIONS
+    }
+)
+
+
+def _chunk_or_narrow_cat(
+    tensor: "torch.Tensor",
+    num_chunks: int,
+    narrow_dim: int,
+    cat_dim: int = 0,
+) -> "torch.Tensor":
+    """
+    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
+    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+    """
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if _are_we_tracing() and has_free_unbacked_symbols(tensor):
+            chunk_size = tensor.size(narrow_dim) // num_chunks
+            chunks = [
+                torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
+                for i in range(num_chunks)
+            ]
+            return torch.cat(chunks, dim=cat_dim)
+    return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
+
 
 def _maybe_view_chunk_cat(
     res: "torch.Tensor", group_size: int, gather_dim: int
@@ -1176,9 +1243,11 @@ def _maybe_view_chunk_cat(
     # Optimization: Can use view instead of split+cat when:
     # 1. res.shape[0] == group_size (invariant after all_gather)
     # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
 
-    if shape[0] == group_size and numel_between == 1:
+    if guard_or_false(shape[0] == group_size) and guard_or_false(numel_between == 1):
         # View optimization: reshape to collapse dim 0 into gather_dim
         final_shape = (
             [1]  # Dim 0 becomes 1
@@ -1191,7 +1260,7 @@ def _maybe_view_chunk_cat(
         # General case: fall back to split + cat
         # This is better than torch.flatten as cat can be vectorized, whereas
         # the contiguous kernel is always bad.
-        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        return _chunk_or_narrow_cat(res, group_size, narrow_dim=0, cat_dim=gather_dim)
 
 
 class _Frame(TypedDict):
@@ -1351,3 +1420,108 @@ def _augment_memory_snapshot_stack_traces(
                 _augment_frames(trace_entry["frames"])
 
     return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()
+
+
+def getenv(name: str) -> "str | None":
+    """Read an environment variable through torch's serialized env access.
+
+    Prefer this over :func:`os.getenv` when torch is loaded: it shares c10's
+    environment mutex, so the read is consistent with concurrent C++ code and
+    other :func:`torch._utils.setenv` calls that also go through c10.
+
+    Args:
+        name: Name of the environment variable.
+
+    Returns:
+        The variable's value, or ``None`` if it is not set.
+    """
+    return torch._C._getenv(name)
+
+
+def setenv(name: str, value: str, overwrite: bool = True) -> None:
+    """Set an environment variable through torch's serialized env access.
+
+    Prefer this over assigning to :data:`os.environ` when torch is loaded: it
+    shares c10's environment mutex, so the write is consistent with concurrent
+    C++ code and other :func:`torch._utils.getenv` calls that also go through
+    c10.
+
+    Args:
+        name: Name of the environment variable.
+        value: Value to set.
+        overwrite: If ``False`` and the variable is already set, leave it
+            unchanged. Defaults to ``True``.
+    """
+    torch._C._setenv(name, value, overwrite)
+
+
+def unsetenv(name: str) -> None:
+    """Remove an environment variable through torch's serialized env access.
+
+    The counterpart to :func:`setenv`; shares c10's environment mutex.
+
+    Args:
+        name: Name of the environment variable to remove.
+    """
+    torch._C._unsetenv(name)
+
+
+# Saved originals so os.environ interception can be reverted; ``None`` means the
+# hook is not currently installed.
+_original_os_putenv: "Callable[..., None] | None" = None
+_original_os_unsetenv: "Callable[..., None] | None" = None
+
+
+def _torch_putenv(key: "str | bytes", value: "str | bytes") -> None:
+    setenv(os.fsdecode(key), os.fsdecode(value))
+
+
+def _torch_unsetenv(key: "str | bytes") -> None:
+    unsetenv(os.fsdecode(key))
+
+
+def install_os_environ_hook() -> None:
+    """Route ``os.environ`` mutations through torch's serialized env access.
+
+    CPython's ``os.environ.__setitem__`` / ``__delitem__`` call the module-level
+    ``os.putenv`` / ``os.unsetenv`` and then update ``os.environ``'s cached dict.
+    This replaces those two functions so that mutating ``os.environ`` (and any
+    direct ``os.putenv`` / ``os.unsetenv`` call) goes through c10's environment
+    mutex, keeping Python and C++ env access consistent. The cached dict is still
+    updated by CPython afterwards, so ``os.environ`` reads stay correct.
+
+    Idempotent: calling it again while installed is a no-op. Use
+    :func:`remove_os_environ_hook` to revert.
+    """
+    global _original_os_putenv, _original_os_unsetenv
+    if _original_os_putenv is not None:
+        return
+    _original_os_putenv = os.putenv
+    _original_os_unsetenv = os.unsetenv
+    os.putenv = _torch_putenv  # type: ignore[assignment]
+    os.unsetenv = _torch_unsetenv  # type: ignore[assignment]
+
+
+def remove_os_environ_hook() -> None:
+    """Undo :func:`install_os_environ_hook`; a no-op if it was not installed."""
+    global _original_os_putenv, _original_os_unsetenv
+    if _original_os_putenv is None or _original_os_unsetenv is None:
+        return
+    os.putenv = _original_os_putenv
+    os.unsetenv = _original_os_unsetenv
+    _original_os_putenv = None
+    _original_os_unsetenv = None

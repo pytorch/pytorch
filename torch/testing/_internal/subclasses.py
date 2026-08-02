@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -38,11 +38,14 @@ class WrapperSubclass(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        if meta is not None:
+            raise AssertionError("Expected meta to be None")
         a = inner_tensors["a"]
         if is_fake(a):
-            assert outer_size is not None
-            assert outer_stride is not None
+            if outer_size is None:
+                raise AssertionError("Expected outer_size to not be None")
+            if outer_stride is None:
+                raise AssertionError("Expected outer_stride to not be None")
         return WrapperSubclass(a, outer_size, outer_stride)
 
     @classmethod
@@ -68,7 +71,7 @@ class WrapperSubclass(torch.Tensor):
             return return_and_correct_aliasing(func, args, kwargs, out)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[type] = None
+        self, expected_metadata: Any, expected_type: type | None = None
     ):
         if expected_type is type(self.a):
             return self.a

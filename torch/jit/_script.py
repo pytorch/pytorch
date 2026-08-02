@@ -16,7 +16,7 @@ import pickle
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -254,7 +254,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         # Cases where sub-module can be re-assigned after ScriptModule construction
-        # 1. If the attr is an module interface type, it's guaranteed that the module is
+        # 1. If the attr is a module interface type, it's guaranteed that the module is
         #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
         # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
         #    and it's legit to swap a new module in.
@@ -284,7 +284,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):  # noqa: B902
+    def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
@@ -359,12 +359,12 @@ def script_method(fn):
         warnings.warn(
             "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return fn
@@ -460,7 +460,7 @@ if _enabled:
             _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
                 calls are forwarded.
             _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
-                exposed on this wrppaer.
+                exposed on this wrapper.
         """
 
         def __init__(self, cpp_class):
@@ -791,7 +791,7 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_for_mobile(*args, **kwargs)
@@ -804,7 +804,7 @@ if _enabled:
             warnings.warn(
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
@@ -823,6 +823,7 @@ if _enabled:
 
         @property
         def original_name(self):
+            # pyrefly: ignore [unnecessary-comparison]
             if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())
@@ -1076,7 +1077,10 @@ def call_prepare_scriptable_func_impl(obj, memo):
     for name, sub_module in obj.__dict__.items():
         if name == "_modules":
             for k, v in sub_module.items():
-                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+                # Mirror the elif below: skip already-scripted children (re-assigning
+                # a jit-ignored grandchild back into a ScriptModule would raise).
+                if isinstance(v, torch.nn.Module) and not isinstance(v, ScriptModule):
+                    sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
             new_obj_dict[name] = sub_module
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(
             sub_module, ScriptModule
@@ -1135,7 +1139,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ):
     global type_trace_db
 
@@ -1274,7 +1278,7 @@ def script(
     optimize: None = None,
     _frames_up: int = 0,
     _rcb: Callable[[str], Any] | None = None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Any:
     r"""Script the function.
 
@@ -1481,12 +1485,12 @@ def script(
         warnings.warn(
             "`torch.jit.script` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return obj
@@ -1588,6 +1592,9 @@ def _check_directly_compile_overloaded(obj):
 def interface(obj: _T) -> _T:
     r"""Decorate to annotate classes or modules of different types.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     This decorator can be used to define an interface that can be used to annotate
     classes or modules of different types. This can be used for to annotate a submodule
     or attribute class that could have different types that implement the same
@@ -1633,6 +1640,10 @@ def interface(obj: _T) -> _T:
         user_fn_jit(impls, 0, val)
         user_fn_jit(impls, 1, val)
     """
+    warnings.warn(
+        "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
+        FutureWarning,
+    )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
@@ -1783,7 +1794,8 @@ class _ScriptProfile:
 
 
 def _unwrap_optional(x):
-    assert x is not None, "Unwrapping null optional"
+    if x is None:
+        raise AssertionError("Unwrapping null optional")
     return x
 
 

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -60,7 +60,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
-        elif is_opaque_type(type(val)):
+        elif is_custom_class(type(val)):
             return True
         return False
 
@@ -102,13 +102,24 @@ class _VerifierMeta(type):
         if bases:
             if "check" in attrs or "_check_graph_module" in attrs:
                 raise SyntaxError("Overriding method check is not allowed.")
-            assert "dialect" in attrs and attrs["dialect"] != "ATEN"
+            if "dialect" not in attrs or attrs["dialect"] == "ATEN":
+                raise AssertionError(
+                    f"subclass must define dialect != 'ATEN', got {attrs.get('dialect')}"
+                )
         else:
-            assert "check" in attrs
-            assert "_check_graph_module" in attrs
-            assert attrs["dialect"] == "ATEN"
+            if "check" not in attrs:
+                raise AssertionError("base class must define 'check' method")
+            if "_check_graph_module" not in attrs:
+                raise AssertionError(
+                    "base class must define '_check_graph_module' method"
+                )
+            if attrs["dialect"] != "ATEN":
+                raise AssertionError(
+                    f"base class dialect must be 'ATEN', got {attrs['dialect']}"
+                )
 
-        assert isinstance(attrs["dialect"], str)
+        if not isinstance(attrs["dialect"], str):
+            raise AssertionError(f"dialect must be str, got {type(attrs['dialect'])}")
         ret = type.__new__(metacls, name, bases, attrs)
         metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
@@ -165,7 +176,7 @@ class Verifier(metaclass=_VerifierMeta):
         return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
-        # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
+        # subgm in HOP's argument could have getattr(weight) nodes, thus stateful
         return (
             torch.fx.GraphModule,
             torch.nn.parameter.Parameter,
@@ -194,18 +205,21 @@ class Verifier(metaclass=_VerifierMeta):
                 ret = self.allowed_getattr_types()
             else:
                 ret = self.allowed_getattr_types_for_subgm()
-            assert not any(t is object for t in ret)
+            if any(t is object for t in ret):
+                raise AssertionError("allowed_getattr_types must not contain 'object'")
             return ret
 
         def _check_valid_op(op) -> None:
             def _allowed_builtin_ops() -> list:
                 ret = self.allowed_builtin_ops()
-                assert all(inspect.isbuiltin(op) for op in ret)
+                if not all(inspect.isbuiltin(op) for op in ret):
+                    raise AssertionError("allowed_builtin_ops must all be builtins")
                 return ret
 
             def _allowed_op_types() -> tuple[type[Any], ...]:
                 ret = self.allowed_op_types()
-                assert not any(t is object for t in ret)
+                if any(t is object for t in ret):
+                    raise AssertionError("allowed_op_types must not contain 'object'")
                 return ret
 
             # TODO Remove this allowlist.
@@ -232,6 +246,13 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._functorch.predispatch._vmap_increment_nesting,
                 torch._functorch.predispatch._vmap_decrement_nesting,
                 torch._functorch.predispatch.lazy_load_decompositions,
+                torch._functorch.predispatch._make_dual,
+                torch._functorch.predispatch._unpack_dual,
+                torch._functorch.predispatch._jvp_increment_nesting,
+                torch._functorch.predispatch._jvp_decrement_nesting,
+                torch._functorch.predispatch._unwrap_for_grad,
+                torch._functorch.predispatch._enter_dual_level,
+                torch._functorch.predispatch._exit_dual_level,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -355,6 +376,10 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
 
+    # Lazily computed on first use; avoids calling graph_module.state_dict()
+    # unless at least one buffer is missing from the top-level state_dict.
+    _gm_state_dict: dict | None = None
+
     # Check every node in the signature exists in the graph
     input_node_names = [
         node.name for node in exported_program.graph.nodes if node.op == "placeholder"
@@ -425,7 +450,18 @@ def _verify_exported_program_signature(exported_program) -> None:
                 input_spec.persistent is True
                 and buffer not in exported_program.state_dict
             ):
-                raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
+                # Allow buffers that live in constants or in a subgraph
+                # submodule (e.g. lifted tensor constants from
+                # invoke_subgraph tracing stored under repeated_subgraph0).
+                # Use a lazy copy of the graph module state to avoid the
+                # cost of state_dict() when no fallback is needed.
+                if buffer not in exported_program.constants:
+                    if _gm_state_dict is None:
+                        _gm_state_dict = exported_program.graph_module.state_dict()
+                    if buffer not in _gm_state_dict:
+                        raise SpecViolationError(
+                            f"Buffer {buffer} is not in the state dict."
+                        )
 
             if input_spec.persistent is False and buffer in exported_program.state_dict:
                 raise SpecViolationError(
@@ -471,7 +507,8 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(f"last node must be output, got {output_node.op}")
     output_nodes = [
         arg.name if isinstance(arg, torch.fx.Node) else arg
         for arg in output_node.args[0]
@@ -492,41 +529,44 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     num_tokens = len(gs.output_tokens)
+    buffers_to_mutate = gs.buffers_to_mutate
+    parameters_to_mutate = gs.parameters_to_mutate
+    user_inputs_to_mutate = gs.user_inputs_to_mutate
     end = (
-        len(gs.buffers_to_mutate)
-        + len(gs.parameters_to_mutate)
-        + len(gs.user_inputs_to_mutate)
+        len(buffers_to_mutate)
+        + len(parameters_to_mutate)
+        + len(user_inputs_to_mutate)
         + num_tokens
     )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:
-        if mutation_node in gs.buffers_to_mutate:
-            if gs.buffers_to_mutate[mutation_node] not in gs.buffers:
+        if mutation_node in buffers_to_mutate:
+            if buffers_to_mutate[mutation_node] not in gs.buffers:
                 raise SpecViolationError(
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
-                    f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
+                    f"Dict of buffers that are mutated, in order: {buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
                 )
-        elif mutation_node in gs.parameters_to_mutate:
-            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+        elif mutation_node in parameters_to_mutate:
+            if parameters_to_mutate[mutation_node] not in gs.parameters:
                 raise SpecViolationError(
                     f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
-                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Dict of parameters that are mutated, in order: {parameters_to_mutate} \n"
                     f"Parameter nodes available: {gs.parameters} \n"
                 )
-        elif mutation_node in gs.user_inputs_to_mutate:
-            if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
+        elif mutation_node in user_inputs_to_mutate:
+            if user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
                 raise SpecViolationError(
                     f"User input output {mutation_node} does not point to a user input that exists. \n"
-                    f"Dict of user inputs that are mutated, in order: {gs.user_inputs_to_mutate} \n"
+                    f"Dict of user inputs that are mutated, in order: {user_inputs_to_mutate} \n"
                     f"User input nodes available: {gs.user_inputs} \n"
                 )
         else:
             raise SpecViolationError(
                 f"Mutation node {mutation_node} is neither a buffer nor a user input. "
-                f"Buffers to mutate: {gs.buffers_to_mutate}, User inputs to mutate: {gs.user_inputs_to_mutate}"
+                f"Buffers to mutate: {buffers_to_mutate}, User inputs to mutate: {user_inputs_to_mutate}"
             )
 
     for user_output_node, user_output_name in zip(user_output_nodes, gs.user_outputs):

@@ -271,12 +271,35 @@ CUDAStream CUDAStreamForId(DeviceIndex device_index, StreamId stream_id) {
 
 } // anonymous namespace
 
+bool CUDAStream::query() const {
+  DeviceGuard guard{stream_.device()};
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream()));
+
+  if (err == cudaSuccess) {
+    return true;
+  } else if (err != cudaErrorNotReady) {
+    C10_CUDA_CHECK(err);
+  } else {
+    // ignore and clear the error if not ready
+    (void)cudaGetLastError();
+  }
+
+  return false;
+}
+
+void CUDAStream::synchronize() const {
+  DeviceGuard guard{stream_.device()};
+  c10::cuda::stream_synchronize(stream());
+}
+
 // See Note [StreamId assignment]
 cudaStream_t CUDAStream::stream() const {
   c10::DeviceIndex device_index = stream_.device_index();
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
+  initCUDAStreamsOnce();
+  check_gpu(device_index);
   if (st.isDefault()) {
     TORCH_CHECK(
         si == 0,
@@ -372,7 +395,9 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
-  current_streams[stream.device_index()] = stream.id();
+  auto device_index = stream.device_index();
+  check_gpu(device_index);
+  current_streams[device_index] = stream.id();
 }
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {

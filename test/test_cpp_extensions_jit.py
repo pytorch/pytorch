@@ -39,6 +39,50 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
+class TestCppExtensionImport(common.TestCase):
+    def test_cython_not_loaded_with_import_cpp_extension(self):
+        script = """
+import importlib.util
+import inspect
+import pathlib
+import sys
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    root = pathlib.Path(tmpdir)
+    (root / "Cython" / "Distutils").mkdir(parents=True)
+    (root / "Cython" / "Compiler").mkdir(parents=True)
+    (root / "Cython" / "__init__.py").write_text("")
+    (root / "Cython" / "Distutils" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "Main.py").write_text("")
+    (root / "Cython" / "Distutils" / "build_ext.py").write_text(
+        "from distutils.command.build_ext import build_ext\\n"
+    )
+
+    sys.path.insert(0, tmpdir)
+    assert importlib.util.find_spec("Cython") is not None  # noqa: S101
+    import torch.utils.cpp_extension
+
+    cython_modules = sorted(
+        name for name in sys.modules
+        if name == "Cython" or name.startswith("Cython.")
+    )
+    assert not cython_modules, cython_modules  # noqa: S101
+    build_extension_cls = torch.utils.cpp_extension.BuildExtension
+    assert isinstance(build_extension_cls, type)  # noqa: S101
+    assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
+    build_extension_source = inspect.getsource(build_extension_cls)
+    assert "def build_extensions" in build_extension_source  # noqa: S101
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
@@ -96,6 +140,39 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIsNone(doubler.get().grad)
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
+
+    def test_jit_stale_lock_file_does_not_deadlock(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189245:
+        # a leftover 'lock' file (e.g. from a builder killed by SIGKILL/OOM)
+        # must not deadlock later loads. Run in a subprocess so a regression
+        # (an infinite wait) surfaces as a timeout instead of hanging the job.
+        build_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, build_dir, ignore_errors=True)
+        # Simulate the stale lock left behind by a forcefully killed builder.
+        open(os.path.join(build_dir, "lock"), "w").close()
+        script = "\n".join(
+            [
+                "import torch.utils.cpp_extension as ext",
+                "m = ext.load_inline(",
+                "    name='stale_lock_ext',",
+                "    cpp_sources='int forty_two() { return 42; }',",
+                "    functions=['forty_two'],",
+                f"    build_directory={build_dir!r},",
+                "    verbose=True)",
+                "assert m.forty_two() == 42",
+                "print('STALE_LOCK_OK')",
+            ]
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
+        self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
 
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
@@ -335,14 +412,11 @@ class TestCppExtensionJIT(common.TestCase):
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
         major, minor = map(int, torch.version.cuda.split(".")[:2])
-        if major < 12 or (major == 12 and minor <= 9):
+        if major == 12 and minor <= 9:
             # Compute capability <= 7.0 is only supported up to CUDA 12.9
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
             archflags["Volta"] = (["70"], ["70"])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if major < 12:
-            # CUDA 12 drops compute capability < 5.0
-            archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
         for flags, expected in archflags.items():
             try:
@@ -865,7 +939,8 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            assert p.grad is None, "zero_grad defaults to setting grads to None"
+            if p.grad is not None:
+                raise AssertionError("zero_grad defaults to setting grads to None")
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
@@ -1484,6 +1559,85 @@ class TestCppExtensionJIT(common.TestCase):
                 os.path.exists(exploit_file),
                 "Command injection vulnerability detected!",
             )
+
+    def test_torch_check_eq_stacktrace(self):
+        """Test that TORCH_CHECK_EQ includes C++ stack trace when TORCH_SHOW_CPP_STACKTRACES=1.
+
+        When TORCH_SHOW_CPP_STACKTRACES=1, errors from TORCH_CHECK_EQ should include
+        a C++ stack trace via DealWithFatal's call to GetFetchStackTrace.
+        Since this env var is cached on first use, we use subprocess to test both cases.
+        """
+        test_script = """
+import torch
+import torch.utils.cpp_extension
+
+cpp_source = '''
+#include <c10/util/Exception.h>
+
+void trigger_torch_check_eq_failure() {
+    int a = 1;
+    int b = 2;
+    TORCH_CHECK_EQ(a, b) << "This check should fail";
+}
+'''
+
+module = torch.utils.cpp_extension.load_inline(
+    name="test_torch_check_eq_stacktrace",
+    cpp_sources=cpp_source,
+    functions=["trigger_torch_check_eq_failure"],
+    verbose=False,
+)
+
+try:
+    module.trigger_torch_check_eq_failure()
+except RuntimeError as e:
+    print(str(e))
+"""
+
+        for show_cpp_stacktraces in [False, True]:
+            with self.subTest(show_cpp_stacktraces=show_cpp_stacktraces):
+                env = os.environ.copy()
+                env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+                env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+                result = subprocess.run(
+                    [sys.executable, "-c", test_script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+
+                error_message = result.stdout + result.stderr
+
+                self.assertIn(
+                    "Check failed: a == b",
+                    error_message,
+                    f"Expected 'Check failed: a == b' in error message, got: {error_message}",
+                )
+
+                if show_cpp_stacktraces:
+                    # C++ CapturedTraceback is not available on aarch64 due to:
+                    # #if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
+                    # in torch/csrc/Module.cpp
+                    import platform
+
+                    is_aarch64 = platform.machine() in ("aarch64", "arm64")
+                    if not is_aarch64:
+                        self.assertIn(
+                            "C++ CapturedTraceback:",
+                            error_message,
+                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",
+                        )
+                    self.assertRegex(
+                        error_message,
+                        r"Exception raised from trigger_torch_check_eq_failure at .*[/\\]main.cpp:8",
+                    )
+                else:
+                    self.assertNotIn(
+                        "C++ CapturedTraceback:",
+                        error_message,
+                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
+                    )
 
 
 if __name__ == "__main__":

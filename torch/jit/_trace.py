@@ -19,7 +19,7 @@ import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -279,7 +279,8 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
         uncompiled_outs, uncompiled_grads = run_fwd_bwd(args, force_trace=True)
-        assert model.has_trace_for(*args)
+        if not model.has_trace_for(*args):
+            raise AssertionError("Model should have trace for the given args")
 
     if is_module:
         model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
@@ -500,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget call .eval() on your model? Nodes:\n"
+                    "Did you forget to call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
@@ -545,9 +546,14 @@ def _check_trace(
                         elif getattr(orig, "is_nested", None) or getattr(
                             ref, "is_nested", None
                         ):
-                            assert getattr(orig, "is_nested", None) == getattr(
+                            if getattr(orig, "is_nested", None) != getattr(
                                 ref, "is_nested", None
-                            )
+                            ):
+                                raise AssertionError(
+                                    f"Nested tensor mismatch: orig.is_nested="
+                                    f"{getattr(orig, 'is_nested', None)}, "
+                                    f"ref.is_nested={getattr(ref, 'is_nested', None)}"
+                                )
                             for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
                                 torch.testing.assert_close(
                                     t_orig.double(),
@@ -604,7 +610,7 @@ class TracerWarning(Warning):
         warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
-# We ignore the tracer warnings coming form inside the library, because all our shape
+# We ignore the tracer warnings coming from inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
@@ -655,7 +661,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) is not type(loaded):
             return False
 
-        if isinstance(orig, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(orig):
             # Skip for FakeTensor.
             return True
         elif isinstance(orig, torch.Tensor):
@@ -994,12 +1000,12 @@ def trace(
         warnings.warn(
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return func
@@ -1031,7 +1037,7 @@ def trace(
     return traced_func
 
 
-_trace_module_map: Optional[dict[Any, Any]] = None
+_trace_module_map: dict[Any, Any] | None = None
 
 
 def trace_module(
@@ -1133,12 +1139,12 @@ def trace_module(
         warnings.warn(
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return mod
@@ -1269,7 +1275,8 @@ class TracedModule(ScriptModule):
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
         super().__init__()
-        assert isinstance(orig, torch.nn.Module)
+        if not isinstance(orig, torch.nn.Module):
+            raise AssertionError(f"Expected nn.Module, got {type(orig)}")
 
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module

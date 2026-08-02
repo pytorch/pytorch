@@ -27,7 +27,7 @@ from .optimizer import (
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):  # noqa: D101
+class RMSprop(Optimizer):
     def __init__(
         self,
         params: ParamsT,
@@ -41,7 +41,7 @@ class RMSprop(Optimizer):  # noqa: D101
         foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -69,7 +69,7 @@ class RMSprop(Optimizer):  # noqa: D101
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -149,7 +149,7 @@ class RMSprop(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -270,7 +270,7 @@ def _single_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,
@@ -334,9 +334,9 @@ def _single_tensor_rmsprop(
             if is_complex_param:
                 buf = torch.view_as_real(buf)
             buf.mul_(momentum).addcdiv_(grad, avg)
-            param.add_(buf, alpha=-lr)
+            param.add_(buf, alpha=-lr)  # type: ignore[arg-type]
         else:
-            param.addcdiv_(grad, avg, value=-lr)
+            param.addcdiv_(grad, avg, value=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_rmsprop(
@@ -347,7 +347,7 @@ def _multi_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,
@@ -460,7 +460,7 @@ def _multi_tensor_rmsprop(
                 momentum_lr = torch._foreach_mul(grouped_momentum_buffer_list, -lr)
                 torch._foreach_add_(grouped_params, momentum_lr)
             else:
-                torch._foreach_add_(
+                torch._foreach_add_(  # type: ignore[arg-type]
                     grouped_params, grouped_momentum_buffer_list, alpha=-lr
                 )
         else:
@@ -470,7 +470,9 @@ def _multi_tensor_rmsprop(
                 torch._foreach_div_(avg, -lr)
                 torch._foreach_addcdiv_(grouped_params, grouped_grads, avg)
             else:
-                torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)
+                torch._foreach_addcdiv_(  # type: ignore[arg-type]
+                    grouped_params, grouped_grads, avg, value=-lr
+                )
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_rmsprop)
@@ -489,7 +491,7 @@ def rmsprop(
     capturable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,

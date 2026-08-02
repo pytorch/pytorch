@@ -154,11 +154,6 @@ class DefaultStager(AsyncStager):
         staged_dict = future.result()
         stager.close()
 
-        # Context manager pattern (recommended)
-        stager = DefaultStager(config)
-        with stager:
-        result = stager.stage(state_dict)
-
     Performance Considerations:
         - Async staging provides best performance when model computation
           can overlap with staging operations
@@ -182,14 +177,12 @@ class DefaultStager(AsyncStager):
         self._staging_executor = None
         self._staging_stream = None
         if self._config.use_async_staging:
-            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                # pyrefly: ignore [bad-assignment]
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
@@ -247,6 +240,7 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
+
         return state_dict
 
     def close(self) -> None:
@@ -265,6 +259,7 @@ class DefaultStager(AsyncStager):
         """
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)
+        self._state_dict_stager.close()
 
     def synchronize_staging(self) -> None:
         """
@@ -298,7 +293,7 @@ class BlockingAsyncStager(AsyncStager):
 
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 
@@ -355,7 +350,6 @@ class _ReplicationStager(AsyncStager):
     ):
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore [read-only]
         self._device = device
         self._transport = PGTransport(pg, timeout, device, None)
 

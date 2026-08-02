@@ -22,6 +22,5 @@ bool isSameDevice(const c10::Device& a, const c10::Device& b) {
     return b.is_mtia();
   }
   TORCH_CHECK(false, "isSameDevice: Unsupported device type ", a, " and ", b);
-  return false;
 }
 } // namespace torch::nativert

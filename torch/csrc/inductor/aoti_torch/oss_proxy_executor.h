@@ -113,7 +113,7 @@ class OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(
       const std::string& json_path,
-      bool is_cpu,
+      const std::string& device_str,
       std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs =
           std::nullopt);
 
@@ -123,6 +123,16 @@ class OSSProxyExecutor : public ProxyExecutor {
       int64_t* flatten_int_args,
       int num_tensors,
       AtenTensorHandle* flatten_tensor_args) override;
+
+  // Returns a snapshot of the torchbind custom-class constants this executor
+  // holds. The IValue payloads share intrusive_ptr ownership with the live
+  // entries in custom_objs_, so consumers can downcast to a known
+  // CustomClassHolder type and mutate state that subsequent call_function()
+  // invocations will observe.
+  std::unordered_map<std::string, c10::IValue> get_custom_objs()
+      const override {
+    return custom_objs_;
+  }
 
  private:
   void prefill_stack_with_static_arguments(

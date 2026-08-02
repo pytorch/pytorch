@@ -67,7 +67,15 @@ bool cudaAwareMpiCheck() {
   } else {
     return false;
   }
-#else // !defined(MPIX_CUDA_AWARE_SUPPORT)
+// Recognize that Cray MPICH is CUDA-aware (used on Cray/HPE supercomputers)
+#elif defined(MPIX_GPU_SUPPORT_CUDA)
+  const char* cray_gpu_support = std::getenv("MPICH_GPU_SUPPORT_ENABLED");
+  if (cray_gpu_support != nullptr && std::string(cray_gpu_support) == "1") {
+    return true;
+  } else {
+    return false;
+  }
+#else // !defined(MPIX_CUDA_AWARE_SUPPORT) && !defined(MPIX_GPU_SUPPORT_CUDA)
   return false;
 #endif // MPIX_CUDA_AWARE_SUPPORT
 }
@@ -271,7 +279,7 @@ void ProcessGroupMPI::initMPIOnce() {
 
 c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
     std::vector<int> ranks) {
-  // Once initialization
+  // One-time initialization
   initMPIOnce();
 
   MPI_Comm groupComm = MPI_COMM_WORLD;
@@ -749,7 +757,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
       std::optional<std::vector<at::Tensor>>(inputTensors[0]));
 }
 
-c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupMPI::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -991,7 +999,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
   return enqueue(std::move(entry), "mpi:barrier", std::nullopt);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupMPI::all_gather_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const AllgatherOptions& opts) {
@@ -1025,7 +1033,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(
       std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
-c10::intrusive_ptr<Work> ProcessGroupMPI::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {

@@ -240,7 +240,8 @@ class TestPybindTypeCasters(common.TestCase):
         """
         # Verify that all functions have the same return type.
         union_type = {self.expected_return_type(f) for f in funcs}
-        assert len(union_type) == 1
+        if len(union_type) != 1:
+            raise AssertionError(f"expected 1 union type, got {len(union_type)}")
         union_type = union_type.pop()
         self.assertIs(Union, get_origin(union_type))
         # SymInt is inconvenient to test, so don't require it
@@ -278,6 +279,21 @@ class TestPybindTypeCasters(common.TestCase):
         for funcs in union_functions:
             with self.subTest(msg=f"check {[f.__name__ for f in funcs]}"):
                 self.check_union(funcs)
+
+    def test_pybind_layout_types(self):
+        layouts = [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch._mkldnn,
+            torch.jagged,
+        ]
+        for layout in layouts:
+            with self.subTest(msg=f"check {layout}"):
+                self.assertEqual(cpp_extension.roundtrip_layout(layout), layout)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

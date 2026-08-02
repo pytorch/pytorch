@@ -1,22 +1,15 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-# implement matrix related ops for distributed tensor
-from typing import cast
-
 import torch
-from torch.distributed.tensor._op_schema import (
-    OpSchema,
-    OpStrategy,
-    PlacementList,
-    StrategyType,
-)
-from torch.distributed.tensor._ops.utils import (
-    expand_to_full_mesh_op_strategy,
-    register_op_strategy,
+from torch._ops import OpOverload
+from torch.distributed.tensor._dtensor_spec import TensorMeta
+from torch.distributed.tensor._op_schema import ArgsType, KwargsType, RuntimeSchemaInfo
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
     Partial,
+    Placement,
     Replicate,
     Shard,
 )
@@ -25,89 +18,80 @@ from torch.distributed.tensor.placement_types import (
 aten = torch.ops.aten
 
 
-@register_op_strategy(aten.embedding.default)
-def embedding_strategy(op_schema: OpSchema) -> StrategyType:
+@register_single_dim_strategy(aten.embedding.default)
+def embedding_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+) -> list[list[Placement]]:
+    """Single-dim strategy for embedding: rowwise, colwise, and batch-dim sharding.
+
+    Placement order: [output, weight, indices]
     """
-    This strategy handles embedding op. We have two possible embedding shardings:
-    rowwise and colwise
+    weight_meta = args_schema[0]
+    indices_meta = args_schema[1]
+    if not isinstance(weight_meta, TensorMeta) or not isinstance(
+        indices_meta, TensorMeta
+    ):
+        raise AssertionError
+
+    # _MaskPartial hashes offset_shape, but torch.Size with SymInt (from
+    # dynamo tracing) is unhashable.  Concretize to int, which adds a
+    # standard dynamo guard (recompiles if the shape changes at runtime).
+    weight_shape = torch.Size(int(s) for s in weight_meta.shape)
+    indices_shape = indices_meta.shape
+    output_emb_dim = len(indices_shape)
+
+    strategies: list[list[Placement]] = []
+
+    # colwise: output shard on last dim, weight shard on dim 1, indices replicate
+    strategies.append([Shard(output_emb_dim), Shard(1), Replicate()])
+
+    # rowwise: output is MaskPartial, weight shard on dim 0, indices MaskPartial
+    # NOTE: same object for output & indices so the mask buffer is shared
+    embedding_partial = _MaskPartial(offset_shape=weight_shape, offset_dim=0)
+    strategies.append([embedding_partial, Shard(0), embedding_partial])
+
+    # batch dim sharding: weight replicated, indices shard on any dim, output follows
+    for i in range(len(indices_shape)):
+        strategies.append([Shard(i), Replicate(), Shard(i)])
+
+    return strategies
+
+
+@register_single_dim_strategy(
+    aten.embedding_dense_backward.default,
+    schema_info=RuntimeSchemaInfo(static_argnum=2),
+)
+def embedding_dense_backward_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+) -> list[list[Placement]]:
+    """Single-dim strategy for embedding backward.
+
+    Placement order: [output(weight_grad), grad_out, indices]
     """
-    weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
-    mesh = op_schema.get_mesh_from_args()
+    grad_out_meta = args_schema[0]
+    indices_meta = args_schema[1]
+    if not isinstance(grad_out_meta, TensorMeta) or not isinstance(
+        indices_meta, TensorMeta
+    ):
+        raise AssertionError
 
-    weight_shape = weight_strategy.shape
-    indices_shape = indices_strategy.shape
-    output_emd_dim = len(indices_shape)
+    grad_out_ndim = len(grad_out_meta.shape)
+    indices_shape = indices_meta.shape
 
-    single_mesh_dim_strategies = []
+    strategies: list[list[Placement]] = []
 
-    # placement list stores placements of [output, weight, input_indices]
-    # first we always have replicate all for inputs and output
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
+    # colwise backward: weight grad shard on dim 1, grad_out shard on last dim, indices replicate
+    strategies.append([Shard(1), Shard(grad_out_ndim - 1), Replicate()])
 
-    # colwise sharding, output shard on last dim, weight shard on dim 1, input replicate
-    colwise_sharding: PlacementList = [Shard(output_emd_dim), Shard(1), Replicate()]
-    single_mesh_dim_strategies.append(colwise_sharding)
+    # batch dim sharding: weight grad partial, grad_out/indices shard on same dim
+    for i in range(len(indices_shape)):
+        strategies.append([Partial(), Shard(i), Shard(i)])
 
-    # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
-    embedding_partial_placement = _MaskPartial(offset_shape=weight_shape, offset_dim=0)
+    # grad_out partial, indices replicate, weight grad partial
+    strategies.append([Partial(), Partial(), Replicate()])
 
-    # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
-    # from the input indices and use it for output reduction
-    rowwise_sharding: PlacementList = [
-        embedding_partial_placement,
-        Shard(0),
-        embedding_partial_placement,
-    ]
-    single_mesh_dim_strategies.append(rowwise_sharding)
-
-    # batch dim sharding, weight replicated, input can shard on any dim, output follows input
-    for input_dim in range(len(indices_shape)):
-        batch_sharding: PlacementList = [
-            Shard(input_dim),
-            Replicate(),
-            Shard(input_dim),
-        ]
-        single_mesh_dim_strategies.append(batch_sharding)
-
-    return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)
-
-
-@register_op_strategy(aten.embedding_dense_backward.default)
-def embedding_dense_backward_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    This strategy handles embedding op. We have two possible embedding shardings:
-    rowwise and colwise
-    """
-    grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
-    mesh = op_schema.get_mesh_from_args()
-
-    grad_out_shape = grad_out_strategy.shape
-    indices_shape = indices_strategy.shape
-    grad_out_ndim = len(grad_out_shape)
-
-    single_mesh_dim_strategies = []
-
-    # placement list stores placements of [output, weight, input_indices]
-    # first we always have replicate all for inputs and output
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
-
-    # colwise sharding backward, grad_out shard on last dim, input replicate,
-    # weight grad shard colwise
-    colwise_sharding: PlacementList = [Shard(1), Shard(grad_out_ndim - 1), Replicate()]
-    single_mesh_dim_strategies.append(colwise_sharding)
-
-    # batch dim sharding, weight replicated, grad_out/input have same sharding
-    # that can shard on any dim, weight grad partial
-    for input_dim in range(len(indices_shape)):
-        batch_sharding: PlacementList = [Partial(), Shard(input_dim), Shard(input_dim)]
-        single_mesh_dim_strategies.append(batch_sharding)
-
-    # grad_out partial, input replicate, weight grad keep partial
-    partial_sharding: PlacementList = [Partial(), Partial(), Replicate()]
-    single_mesh_dim_strategies.append(partial_sharding)
-
-    return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)
+    return strategies

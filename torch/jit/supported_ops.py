@@ -7,7 +7,7 @@ from torch.jit._builtins import _find_builtin
 
 
 # this file is for generating documentation using sphinx autodoc
-# > help(torch.jit.supported_ops) will also give a nice listed of the
+# > help(torch.jit.supported_ops) will also give a nice list of the
 # supported ops programmatically
 
 
@@ -104,7 +104,7 @@ def _get_nn_functional_ops():
             scripted = torch.jit.script(attr)
             scripted_schema = scripted.schema
             functions.append(_emit_schema(name, elem, scripted_schema))
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             # Skip interpolate / boolean dispatched things
             pass
 

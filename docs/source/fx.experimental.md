@@ -68,6 +68,10 @@ These APIs are experimental and subject to change without notice.
     StatelessSymbolicContext
     StatefulSymbolicContext
     SubclassSymbolicContext
+    SymIntEqByExpr
+    SymIntSymbolicContext
+    TrackedFake
+    ValueRangesSLoc
     DimConstraints
     ShapeEnvSettings
     ConvertIntKey
@@ -77,8 +81,6 @@ These APIs are experimental and subject to change without notice.
     InnerTensorKey
     Specialization
 
-    hint_int
-    size_hint
     is_concrete_int
     is_concrete_bool
     is_concrete_float
@@ -116,11 +118,13 @@ These APIs are experimental and subject to change without notice.
     guard_float
     guard_int
     guard_scalar
-    has_hint
+    guarding_hint_or_throw
+    has_guarding_hint
     has_symbolic_sizes_strides
     is_nested_int
     is_symbol_binding_fx_node
     is_symbolic
+    optimization_hint
     expect_true
     log_lru_cache_stats
 ```
@@ -142,15 +146,18 @@ These APIs are experimental and subject to change without notice.
 
     make_fx
     handle_sym_dispatch
+    get_innermost_proxy_mode
     get_proxy_mode
     maybe_enable_thunkify
     maybe_disable_thunkify
+    selective_decompose
     thunkify
     track_tensor
     track_tensor_tree
     decompose
     disable_autocast_cache
     disable_proxy_modes_tracing
+    dispatch_trace
     extract_val
     fake_signature
     fetch_object_proxy
@@ -181,6 +188,8 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     extract_subgraph
+    gen_mkl_autotuner
+    matches_module_pattern
     modules_to_mkldnn
     optimize_for_inference
     remove_dropout
@@ -227,6 +236,28 @@ These APIs are experimental and subject to change without notice.
     reify
 ```
 
+## torch.fx.experimental.unification.multipledispatch.utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    typename
+    expand_tuples
+    groupby
+    raises
+    reverse_dict
+```
+
 ## torch.fx.experimental.unification.unification_tools
 
 ```{eval-rst}
@@ -246,6 +277,8 @@ These APIs are experimental and subject to change without notice.
     assoc_in
     dissoc
     first
+    get_in
+    groupby
     keyfilter
     keymap
     merge
@@ -279,6 +312,7 @@ These APIs are experimental and subject to change without notice.
     transform_to_z3
     transform_var
     evaluate_conditional_with_constraints
+    iterate_till_fixed_point
 ```
 
 ## torch.fx.experimental.migrate_gradual_types.constraint
@@ -317,26 +351,52 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     adaptive_inference_rule
+    add_layer_norm_constraints
+    add_linear_constraints
+    arange_inference_rule
     assert_inference_rule
     batchnorm_inference_rule
     bmm_inference_rule
+    broadcasting_inference_rule
+    conv2d_inference_rule
+    cumsum_inference_rule
     embedding_inference_rule
     embedding_inference_rule_functional
     eq_inference_rule
     equality_inference_rule
     expand_inference_rule
+    flatten_inference_rule
     full_inference_rule
+    gen_broadcasting_constraints
+    gen_embedding_rules
+    gen_layer_norm_constraints
+    generate_flatten_constraints
+    get_attr_inference_rule
+    getitem_inference_rule
     gt_inference_rule
+    index_select_inference_rule
+    layer_norm_functional
+    layer_norm_inference_rule
+    linear_constraints
+    linear_inference_rule
     lt_inference_rule
     masked_fill_inference_rule
+    maxpool_inference_rule
     neq_inference_rule
+    range_check
+    register_inference_rule
+    relu_inference_rule
+    reshape_inference_rule
+    size_inference_rule
     tensor_inference_rule
     torch_dim_inference_rule
     torch_linear_inference_rule
+    transpose_inference_rule
     type_inference_rule
     view_inference_rule
     register_inference_rule
     transpose_inference_rule
+    range_check
 ```
 
 ## torch.fx.experimental.migrate_gradual_types.constraint_transformation
@@ -355,8 +415,27 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     apply_padding
+    broadcast_dim
     calc_last_two_dims
     create_equality_constraints_for_broadcasting
+    gen_all_reshape_possibilities
+    gen_broadcasting_constraints
+    gen_consistency_constraints
+    gen_greatest_upper_bound
+    gen_lists_of_dims
+    generate_all_broadcasting_possibilities_no_padding
+    generate_all_int_dyn_dim_possibilities
+    generate_binconstraint_d
+    generate_binconstraint_t
+    generate_broadcasting
+    generate_calc_conv
+    generate_calc_maxpool
+    generate_calc_product
+    generate_conj
+    generate_d_gub
+    generate_disj
+    generate_gub
+    generate_reshape
     is_target_div_by_dim
     no_broadcast_dim_with_index
     register_transformation_rule
@@ -387,17 +466,34 @@ These APIs are experimental and subject to change without notice.
 
     adaptiveavgpool2d_check
     adaptiveavgpool2d_inference_rule
+    add_inference_rule
     all_eq
     bn2d_inference_rule
+    broadcast_types
     calculate_out_dimension
+    conv2d_inference_rule
     conv_refinement_rule
     conv_rule
     element_wise_eq
     expand_to_tensor_dim
     first_two_eq
+    flatten_check
+    flatten_inference_rule
+    flatten_refinement_rule
+    get_attr_inference_rule
+    get_greatest_upper_bound
+    get_parameter
+    GraphTypeChecker
+    linear_check
+    linear_inference_rule
+    linear_refinement_rule
+    maxpool2d_check
+    maxpool2d_inference_rule
     register_algebraic_expressions_inference_rule
     register_inference_rule
     register_refinement_rule
+    relu_inference_rule
+    reshape_inference_rule
     transpose_inference_rule
 ```
 
@@ -418,6 +514,7 @@ These APIs are experimental and subject to change without notice.
 
     embedding_override
     functional_relu_override
+    gen_constructor_wrapper
     nn_layernorm_override
     proxys_to_metas
     symbolic_trace
@@ -425,4 +522,281 @@ These APIs are experimental and subject to change without notice.
     torch_nn_relu_override
     torch_relu_override
     torch_where_override
+```
+
+## torch.fx.experimental.accelerator_partitioner
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.accelerator_partitioner
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.accelerator_partitioner
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_dependency
+    combine_two_partitions
+    reorganize_partitions
+    reset_partition_device
+    set_parents_and_children
+```
+
+## torch.fx.experimental.debug
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.debug
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.debug
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_trace
+```
+
+## torch.fx.experimental.merge_matmul
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.merge_matmul
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.merge_matmul
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    are_nodes_independent
+    may_depend_on
+    merge_matmul
+```
+
+## torch.fx.experimental.unification.match
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.match
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.match
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    edge
+    match
+    ordering
+    supercedes
+```
+
+## torch.fx.experimental.unification.more
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.more
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.more
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    reify_object
+    unifiable
+    unify_object
+```
+
+## torch.fx.experimental.unification.multipledispatch.conflict
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.conflict
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.conflict
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    ambiguities
+    ambiguous
+    consistent
+    edge
+    ordering
+    super_signature
+    supercedes
+```
+
+## torch.fx.experimental.unification.multipledispatch.core
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.core
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.core
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    dispatch
+    ismethod
+```
+
+## torch.fx.experimental.unification.multipledispatch.dispatcher
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.dispatcher
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.dispatcher
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    ambiguity_warn
+    halt_ordering
+    restart_ordering
+    source
+    str_signature
+    variadic_signature_matches
+    variadic_signature_matches_iter
+    warning_text
+```
+
+## torch.fx.experimental.unification.multipledispatch.variadic
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.variadic
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.variadic
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    isvariadic
+```
+
+## torch.fx.experimental.unification.utils
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    freeze
+    hashable
+    raises
+    reverse_dict
+    transitive_get
+    xfail
+```
+
+## torch.fx.experimental.unification.variable
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.variable
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.variable
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    var
+    variables
+    vars
+```
+
+## torch.fx.experimental.unify_refinements
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unify_refinements
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unify_refinements
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_for_type_equality
+    convert_eq
+    infer_symbolic_types
+    infer_symbolic_types_single_pass
+    substitute_all_types
+    substitute_solution_one_type
+    unify_eq
+```
+
+## torch.fx.experimental.validator
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.validator
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.validator
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    bisect
+    TranslationValidator
+    translation_validation_enabled
+    translation_validation_timeout
+    z3op
+    z3str
 ```

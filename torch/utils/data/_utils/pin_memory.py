@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter to put fetched tensors into pinned memory.
 
-These **needs** to be in global scope since Py2 doesn't support serializing
+These **need** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
@@ -54,7 +54,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None
 
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
-        return data.pin_memory(device)
+        return data.pin_memory()
 
     if hasattr(data, "pin_memory"):
         return data.pin_memory()

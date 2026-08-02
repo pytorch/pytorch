@@ -202,7 +202,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 
@@ -270,7 +269,7 @@ vgg16,eager_two_runs_differ,0
 
 
 
-vision_maskrcnn,fail_to_run,17
+vision_maskrcnn,fail_to_run,18
 
 
 

@@ -1,13 +1,16 @@
 # Owner(s): ["module: inductor"]
+import functools
 import math
 import unittest
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def dummy_fn(x):
@@ -244,6 +247,111 @@ class TestInductorConfig(TestCase):
             code = torch._inductor.config.codegen_config()
             self.assertNotIn("post_grad_custom", code)
 
+    def test_codegen_serializes_inductor_choices_partial(self):
+        partial_choices = functools.partial(InductorChoices, lb=10, ub=100)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("inductor_choices_class", code)
+            self.assertIn("functools.partial", code)
+            self.assertNotIn("<class ", code)
+            compile(code, "<codegen_config>", "exec")
+            namespace = {"torch": torch}
+            exec(code, namespace)
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIsInstance(reconstructed, functools.partial)
+            self.assertIs(reconstructed.func, InductorChoices)
+            self.assertEqual(reconstructed.args, ())
+            self.assertEqual(reconstructed.keywords, {"lb": 10, "ub": 100})
+
+    def test_codegen_serializes_builtin_partial_with_container_arg(self):
+        partial_choices = functools.partial(max, [1, (2, {"limit": 3})])
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+            compile(code, "<codegen_config>", "exec")
+            exec(code, {"torch": torch})
+
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIs(reconstructed.func, max)
+            self.assertEqual(reconstructed.args, ([1, (2, {"limit": 3})],))
+
+    def test_codegen_partial_over_non_importable_emits_comment(self):
+        non_importable = functools.partial(lambda lb=0: None, lb=5)
+
+        with torch._inductor.config.patch(inductor_choices_class=non_importable):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("omitted", code)
+            self.assertIn("inductor_choices_class", code)
+            self.assertNotIn("config.inductor_choices_class = functools.partial", code)
+            compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unsupported_arg_emits_comment(self):
+        for arg in ({1, 2}, math.inf, math.nan):
+            with self.subTest(arg=arg):
+                partial_choices = functools.partial(InductorChoices, arg)
+                with torch._inductor.config.patch(
+                    inductor_choices_class=partial_choices
+                ):
+                    code = torch._inductor.config.codegen_config()
+
+                self.assertIn("omitted", code)
+                self.assertNotIn("config.inductor_choices_class =", code)
+                compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unresolvable_identity_emits_comment(self):
+        def impostor():
+            pass
+
+        impostor.__module__ = InductorChoices.__module__
+        impostor.__qualname__ = InductorChoices.__qualname__
+        partial_choices = functools.partial(impostor)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_raising_metadata_emits_comment(self):
+        class CallableWithRaisingMetadata:
+            @property
+            def __module__(self):
+                raise RuntimeError("module metadata unavailable")
+
+            def __call__(self):
+                pass
+
+        partial_choices = functools.partial(CallableWithRaisingMetadata())
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_invalid_qualname_emits_comment(self):
+        class CallableWithInvalidQualname:
+            __module__ = __name__
+            __qualname__ = "invalid name"
+
+            def __call__(self):
+                pass
+
+        callable_with_invalid_qualname = CallableWithInvalidQualname()
+        globals()["invalid name"] = callable_with_invalid_qualname
+        try:
+            partial_choices = functools.partial(callable_with_invalid_qualname)
+            with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+                code = torch._inductor.config.codegen_config()
+        finally:
+            del globals()["invalid name"]
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
     def test_select_decomp_table_fallback_embedding_bag_byte_unpack(self):
         """Test that select_decomp_table removes embedding_bag_byte_unpack when fallback is enabled"""
         from torch._inductor.decomposition import select_decomp_table
@@ -326,6 +434,68 @@ class TestInductorConfig(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+    @requires_gpu
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_config_read_in_backwards(self):
+        @torch.compile
+        def f(x, y):
+            z = x @ y
+            return z.sin().sum()
+
+        called = False
+
+        def my_pass(graph):
+            nonlocal called
+            called = True
+
+        x, y = (
+            torch.randn(3, 3, device=GPU_TYPE, requires_grad=True),
+            torch.randn(3, 3, device=GPU_TYPE),
+        )
+        z = f(x, y)
+        z.backward()
+        self.assertFalse(called)
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            z.backward()
+
+        self.assertTrue(called)
+
+        called = False
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            torch.autograd.grad(z, x)
+        self.assertTrue(called)
+
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_config_read_in_grad_fn(self):
+        @torch.compile
+        def f(x, y):
+            z = x @ y
+            return z.sin().sum()
+
+        called = False
+
+        def my_pass(graph):
+            nonlocal called
+            called = True
+
+        x, y = (
+            torch.randn(3, 3, requires_grad=True),
+            torch.randn(3, 3),
+        )
+
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            z = f(x, y)
+        self.assertTrue(called)
+
+        # Make sure the context gets cleared after forward pass
+        called = False
+        z.grad_fn.apply(torch.tensor(0))
+        self.assertFalse(called)
 
 
 if __name__ == "__main__":

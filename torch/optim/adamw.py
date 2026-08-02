@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 from torch import Tensor
 
 from .adam import Adam, adam
@@ -11,6 +9,7 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     ParamsT,
+    StateDict,
 )
 
 
@@ -51,7 +50,7 @@ class AdamW(Adam):
     # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
     # guarantees that decoupled_weight_decay will always be True for loading any state into
     # AdamW
-    def __setstate__(self, state):
+    def __setstate__(self, state: StateDict) -> None:
         super().__setstate__(state)
         for group in self.param_groups:
             group["decoupled_weight_decay"] = True
@@ -101,7 +100,7 @@ AdamW.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+        betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
             its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve

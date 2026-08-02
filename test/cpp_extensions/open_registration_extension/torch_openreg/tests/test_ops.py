@@ -22,10 +22,6 @@ class TestFactory(TestCase):
         self.assertEqual(x.device.type, "openreg")
         self.assertEqual(x.shape, torch.Size([3]))
 
-        x = torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
-        self.assertEqual(x.device.type, "openreg")
-        self.assertEqual(x.shape, torch.Size([2, 3, 4, 5]))
-
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.empty(3, 3, device="openreg")
             y = torch.empty(3, 3, device="openreg:0")
@@ -227,10 +223,13 @@ class TestSDPA(NNTestCase):
         q_privateuse1 = q_cpu.to("openreg")
         k_privateuse1 = k_cpu.to("openreg")
         v_privateuse1 = v_cpu.to("openreg")
-        assert (
+        if (
             torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1)
-            == SDPBackend.OVERRIDEABLE.value
-        )
+            != SDPBackend.OVERRIDEABLE.value
+        ):
+            raise AssertionError(
+                "Expected _fused_sdp_choice to return SDPBackend.OVERRIDEABLE.value"
+            )
 
     def test_scaled_dot_product_fused_attention_overrideable(self):
         """Test scaled dot product fused attention overrideable forward"""

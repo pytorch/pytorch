@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -28,7 +28,7 @@ set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/
   # Note: if you want to add ANY dependency to the c10 library, make sure you
   # check with the core PyTorch developers as the dependency will be
   # transitively passed on to all libraries dependent on PyTorch.
-  file(GLOB C10_SRCS
+  file(GLOB C10_SRCS CONFIGURE_DEPENDS
           *.cpp
           core/*.cpp
           core/impl/*.cpp
@@ -36,7 +36,7 @@ set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/
           macros/*.cpp
           util/*.cpp
         )
-  file(GLOB C10_HEADERS
+  file(GLOB C10_HEADERS CONFIGURE_DEPENDS
           *.h
           core/*.h
           core/impl/*.h
@@ -102,12 +102,25 @@ if(NOT BUILD_LIBTORCHLESS)
     message(STATUS ${Numa_LIBRARIES})
     target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
     target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+    # libnuma is a PRIVATE impl detail of c10, but libc10.so's DT_NEEDED
+    # libnuma.so.1 still has to resolve at link time when in-tree targets
+    # (test executables, extensions) link c10. The conda compat linker has a
+    # narrow sysroot view, so propagate libnuma's directory as an INTERFACE
+    # rpath-link entry. Wrapped in BUILD_INTERFACE so this build-machine path
+    # is not baked into the installed Caffe2Targets.cmake export (it is
+    # meaningless to downstream find_package(Torch) consumers). ELF/GNU-ld only.
+    if(NOT WIN32 AND NOT APPLE)
+      get_filename_component(_numa_dir "${Numa_LIBRARIES}" DIRECTORY)
+      target_link_options(
+        c10 INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,${_numa_dir}>")
+    endif()
   else()
     message(STATUS "don't use NUMA")
   endif()
 
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-    target_link_libraries(c10 PRIVATE cpuinfo)
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+    target_link_libraries(c10 INTERFACE "$<BUILD_INTERFACE:cpuinfo>")
+    target_link_libraries(c10 PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,cpuinfo>")
   endif()
 
   find_package(Backtrace)

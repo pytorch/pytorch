@@ -111,7 +111,7 @@ class TORCH_API LoopNest {
   // Sanitize variables and buffer names.
   // The pass assigns predefined names for loop index variables
   // (i,j,k,l,m,n,o,p,i1,j1,k1,...) and ensures these names are not conflicting
-  // anywhere. It also removes duplicates from other Buf nad Var names as well
+  // anywhere. It also removes duplicates from other Buf and Var names as well
   // as replaces illegal characters in them with underscores.
   //
   // Note: since it's currently technically possible to use the same variable

@@ -17,7 +17,30 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
+    # Old TorchBench SAM is flaky even with mask IoU checking.
+    # Borderline mask thresholding can flip a single pixel and give IoU=0
+    # when both masks are nearly empty.
+    # https://github.com/pytorch/pytorch/issues/176776
+    "sam",
 }
+
+
+def get_eager_nondeterministic_models(expected_filename: str) -> set[str]:
+    expected_filename = expected_filename.replace(os.sep, "/")
+    if expected_filename.endswith("ci_expected_accuracy/inductor_timm_training.csv"):
+        return {
+            "mobilenetv2_100",
+            "tf_efficientnet_b0",
+        }
+    if expected_filename.endswith(
+        "ci_expected_accuracy/inductor_torchbench_training.csv"
+    ):
+        return {
+            "mnasnet1_0",
+            "mobilenet_v2",
+            "shufflenet_v2_x1_0",
+        }
+    return set()
 
 
 def get_field(csv, model_name: str, field: str):
@@ -30,6 +53,7 @@ def get_field(csv, model_name: str, field: str):
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
+    eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
 
     if "rocm" in expected_filename:
         flaky_models.update(
@@ -49,6 +73,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # LLM
                 "google/gemma-2-2b",
                 "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
+                # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
+                "alexnet",
+                "demucs",
             }
         )
 
@@ -66,6 +93,12 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
+        elif (
+            expected_accuracy == "pass"
+            and accuracy == "eager_two_runs_differ"
+            and model in eager_nondeterministic_models
+        ):
+            status = "EAGER_NONDETERMINISTIC:"
         elif model in flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed

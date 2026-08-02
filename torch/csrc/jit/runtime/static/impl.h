@@ -14,8 +14,10 @@
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/custom_class.h>
 #include <limits>
+#include <vector>
 
 #ifdef FBCODE_CAFFE2
+#include <c10/util/Registry.h>
 #include <folly/container/F14Map.h>
 #include <folly/container/F14Set.h>
 #endif
@@ -196,7 +198,7 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
   StaticModuleOptions opts_;
 };
 
-/// The static runime supports two execution modes.
+/// The static runtime supports two execution modes.
 ///
 /// Mode 1: single-threaded with no parallelism except for intra-op parallelism
 /// For this mode, you can do either:
@@ -241,13 +243,25 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
 /// @endcode
 ///
 class MemoryPlanner;
-class StaticNodeInfo;
 class ProcessedNode;
 class StaticRuntime;
 
 using SROperator = std::function<void(ProcessedNode*)>;
 
 #ifdef FBCODE_CAFFE2
+
+class BlockRunner;
+
+// Node execution function pointer type. Called once per inference in place of
+// the sequential node loop. `block_runner` owns the nodes and exposes per-run
+// state such as the live MemoryPlanner. The context pointer holds
+// executor-specific state created at model load time.
+using NodeExecutorFn = void (*)(
+    BlockRunner& block_runner,
+    ProcessedNode* nodes,
+    size_t num_nodes,
+    void* context);
+
 struct TORCH_API SROperatorObserver {
   using OperatorCallback = void (*)(const Node*);
   OperatorCallback startCb = nullptr;
@@ -294,6 +308,36 @@ class TORCH_API ProcessedFunction {
   Kind kind_{ProcessedFunction::Kind::kOutVariant};
   bool check_memory_overlap_{false};
   size_t num_outputs_{0};
+};
+
+class TORCH_API StaticNodeInfo {
+ public:
+  StaticNodeInfo(
+      Node* n,
+      ProcessedFunction* fn,
+      ProcessedNodeInputs inputs,
+      uint16_t outputs_offset);
+
+  Node* node() const {
+    return node_;
+  }
+
+  size_t num_outputs() const {
+    DCHECK(fn_ != nullptr);
+    return fn_->num_outputs();
+  }
+
+  bool has_out_variant() const {
+    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
+  }
+
+ private:
+  friend class ProcessedNode;
+
+  Node* node_;
+  const ProcessedFunction* fn_;
+  ProcessedNodeInputs inputs_;
+  uint16_t outputs_offset_;
 };
 
 // A `BlockInfo` instance stores all of the shared state that each
@@ -403,6 +447,22 @@ class BlockInfo {
   std::vector<uint16_t> output_indices_;
   Block& block_;
 };
+
+#ifdef FBCODE_CAFFE2
+// Factory base class for pluggable node execution strategies.
+// Used only at model load time (not on the hot path).
+struct TORCH_API NodeExecutorFunctor {
+  // Called once at model load. Returns a function pointer for inference.
+  // The context is owned by the functor and must outlive the BlockRunner.
+  virtual NodeExecutorFn Create(
+      const BlockInfo& block_info,
+      const StaticModuleOptions& opts,
+      void** context) = 0;
+  virtual ~NodeExecutorFunctor() = default;
+};
+
+TORCH_DECLARE_REGISTRY(SRNodeExecutorRegistry, NodeExecutorFunctor);
+#endif // FBCODE_CAFFE2
 
 class TORCH_API StaticModule {
  public:
@@ -675,6 +735,10 @@ class TORCH_API BlockRunner {
     return planner_.get();
   }
 
+  // Detect and correct incorrect schema alias info for a node's outputs at
+  // runtime. Public so pluggable node executors can invoke it.
+  void verify_and_correct_memory_overlap(ProcessedNode& n);
+
   bool check_for_memory_leak(
       bool output_returned = true,
       bool recurse_on_sub_blocks = false);
@@ -761,7 +825,6 @@ class TORCH_API BlockRunner {
   bool fast_check_and_correct_overlap_with(
       ProcessedNode& n,
       c10::IValue& tensor_ival);
-  void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() noexcept {
@@ -813,36 +876,14 @@ class TORCH_API BlockRunner {
 
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
-};
 
-class TORCH_API StaticNodeInfo {
- public:
-  StaticNodeInfo(
-      Node* n,
-      ProcessedFunction* fn,
-      ProcessedNodeInputs inputs,
-      uint16_t outputs_offset);
-
-  Node* node() const {
-    return node_;
-  }
-
-  size_t num_outputs() const {
-    DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
-  }
-
-  bool has_out_variant() const {
-    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
-  }
-
- private:
-  friend class ProcessedNode;
-
-  Node* node_;
-  const ProcessedFunction* fn_;
-  ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
+#ifdef FBCODE_CAFFE2
+  // Pluggable node execution strategy. Initialized from
+  // SRNodeExecutorRegistry at model load time.
+  NodeExecutorFn node_executor_fn_ = nullptr;
+  void* node_executor_ctx_ = nullptr;
+  std::unique_ptr<NodeExecutorFunctor> node_executor_owner_;
+#endif
 };
 
 inline size_t BlockInfo::num_nodes() const {
@@ -1112,30 +1153,28 @@ class TORCH_API StaticRuntime {
   class IValueArray {
    public:
     IValueArray() = default;
-    explicit IValueArray(size_t size) : array_(allocate(size)), size_(size) {}
+    IValueArray(const IValueArray&) = delete;
+    IValueArray& operator=(const IValueArray&) = delete;
 
-    IValue* data() const {
-      return array_.get();
+    IValueArray(IValueArray&&) noexcept = default;
+    IValueArray& operator=(IValueArray&&) noexcept = default;
+
+    explicit IValueArray(size_t size) : array_(size) {}
+
+    IValue* data() {
+      return array_.empty() ? nullptr : array_.data();
+    }
+
+    const IValue* data() const {
+      return array_.empty() ? nullptr : array_.data();
     }
 
     size_t size() const {
-      return size_;
+      return array_.size();
     }
 
    private:
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-    static std::unique_ptr<IValue[]> allocate(size_t size) {
-      if (size) {
-        return std::make_unique<IValue[]>(size);
-      }
-      return nullptr;
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-    std::unique_ptr<IValue[]> array_ = nullptr;
-    size_t size_ = 0;
+    std::vector<IValue> array_;
   };
 
   std::unique_ptr<BlockRunner> block_;

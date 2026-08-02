@@ -53,6 +53,9 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
+  void* getStreamNativeHandle(const Stream s) const override {
+    return impl_->getStreamNativeHandle(s);
+  }
   DeviceIndex deviceCount() const noexcept override {
     return impl_->deviceCount();
   }
@@ -85,6 +88,9 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   }
   void synchronizeStream(const Stream& stream) const override {
     impl_->synchronizeStream(stream);
+  }
+  bool isStreamCapturing(const Stream& stream) const override {
+    return impl_->isStreamCapturing(stream);
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)

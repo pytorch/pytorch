@@ -25,7 +25,7 @@ from .optimizer import (
 __all__ = ["SGD", "sgd"]
 
 
-class SGD(Optimizer):  # noqa: D101
+class SGD(Optimizer):
     def __init__(
         self,
         params: ParamsT,
@@ -39,7 +39,7 @@ class SGD(Optimizer):  # noqa: D101
         foreach: bool | None = None,
         differentiable: bool = False,
         fused: bool | None = None,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
@@ -72,7 +72,7 @@ class SGD(Optimizer):  # noqa: D101
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("nesterov", False)
@@ -263,7 +263,7 @@ def sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -328,7 +328,7 @@ def _single_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -350,7 +350,6 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
-                    # pyrefly: ignore [bad-argument-type]
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -389,7 +388,7 @@ def _multi_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -470,11 +469,11 @@ def _multi_tensor_sgd(
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:
-                torch._foreach_add_(device_params, device_grads, alpha=-lr)
+                torch._foreach_add_(device_params, device_grads, alpha=-lr)  # type: ignore[arg-type]
         else:
             # foreach APIs don't support sparse
             for i in range(len(device_params)):
-                device_params[i].add_(device_grads[i], alpha=-lr)
+                device_params[i].add_(device_grads[i], alpha=-lr)  # type: ignore[arg-type]
 
 
 def _fused_sgd(
@@ -486,7 +485,7 @@ def _fused_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,

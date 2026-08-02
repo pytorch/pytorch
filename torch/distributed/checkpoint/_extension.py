@@ -94,7 +94,6 @@ class ZStandard(StreamTransformExtension):
         return zstandard is not None or pyzstd is not None
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def from_descriptor(version: str) -> "ZStandard":
         if version.partition(".")[0] != "1":
             raise ValueError(f"Unknown extension {version=}")
@@ -199,7 +198,7 @@ class ExtensionRegistry:
 
     def from_descriptor_list(self, descriptors: Sequence[str]) -> Sequence[Extension]:
         """
-        Given a seuquence of descriptor strings as returned by
+        Given a sequence of descriptor strings as returned by
         Extension.get_descriptor at save time, creates a sequence of
         Extension instances.  The name[@local-domain] preceding the
         version number is used to look up an implementation class in

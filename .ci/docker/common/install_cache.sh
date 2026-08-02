@@ -3,22 +3,21 @@
 set -ex
 
 install_ubuntu() {
-  echo "Preparing to build sccache from source"
-  apt-get update
-  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
-  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
-  apt-get install -y cargo
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.10.0
-  cd sccache
-  echo "Building sccache"
-  cargo build --release
-  cp target/release/sccache /opt/cache/bin
-  echo "Cleaning up"
-  cd ..
-  rm -rf sccache
-  apt-get remove -y cargo rustc
-  apt-get autoclean && apt-get clean
+  ARCH=$(uname -m)
+  VERSION=0.16.0
+  FEATURES="sccache sccache-dist"
+  if [[ "${ARCH}" == "riscv64" ]]; then
+    # Rust's riscv64 arch is riscv64gc
+    ARCH=riscv64gc
+    # sccache-dist is not available on riscv64, so we only install sccache
+    FEATURES="sccache"
+  fi
+  echo "Downloading sccache binaries from GitHub mozilla/sccache release"
+  for feature in $FEATURES; do
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 ${feature}-v${VERSION}-${ARCH}-unknown-linux-musl/${feature}
+    chmod a+x /opt/cache/bin/${feature}
+  done
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -37,7 +36,6 @@ export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
 install_ubuntu
-chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
@@ -75,10 +73,15 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-write_sccache_stub cc
-write_sccache_stub c++
-write_sccache_stub gcc
-write_sccache_stub g++
+# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
+# intercept assembly (.s) compilation and fail because the assembler does not
+# produce the .d dependency file that sccache expects.
+if [ "$ROCM_VERSION" != "nightly" ]; then
+  write_sccache_stub cc
+  write_sccache_stub c++
+  write_sccache_stub gcc
+  write_sccache_stub g++
+fi
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then

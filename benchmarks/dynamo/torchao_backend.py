@@ -14,7 +14,6 @@ def setup_baseline():
 
 def torchao_optimize_ctx(quantization: str):
     from torchao.quantization.quant_api import (
-        autoquant,
         int4_weight_only,
         int8_dynamic_activation_int8_weight,
         int8_weight_only,
@@ -35,21 +34,7 @@ def torchao_optimize_ctx(quantization: str):
                     quantize_(module, int8_weight_only(), set_inductor_config=False)
                 elif quantization == "int4weightonly":
                     quantize_(module, int4_weight_only(), set_inductor_config=False)
-                if quantization == "autoquant":
-                    autoquant(module, error_on_unseen=False, set_inductor_config=False)
-                    if isinstance(example_inputs, dict):
-                        module(**example_inputs)
-                    else:
-                        module(*example_inputs)
-                    from torchao.quantization.autoquant import AUTOQUANT_CACHE
-
-                    if len(AUTOQUANT_CACHE) == 0:
-                        raise Exception(  # noqa: TRY002
-                            "NotAutoquantizable"
-                            f"Found no autoquantizable layers in model {type(module)}, stopping autoquantized run"
-                        )
-                else:
-                    unwrap_tensor_subclass(module)
+                unwrap_tensor_subclass(module)
                 setattr(module, "_quantized", True)  # noqa: B010
             model_iter_fn(module, example_inputs)
 

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import errno
 import functools
 import hashlib
 import importlib.util
@@ -18,7 +19,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, Optional, Union
+from typing import Any, Generic, Optional
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -56,6 +57,8 @@ DTRACE_ENV_VAR = "TORCH_DTRACE"
 LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
+
+LOG_PREFIX = "dedicated_log_torch_trace_"
 
 
 @dataclass
@@ -103,7 +106,7 @@ class LogRegistry:
         return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qnames: Union[str, list[str]]) -> None:
+    def register_log(self, alias, log_qnames: str | list[str]) -> None:
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         self.log_alias_to_log_qnames[alias] = log_qnames
@@ -207,18 +210,18 @@ DEFAULT_LOGGING = {
 
 def set_logs(
     *,
-    all: Optional[int] = None,
-    dynamo: Optional[int] = None,
-    aot: Optional[int] = None,
-    autograd: Optional[int] = None,
-    dynamic: Optional[int] = None,
-    inductor: Optional[int] = None,
-    distributed: Optional[int] = None,
-    c10d: Optional[int] = None,
-    ddp: Optional[int] = None,
-    fsdp: Optional[int] = None,
-    dtensor: Optional[int] = None,
-    onnx: Optional[int] = None,
+    all: int | None = None,
+    dynamo: int | None = None,
+    aot: int | None = None,
+    autograd: int | None = None,
+    dynamic: int | None = None,
+    inductor: int | None = None,
+    distributed: int | None = None,
+    c10d: int | None = None,
+    ddp: int | None = None,
+    fsdp: int | None = None,
+    dtensor: int | None = None,
+    onnx: int | None = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
     aot_joint_graph: bool = False,
@@ -246,8 +249,8 @@ def set_logs(
     onnx_diagnostics: bool = False,
     fusion: bool = False,
     overlap: bool = False,
-    export: Optional[int] = None,
-    modules: Optional[dict[str, Union[int, bool]]] = None,
+    export: int | None = None,
+    modules: dict[str, int | bool] | None = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd: bool = False,
@@ -255,6 +258,8 @@ def set_logs(
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
     autotuning: bool = False,
+    autotuning_inputs: bool = False,
+    incremental: bool = False,
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
@@ -401,7 +406,7 @@ def set_logs(
             Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
 
         kernel_code (:class:`bool`):
-            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-kernel basis. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -431,7 +436,7 @@ def set_logs(
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
         sym_node (:class:`bool`):
-            Whether to emit debug info for various SymNode opterations. Default: ``False``
+            Whether to emit debug info for various SymNode operations. Default: ``False``
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
@@ -454,6 +459,12 @@ def set_logs(
 
         autotuning (:class:`bool`):
             Autotuning choice logs, such as kernel source, perf, and tuning parameters. Default: ``False``
+
+        autotuning_inputs (:class:`bool`):
+            Per-kernel input tensor shapes/dtypes/strides logged during autotuning. Default: ``False``
+
+        incremental (:class:`bool`):
+            Incremental autotuning logs. Default: ``False``
 
         graph_region_expansion (:class:`bool`):
             Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
@@ -583,6 +594,8 @@ def set_logs(
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
         autotuning=autotuning,
+        autotuning_inputs=autotuning_inputs,
+        incremental=incremental,
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
@@ -942,7 +955,7 @@ def make_module_path_relative(abs_path: str) -> str:
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
     def __init__(
-        self, *, trace: bool = False, trace_id_filter: Optional[set[str]] = None
+        self, *, trace: bool = False, trace_id_filter: set[str] | None = None
     ) -> None:
         super().__init__()
         self._is_trace = trace
@@ -1022,11 +1035,7 @@ class TorchLogsFormatter(logging.Formatter):
         if self._is_trace:
             if s != "":
                 raise AssertionError(f"expected empty string for trace, got {s!r}")
-            try:
-                r = f"{prefix} {json.dumps(record.metadata)}"
-            except TypeError:
-                log.warning("failing metadata: %r", record.metadata)
-                raise
+            r = f"{prefix} {json.dumps(record.metadata, default=repr)}"
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -1053,6 +1062,42 @@ def _default_formatter():
 DEFAULT_FORMATTER = _default_formatter()
 
 
+class _StderrHandler(logging.Handler):
+    """
+    A logging handler that follows the current sys.stderr.
+
+    Test capture tools can replace and later close sys.stderr before Python
+    atexit handlers run.  Some PT2 logs intentionally emit from atexit, so the
+    console handler must not retain a stale captured stream.
+    """
+
+    terminator = "\n"
+
+    @property
+    def stream(self) -> Any:
+        return sys.stderr
+
+    def flush(self) -> None:
+        self.acquire()
+        try:
+            stream = self.stream
+            if stream and hasattr(stream, "flush"):
+                stream.flush()
+        finally:
+            self.release()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            stream.write(msg + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 def _setup_handlers(create_handler_fn, log) -> None:
     debug_handler = _track_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
@@ -1061,24 +1106,28 @@ def _setup_handlers(create_handler_fn, log) -> None:
 
 
 handlers = WeakSet()  # type: ignore[var-annotated]
+_TORCH_HANDLER_MARKER = "_torch_logging_internal_handler"
 
 
 # mark handlers that we've created
 # so we don't modify user handlers
 def _track_handler(handler):
+    setattr(handler, _TORCH_HANDLER_MARKER, True)
     handlers.add(handler)
     return handler
 
 
 def _is_torch_handler(handler):
-    return handler in handlers
+    return handler in handlers or getattr(handler, _TORCH_HANDLER_MARKER, False)
 
 
 # clears all torch handlers on specified loggers
-def _clear_handlers(log) -> None:
+def _clear_handlers(log, *, close: bool = True) -> None:
     to_remove = [handler for handler in log.handlers if _is_torch_handler(handler)]
     for handler in to_remove:
         log.removeHandler(handler)
+        if close:
+            handler.close()
 
 
 def _reset_logs() -> None:
@@ -1098,7 +1147,9 @@ def _reset_logs() -> None:
         log.propagate = True
 
     trace_log.propagate = False
-    _clear_handlers(trace_log)
+    # LOG_TRACE_HANDLER is a reusable singleton.  Keep its stream lifecycle
+    # unchanged when _init_logs temporarily removes it from trace_log.
+    _clear_handlers(trace_log, close=False)
 
 
 def _get_log_state():
@@ -1140,7 +1191,7 @@ def _init_logs(log_file_name=None) -> None:
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
         _setup_handlers(
-            logging.StreamHandler,
+            _StderrHandler,
             log,
         )
 
@@ -1160,6 +1211,13 @@ def _init_logs(log_file_name=None) -> None:
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
+    # If TORCH_COMPILE_DEBUG=1 is set but no TORCH_TRACE, automatically use
+    # the torch_compile_debug directory for trace logs (to simplify tlparse usage)
+    if trace_dir_name is None and os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1":
+        import torch._dynamo.config as dynamo_config
+
+        trace_dir_name = os.path.join(dynamo_config.debug_dir_root, "tlparse")
+
     if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
         trace_dir_name = dtrace_dir_name
@@ -1176,6 +1234,10 @@ def _init_logs(log_file_name=None) -> None:
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
+    # Override isEnabledFor so that logging.disable() cannot suppress trace
+    # events.  When TORCH_TRACE is set we always want output regardless of
+    # the global disable threshold.
+    trace_log.isEnabledFor = lambda level: level >= trace_log.level
     trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
@@ -1184,27 +1246,47 @@ def _init_logs(log_file_name=None) -> None:
 class LazyTraceHandler(logging.StreamHandler):
     """Like FileHandler, but the file is allocated lazily only upon the first log message"""
 
-    def __init__(self, root_dir: Optional[str]) -> None:
+    def __init__(self, root_dir: str | None) -> None:
         # This is implemented in the same way that delay is implemented on
         # FileHandler
         self.root_dir = root_dir
         logging.Handler.__init__(self)
         self.stream = None
+        self._pid: int | None = None
+        self._stream_path: str | None = None
         self._builtin_open = open
+        self._pending_log_version = False
+
+    def _close_stream(self, *, flush: bool = True) -> None:
+        if self.stream:
+            stream = self.stream
+            try:
+                if flush:
+                    self.flush()
+            finally:
+                self.stream = None
+                self._pid = None
+                self._stream_path = None
+                self._pending_log_version = False
+                if flush and hasattr(stream, "close"):
+                    stream.close()
+                elif not flush:
+                    # stream.close() flushes Python buffers.  In a post-fork
+                    # child, close only the inherited fd so parent buffers are
+                    # discarded instead of written to the parent's trace file.
+                    os.close(stream.fileno())
+                    try:
+                        stream.close()
+                    except OSError as exc:
+                        if exc.errno != errno.EBADF:
+                            raise
 
     # cloned from FileHandler in cpython
     def close(self) -> None:
         self.acquire()
         try:
             try:
-                if self.stream:
-                    try:
-                        self.flush()
-                    finally:
-                        stream = self.stream
-                        self.stream = None
-                        if hasattr(stream, "close"):
-                            stream.close()
+                self._close_stream(flush=self._pid is None or self._pid == os.getpid())
             finally:
                 # Issue #19523: call unconditionally to
                 # prevent a handler leak when delay is set
@@ -1215,6 +1297,10 @@ class LazyTraceHandler(logging.StreamHandler):
             self.release()
 
     def emit(self, record) -> None:
+        current_pid = os.getpid()
+        if self.stream is not None and self._pid != current_pid:
+            self._close_stream(flush=False)
+
         if self.stream is None:
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
@@ -1250,20 +1336,49 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
-                self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
-                    mode="w+",
+                fd, path = tempfile.mkstemp(
                     suffix=".log",
-                    prefix=f"dedicated_log_torch_trace_{ranksuffix}",
+                    prefix=LOG_PREFIX + ranksuffix,
                     dir=self.root_dir,
-                    delete=False,
                 )
-                log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                self.stream = os.fdopen(fd, mode="w+")
+                self._pid = current_pid
+                self._stream_path = path
+                log.info("LazyTraceHandler: logging to %s", self._stream_path)
+                # Log tlparse path via inductor logger so it shows when
+                # TORCH_LOGS="inductor" is enabled
+                inductor_log = logging.getLogger("torch._inductor")
+                inductor_log.info("tlparse raw data: %s", self._stream_path)
+                self._pending_log_version = True
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
                 return
         if self.stream:
             super().emit(record)
+            if self._pending_log_version:
+                self._pending_log_version = False
+                _log_torch_version()
+
+
+def _log_torch_version() -> None:
+    import torch
+    from torch._environment import is_fbcode
+    from torch._utils_internal import get_torch_source_version
+
+    version_info: dict[str, object] = {
+        "pytorch_version": torch.__version__,
+        "commit": get_torch_source_version(),
+        "oss": not is_fbcode(),
+    }
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {"name": "torch_version", "encoding": "json"},
+        payload_fn=lambda: version_info,
+        suppress_context=True,
+        expect_trace_id=False,
+    )
 
 
 @functools.cache
@@ -1351,7 +1466,7 @@ def add_structured_logging_overhead(time_spent: float) -> None:
         structured_logging_overhead[key] += time_spent
 
 
-def get_structured_logging_overhead() -> Optional[float]:
+def get_structured_logging_overhead() -> float | None:
     key = None
     if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
         frame_id = trace_id.compile_id.frame_id
@@ -1366,8 +1481,8 @@ def get_structured_logging_overhead() -> Optional[float]:
 def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
-    compile_id: Optional[CompileId] = None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
+    compile_id: CompileId | None = None,
 ) -> None:
     trace_structured(
         "artifact",
@@ -1384,13 +1499,13 @@ def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
+    compile_id: CompileId | None = None,  # Optional if unavailable in the trace
 ) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1409,6 +1524,7 @@ def trace_structured(
         "timestamp",
         "pathname",
         "thread",
+        "subgraph_name",
     ]
     if name in reserved_names:
         raise AssertionError(f"name {name!r} is reserved and cannot be used")
@@ -1452,6 +1568,12 @@ def trace_structured(
                 if trace_id:
                     record["attempt"] = trace_id.attempt
 
+            from torch.fx.traceback import _get_regional_inductor_subgraph_name
+
+            subgraph_name = _get_regional_inductor_subgraph_name()
+            if subgraph_name is not None:
+                record["subgraph_name"] = subgraph_name
+
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
@@ -1488,9 +1610,9 @@ def dtrace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
@@ -1513,3 +1635,4 @@ def dtrace_structured(
 import torch._guards
 import torch._utils_internal
 import torch.distributed as dist
+import torch.fx.traceback

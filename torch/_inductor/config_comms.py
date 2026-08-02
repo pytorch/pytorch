@@ -1,6 +1,5 @@
 import os
 import sys
-from typing import Optional
 
 from torch.utils._config_module import install_config_module
 
@@ -14,12 +13,12 @@ runtime_estimations_use_nccl_lib_estimations: bool = False
 runtime_estimations_align_across_all_distributed_ranks: bool = False
 
 reorder_iterative_debug_memory_recompute: bool = False
-reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+reorder_iterative_debug_limit_to_reorder: int | None = (
     None
     if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
     else int(env_str)
 )
-sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+sink_waits_iterative_debug_limit_to_sink: int | None = (
     # pyrefly: ignore[unbound-name]
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
@@ -32,7 +31,7 @@ sink_iterative_use_runtime_estimations: bool = False
 # Broadcast runtime estimations doing real Collective operation between all ranks.
 # If non-deterministic runtime estimations are used this must be used to make
 # all ranks to do identical decisions and prevent global Collectives reordering,
-# (that will result un NCCL hangs)
+# (that will result in NCCL hangs)
 reorder_for_compute_comm_overlap_broadcast_runtime_estimations: bool = False
 
 # Block of Ratios to workaround imperfection of current runtime estimations

@@ -1,9 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import json
 import os
 import pprint
 import sys
+import unittest
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -11,18 +14,52 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_cleanup_hook_tolerates_missing_name(self):
+        # During interpreter shutdown the scope's module __dict__ may already be
+        # cleared before the weakref callback fires the hook. The hook must not
+        # raise KeyError (which would surface as an "Exception ignored in
+        # weakref callback").
+        scope = {}
+        hook = utils.CleanupHook.create(scope, "myglobal", object())
+        del scope["myglobal"]
+        hook()
+
+        # The normal path still removes the installed global.
+        hook2 = utils.CleanupHook.create(scope, "myglobal", object())
+        hook2()
+        self.assertNotIn("myglobal", scope)
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
         fp64_ref = torch.DoubleTensor([5.0])
         res = utils.same(a, b, fp64_ref=fp64_ref, equal_nan=True)
         self.assertTrue(res)
+
+    def test_same_iou_for_bool_propagates_to_instances(self):
+        Instances = type("Instances", (), {})
+        ref = Instances()
+        res = Instances()
+        ref.pred_masks = torch.ones((4, 16, 16), dtype=torch.bool)
+        res.pred_masks = ref.pred_masks.clone()
+        res.pred_masks[0, 0, 0] = False
+
+        self.assertFalse(utils.same(ref, res))
+        self.assertTrue(utils.same(ref, res, use_iou_for_bool=True))
 
     def test_larger_multiplier_for_smaller_tensor(self):
         """
@@ -55,7 +92,7 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_even_smaller_tensor(self):
         """
-        Tesnor numel <=10
+        Tensor numel <=10
         """
         fp64_ref = torch.DoubleTensor([0.0])
         a = torch.Tensor([1.0])
@@ -84,7 +121,6 @@ class TestUtils(TestCase):
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
-            "inline_inbuilt_nn_modules": False,
         }
     )
     def test_graph_break_counting(self):
@@ -94,7 +130,7 @@ class TestUtils(TestCase):
         """
 
         def run_forward_backward():
-            model = torch.compile(TestModel())
+            model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
             x = torch.rand([3], requires_grad=True)
             output = model(x)
             loss_fn = torch.nn.MSELoss()
@@ -102,18 +138,18 @@ class TestUtils(TestCase):
             loss = loss_fn(output, target)
             loss.backward()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def add(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it(x):
             y = x.sum()
             if y > 0:
                 return x + y.item()
             return x - y.item()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it2(x):
             y = x.sum()
             if y > 0:
@@ -167,8 +203,6 @@ class TestUtils(TestCase):
             traced_code_lists.append(get_traced_code())
             return gm.forward
 
-        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
-
         # === no inlining ===
         @torch.compile(backend=my_backend)
         def fn(x):
@@ -191,6 +225,7 @@ class TestUtils(TestCase):
         self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
 
         # === graph break occurs during inlining ===
+        @torch._dynamo.disable_nested_graph_breaks
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
@@ -211,6 +246,100 @@ class TestUtils(TestCase):
         traced_code_lists = []
         fn(x)
         self.assertEqual(traced_code_lists, [])
+
+    def test_add_record_function_data(self):
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", False),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data("test_event")
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
+
+    def test_reinplace_counters_use_trigger_name_not_enum_value(self):
+        """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
+        from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+
+        # Clear any existing state
+        ReinplaceCounters.clear()
+
+        # Test with AUTO_FUNC_V1 trigger
+        trigger = ReInplaceTrigger.AUTO_FUNC_V1
+
+        # Add some values
+        ReinplaceCounters.add_missed_opportunities(trigger, 2)
+        ReinplaceCounters.add_missed_bytes(trigger, 512)
+
+        # Check that the dictionary keys use the trigger name, not the enum value
+        expected_tensor_key = "missed_tensors_AUTO_FUNC_V1"
+        expected_bytes_key = "missed_bytes_AUTO_FUNC_V1"
+
+        # Verify the keys exist with the correct format
+        self.assertIn(
+            expected_tensor_key,
+            ReinplaceCounters._values,
+            lambda msg: f"{msg}\nExpected key {expected_tensor_key} not found",
+        )
+        self.assertIn(
+            expected_bytes_key,
+            ReinplaceCounters._values,
+            lambda msg: f"{msg}\nExpected key {expected_bytes_key} not found",
+        )
+
+        # Verify the values are correct
+        self.assertEqual(ReinplaceCounters._values[expected_tensor_key], 2)
+        self.assertEqual(ReinplaceCounters._values[expected_bytes_key], 512)
+
+        # Clear for next test
+        ReinplaceCounters.clear()
+
+        # Test with a different trigger to ensure it's not hardcoded
+        trigger2 = ReInplaceTrigger.TRITON_OPS
+        ReinplaceCounters.add_missed_opportunities(trigger2, 3)
+
+        expected_key2 = "missed_tensors_TRITON_OPS"
+        self.assertIn(
+            expected_key2,
+            ReinplaceCounters._values,
+            lambda msg: f"{msg}\nExpected key {expected_key2} not found",
+        )
+        self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
+
+        # Verify the old key doesn't exist
+        self.assertNotIn("missed_tensors_AUTO_FUNC_V1", ReinplaceCounters._values)
+
+        # Test edge case: check that we don't use the enum integer value
+        # ReInplaceTrigger.AUTO_FUNC_V1 has value 1, so we verify "missed_tensors_1" doesn't exist
+        self.assertNotIn(
+            f"missed_tensors_{trigger.value}",
+            ReinplaceCounters._values,
+            "Should not use enum value (integer) in key, should use trigger.name instead",
+        )
+
+    def test_get_dynamo_config_for_logging_ignores_logging_functions(self):
+        with dynamo_config.patch(ignore_logging_functions={print}):
+            result = utils._get_dynamo_config_for_logging()
+            parsed = json.loads(result)
+
+        self.assertIsInstance(parsed, dict)
+        self.assertNotIn("ignore_logging_functions", parsed)
 
 
 class TestModel(torch.nn.Module):
@@ -233,7 +362,7 @@ class TestDynamoTimed(TestCase):
             torch._dynamo.reset_recompile_user_contexts()
 
     def run_forward_backward(self):
-        model = torch.compile(TestModel())
+        model = torch.compile(TestModel())  # noqa: UNSPECIFIED_BACKEND
         x = torch.rand([3], requires_grad=True)
         output = model(x)
         loss_fn = torch.nn.MSELoss()
@@ -244,7 +373,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 
@@ -290,8 +419,8 @@ class TestDynamoTimed(TestCase):
 
         self.assertEqual(
             compilation_events[0].graph_node_shapes,
-            "{'l_self_modules_linear_parameters_weight_': [1, 3], "
-            "'l_self_modules_linear_parameters_bias_': [1], "
+            "{'l_self_modules_linear_parameters_bias_': [1], "
+            "'l_self_modules_linear_parameters_weight_': [1, 3], "
             "'l_x_': [3], 'linear': [1]}",
         )
 
@@ -356,10 +485,13 @@ class TestDynamoTimed(TestCase):
             "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148093",
+    )
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
-            "inline_inbuilt_nn_modules": False,
         }
     )
     @inductor_config.patch(
@@ -406,38 +538,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(utils.compilation_time_metrics),
             filter_expected(
                 """\
-{'GraphLowering.codegen': [0.0, 0.0],
- 'GraphLowering.compile_to_fn': [0.0, 0.0],
- 'GraphLowering.compile_to_module': [0.0, 0.0],
- 'GraphLowering.run': [0.0, 0.0],
- 'OutputGraph.call_user_compiler': [0.0],
- 'PyCodeCache.load_by_key_path': [0.0, 0.0],
- 'PythonWrapperCodegen.generate': [0.0, 0.0],
- 'Scheduler.__init__': [0.0, 0.0],
- 'Scheduler.codegen': [0.0, 0.0],
- 'Scheduler.fused_nodes': [0.0, 0.0],
- '_compile.compile_inner': [0.0],
- '_recursive_joint_graph_passes': [0.0],
- '_recursive_post_grad_passes': [0.0, 0.0],
- '_recursive_pre_grad_passes': [0.0],
- 'additional_fake_tensor_prop': [0.0, 0.0],
- 'aot_collect_metadata': [0.0],
- 'aot_trace_joint_graph': [0.0],
- 'backward._backward_impl': [0.0],
- 'build_guards': [0.0],
- 'bytecode_tracing': [0.0],
- 'compile_attempt_0': [0.0],
- 'compile_file': [0.0, 0.0],
- 'compile_fx.<locals>.bw_compiler': [0.0],
- 'compile_fx.<locals>.fw_compiler_base': [0.0],
- 'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0],
- 'fx_codegen_and_compile': [0.0, 0.0],
- 'gc': [0.0],
- 'min_cut_rematerialization_partition': [0.0]}"""
-                if _IS_WINDOWS
-                else """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -466,8 +568,87 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
- 'min_cut_rematerialization_partition': [0.0]}"""
-            ),  # noqa: B950
+ 'insert_deferred_runtime_asserts': [0.0],
+ 'min_cut_rematerialization_partition': [0.0],
+ 'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_0': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_1': [0.0],
+ 'pass.joint_graph_passes.remove_noop_ops': [0.0],
+ 'pass.post_grad_passes.decompose_auto_functionalized': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
+ 'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_2': [0.0, 0.0],
+ 'pass.post_grad_passes.post_grad_custom_pre_pass': [0.0, 0.0],
+ 'pass.post_grad_passes.reinplace_inplaceable_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_assert_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_noop_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_profiler_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.stable_sort': [0.0, 0.0],
+ 'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
+ 'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
+ 'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
+                if _IS_WINDOWS
+                else """\
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
+ 'GraphLowering.compile_to_fn': [0.0, 0.0],
+ 'GraphLowering.compile_to_module': [0.0, 0.0],
+ 'GraphLowering.run': [0.0, 0.0],
+ 'OutputGraph.call_user_compiler': [0.0],
+ 'PyCodeCache.load_by_key_path': [0.0, 0.0],
+ 'PythonWrapperCodegen.generate': [0.0, 0.0],
+ 'Scheduler.__init__': [0.0, 0.0],
+ 'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.fused_nodes': [0.0, 0.0],
+ '_compile.compile_inner': [0.0],
+ '_recursive_joint_graph_passes': [0.0],
+ '_recursive_post_grad_passes': [0.0, 0.0],
+ '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
+ 'async_compile.wait': [0.0, 0.0],
+ 'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
+ 'bytecode_tracing': [0.0],
+ 'compile_attempt_0': [0.0],
+ 'compile_file': [0.0, 0.0],
+ 'compile_fx.<locals>.bw_compiler': [0.0],
+ 'compile_fx.<locals>.fw_compiler_base': [0.0],
+ 'compile_fx_inner': [0.0, 0.0],
+ 'create_aot_dispatcher_function': [0.0],
+ 'fx_codegen_and_compile': [0.0, 0.0],
+ 'gc': [0.0],
+ 'insert_deferred_runtime_asserts': [0.0],
+ 'min_cut_rematerialization_partition': [0.0],
+ 'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_0': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_1': [0.0],
+ 'pass.joint_graph_passes.remove_noop_ops': [0.0],
+ 'pass.post_grad_passes.decompose_auto_functionalized': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.fix_auto_functionalized_dtype_views': [0.0, 0.0],
+ 'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_2': [0.0, 0.0],
+ 'pass.post_grad_passes.post_grad_custom_pre_pass': [0.0, 0.0],
+ 'pass.post_grad_passes.reinplace_inplaceable_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_assert_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_noop_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_profiler_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.stable_sort': [0.0, 0.0],
+ 'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
+ 'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
+ 'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
+            ),
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -500,7 +681,7 @@ class TestDynamoTimed(TestCase):
  'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate the CompilationMetrics logs. We expect a log for the
@@ -516,6 +697,7 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
@@ -557,7 +739,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': set(),
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -575,12 +757,13 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
- 'graph_input_count': 1,
- 'graph_node_count': 3,
+ 'graph_input_count': 3,
+ 'graph_node_count': 5,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 10,
+ 'guard_count': 31,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -650,7 +833,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': set(),
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -668,12 +851,13 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
- 'graph_input_count': 1,
- 'graph_node_count': 3,
+ 'graph_input_count': 3,
+ 'graph_node_count': 5,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 10,
+ 'guard_count': 31,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -724,7 +908,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Second event is for the backward
@@ -757,7 +941,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': None,
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -775,6 +959,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -850,7 +1035,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': None,
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -868,6 +1053,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -924,7 +1110,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
     @dynamo_config.patch(
@@ -939,7 +1125,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(1))
+            torch.compile(test1)(torch.randn(1))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertIn(
             '"job_id": "test_job_id"',
@@ -971,7 +1157,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(10, 10))
+            torch.compile(test1)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, first)
 
@@ -981,7 +1167,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test2)(torch.randn(10, 10))
+            torch.compile(test2)(torch.randn(10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
 
@@ -999,7 +1185,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(graph_module)(torch.randn(6, 6))
+            torch.compile(graph_module)(torch.randn(6, 6))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(
             compilation_events[0].inductor_provenance,
@@ -1012,7 +1198,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1031,7 +1217,7 @@ class TestDynamoTimed(TestCase):
             mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
         ):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def f(x):
                 return x * x
 
@@ -1062,7 +1248,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelSimple()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 520)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
@@ -1080,7 +1266,7 @@ class TestDynamoTimed(TestCase):
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             m = ModelWrapped()
-            torch.compile(m)(torch.randn(1, 10, 10))
+            torch.compile(m)(torch.randn(1, 10, 10))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 1040)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
@@ -1092,7 +1278,7 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l1, l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 16, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 40)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
@@ -1105,11 +1291,34 @@ class TestDynamoTimed(TestCase):
         m = nn.Sequential(l1, nn.Sequential(l2))
         self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(m)(torch.randn(4, 4))
+            torch.compile(m)(torch.randn(4, 4))  # noqa: UNSPECIFIED_BACKEND
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 24)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
         self.assertEqual(compilation_events[0].param_count, 3)
+
+
+class TestTimedSync(TestCase):
+    def test_timed_syncs_on_accelerator(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.utils import timed
+
+        called = []
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+        ):
+            timed(gm, inputs, times=1)
+
+        # once before loop + once per iteration for times=1
+        self.assertEqual(len(called), 2)
+
+
+instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
 
 
 class TestInductorConfigParsingForLogging(TestCase):
@@ -1180,6 +1389,39 @@ class TestInductorConfigParsingForLogging(TestCase):
         mocked_inductor_config.get_config_copy.return_value = None
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
+
+
+class TestFunctorchConfigParsingForLogging(TestCase):
+    def test_functorch_config_jsonify(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        self.assertIsInstance(functorch_config_json, str)
+        parsed = json.loads(functorch_config_json)
+        self.assertIn("activation_memory_budget", parsed)
+        self.assertEqual(parsed["activation_memory_budget"], 1.0)
+
+    def test_functorch_config_blocklist(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        parsed = json.loads(functorch_config_json)
+        self.assertNotIn("TYPE_CHECKING", parsed)
+        self.assertNotIn("_save_config_ignore", parsed)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_none(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = AttributeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_runtime_error(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = RuntimeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.justknobs_check", return_value=False)
+    def test_functorch_config_jk_disabled(self, mocked_jk):
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+        mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
 if __name__ == "__main__":

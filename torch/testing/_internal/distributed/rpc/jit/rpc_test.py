@@ -508,7 +508,7 @@ def two_args_two_kwargs(
 
 @torch.jit.script
 def assorted_types_args_kwargs(
-    tensor_arg: Tensor,  # noqa: E999
+    tensor_arg: Tensor,
     str_arg: str,
     int_arg: int,
     tensor_kwarg: Tensor = torch.tensor([2, 2]),
@@ -684,7 +684,7 @@ class JitRpcOpTest:
 
             @torch.jit.script
             def script_rpc_async_call_with_less_args(
-                dst_worker_name: str,  # noqa: E999
+                dst_worker_name: str,
             ):
                 args = (torch.tensor([1, 1]),)
                 kwargs = {}
@@ -729,7 +729,7 @@ class JitRpcOpTest:
         # Notice, kwargs matching happens during execution.
         @torch.jit.script
         def script_rpc_async_call_with_unexpected_kwarg(
-            dst_worker_name: str,  # noqa: E999
+            dst_worker_name: str,
         ):
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {"third_kwarg": torch.tensor([1, 1])}
@@ -921,7 +921,7 @@ class JitRpcTest(
 
         # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
-        # common word can be greped is "pickle".
+        # common word can be grepped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
             rpc.rpc_async(dst_worker_name, my_local_script_module.forward, args=())
 

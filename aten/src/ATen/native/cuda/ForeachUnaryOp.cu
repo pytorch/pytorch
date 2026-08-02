@@ -13,6 +13,7 @@
 #include <ATen/ops/_foreach_asin_native.h>
 #include <ATen/ops/_foreach_atan_native.h>
 #include <ATen/ops/_foreach_ceil_native.h>
+#include <ATen/ops/_foreach_clone_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_erf_native.h>
@@ -40,7 +41,9 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_strided_native.h>
 #endif
 
 namespace at::native {
@@ -429,6 +432,50 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
                 /* r_args_depth */ 1,
                 /* res_arg_index */ 0>());
       });
+}
+
+std::vector<Tensor> foreach_tensor_clone_cuda(
+    TensorList self,
+    std::optional<MemoryFormat> memory_format) {
+  check_foreach_api_restrictions(self);
+  if (!_check_tensors_share_device_and_dtype({self})) {
+    return at::native::foreach_tensor_clone_slow(self, memory_format);
+  }
+
+  std::vector<Tensor> ret{};
+  ret.reserve(self.size());
+
+  auto realized_memory_format = memory_format.value_or(MemoryFormat::Preserve);
+  for (const auto& s : self) {
+    // This logic modified from at::native::clone.
+    if (realized_memory_format == MemoryFormat::Preserve) {
+      if (s.is_non_overlapping_and_dense()) {
+        // Copy all strides, this is marginally faster than calling empty_like
+        auto options = s.options();
+        ret.emplace_back(at::native::empty_strided_cuda(
+            s.sizes(),
+            s.strides(),
+            c10::optTypeMetaToScalarType(options.dtype_opt()),
+            options.layout_opt(),
+            options.device_opt(),
+            options.pinned_memory_opt()));
+      } else {
+        ret.emplace_back(at::native::empty_like(s));
+      }
+    } else {
+      auto options = s.options();
+      ret.emplace_back(at::native::empty_like(
+          s,
+          c10::optTypeMetaToScalarType(options.dtype_opt()),
+          options.layout_opt(),
+          options.device_opt(),
+          options.pinned_memory_opt(),
+          realized_memory_format));
+    }
+  }
+
+  at::native::foreach_tensor_copy_list_kernel_cuda_(ret, self);
+  return ret;
 }
 
 } // namespace at::native

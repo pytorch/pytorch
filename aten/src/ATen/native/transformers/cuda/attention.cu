@@ -1,7 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <cstdint>
+#include <limits>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -86,6 +89,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
+#include <ATen/native/transformers/hip/gemm_kernel_utils.h>
 #ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
@@ -95,7 +99,7 @@
 #endif
 #endif
 
-#if defined(USE_ROCM) && (defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION))
+#if defined(USE_ROCM) && defined(USE_FLASH_ATTENTION)
 namespace pytorch_flash
 {
 std::tuple<
@@ -466,6 +470,143 @@ Tensor collapse_dims_1_and_2(const Tensor& sizes) {
   return (sizes_dim1 * sizes_dim2).contiguous();
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_impl(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<Tensor> out,
+    std::optional<int64_t> num_splits
+    ) {
+#if defined(USE_FLASH_ATTENTION)
+  const auto softmax_scale =
+      sdp::calculate_scale(query, scale).expect_float();
+
+  std::optional<Tensor> seqused_k = _seqused_k;
+  std::optional<at::Tensor> block_table = _block_table;
+  std::optional<Tensor> alibi_slopes = _alibi_slopes;
+  const float softcap = 0.0;
+
+#ifdef USE_ROCM
+  TORCH_CHECK(
+      !num_splits.has_value(),
+      "num_splits is not supported on ROCm");
+  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
+  const auto window_left = window_size_left;
+  const auto window_right = window_size_right;
+#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
+  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
+  using sdp::aotriton_adapter::parse_window_size;
+  const auto [window_left, window_right] = parse_window_size(window_size_left,
+                                                             window_size_right);
+#endif
+#else  // USE_ROCM
+  const int window_left = window_size_left.value_or(-1);
+  const int window_right = window_size_right.value_or(-1);
+#endif  // USE_ROCM
+
+  // We are going to have two paths:
+  // 1. The standard MHA path for dense tensors
+  // 2. The Varseqlen path
+  TORCH_CHECK(
+      cumulative_sequence_length_q.has_value() ==
+          cumulative_sequence_length_k.has_value(),
+      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
+  Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
+      philox_seed, philox_offset, debug_attn_mask;
+  if (cumulative_sequence_length_q.has_value()) {
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        FLASH_NAMESPACE::mha_varlen_fwd(
+            query,
+            key,
+            value,
+            out,
+            cumulative_sequence_length_q.value(),
+            cumulative_sequence_length_k.value(),
+            seqused_k, /*seqused_k*/
+            block_table, /*block_table*/
+            alibi_slopes, /*alibi_slopes*/
+            max_seqlen_batch_q,
+            max_seqlen_batch_k,
+            dropout_p,
+            softmax_scale,
+            false /*zero_tensors*/,
+            is_causal,
+            window_left,
+            window_right,
+            softcap,
+            return_debug_mask,
+            std::nullopt /*gen_*/
+#ifndef USE_ROCM
+            , num_splits.value_or(0)
+#endif
+            );
+  } else {
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        FLASH_NAMESPACE::mha_fwd(
+            query,
+            key,
+            value,
+            out,
+            alibi_slopes,
+            dropout_p,
+            softmax_scale,
+            is_causal,
+            window_left,
+            window_right,
+            softcap,
+            return_debug_mask, /*return_softmax (this is used for testing)*/
+            std::nullopt);
+  }
+  debug_attn_mask =
+      return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+  return std::make_tuple(
+      std::move(output),
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
+
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor());
+}
+
 } // namespace
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
 __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
@@ -546,7 +687,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
-          const auto offsets_ptr = metadata.data_ptr<int>();
+          const auto offsets_ptr = metadata.const_data_ptr<int>();
           const auto sizes_ptr = offsets_ptr + sizes.numel() + 1;
           const auto input_dim = sizes.sizes()[1];
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_dim == 1);
@@ -568,7 +709,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
 #undef CALL_KERNEL
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
-  return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+  return std::make_tuple(std::move(q_k_v_s[0]), std::move(q_k_v_s[1]), std::move(q_k_v_s[2]));
 }
 
 std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
@@ -646,7 +787,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 && !need_weights) {
+  if ((query.is_same(key) && key.is_same(value)) && !need_weights) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors
@@ -824,8 +965,50 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
-  return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
+  return std::make_tuple(std::move(attention), std::move(logsumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_quantized(
+  const Tensor& query,
+  const Tensor& key,
+  const Tensor& value,
+  const std::optional<Tensor>& q_descale,
+  const std::optional<Tensor>& k_descale,
+  const std::optional<Tensor>& v_descale,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale) {
+  TORCH_CHECK(false,
+    "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
+}
+
+namespace {
+
+// Check the pointer and stride alignment required by cuDNN varlen SDPA.
+bool has_aligned_varlen_layout(const Tensor& tensor) {
+  constexpr int64_t alignment_bytes = 16;
+  if (!tensor.numel()) {
+    return true;
+  }
+  if (tensor.dim() == 0 || tensor.stride(-1) != 1 ||
+      reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % alignment_bytes !=
+          0) {
+    return false;
+  }
+  const int64_t alignment = alignment_bytes / tensor.element_size();
+  for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
+    if (tensor.size(dim) > 1 &&
+        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
     const Tensor& query,
@@ -840,12 +1023,42 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    const std::optional<Tensor>& seqused_k,
+    const std::optional<Tensor>& block_table) {
   // TODO(eqy): debug mask support
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
   const bool is_nested = cumulative_sequence_length_q.has_value();
+  const bool has_kv_cache = seqused_k.has_value() || block_table.has_value();
+  TORCH_CHECK(
+      query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
+      "cuDNN attention only supports float16 and bfloat16, got ",
+      query.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == query.scalar_type() &&
+          value.scalar_type() == query.scalar_type(),
+      "cuDNN attention expects query, key and value to have the same dtype, got ",
+      query.scalar_type(), ", ", key.scalar_type(), " and ", value.scalar_type());
+  TORCH_CHECK(
+      !has_kv_cache ||
+          (has_aligned_varlen_layout(query) &&
+           has_aligned_varlen_layout(key) &&
+           has_aligned_varlen_layout(value)),
+      "cuDNN KV-cache attention requires query, key and value to have "
+      "16-byte-aligned storage and non-broadcast strides, with a contiguous "
+      "last dimension.");
+  TORCH_CHECK(
+      !is_nested || max_seqlen_batch_q > 128,
+      "cuDNN varlen attention does not support query sequence length <= 128.");
+  TORCH_CHECK(
+      is_nested || !has_kv_cache,
+      "cuDNN attention only supports seqused_k/block_table in the varlen path.");
+  TORCH_CHECK(
+      !has_kv_cache || !at::GradMode::is_enabled() ||
+          !(query.requires_grad() || key.requires_grad() || value.requires_grad()),
+      "seqused_k and block_table are inference-only for cuDNN attention.");
   if (!is_nested) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
@@ -917,12 +1130,66 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   } else {
     // TODO(eqy): debug mask support
     // BHSD ...
-    const int64_t batch_size = cumulative_sequence_length_q.value().size(0) - 1;
+    Tensor cum_seq_q = cumulative_sequence_length_q.value();
+    TORCH_CHECK(cum_seq_q.dim() == 1, "cum_seq_q must be 1D");
+    const int64_t batch_size = cum_seq_q.size(0) - 1;
     const int64_t num_heads_q = query.size(-2);
     const int64_t num_heads_k = key.size(-2);
     const int64_t num_heads_v = value.size(-2);
     const int64_t head_dim_qk = query.size(-1);
     const int64_t head_dim_v = value.size(-1);
+    TORCH_CHECK(
+        block_table.has_value() || cumulative_sequence_length_kv.has_value(),
+        "cuDNN varlen attention requires cum_seq_k unless a block_table is given.");
+    // The schema returns cum_seq_k even when paged attention does not use one.
+    Tensor cum_seq_k = cumulative_sequence_length_kv.has_value()
+        ? cumulative_sequence_length_kv.value()
+        : at::empty({0}, query.options().dtype(at::kInt));
+    for (const auto& cum : {cumulative_sequence_length_q, cumulative_sequence_length_kv}) {
+      if (!cum.has_value()) {
+        continue;
+      }
+      TORCH_CHECK(cum.value().dtype() == at::kInt, "cum_seq_q/cum_seq_k must have dtype int32");
+      TORCH_CHECK(cum.value().is_contiguous(), "cum_seq_q/cum_seq_k must be contiguous");
+      TORCH_CHECK(cum.value().device() == query.device(),
+          "cum_seq_q/cum_seq_k must be on the same device as query");
+      TORCH_CHECK(cum.value().dim() == 1 && cum.value().size(0) == batch_size + 1,
+          "cum_seq_q/cum_seq_k must have shape (", batch_size + 1,
+          "), got ", cum.value().sizes());
+    }
+    if (seqused_k.has_value()) {
+      const auto& seqused = seqused_k.value();
+      TORCH_CHECK(seqused.dtype() == at::kInt, "seqused_k must have dtype int32");
+      TORCH_CHECK(seqused.device() == query.device(), "seqused_k must be on the same device as query");
+      TORCH_CHECK(seqused.is_contiguous(), "seqused_k must be contiguous");
+      TORCH_CHECK(seqused.dim() == 1 && seqused.size(0) == batch_size,
+          "seqused_k must have shape (", batch_size, "), got ", seqused.sizes());
+    }
+    if (block_table.has_value()) {
+      const auto& table = block_table.value();
+      TORCH_CHECK(seqused_k.has_value(), "block_table requires seqused_k");
+      TORCH_CHECK(table.dtype() == at::kInt, "block_table must have dtype int32");
+      TORCH_CHECK(table.device() == query.device(), "block_table must be on the same device as query");
+      TORCH_CHECK(table.dim() == 2 && table.size(0) == batch_size,
+          "block_table must have shape (", batch_size, ", max_pages_per_seq), got ", table.sizes());
+      TORCH_CHECK(table.stride(-1) == 1, "block_table must have contiguous last dimension");
+      TORCH_CHECK(key.dim() == 4 && value.dim() == 4,
+          "paged key/value must be 4D page pools (num_pages, page_size, num_heads, head_dim)");
+      TORCH_CHECK(key.size(-1) == query.size(-1),
+          "paged key head dimension must match query, got ", key.size(-1), " and ", query.size(-1));
+      TORCH_CHECK(
+          key.size(0) == value.size(0) &&
+              key.size(1) == value.size(1) &&
+              key.size(2) == value.size(2),
+          "paged key and value must have matching page count, page size, and number of heads, got ",
+          key.sizes(), " and ", value.sizes());
+      const int64_t page_size = key.size(1);
+      TORCH_CHECK(page_size > 0, "paged key/value page size must be positive");
+      TORCH_CHECK(
+          table.size(1) <= std::numeric_limits<int>::max() / page_size,
+          "paged key/value capacity exceeds cuDNN's maximum supported sequence length, got page table width ",
+          table.size(1), " and page size ", page_size);
+    }
     auto attn_bias_ = attn_bias;
     if (attn_bias_.has_value()) {
       const auto bias_dim = attn_bias_.value().dim();
@@ -976,8 +1243,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      compute_logsumexp/* bool */,
                                      is_causal/* bool */,
                                      dropout_p/*double dropout_probability*/,
-                                     cumulative_sequence_length_q.value(),
-                                     cumulative_sequence_length_kv.value(),
+                                     cum_seq_q,
+                                     cum_seq_k,
+                                     seqused_k,
+                                     block_table,
                                      query/* Tensor q*/,
                                      key/* Tensor k*/,
                                      value/* Tensor v*/,
@@ -987,7 +1256,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      cudnn_seed/*Tensor dropoutseed*/,
                                      cudnn_offset/*Tensor dropoutoffset*/);
     //attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-    return std::make_tuple(std::move(attention), std::move(log_sumexp), cumulative_sequence_length_q.value(), cumulative_sequence_length_kv.value(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
+    return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(cum_seq_q), std::move(cum_seq_k), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   }
 }
 
@@ -1006,7 +1275,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   const int64_t max_seqlen_batch_q = query.size(2);
   const int64_t max_seqlen_batch_k = key.size(2);
 
-  return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale);
+  return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale, std::nullopt, std::nullopt);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -1157,116 +1426,79 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
     ) {
-#if defined(USE_FLASH_ATTENTION)
-  const auto softmax_scale =
-      sdp::calculate_scale(query, scale).expect_float();
-  std::optional<Tensor> out = std::nullopt;
-
-  std::optional<Tensor> seqused_k = _seqused_k;
-  std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
-  std::optional<Tensor> alibi_slopes = _alibi_slopes;
-  const float softcap = 0.0;
-
-#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-  const int non_null_window_left = window_size_left.value_or(-1);
-  const int non_null_window_right = window_size_right.value_or(-1);
-#endif
-
-  // We are going to have two paths:
-  // 1. The standard MHA path for dense tensors
-  // 2. The Varseqlen path
-  TORCH_CHECK(
-      cumulative_sequence_length_q.has_value() ==
-          cumulative_sequence_length_k.has_value(),
-      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
-  Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
-      philox_seed, philox_offset, debug_attn_mask;
-  if (cumulative_sequence_length_q.has_value()) {
-    std::tie(
-        output,
-        q_padded,
-        k_padded,
-        v_padded,
-        logsumexp,
-        philox_seed,
-        philox_offset,
-        debug_attn_mask) =
-        FLASH_NAMESPACE::mha_varlen_fwd(
-            query,
-            key,
-            value,
-            out,
-            cumulative_sequence_length_q.value(),
-            cumulative_sequence_length_k.value(),
-            seqused_k, /*seqused_k*/
-            block_table, /*block_table*/
-            alibi_slopes, /*alibi_slopes*/
-            max_seqlen_batch_q,
-            max_seqlen_batch_k,
-            dropout_p,
-            softmax_scale,
-            false /*zero_tensors*/,
-            is_causal,
-#ifdef USE_ROCM
-            window_size_left,
-            window_size_right,
-#else
-            non_null_window_left,
-            non_null_window_right,
-#endif
-            softcap,
-            return_debug_mask,
-            std::nullopt /*gen_*/);
-  } else {
-    std::tie(
-        output,
-        q_padded,
-        k_padded,
-        v_padded,
-        logsumexp,
-        philox_seed,
-        philox_offset,
-        debug_attn_mask) =
-        FLASH_NAMESPACE::mha_fwd(
-            query,
-            key,
-            value,
-            out,
-            alibi_slopes,
-            dropout_p,
-            softmax_scale,
-            is_causal,
-#ifdef USE_ROCM
-            window_size_left,
-            window_size_right,
-#else
-            non_null_window_left,
-            non_null_window_right,
-#endif
-            softcap,
-            return_debug_mask, /*return_softmax (this is used for testing)*/
-            std::nullopt);
-  }
-  debug_attn_mask =
-      return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
-  return std::make_tuple(
-      std::move(output),
-      std::move(logsumexp),
-      std::move(philox_seed),
-      std::move(philox_offset),
-      std::move(debug_attn_mask));
-
-#endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(
-      Tensor(),
-      Tensor(),
-      Tensor(),
-      Tensor(),
-      Tensor());
+  return _flash_attention_forward_impl(
+      query, key, value,
+      cumulative_sequence_length_q, cumulative_sequence_length_k,
+      max_seqlen_batch_q, max_seqlen_batch_k,
+      dropout_p, is_causal, return_debug_mask,
+      scale, window_size_left, window_size_right,
+      _seqused_k, _alibi_slopes, _block_table,
+      /*out=*/std::nullopt, num_splits);
 }
+
+Tensor
+_flash_attention_forward_no_dropout_inplace(
+    Tensor& out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
+    ) {
+  TORCH_CHECK(dropout_p == 0.0);
+  auto [output, logsumexp, philox_seed, philox_offset, debug_attn_mask] =
+      _flash_attention_forward_impl(
+          query, key, value,
+          cumulative_sequence_length_q, cumulative_sequence_length_k,
+          max_seqlen_batch_q, max_seqlen_batch_k,
+          dropout_p, is_causal, return_debug_mask,
+          scale, window_size_left, window_size_right,
+          _seqused_k, _alibi_slopes, _block_table,
+          /*out=*/std::make_optional(out), num_splits);
+  return logsumexp;
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_quantized(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes
+  ) {
+    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+    return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]
@@ -1305,8 +1537,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   TORCH_CHECK(key.size(1) == value.size(1));
 
   // Num heads
-  TORCH_CHECK(query.size(2) == key.size(2));
-  TORCH_CHECK(query.size(2) == value.size(2));
+  const int64_t num_heads = query.size(2);
+  const int64_t num_heads_kv = key.size(2);
+  TORCH_CHECK(num_heads_kv == value.size(2));
+#ifdef USE_ROCM
+  TORCH_CHECK(num_heads == num_heads_kv);
+#else
+  TORCH_CHECK(
+      (num_heads == 0 && num_heads_kv == 0) ||
+          (num_heads > 0 && num_heads_kv > 0 &&
+           num_heads % num_heads_kv == 0),
+      "Number of heads in key/value must divide number of heads in query");
+#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -1322,9 +1564,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(seqstart_q->size(0) == seqstart_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
+    TORCH_CHECK(max_seqlen_k_.has_value());
     max_seqlen_q = *max_seqlen_q_;
-    max_seqlen_k = 0; // TODO: is this actually being set inside the kernel anywhere?
-                      // see https://github.com/pytorch/pytorch/issues/115590s
+    max_seqlen_k = *max_seqlen_k_;
   } else {
     max_seqlen_q = query.size(1);
     max_seqlen_k = key.size(1);
@@ -1340,7 +1582,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   int64_t B = query.size(0);
   int64_t M = query.size(1);
   int64_t N = key.size(1);
-  int64_t num_heads = query.size(-2);
   int64_t K = query.size(-1);
   int64_t Kv = value.size(-1);
 
@@ -1387,9 +1628,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
-    // Not using dropout
-    seed_t = at::empty({}, at::dtype(at::kLong).device(device));
-    offset_t = at::empty({}, at::dtype(at::kLong).device(device));
+    // Not using dropout. AOTAutograd may still save these dummy tensors, and
+    // ROCm attention backends may read their pointers. Keep their device
+    // independent of CUDA graph capture and their value deterministic.
+    const auto options = query.options().dtype(at::kLong);
+    seed_t = at::zeros({}, options);
+    offset_t = at::zeros({}, options);
   }
 
 #ifdef USE_ROCM
@@ -1450,12 +1694,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     // compute_logsumexp is false
     constexpr int kAlignLSE = 1;
     res = at::empty({B, M, num_heads, Kv}, query.options());
+    const auto lse_batch_size =
+        seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
     at::Tensor softmax_lse;
     logsumexp = at::empty(
-      { B, num_heads, compute_logsumexp ? max_seqlen_q : 0},
+      {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
       query.options().dtype(at::ScalarType::Float));
     if (compute_logsumexp) {
-      softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
+      softmax_lse = logsumexp.view({lse_batch_size * num_heads, max_seqlen_q});
     }
     at::Tensor q_t = query.transpose(1, 2);
     at::Tensor k_t = key.transpose(1, 2);
@@ -1478,8 +1724,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       atomic_counter = at::zeros({1}, query.options().dtype(at::kInt));
     }
 
-    using aotriton::v2::flash::attn_fwd;
-    using aotriton::v2::flash::attn_fwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
@@ -1487,100 +1731,64 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
     aotriton::TensorView<2> empty_t2(0, {0, 0}, {0, 0}, aotriton::DType::kFloat32);
     at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
-    const bool use_philox_state = in_capture_stream;
-    auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
-    auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+    // Keep the returned dummy tensors on query.device() for AOTAutograd
+    // metadata stability, but preserve the old no-dropout AOTriton backend
+    // contract: CPU scalar placeholders, not query-device scalar pointers.
+    const auto aotriton_seed_t =
+        use_dropout ? seed_t : at::zeros({}, at::dtype(at::kLong));
+    const auto aotriton_offset_t =
+        use_dropout ? offset_t : at::zeros({}, at::dtype(at::kLong));
+    const bool use_philox_state = use_dropout && in_capture_stream;
+    auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr)
+                                 : mk_aoscalartensor(aotriton_seed_t);
+    auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr)
+                                    : mk_aoscalartensor(aotriton_offset_t);
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
     auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     hipError_t err; // TODO: Error handling
-    if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
-#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
-      using aotriton::v3::flash::CausalType;
-      using aotriton::v3::flash::VarlenType;
-      using aotriton::v3::flash::WindowValue;
-      aotriton::v3::flash::attn_fwd_params params;
-      params.Q = mk_aotensor(q_t, "q");
-      params.K = mk_aotensor(k_t, "k");
-      params.V = mk_aotensor(v_t, "v");
-      params.Sm_scale = softmax_scale;
-      params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
-      params.Out = mk_aotensor(output_t, "Out");
-      params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
-      params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
-      params.dropout_p = dropout_p;
-      params.philox_seed_ptr = seed;
-      params.philox_offset1 = offset1;
-      params.philox_offset2 = offset2;
-      params.philox_seed_output = seed_output;
-      params.philox_offset_output = offset_output;
-      params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
-      params.persistent_atomic_counter = persistent_counter;
-      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-        params.window_left = WindowValue::TopLeftAligned;
-        params.window_right = WindowValue::TopLeftAligned;
-      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
-        params.window_left = WindowValue::BottomRightAligned;
-        params.window_right = WindowValue::BottomRightAligned;
-      }
-      if (bias.has_value()) {
-        params.B = mk_aotensor(bias.value(), "bias");
-      }
-      if (seqstart_q.has_value()) {
-        params.varlen_type = VarlenType::CompactVarlen;
-        params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
-        params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
-      } else {
-        params.varlen_type = VarlenType::None;
-      }
-      err = aotriton::v3::flash::attn_fwd(params,
-                                          aotriton::v3::flash::attn_fwd_params::kVersion,
-                                          stream);
-#endif  // AOTRITON_V3_API
-    } else if (seqstart_q.has_value()) {
-      // varlen aka nested tensor
-      err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
-                                    mk_aotensor(k_t, "k"),
-                                    mk_aotensor(v_t, "v"),
-                                    bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
-                                    mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q"),
-                                    mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k"),
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    softmax_scale,
-                                    compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
-                                    mk_aotensor(output_t, "Out"),
-                                    dropout_p,
-                                    seed,
-                                    offset1,
-                                    offset2,
-                                    seed_output,
-                                    offset_output,
-                                    mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                                    is_causal,
-                                    persistent_counter,
-                                    stream);
-    } else {
-      err = attn_fwd(mk_aotensor(q_t, "q"),
-                     mk_aotensor(k_t, "k"),
-                     mk_aotensor(v_t, "v"),
-                     bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
-                     softmax_scale,
-                     compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2,
-                     mk_aotensor(output_t, "Out"),
-                     dropout_p,
-                     seed,
-                     offset1,
-                     offset2,
-                     seed_output,
-                     offset_output,
-                     mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                     is_causal,
-                     persistent_counter,
-                     stream);
+    using aotriton::v3::flash::CausalType;
+    using aotriton::v3::flash::VarlenType;
+    using aotriton::v3::flash::WindowValue;
+    aotriton::v3::flash::attn_fwd_params params;
+    params.Q = mk_aotensor(q_t, "q");
+    params.K = mk_aotensor(k_t, "k");
+    params.V = mk_aotensor(v_t, "v");
+    params.Sm_scale = softmax_scale;
+    params.L = compute_logsumexp ? mk_aotensor<2>(softmax_lse, "M") : empty_t2;
+    params.Out = mk_aotensor(output_t, "Out");
+    params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.dropout_p = dropout_p;
+    params.philox_seed_ptr = seed;
+    params.philox_offset1 = offset1;
+    params.philox_offset2 = offset2;
+    params.philox_seed_output = seed_output;
+    params.philox_offset_output = offset_output;
+    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.persistent_atomic_counter = persistent_counter;
+    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+      params.window_left = WindowValue::TopLeftAligned;
+      params.window_right = WindowValue::TopLeftAligned;
+    } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+      params.window_left = WindowValue::BottomRightAligned;
+      params.window_right = WindowValue::BottomRightAligned;
     }
+    if (bias.has_value()) {
+      params.B = mk_aotensor(bias.value(), "bias");
+    }
+    if (seqstart_q.has_value()) {
+      params.varlen_type = VarlenType::CompactVarlen;
+      params.cu_seqlens_q = mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k");
+    } else {
+      params.varlen_type = VarlenType::None;
+    }
+    err = aotriton::v3::flash::attn_fwd(params,
+                                        aotriton::v3::flash::attn_fwd_params::kVersion,
+                                        stream);
 #else
     TORCH_CHECK(false, "Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
 #endif
@@ -1616,9 +1824,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       return;
     }
     // Alignment
+    const auto is_ptr_aligned = [](const void* ptr, int64_t alignment_bytes) {
+      return uint64_t(ptr) % alignment_bytes == 0;
+    };
     if ((query.stride(2) % Kernel::kAlignmentQ) ||
         (key.stride(2) % Kernel::kAlignmentK) ||
-        (value.stride(2) % Kernel::kAlignmentV)) {
+        (value.stride(2) % Kernel::kAlignmentV) ||
+        !is_ptr_aligned(
+            query.const_data_ptr(), Kernel::kAlignmentQ * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            key.const_data_ptr(), Kernel::kAlignmentK * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            value.const_data_ptr(), Kernel::kAlignmentV * sizeof(scalar_t))) {
       return;
     }
     // Uses too much shmem
@@ -1641,6 +1858,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          num_heads,
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
+    if (num_heads == 0) {
+      return;
+    }
     typename Kernel::Params p;
     p.query_ptr = (const scalar_t*)query.const_data_ptr();
     p.key_ptr = (const scalar_t*)key.const_data_ptr();
@@ -1668,6 +1888,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
 
     p.num_heads = num_heads;
+    p.q_heads_per_kv = num_heads / num_heads_kv;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = max_seqlen_q;

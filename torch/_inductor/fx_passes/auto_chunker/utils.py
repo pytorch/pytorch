@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx import Graph, GraphModule, Node
@@ -42,7 +42,7 @@ def compute_tensor_size(*args: Any, count_bytes: bool = True, **kwargs: Any) -> 
 
 def get_fake_tensor_from_node_arg(
     node: torch.fx.node.Argument,
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     if (
         not hasattr(node, "meta")
         or ("val" not in node.meta)  # type: ignore[union-attr]
@@ -68,7 +68,7 @@ def format_node_with_chunking_meta(
     """
     Print the node with chunking metadata for the current node if exists.
 
-    If include_args is True, also print chuning metadata for Node arguments.
+    If include_args is True, also print chunking metadata for Node arguments.
     """
     from torch._inductor.runtime.runtime_utils import green_text
 
@@ -93,7 +93,7 @@ def has_any_chunking_meta(*node_list: Node) -> bool:
     return any(get_chunking_meta(node) for node in node_list)
 
 
-def get_first_chunking_meta(*node_list: Node) -> Optional[ChunkingMeta]:
+def get_first_chunking_meta(*node_list: Node) -> ChunkingMeta | None:
     """
     Get the first non-none chunking metadata if there is any.
     """
@@ -106,13 +106,13 @@ def get_first_chunking_meta(*node_list: Node) -> Optional[ChunkingMeta]:
     return None
 
 
-def get_scale_by_from_metas(*metas: ChunkingMeta) -> Optional[Node]:
+def get_scale_by_from_metas(*metas: ChunkingMeta) -> Node | None:
     """
     If there are multiple ChunkingMeta having the scale_by field,
     raise a CantChunk exception.
 
     If no ChunkingMeta has scale_by field, return None.
-    Other wise return the only scale_by field.
+    Otherwise return the only scale_by field.
     """
 
     scale_by_list = []
@@ -128,7 +128,7 @@ def get_scale_by_from_metas(*metas: ChunkingMeta) -> Optional[Node]:
     return scale_by_list[0] if len(scale_by_list) == 1 else None
 
 
-def get_scale_by_from_node(node: Node) -> Optional[Node]:
+def get_scale_by_from_node(node: Node) -> Node | None:
     from .core import get_chunking_meta
 
     meta = get_chunking_meta(node)
@@ -142,7 +142,8 @@ def get_node_is_scalar(nodes: Sequence[Node]) -> dict[Node, bool]:
     node_is_scalar = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_is_scalar[node] = ft.numel() == 1
     return node_is_scalar
 
@@ -154,7 +155,8 @@ def get_node_ndim(nodes: Sequence[Node]) -> dict[Node, int]:
     node_ndim = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_ndim[node] = ft.ndim
     return node_ndim
 

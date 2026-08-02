@@ -223,6 +223,16 @@ class C10_API AcceleratorAllocatorConfig {
     return instance().pinned_use_background_threads_;
   }
 
+  // Returns the max size to allocate power-of-2.
+  static size_t pinned_max_round_threshold() {
+    return instance().pinned_max_round_threshold_;
+  }
+
+  // Returns the max size to cache blocks in the free list.
+  static size_t pinned_max_cached_size() {
+    return instance().pinned_max_cached_size_;
+  }
+
   /* Settings for both device and host allocator */
 
   // Returns the current allocator settings as a string. This string is useful
@@ -234,24 +244,17 @@ class C10_API AcceleratorAllocatorConfig {
 
   // Use `Construct On First Use Idiom` to avoid `Static Initialization Order`
   // issue.
-  static std::unordered_set<std::string>& getMutableKeys() {
-    static std::unordered_set<std::string> keys{
-        "large_segment_size_mb",
-        "max_split_size_mb",
-        "max_non_split_rounding_mb",
-        "garbage_collection_threshold",
-        "roundup_power2_divisions",
-        "expandable_segments",
-        "pinned_use_background_threads"};
-    return keys;
-  }
+  static std::unordered_set<std::string>& getMutableKeys();
 
   // Returns the set of valid keys for the allocator configuration.
   // This set is used to validate the presence and correctness of keys in
   // device-specific configuration parsers.
-  static const std::unordered_set<std::string>& getKeys() {
-    return getMutableKeys();
-  }
+  static const std::unordered_set<std::string>& getKeys();
+
+  // Optional hook for parsing additional device-specific allocator settings.
+  // This allows backends (e.g., CUDA, XPU) to register a custom parser for
+  // their own environment configuration extensions.
+  static std::function<void(const std::string&)>& getConfigParserHook();
 
   // Registers a device-specific configuration parser hook and its key. This
   // allows backends to parse additional device-specific configuration options
@@ -263,7 +266,7 @@ class C10_API AcceleratorAllocatorConfig {
   static void registerDeviceConfigParserHook(
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
-    device_config_parser_hook_ = std::move(hook);
+    getConfigParserHook() = std::move(hook);
     auto& mutable_keys = getMutableKeys();
     for (auto& key : keys) {
       TORCH_CHECK_VALUE(
@@ -279,8 +282,8 @@ class C10_API AcceleratorAllocatorConfig {
   // device-specific configuration options from the environment variable.
   // If no hook is registered, this function does nothing.
   static void callDeviceConfigParserHook(const std::string& env) {
-    if (device_config_parser_hook_) {
-      device_config_parser_hook_(env);
+    if (getConfigParserHook()) {
+      getConfigParserHook()(env);
     }
   }
 
@@ -323,6 +326,13 @@ class C10_API AcceleratorAllocatorConfig {
       const ConfigTokenizer& tokenizer,
       size_t i);
 
+  // Parse `max_round_threshold` from environment variable.
+  size_t parsePinnedMaxRoundThreshold(
+      const ConfigTokenizer& tokenizer,
+      size_t i);
+  // Parse `max_cached_size` from environment variable.
+  size_t parsePinnedMaxCachedSize(const ConfigTokenizer& tokenizer, size_t i);
+
   /* The following members are specifically used for the device allocator. */
 
   // "large" allocations may be packed in blocks of this size
@@ -346,17 +356,16 @@ class C10_API AcceleratorAllocatorConfig {
   // A flag to enable background thread for processing events.
   std::atomic<bool> pinned_use_background_threads_{false};
 
+  // Above this threshold, don't round allocations to power-of-2.
+  size_t pinned_max_round_threshold_{std::numeric_limits<size_t>::max()};
+  // Above this threshold, don't cache blocks in the free list.
+  size_t pinned_max_cached_size_{std::numeric_limits<size_t>::max()};
+
   /* The following members are used for both device and host allocator. */
 
   // Record the last allocator config environment setting.
   std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
-
-  // Optional hook for parsing additional device-specific allocator settings.
-  // This allows backends (e.g., CUDA, XPU) to register a custom parser for
-  // their own environment configuration extensions.
-  inline static std::function<void(const std::string&)>
-      device_config_parser_hook_{nullptr};
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {

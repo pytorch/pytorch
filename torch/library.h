@@ -34,7 +34,7 @@
 /// // You must define all of the operators for this library in
 /// // this namespace.
 /// TORCH_LIBRARY(myops, m) {
-///   // Define a operator with exactly one implementation for all backends.
+///   // Define an operator with exactly one implementation for all backends.
 ///   m.def("add(Tensor self, Tensor other) -> Tensor", &add_impl);
 ///
 ///   // Define a schema for an operator, but provide no implementation
@@ -228,14 +228,6 @@ class TORCH_API CppFunction final {
   /// function done in the same way.
   static CppFunction makeFallthrough() {
     return makeFromBoxedKernel(c10::BoxedKernel::makeFallthrough());
-  }
-
-  /// \private
-  ///
-  /// Creates a function that raises an error saying that named tensors
-  /// are not supported when called.
-  static CppFunction makeNamedNotSupported() {
-    return makeFromBoxedKernel(c10::BoxedKernel::makeNamedNotSupported());
   }
 
   /// Create a function from a boxed kernel function with signature
@@ -475,7 +467,7 @@ class TorchLibraryInit;
 // except it also carries at compile time a boolean saying whether or not a
 // registration should actually happen or not.  We then have extra overloads
 // which bypass registration entirely if a selective name is disabled.  We do a
-// constexpr test to see if a operator should be enabled or not; this is
+// constexpr test to see if an operator should be enabled or not; this is
 // currently implemented in ATen/core/op_registration/op_allowlist.h
 
 namespace detail {
@@ -984,7 +976,7 @@ class TorchLibraryInit final {
   static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_##ns( \
       torch::Library::DEF,                                                     \
       &TORCH_LIBRARY_init_##ns,                                                \
-      #ns,                                                                     \
+      C10_STRINGIZE(ns),                                                                     \
       std::nullopt,                                                            \
       __FILE__,                                                                \
       __LINE__);                                                               \
@@ -1014,7 +1006,7 @@ class TorchLibraryInit final {
       TORCH_LIBRARY_FRAGMENT_static_init_##ns##_, uid)(           \
       torch::Library::FRAGMENT,                                   \
       &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid), \
-      #ns,                                                        \
+      C10_STRINGIZE(ns),                                                        \
       std::nullopt,                                               \
       __FILE__,                                                   \
       __LINE__);                                                  \
@@ -1076,7 +1068,7 @@ class TorchLibraryInit final {
       TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
       torch::Library::IMPL,                                               \
       &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),       \
-      #ns,                                                                \
+      C10_STRINGIZE(ns),                                                                \
       std::make_optional(c10::DispatchKey::k),                            \
       __FILE__,                                                           \
       __LINE__);                                                          \

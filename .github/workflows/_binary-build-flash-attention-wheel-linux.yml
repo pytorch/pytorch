@@ -1,0 +1,109 @@
+# Owner(s): ["oncall: releng"]
+name: Build Flash Attention 3 wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Build test wheels with date suffix in version'
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '0 0 1,15 * *'  # periodic builds (no uploads) every 2 weeks to test the script
+  pull_request:
+    paths:
+      - .github/workflows/_binary-build-flash-attention-wheel-linux.yml
+      - .ci/flash-attention/*.sh
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-wheel:
+    if: github.repository_owner == 'pytorch'
+    name: "Build FA3 ${{ matrix.cuda_version }} ${{ matrix.arch }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "12.6.3"
+            arch: "x86_64"
+            cuda_short: "126"
+            torch_cuda_arch_list: "8.0;8.6;9.0"
+            docker_image: "pytorch/manylinux2_28-builder:cuda12.6"
+            runner: "mt-l-x86iavx512-48-384"
+            manylinux_plat: "manylinux_2_28_x86_64"
+          - cuda_version: "13.0.2"
+            arch: "x86_64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
+            docker_image: "pytorch/manylinux2_28-builder:cuda13.0"
+            runner: "mt-l-x86iavx512-48-384"
+            manylinux_plat: "manylinux_2_28_x86_64"
+          - cuda_version: "12.6.3"
+            arch: "aarch64"
+            cuda_short: "126"
+            torch_cuda_arch_list: "9.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
+            runner: "mt-l-arm64g3-61-463"
+            max_jobs: "4"
+            nvcc_threads: "2"
+            manylinux_plat: "manylinux_2_34_aarch64"
+            cuda_installer_name: "cuda_12.6.3_560.35.05_linux"
+          - cuda_version: "13.0.2"
+            arch: "aarch64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "9.0;10.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
+            runner: "mt-l-arm64g3-61-463"
+            max_jobs: "4"
+            nvcc_threads: "2"
+            manylinux_plat: "manylinux_2_34_aarch64"
+            cuda_installer_name: "cuda_13.0.2_580.95.05_linux"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 1440
+    # Build inside the manylinux builder image (the pod is the builder): ARC has
+    # no host docker daemon, so we run .ci/flash-attention/build.sh directly
+    # instead of docker run/exec.
+    container:
+      image: ${{ matrix.docker_image }}
+      options: --ipc=host --tty
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+      CUDA_SHORT: ${{ matrix.cuda_short }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+      # building against Python 3.10 and torch 2.10
+      PYTHON_VERSION: "3.10"
+      TORCH_VERSION: "2.10.0"
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: true
+          show-progress: false
+
+      - name: Build Flash Attention 3 wheel
+        shell: bash
+        env:
+          FA_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
+          MANYLINUX_PLAT: ${{ matrix.manylinux_plat }}
+          MAX_JOBS: ${{ matrix.max_jobs }}
+          NVCC_THREADS: ${{ matrix.nvcc_threads }}
+          CUDA_INSTALLER_NAME: ${{ matrix.cuda_installer_name }}
+          FA_TEST_BUILD: ${{ inputs.test }}
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          PYTHON_EXECUTABLE="/opt/python/cp${PYTHON_VERSION//./}-cp${PYTHON_VERSION//./}/bin/python"
+          export PYTHON_EXECUTABLE
+          "${PYTHON_EXECUTABLE}" -m pip install \
+            "torch==${TORCH_VERSION}" --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+          bash .ci/flash-attention/build.sh
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*.whl

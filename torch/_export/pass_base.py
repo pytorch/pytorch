@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
 import traceback
-import typing
 from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch import fx
@@ -13,7 +12,12 @@ from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_constant,
+    maybe_get_fake_mode,
+)
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 from torch.fx.experimental.symbolic_shapes import (
@@ -32,7 +36,7 @@ __all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
 Argument = Any
 Value = Any
 Fn = Callable[..., Any]
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 
 _TORCH_SYM_OPS: set[Callable] = {
@@ -70,7 +74,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.graph = torch.fx.Graph()
             self.graph.set_codegen(codegen)
             self.tensor_attrs: dict[str, torch.Tensor] = {}  # type: ignore[assignment]
-            self.fake_tensor_mode: Optional[FakeTensorMode] = None
+            self.fake_tensor_mode: FakeTensorMode | None = None
             self.submodules: dict[torch.nn.Module, str] = {}
 
         def trace(self) -> None:  # type: ignore[override]
@@ -82,10 +86,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     name_submodule = f"submodule_{len(self.submodules)}"
                     self.root.add_module(name_submodule, a)
                     self.submodules[a] = name_submodule
-            elif isinstance(a, FakeTensor):
-                if not hasattr(a, "constant") or a.constant is None:
+            elif is_fake_tensor(a):
+                if maybe_get_fake_constant(a) is None:
                     raise ExportPassBaseError(f"Cannot add {a} to graph.")
-                a = a.constant
+                a = maybe_get_fake_constant(a)
             node = super().create_arg(a)
             if (
                 isinstance(a, torch.Tensor)
@@ -104,18 +108,18 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             # propagate the fake tensor or sym nodes
             def make_val(
                 x: Argument,
-            ) -> Union[
-                FakeTensor,
-                torch.SymInt,
-                torch.SymFloat,
-                torch.SymBool,
-                int,
-                float,
-                bool,
-                str,
-                None,
-            ]:
-                if isinstance(x, FakeTensor):
+            ) -> (
+                FakeTensor
+                | torch.SymInt
+                | torch.SymFloat
+                | torch.SymBool
+                | int
+                | float
+                | bool
+                | str
+                | None
+            ):
+                if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                     return x
                 elif isinstance(x, torch.Tensor):
                     if x.is_quantized:
@@ -123,7 +127,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                         x = torch.dequantize(x)
 
                     try:
-                        assert self.fake_tensor_mode is not None
+                        if self.fake_tensor_mode is None:
+                            raise AssertionError("fake_tensor_mode must not be None")
                         # TODO we should allocate static shapes
                         # for param/buffer values
                         if isinstance(x, torch.nn.Parameter):
@@ -160,14 +165,15 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             node.meta["val"] = pytree.tree_map(make_val, value)
 
             # Set the tensor_metadata for values that do not have a corresponding FakeTensor
-            def make_tensor_meta(x: Argument) -> Optional[TensorMetadata]:
-                if not isinstance(x, FakeTensor) and isinstance(x, torch.Tensor):
+            def make_tensor_meta(x: Argument) -> TensorMetadata | None:
+                if not is_fake_tensor(x) and isinstance(x, torch.Tensor):
                     if x.is_quantized:
                         # TODO (tmanlaibaatar) properly support Quantized FakeTensor
                         x = torch.dequantize(x)
 
                     try:
-                        assert self.fake_tensor_mode is not None
+                        if self.fake_tensor_mode is None:
+                            raise AssertionError("fake_tensor_mode must not be None")
                         _ = self.fake_tensor_mode.from_tensor(x)
                         tensor_meta = None
                     except UnsupportedFakeTensorException:
@@ -222,10 +228,12 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 "builtins",
                 "math",
             }:
-                assert callable(target)
+                if not callable(target):
+                    raise AssertionError(f"expected callable target, got {target}")
                 return self.callback.call_sym(target, args, meta)
             elif target in _TORCH_SYM_OPS:
-                assert callable(target)
+                if not callable(target):
+                    raise AssertionError(f"expected callable target, got {target}")
                 return self.callback.call_sym(target, args, meta)
             elif isinstance(
                 target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
@@ -288,9 +296,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())
-        self.fake_tensor_mode: Optional[FakeTensorMode] = None
+        self.fake_tensor_mode: FakeTensorMode | None = None
         self._initialized = True
-        self.node_debug_str: typing.Optional[str] = None
+        self.node_debug_str: str | None = None
 
     def _fx(
         self,
@@ -328,14 +336,15 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         if (args := graph_module.meta.get("args", None)) is not None:
             return list(args)
 
-        def extract_input(node: torch.fx.Node) -> Optional[FakeTensor]:
+        def extract_input(node: torch.fx.Node) -> FakeTensor | None:
             if "val" in node.meta:
                 fake = node.meta["val"]
                 if hasattr(fake, "constant") and fake.constant is not None:
                     return fake.constant
                 return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
-                assert self.fake_tensor_mode is not None
+                if self.fake_tensor_mode is None:
+                    raise AssertionError("fake_tensor_mode must not be None")
                 return FakeTensor(
                     self.fake_tensor_mode,
                     torch.empty(
@@ -395,8 +404,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     ) -> ProxyValue:
         true_branch = self.call_submodule(true_fn, tuple(inputs))
         false_branch = self.call_submodule(false_fn, tuple(inputs))
-        assert true_branch is not None
-        assert false_branch is not None
+        if true_branch is None:
+            raise AssertionError("true_branch must not be None")
+        if false_branch is None:
+            raise AssertionError("false_branch must not be None")
         return self._fx(
             "call_function",
             torch.ops.higher_order.cond,
@@ -414,7 +425,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     ) -> ProxyValue:
         xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
         f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in operands]))
-        assert f_branch is not None
+        if f_branch is None:
+            raise AssertionError("f_branch must not be None")
         return self._fx(
             "call_function",
             torch.ops.higher_order.map_impl,
@@ -470,11 +482,13 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         fake_tensor_mode = None
         for i in inputs:
-            if isinstance(i, FakeTensor):
-                assert fake_tensor_mode is None or fake_tensor_mode is i.fake_mode, (
-                    "Multiple fake tensor mode detected."
-                )
-                fake_tensor_mode = i.fake_mode
+            if is_fake_tensor(i):
+                if (
+                    fake_tensor_mode is not None
+                    and fake_tensor_mode is not maybe_get_fake_mode(i)
+                ):
+                    raise AssertionError("Multiple fake tensor mode detected.")
+                fake_tensor_mode = maybe_get_fake_mode(i)
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]

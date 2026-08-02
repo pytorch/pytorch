@@ -35,7 +35,7 @@ std::string FlightRecorder<EventType>::Entry::getTraceback() {
     #4 main from /home/user/repro.py:34
     #5 <module> from /home/user/repro.py:40
   */
-  return oss.str();
+  return std::move(oss).str();
 }
 
 template <typename EventType>
@@ -89,13 +89,13 @@ typename FlightRecorder<EventType>::TraceIdentifier FlightRecorder<EventType>::
   if (!enabled_) {
     return TraceIdentifier{std::nullopt, std::nullopt};
   }
+  auto traceback =
+      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
+  std::lock_guard<std::mutex> guard(mutex_);
   if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
     // Current pg_status is not in FR.
     all_pg_status_[pg_id] = std::move(pg_status);
   }
-  auto traceback =
-      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-  std::lock_guard<std::mutex> guard(mutex_);
 
   TORCH_CHECK(
       reset_epoch_start_idx_.find(reset_epoch_) !=
@@ -296,7 +296,7 @@ void FlightRecorder<EventType>::retire_id(
   }
 
   if (can_compute_duration) {
-    // Compute duration without without holding the lock, because
+    // Compute duration without holding the lock, because
     // cudaEventDuration() can hang, and we need to acquire the lock before we
     // can dump(), which we never want to block.
     guard.unlock();

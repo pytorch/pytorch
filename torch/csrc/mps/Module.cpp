@@ -13,8 +13,10 @@
 #include <memory>
 
 #ifdef USE_MPS
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <torch/csrc/mps/Stream.h>
 #endif
 
 namespace torch::mps {
@@ -64,8 +66,12 @@ static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_deviceSynchronize(
     PyObject* _unused,
     PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  at::detail::getMPSHooks().deviceSynchronize();
+  HANDLE_TH_ERRORS {
+    // Release GIL so Metal's completion thread can destroy Python-wrapped
+    // objects (e.g. storages captured in MTLBuffer deallocator blocks).
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().deviceSynchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -113,6 +119,14 @@ static PyObject* MPSModule_recommendedMaxMemory(
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       at::detail::getMPSHooks().getRecommendedMaxMemory());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_maxBufferLength(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::detail::getMPSHooks().getMaxBufferLength());
   END_HANDLE_TH_ERRORS
 }
 
@@ -178,7 +192,11 @@ static PyObject* MPSModule_waitForEvent(PyObject* _unused, PyObject* args) {
 static PyObject* MPSModule_synchronizeEvent(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().synchronizeEvent(event_id);
+  {
+    // See MPSModule_deviceSynchronize.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().synchronizeEvent(event_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -211,6 +229,21 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_MPS
+static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
+  HANDLE_TH_ERRORS
+  at::mps::MPSStream* mps_stream = nullptr;
+  if (stream != Py_None) {
+    TORCH_CHECK(
+        THPMPSStream_Check(stream), "invalid stream argument to setStream");
+    mps_stream = reinterpret_cast<THPMPSStream*>(stream)->mps_stream;
+  }
+  at::mps::setCurrentMPSStream(mps_stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+#endif /* USE_MPS */
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -241,6 +274,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
+    {"_mps_maxBufferLength", MPSModule_maxBufferLength, METH_NOARGS, nullptr},
     {"_mps_profilerStartTrace",
      MPSModule_profilerStartTrace,
      METH_VARARGS,
@@ -259,6 +293,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
      nullptr},
+#ifdef USE_MPS
+    {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+#endif /* USE_MPS */
     {nullptr}};
 
 PyMethodDef* python_functions() {
@@ -495,6 +532,26 @@ void initModule(PyObject* module) {
       .def_property_readonly(
           "static_thread_group_memory_length",
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
+  py::class_<
+      PrecompiledMetalShaderLibrary,
+      std::shared_ptr<PrecompiledMetalShaderLibrary>>(
+      m, "_mps_PrecompiledShaderLibrary")
+      .def(
+          "__getattr__",
+          [](PrecompiledMetalShaderLibrary& self, const std::string& name) {
+            return self.getKernelFunction(name);
+          })
+      .def("__dir__", [](PrecompiledMetalShaderLibrary& self) {
+        return self.getFunctionNames();
+      });
+  m.def("_mps_loadMetalllib", [](const py::bytes& data) {
+    auto sv = static_cast<std::string_view>(data);
+    std::vector<uint8_t> bytes(sv.begin(), sv.end());
+    return std::make_shared<PrecompiledMetalShaderLibrary>(std::move(bytes));
+  });
+  m.def("_mps_loadMetallibFromPath", [](const std::string& path) {
+    return std::make_shared<PrecompiledMetalShaderLibrary>(path);
+  });
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
   });
@@ -507,12 +564,29 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_stopCapture", []() {
+    // See MPSModule_deviceSynchronize: stopCapture drains the stream, so the
+    // GIL must be released while waiting on GPU work
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSProfiler().stopCapture();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
+    PyObject* obj = py_storage.ptr();
+    TORCH_CHECK_TYPE(
+        THPStorage_Check(obj),
+        "_mps_host_alias_storage: expected a torch.UntypedStorage");
+    const c10::Storage& mps_storage = THPStorage_Unpack(obj);
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_CHECK(allocator, "MPS allocator is not available");
+    c10::Storage host_alias = allocator->getHostAliasStorage(mps_storage);
+    return py::reinterpret_steal<py::object>(
+        THPStorage_Wrap(std::move(host_alias)));
   });
 }
 #endif /* USE_MPS */

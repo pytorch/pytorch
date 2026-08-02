@@ -7,7 +7,6 @@
 #include <ATen/native/NonSymbolicBC.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -532,7 +531,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
       } else {
         TORCH_CHECK(
             in1_i,
-            "dytpe cannot be None when copy is True for aten::to.prim_dtype");
+            "dtype cannot be None when copy is True for aten::to.prim_dtype");
         p_node->Output(0) = at::native::to(in0_t, *in1_i, in2_i, in3_i);
       }
     };
@@ -1103,7 +1102,7 @@ c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
 /*
   prim::fork forks the execution of a subgraph. It returns a future on which
   the corresponding aten::wait op waits until future is marked complete
-  Current implementation creates a instance of StaticModule uses it to
+  Current implementation creates an instance of StaticModule uses it to
   create StaticRuntime instances on the fly during runtime to handle the
   execution of forked subgraph. Async execution is handled by
   aten::ParallelThreadPoolNative threadpool.
@@ -1246,8 +1245,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& elems = pnode->Input(0).toTupleRef().elements();
-        using c10::ssize;
-        const auto num_elems = ssize(elems);
+        const auto num_elems = std::ssize(elems);
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
         if (norm_idx < 0 || norm_idx >= num_elems) {
@@ -1491,7 +1489,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           std::stringstream ss;
           ss << "Cannot input a tensor of type " << tensor.scalar_type()
              << " as an integral argument";
-          throw std::runtime_error(ss.str());
+          throw std::runtime_error(std::move(ss).str());
         }
         pnode->Output(0) = at::native::item(tensor).toInt();
       };

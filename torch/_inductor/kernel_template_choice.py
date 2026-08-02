@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
-from .template_heuristics.params import DictKernelTemplateParams
+from .heuristics.template.params import DictKernelTemplateParams
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from .codegen.common import KernelTemplate
+    from .heuristics.template.params import KernelTemplateParams
     from .ir import ChoiceCaller, Layout
     from .kernel_inputs import KernelInputs
     from .select_algorithm import ExternKernelChoice
-    from .template_heuristics.params import KernelTemplateParams
 
 
 class KernelTemplateChoice:
@@ -25,7 +25,7 @@ class KernelTemplateChoice:
 
     def __init__(
         self,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        template: KernelTemplate | ExternKernelChoice,
         params: KernelTemplateParams,
         extra_kwargs: dict[str, Any],
         layout: Layout,
@@ -39,7 +39,7 @@ class KernelTemplateChoice:
         self.annotations: dict[str, Any] = {"ktc": self}
 
     @property
-    def choice(self) -> Optional[ChoiceCaller]:
+    def choice(self) -> ChoiceCaller | None:
         """
         Lazily evaluate and return the ChoiceCaller for this template choice.
 
@@ -65,7 +65,7 @@ class KernelTemplateChoice:
 
 
 def make_ktc_generator(
-    template: Union[KernelTemplate, ExternKernelChoice],
+    template: KernelTemplate | ExternKernelChoice,
     cs: Generator[KernelTemplateParams, None, None],
     extra_kwargs: dict[str, Any],
     overrides: dict[str, Any],

@@ -4,7 +4,7 @@
 
 include(../../cmake/public/xpu.cmake)
 
-if(NOT BUILD_LIBTORCHLESS)
+if(BUILD_LIBTORCHLESS)
   find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
 
@@ -15,12 +15,14 @@ configure_file(
     ${CMAKE_BINARY_DIR}/c10/xpu/impl/xpu_cmake_macros.h)
 
 set(C10_XPU_SRCS
+    PeerToPeerAccess.cpp
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
     XPUStream.cpp
     impl/XPUGuardImpl.cpp
 )
 set(C10_XPU_HEADERS
+    PeerToPeerAccess.h
     XPUCachingAllocator.h
     XPUDeviceProp.h
     XPUException.h

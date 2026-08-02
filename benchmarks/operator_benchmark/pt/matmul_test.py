@@ -13,7 +13,7 @@ mm_short_configs = op_bench.config_list(
         [128, 128, 128, True, False],
         [256, 256, 256, False, True],
     ],
-    cross_product_configs={"device": ["cpu", "cuda"]},
+    cross_product_configs={"device": ["cpu", "cuda", "xpu"]},
     tags=["short"],
 )
 
@@ -24,7 +24,7 @@ mm_long_configs = op_bench.cross_product_configs(
     K=[512, 4096],
     trans_a=[False, True],
     trans_b=[True, False],
-    device=["cuda"],
+    device=["cuda", "xpu"],
     dtype=[torch.float16, torch.bfloat16, torch.float32],
     tags=["long"],
 )
@@ -69,7 +69,10 @@ class MatMulBenchmark(op_bench.TorchBenchmarkBase):
         # input_one and input_two are properly shaped for matmul regardless of transpose
         M, N = input_one.shape
         N_check, K = input_two.shape
-        assert N == N_check, "Matrix dimensions must match for matmul"
+        if N != N_check:
+            raise AssertionError(
+                f"Matrix dimensions must match for matmul: N={N}, N_check={N_check}"
+            )
 
         bytes_per_element = input_one.element_size()
         total_elements = M * N + N * K + M * K

@@ -3,14 +3,24 @@ import functools
 import operator
 import os
 import re
+import unittest
 import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage, Unsupported
+from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
+from torch._dynamo.exc import Unsupported
+from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
+    parametrize,
+    skipIfWindows,
+    TEST_WITH_ASAN,
+)
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
@@ -39,12 +49,31 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_invoke_subgraph_wrapper_is_allow_in_graph(self):
+        # `invoke_subgraph_inner_compiler` returns a boxed wrapper that, when
+        # called, invokes an inner closure decorated with `@disable` and
+        # `@torch._dynamo.allow_in_graph`. The id of that inner closure must
+        # be in the allow_in_graph registry — otherwise dynamo's
+        # `lookup_callable` will fall through to the disable check and graph
+        # break, defeating the point of `allow_in_graph`.
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        boxed = invoke_subgraph_inner_compiler(gm, [torch.randn(4)])
+
+        # The boxed wrapper closes over `invoke_subgraph_wrapper_unboxed`.
+        self.assertEqual(
+            boxed.__code__.co_freevars, ("invoke_subgraph_wrapper_unboxed",)
+        )
+        unboxed = boxed.__closure__[0].cell_contents
+
+        self.assertTrue(is_callable_allowed(unboxed))
+
     def test_disable_for_custom_op(self):
         import torch.library
-        from torch.library import Library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        try:
+        with torch.library._scoped_library("foo", "DEF") as foo:
             foo.define("custom(Tensor self) -> Tensor")
 
             # Dynamic shape data dependent operator. For static shape compilation, Dynamo
@@ -74,8 +103,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 self.assertEqual(ref, res)
             finally:
                 torch.ops.foo.custom = orig_custom
-        finally:
-            foo._destroy()
+
+    def test_disable_not_traced_and_correct(self):
+        # disable must keep Dynamo from tracing into the function while still
+        # returning correct results (exercises the non-export hot path).
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        def fn(x):
+            return torch.cos(inner(torch.sin(x)))
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        res = torch.compile(fn, backend=cnts)(x)
+        self.assertEqual(ref, res)
+        # inner is disabled -> graph break around it -> two compiled frames.
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_disable_under_eager_on_recompile_stance(self):
+        # A disabled function honors the stance for its body: under
+        # eager_on_recompile the stance callback is False (run-only), not fully
+        # off. Pin that it still returns correct results.
+        @torch._dynamo.disable
+        def inner(x):
+            return x + 1
+
+        x = torch.randn(4)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            self.assertEqual(inner(x), x + 1)
+            self.assertEqual(inner(x), x + 1)
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
@@ -241,10 +300,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
         fn(torch.randn(10))
 
         # Check for graph break
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_incorrect_usage_disallow_in_graph(self):
-        with self.assertRaises(IncorrectUsage):
+        with self.assertRaisesRegex(RuntimeError, "disallow_in_graph is expected"):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
@@ -252,6 +311,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_nonstrict_trace_tensor_args(self):
         @torch._dynamo.nonstrict_trace
+        def trace_me(x, y, z):
+            torch._dynamo.graph_break()
+            return x * y + z
+
+        def fn(x, y):
+            t0 = x + 1
+            t1 = trace_me(x, y, t0)
+            t2 = t1 + y
+            return t0 * t2
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_from_torch_compiler(self):
+        @torch.compiler.nonstrict_trace
         def trace_me(x, y, z):
             torch._dynamo.graph_break()
             return x * y + z
@@ -486,7 +564,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State:
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -509,7 +587,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="value")
+        torch._library.opaque_object.register_custom_class(State, typ="constant")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -648,15 +726,16 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_nonstrict_trace_no_action_at_a_distance(self):
         def trace_me(x):
+            x = x + 4
             torch._dynamo.graph_break()
-            return x + 42
+            return x + 8
 
         # No effect on traceability of `trace_me`
         torch._dynamo.nonstrict_trace(trace_me)
 
         def fn(x):
-            res = trace_me(x)
-            return res + 1
+            res = trace_me(x + 1)
+            return res + 2
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -682,7 +761,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # NOQA: B950
+            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
             self.assertIn(msg, str(e))
 
     def test_nonstrict_trace_custom_class_error(self):
@@ -787,7 +866,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State:
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -804,7 +883,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="reference")
+        torch._library.opaque_object.register_custom_class(State, typ="symbolic")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -871,6 +950,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertIn(
                 "Invalid use of pytree_flatten with nonstrict_trace-ed function", str(e)
             )
+
+    def test_nonstrict_trace_nn_module_dict_input(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, modules):
+            torch._dynamo.graph_break()
+            return modules["a"](x) + modules["b"](x)
+
+        def fn(x, modules):
+            return trace_me(x, modules) + 1
+
+        linear_a = torch.nn.Linear(4, 4)
+        linear_b = torch.nn.Linear(4, 4)
+        modules = {"a": linear_a, "b": linear_b}
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, modules)
+        res = opt_fn(x, modules)
+        self.assertEqual(ref, res)
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1032,6 +1130,92 @@ class DecoratorTests(PytreeRegisteringTestCase):
         )
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
+
+    def test_fullgraph_eval_frame_override(self):
+        # NOTE it is NOT enough to just call a torch.compile'd function in a compiled
+        # function returned by the backend - this is because we apply disable(recursive=True)
+        # to compiled functions and if we call a directly torch.compile'd function, that
+        # "overrides" the disable(recursive=True) - i.e. this behavior is intentional.
+
+        # Instead, we will patch symbolic_convert.InstructionTranslator.codegen_return_with_pops to
+        # append a bunch of additional bytecode that will run a function that is not disabled.
+        global inner
+
+        y = torch.ones(3)
+
+        def inner():
+            nonlocal y
+            y += 1
+
+        from torch._dynamo.bytecode_transformation import (
+            create_call_function,
+            create_instruction,
+            Instruction,
+        )
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        old_codegen_return = InstructionTranslatorBase.codegen_return_with_pops
+
+        def codegen_return_with_pops(self, *args) -> list[Instruction]:
+            insts = old_codegen_return(*args)
+            if not insts[-1].opname.startswith("RETURN"):
+                raise AssertionError(
+                    f"Expected RETURN instruction, got {insts[-1].opname}"
+                )
+            # to prevent infinite recursion
+            if self.f_code.co_name != "inner":
+                insts[-1:-1] = [
+                    create_instruction("LOAD_GLOBAL", argval="inner"),
+                    *create_call_function(0, True),
+                    create_instruction("POP_TOP"),
+                ]
+            return insts
+
+        def fn(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        with mock.patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslatorBase.codegen_return_with_pops",
+            codegen_return_with_pops,
+        ):
+            # fullgraph=False will result in inner being traced!
+            opt_fn_1 = torch.compile(fn, backend=cnts, fullgraph=False)
+
+            # inner compiled
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(y, torch.ones(3) + 1)
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # NOTE do not fully reset dynamo - to ensure eval frame override is applied for cache hits
+            opt_fn_2 = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=False
+            ):
+                # fullgraph=True will result in inner being skipped!
+                opt_fn_2(torch.ones(3))
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(y, torch.ones(3) + 2)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=True
+            ):
+                # fullgraph=True will result in error when attempting to compile inner
+                with self.assertRaisesRegex(
+                    RuntimeError, "Dynamo: expected not to compile nested code"
+                ):
+                    opt_fn_2(torch.ones(3))
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # if we run fullgraph=False again, inner is compiled again (because we reset_code)
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(y, torch.ones(3) + 3)
 
     def test_substitute_in_graph(self):
         counters.clear()
@@ -1210,8 +1394,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.
-        # For both inline_inbuilt_nn_modules True and False, we expect the
-        # tensor to be present in the buffers attribute of the graph.
+        # We expect the tensor to be present in the buffers attribute of the graph.
 
         compiles_with_buffers = 0
         compiles = 0
@@ -1248,15 +1431,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(compiles, 2 if guarded else 1)
 
     def test_mark_static_address_guarded(self):
-        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
-            self._test_mark_static_address(guarded=True)
-
         self._test_mark_static_address(guarded=True)
 
     def test_mark_static_address_unguarded(self):
-        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
-            self._test_mark_static_address(guarded=False)
-
         self._test_mark_static_address(guarded=False)
 
     def test_class_methods(self):
@@ -1356,7 +1533,46 @@ class DecoratorTests(PytreeRegisteringTestCase):
         y = torch.tensor([1])
         x = torch.tensor(1)
 
-        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+        self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
+
+    def test_justknobs_check(self):
+        def fn(x, y):
+            if torch._utils_internal.justknobs_check("test", True):
+                return x + y
+            else:
+                return x - y
+
+        x = torch.randn(2, 2, device="cpu")
+        y = torch.randn(2, 2, device="cpu")
+        eager_out = fn(x, y)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_out = compiled_fn(x, y)
+        self.assertEqual(eager_out, compiled_out)
+
+    def test_assume_constant_result_on_cached_property(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._cached_id = None
+
+            @property
+            def cached_id(self) -> int:
+                if self._cached_id is None:
+                    self._cached_id = 42
+                return self._cached_id
+
+            def forward(self, x):
+                return x * self.cached_id
+
+        torch._dynamo.assume_constant_result(MyModule.cached_id.fget)
+
+        model = MyModule()
+        x = torch.tensor([1.0, 2.0, 3.0])
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        result_eager = model(x)
+        result_compiled = compiled_model(x)
+
+        self.assertTrue(torch.allclose(result_eager, result_compiled))
 
     def test_set_stance_aot_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1373,7 +1589,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Would have been 4 without stance
         self.assertEqual(cnts.op_count, 2)
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):
         @torch._dynamo.mark_static
         class Mock(torch.nn.Module):
@@ -1400,6 +1615,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    @unittest.skipIf(
+        IS_LINUX or IS_MACOS, "https://github.com/pytorch/pytorch/issues/148515"
+    )
     def test_set_stance_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1414,6 +1632,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/148463",
+    )
     def test_set_stance_eager_then_compile_with_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1430,6 +1652,42 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(3, torch.randn(3), {0: torch.randn(3)})
 
         # frame count 2 since we added a graph break
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_stance_eager_then_compile_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            x1 = torch.randn(10)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(10)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(10, 10)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_stance_eager_then_compile_delayed_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        x1 = torch.randn(4)
+        x2 = torch.randn(4)
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            self.assertEqual(fn(x1), x1 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 3, 4, 5)
+            self.assertEqual(fn(x3), x3 + 1)
+
         self.assertEqual(cnts.frame_count, 2)
 
     def test_set_stance_force_eager(self):
@@ -1515,7 +1773,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
 Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: 'test_decorators.py', function name: 'f', line number: N
     triggered by the following guard failure(s):
     - 0/0: tensor 'x' size mismatch at index 0. expected 4, actual 7
-    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",  # noqa: B950
+    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",
                 post_munge=post_munge,
             )
 
@@ -1603,7 +1861,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             g(torch.ones(3))
 
     def test_set_stance_force_backend(self):
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def a(x):
             return x + 1
 
@@ -1846,6 +2104,45 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_error_on_graph_break_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        with mock.patch(
+            "torch._dynamo.decorators._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            with torch._dynamo.error_on_graph_break(False):
+                pass
+
+    def test_error_on_graph_break_reentrant_context_restores_outer_state(self):
+        torch._dynamo.utils._set_error_on_graph_break(True)
+        cm = torch._dynamo.error_on_graph_break(False)
+
+        try:
+            with cm:
+                self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+                with cm:
+                    self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+
+            self.assertTrue(torch._dynamo.utils._get_error_on_graph_break())
+        finally:
+            torch._dynamo.utils._set_error_on_graph_break(False)
+
+    def test_error_on_graph_break_compile_wrapper_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch._dynamo.optimize("eager", error_on_graph_break=False)(fn)
+        x = torch.ones(3)
+
+        with mock.patch(
+            "torch._dynamo.eval_frame._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            self.assertEqual(opt_fn(x), fn(x))
+
     def test_error_on_graph_break_nested(self):
         # error_on_graph_break in a nested frame
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1864,7 +2161,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f5(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner_f6(x):
             x = x + 2
@@ -1880,7 +2177,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         cnts.clear()
         self.assertEqual(f6(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner_f7(x):
             x = x + 2
@@ -1920,7 +2217,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f8(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 3)
 
         def inner2_f9(x):
             x = x + 2
@@ -1983,7 +2280,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f1(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner1_f2(x):
             x = x + 1
@@ -2174,8 +2471,92 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             )
 
             # check the model is compilable
-            torch.compile(model)
-            torch.compile(other_model)
+            torch.compile(model, backend="eager")
+            torch.compile(other_model, backend="eager")
+
+    def test_disable_class_and_instance_method(self):
+        # Test that decorating a method at class definition time and then
+        # re-decorating the instance method works correctly. This tests the
+        # fix in innermost_fn that stops unwrapping when hitting a bound method.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        class Foo:
+            def run(self, a, b, c):
+                return self.work(a, b, c)
+
+            @torch._dynamo.disable
+            def work(self, a, b, c):
+                return a + b - c
+
+        foo = Foo()
+        # Re-decorate the instance method
+        foo.work = torch._dynamo.disable(foo.work)
+
+        a = torch.randint(0, 10, (10,))
+        b = torch.randint(0, 10, (10,))
+        c = torch.randint(0, 10, (10,))
+
+        # Should work without error - self should be correctly bound
+        result = foo.run(a, b, c)
+        self.assertEqual(result, a + b - c)
+
+        # Also test nested disable on instance methods
+        foo2 = Foo()
+        foo2.work = torch._dynamo.disable(torch._dynamo.disable(foo2.work))
+        result2 = foo2.run(a, b, c)
+        self.assertEqual(result2, a + b - c)
+
+        # Test innermost_fn shortcut behavior for unbound methods
+        # disable(disable(Foo.method)) should unwrap to the original function
+        class Bar:
+            def method(self, x):
+                return x + 1
+
+        bar = Bar()
+        bound_method = bar.method
+
+        original_method = Bar.method
+        disabled_once = torch._dynamo.disable(Bar.method)
+        disabled_twice = torch._dynamo.disable(disabled_once)
+        # innermost_fn should find the original unbound method
+        self.assertIs(innermost_fn(disabled_twice), original_method)
+        self.assertIs(innermost_fn(disabled_once), original_method)
+
+        # Test innermost_fn shortcut behavior for bound methods
+        # disable(disable(obj.method)) should stop at the bound method
+        # innermost_fn should return the bound method itself, not unwrap it
+        self.assertIs(innermost_fn(bound_method), bound_method)
+        # Wrapping a bound method should also preserve the binding
+        disabled_bound = torch._dynamo.disable(bound_method)
+        self.assertIs(innermost_fn(disabled_bound), bound_method)
+
+    def test_disable_functools_wraps(self):
+        # Test that functools.wraps copying _torchdynamo_orig_callable doesn't
+        # cause innermost_fn to bypass the outer wrapper. This tests the fix
+        # using _torchdynamo_wrapper_id to verify the attribute was set by our
+        # decorator, not copied by functools.wraps.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        @torch._dynamo.disable
+        def inner_fn(x):
+            return x + 1
+
+        # Outer wrapper uses functools.wraps which copies _torchdynamo_orig_callable
+        @functools.wraps(inner_fn)
+        def outer_wrapper(x):
+            return inner_fn(x) * 2
+
+        # innermost_fn should NOT follow the copied _torchdynamo_orig_callable
+        # because _torchdynamo_wrapper_id won't match
+        self.assertIs(innermost_fn(outer_wrapper), outer_wrapper)
+
+        # Applying disable to outer_wrapper should wrap outer_wrapper, not inner_fn
+        disabled_outer = torch._dynamo.disable(outer_wrapper)
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        expected = outer_wrapper(x)  # (x+1)*2 = [4, 6, 8]
+        actual = disabled_outer(x)
+        self.assertEqual(expected, actual)
 
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
@@ -2213,6 +2594,149 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         model.forward = torch._dynamo.disable(model.forward, recursive=False)
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
+
+    def test_allow_in_graph_inside_compile_gives_clear_error(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # Calling allow_in_graph inside a compiled region is not supported.
+        # Verify the error message guides users to annotate before compilation.
+        def forward(x):
+            wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
+            return wrapped_fn(x)
+
+        compiled = torch.compile(forward, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "allow_in_graph",
+        ):
+            compiled(torch.randn(4))
+
+    @parametrize("use_decorator", [False, True])
+    @parametrize("fwd,bwd", [(True, False), (False, False)])
+    def test_override_cudagraphs_annotation_graph_break(self, use_decorator, fwd, bwd):
+        # override_cudagraphs must propagate its annotation onto every compiled
+        # subgraph even when the graph break happens inside a callee compiled as
+        # a separate frame (it cannot be inlined). The override is established
+        # either by a context manager in the caller or by decorating the callee;
+        # both must seed every segment, for enable (fwd=True) and disable
+        # (fwd=False) alike. Device-independent check on gm.meta (no CUDA).
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        if use_decorator:
+
+            @torch._dynamo.override_cudagraphs(fwd=fwd, bwd=bwd)
+            def callee(x):
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y * 2
+
+            def model(x):
+                return callee(x)
+
+        else:
+
+            def callee(x):
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y * 2
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=fwd, bwd=bwd):
+                    return callee(x)
+
+        torch._dynamo.reset()
+        torch.compile(model, backend=backend)(torch.randn(4))
+        # Both segments of the callee (before and after the break) carry it.
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (fwd, bwd))
+
+    def test_override_cudagraphs_annotation_nested_overrides_graph_break(self):
+        # Nested overrides: the innermost (most recently entered) override wins
+        # while active, and on exit the runtime stack restores the outer one so
+        # a later separately-compiled callee sees it. Each callee graph-breaks,
+        # so it is compiled as a separate frame seeded from the runtime
+        # top-of-stack override. inner_callee and outer_callee are distinct code
+        # objects (reusing one callee would be a sticky cache hit and would not
+        # recompile under the restored override). Device-independent.
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        def inner_callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def outer_callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def model(x):
+            with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=True):
+                    z = inner_callee(x)
+                # Inner override popped here; outer (True, False) is restored.
+                return outer_callee(z)
+
+        torch._dynamo.reset()
+        torch.compile(model, backend=backend)(torch.randn(4))
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+        vals = [(ann.fwd, ann.bwd) for ann in annotations]
+        # Every segment carries one of the two overrides, never None or a
+        # partial/leaked value (segment counts depend on nested_graph_breaks).
+        self.assertTrue(all(v in {(False, True), (True, False)} for v in vals))
+        # Inner override wins while active (inner_callee's segments).
+        self.assertIn((False, True), vals)
+        # After the inner `with` exits, __exit__ restores the outer override so
+        # outer_callee sees it. Absent if __exit__ fails to pop/restore.
+        self.assertIn((True, False), vals)
+
+    def test_override_cudagraphs_annotation_not_guarded_first_compile_wins(self):
+        # We intentionally do NOT guard on the dynamo global cudagraph override
+        # state. The annotation is therefore sticky per code object: the first
+        # compile wins, and toggling the override on a later call does NOT
+        # recompile. This pins that intentional behavior; if a guard is added
+        # later this test will flip (the second call would recompile).
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        @torch.compile(backend=backend)
+        def callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        torch._dynamo.reset()
+        # First reach callee from inside an override; its two segments compile
+        # with the override annotation baked in.
+        with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+            callee(torch.randn(4))
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (True, True))
+
+        annotations.clear()
+        # Reach the same callee with no active override. Because the override
+        # state is not guarded, callee is not recompiled: the backend is not
+        # invoked again and the first-compile annotation sticks.
+        callee(torch.randn(4))
+        self.assertEqual(annotations, [])
+
+
+instantiate_parametrized_tests(DecoratorTests)
 
 
 if __name__ == "__main__":

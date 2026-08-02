@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
 #include <iostream>
+#include <optional>
 
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
@@ -37,7 +38,9 @@ bool is_supported_onednn_dtype(const at::Tensor& tensor);
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor);
 
 dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor);
-dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
+dnnl::memory::desc get_onednn_md(
+    const at::Tensor& tensor,
+    std::optional<int> packed_dim = std::nullopt);
 
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);
@@ -45,6 +48,12 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2);
 void undo_broadcast(at::Tensor& tensor);
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor);
+
+bool is_64_bytes_aligned(const at::Tensor& tensor);
+
+at::Tensor make_contiguous_and_aligned(
+    const at::Tensor& tensor,
+    std::optional<at::MemoryFormat> memory_format = std::nullopt);
 
 bool is_broadcast_from_other_to_self(
     const at::Tensor& self,

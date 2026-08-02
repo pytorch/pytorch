@@ -3,7 +3,15 @@
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
-from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
+from torch.distributed.tensor import (
+    DeviceMesh,
+    DTensor,
+    linspace,
+    logspace,
+    Replicate,
+    Shard,
+    zeros,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -30,6 +38,21 @@ class DTensorInitOpsTest(DTensorTestBase):
     def test_init_ops(self):
         # NOTE: random init tests are moved to test_random_ops.py
         self._run_init_op(torch.nn.init.constant_, 2.4)
+
+    @with_comms
+    def test_eye_init(self):
+        # Test nn.init.eye_() with DTensor (issue #173357)
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Replicate()]
+        input_size = (8, 8)
+
+        input_tensor = torch.randn(*input_size, device=self.device_type)
+        dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
+
+        torch.nn.init.eye_(dtensor)
+
+        expected = torch.eye(*input_size, device=self.device_type)
+        self.assertEqual(expected, dtensor.to_local())
 
 
 class DTensorConstructorTest(DTensorTestBase):
@@ -126,6 +149,128 @@ class DTensorConstructorTest(DTensorTestBase):
             123.4,
             requires_grad=True,
         )
+
+    @with_comms
+    def test_linspace(self):
+        mesh = self.build_device_mesh()
+        steps = 8
+
+        for placements in ([Replicate()], [Shard(0)]):
+            dist_tensor = linspace(
+                1.0,
+                2.0,
+                steps,
+                dtype=torch.float64,
+                device_mesh=mesh,
+                placements=placements,
+            )
+            self.assertEqual(dist_tensor.size(), torch.Size([steps]))
+            self.assertEqual(
+                dist_tensor.full_tensor(),
+                torch.linspace(1.0, 2.0, steps, dtype=torch.float64),
+            )
+
+            dist_tensor = linspace(
+                0.0, 1.0, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(0.0, 1.0, steps))
+
+            dist_tensor = linspace(1.0, 2.0, 1, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([1]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, 1))
+
+            dist_tensor = linspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([0]))
+
+            dist_tensor = linspace(
+                2.0, -2.0, 5, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(2.0, -2.0, 5))
+
+            start = DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+            )
+            end = DTensor.from_local(
+                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+            )
+            dist_tensor = linspace(
+                start, end, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, steps))
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "linspace only supports 0-dimensional start and end tensors",
+            ):
+                linspace(
+                    torch.tensor([1.0, 2.0], device=self.device_type),
+                    2.0,
+                    steps,
+                    device_mesh=mesh,
+                    placements=placements,
+                )
+
+    @with_comms
+    def test_logspace(self):
+        mesh = self.build_device_mesh()
+        steps = 8
+
+        for placements in ([Replicate()], [Shard(0)]):
+            dist_tensor = logspace(
+                1.0,
+                2.0,
+                steps,
+                dtype=torch.float64,
+                device_mesh=mesh,
+                placements=placements,
+            )
+            self.assertEqual(dist_tensor.size(), torch.Size([steps]))
+            self.assertEqual(
+                dist_tensor.full_tensor(),
+                torch.logspace(1.0, 2.0, steps, dtype=torch.float64),
+            )
+
+            dist_tensor = logspace(
+                0.0, 1.0, steps, base=2.0, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(
+                dist_tensor.full_tensor(), torch.logspace(0.0, 1.0, steps, base=2.0)
+            )
+
+            dist_tensor = logspace(1.0, 2.0, 1, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([1]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, 1))
+
+            dist_tensor = logspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([0]))
+
+            dist_tensor = logspace(
+                2.0, -2.0, 5, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(2.0, -2.0, 5))
+
+            start = DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+            )
+            end = DTensor.from_local(
+                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+            )
+            dist_tensor = logspace(
+                start, end, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, steps))
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "logspace only supports 0-dimensional start and end tensors",
+            ):
+                logspace(
+                    torch.tensor([1.0, 2.0], device=self.device_type),
+                    2.0,
+                    steps,
+                    device_mesh=mesh,
+                    placements=placements,
+                )
 
     @with_comms
     def test_zeros(self):

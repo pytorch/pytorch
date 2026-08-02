@@ -150,12 +150,12 @@ def scaled_dot_product_attention(
     scale: torch._C.Value | None = None,
     enable_gqa: bool = False,
 ):
-    assert (not is_causal) or (is_causal and symbolic_helper._is_none(attn_mask)), (
-        "is_causal and attn_mask cannot be set at the same time"
-    )
-    assert not enable_gqa, (
-        "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
-    )
+    if is_causal and not symbolic_helper._is_none(attn_mask):
+        raise AssertionError("is_causal and attn_mask cannot be set at the same time")
+    if enable_gqa:
+        raise AssertionError(
+            "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
+        )
 
     if symbolic_helper._is_none(scale):
         scale = _attention_scale(g, query)
@@ -167,7 +167,7 @@ def scaled_dot_product_attention(
     # NOTE: onnx-script has different logic here, because the attribute perms in
     # transpose needs list of ints
     key_shape_builtin = symbolic_helper._get_tensor_rank(key)
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore [bad-argument-type, no-matching-overload]
     key_transposed_axes = list(range(key_shape_builtin))
     key_transposed_axes[-1], key_transposed_axes[-2] = (
         key_transposed_axes[-2],

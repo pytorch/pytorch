@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/cuda/StreamBlock.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
