@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch.package import analyze
-from torch.testing._internal.common_utils import IS_LINUX, run_tests
+from torch.testing._internal.common_utils import IS_LINUX, run_tests, skipIfTorchDynamo
 
 
 try:
@@ -18,6 +18,7 @@ except ImportError:
 class TestAnalyze(PackageTestCase):
     """Dependency analysis API tests."""
 
+    @skipIfTorchDynamo("trace_dependencies uses sys.setprofile")
     def test_trace_dependencies_restores_profile(self):
         def profile(frame, event, arg):
             pass
@@ -30,6 +31,7 @@ class TestAnalyze(PackageTestCase):
 
         self.assertIs(sys.getprofile(), profile)
 
+    @skipIfTorchDynamo("trace_dependencies uses sys.setprofile")
     def test_trace_dependencies_restores_profile_when_callable_raises(self):
         def profile(frame, event, arg):
             pass
