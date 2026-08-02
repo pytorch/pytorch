@@ -176,7 +176,7 @@ class MaxPool2d(_MaxPoolNd):
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
@@ -256,7 +256,7 @@ class MaxPool3d(_MaxPoolNd):
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
@@ -814,7 +814,7 @@ class AvgPool3d(_AvgPoolNd):
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the depth, height and width dimension
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
