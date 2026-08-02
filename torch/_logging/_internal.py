@@ -647,7 +647,11 @@ def register_log_env_var(env_var_name: str) -> None:
     """
     Registers an additional environment variable name to be checked
     alongside LOG_ENV_VAR (TORCH_LOGS) by _init_logs()/set_logs(), without
-    modifying LOG_ENV_VAR itself. If env_var_name is already set in
+    modifying LOG_ENV_VAR itself. If both TORCH_LOGS and one or more
+    registered env vars are set, their settings are merged (log levels and
+    enabled artifacts), with registered env vars taking precedence over
+    TORCH_LOGS on conflicting entries, and later-registered env vars taking
+    precedence over earlier ones. If env_var_name is already set in
     os.environ, _init_logs() is re-invoked immediately so late registration
     (e.g. a backend imported after `import torch` has already run
     _init_logs() once) still takes effect.
@@ -937,11 +941,22 @@ def _get_module_and_submodules(qname: str) -> Sequence[str] | None:
 
 def _update_log_state_from_env() -> None:
     global log_state
+    new_state = None
     for env_var in [LOG_ENV_VAR, *_extra_log_env_vars]:
         log_setting = os.environ.get(env_var, None)
-        if log_setting is not None:
-            log_state = _parse_log_settings(log_setting)
-            break
+        if log_setting is None:
+            continue
+        parsed = _parse_log_settings(log_setting)
+        if new_state is None:
+            new_state = parsed
+        else:
+            # Merge on top of what's already set: registered env vars are
+            # additive to TORCH_LOGS, with later ones winning on conflicting
+            # qnames/artifacts.
+            new_state.log_qname_to_level.update(parsed.log_qname_to_level)
+            new_state.artifact_names.update(parsed.artifact_names)
+    if new_state is not None:
+        log_state = new_state
 
 
 def _has_registered_parent(log_qname) -> bool:
