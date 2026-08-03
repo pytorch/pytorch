@@ -3541,6 +3541,28 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.take(source, index, out=out), expected)
         self.assertEqual(out, expected)
 
+    @onlyOn(["cpu", "cuda"])
+    @parametrize(
+        "index_dtype",
+        (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ),
+    )
+    def test_take_integer_index_backward(self, device, index_dtype):
+        source = torch.arange(4.0, device=device, requires_grad=True)
+        index = torch.tensor([0, 2, 2], device=device, dtype=index_dtype)
+
+        torch.take(source, index).sum().backward()
+
+        self.assertEqual(source.grad, torch.tensor([1.0, 0.0, 2.0, 0.0], device=device))
+
     @onlyCPU
     @parametrize(
         "index_dtype",
