@@ -9,7 +9,6 @@ generated wrapper at runtime, keeping the generated code thin.
 
 from __future__ import annotations
 
-import dataclasses
 import functools
 import hashlib
 import importlib
@@ -27,7 +26,6 @@ from torch._inductor.codegen.common import (
     WorkspaceZeroMode,
 )
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
-from torch._inductor.codegen.cutlass.python_evt import _ACCUMULATOR_ARG_NAME
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
 )
@@ -38,7 +36,10 @@ from torch._inductor.ir import (
     MutableBox,
     ReinterpretView,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmReductionArguments,
+)
 from torch._inductor.virtualized import V
 
 
@@ -48,6 +49,14 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
+    "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
+)
+
+
+def _local_reduce_source_constant(field: str) -> str:
+    return f"_LOCAL_REDUCE_{field.removesuffix('_fn').upper()}_FN_SRC"
 
 
 class CuTeDSLEpilogueArguments:
@@ -60,7 +69,7 @@ class CuTeDSLEpilogueArguments:
 
         inputs, outputs = trace_in_out(epilogue_fn)
         names = dict.fromkeys((*inputs, *outputs))
-        names.pop(_ACCUMULATOR_ARG_NAME, None)
+        names.pop(GEMM_ACCUMULATOR_ARG_NAME, None)
         unexpected = kwargs.keys() - names.keys()
         missing = names.keys() - kwargs.keys()
         if missing or unexpected:
@@ -365,12 +374,12 @@ def _worker_nvgemm_autotuning_precompile(
     epilogue_source = ""
     aux_tensors: tuple = ()
     if has_bias_epilogue:
-        from cutlass.operators.arguments import EpilogueArguments
-
         *gemm_list, bias = input_tensors
         input_tensors = tuple(gemm_list)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
-        epilogue_source = "nvgemm_addmm_bias_v1"
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
+        epilogue_source = "nvgemm_addmm_bias_v2"
         aux_tensors = (bias,)
 
     cache_key = _create_gemm_cache_key(
@@ -492,16 +501,9 @@ def _create_gemm_arguments(
         from cutlass.operators.utils.tensor import TensorWrapper
 
         def wrap(output):
-            return (
-                TensorWrapper(output, alignment_bytes=4) if output is not None else None
-            )
+            return TensorWrapper(output, alignment_bytes=4)
 
-        args.local_reduce = dataclasses.replace(
-            local_reduce,
-            output=wrap(local_reduce.output),
-            feed_output=wrap(local_reduce.feed_output),
-            secondary_feed_output=wrap(local_reduce.secondary_feed_output),
-        )
+        args.local_reduce = local_reduce.map_tensors(wrap)
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -609,18 +611,13 @@ def _tensor_sig(t):
 def _local_reduce_specialization(variant_kwargs: dict | None) -> tuple:
     if variant_kwargs is None or not (reduction := variant_kwargs.get("local_reduce")):
         return ()
-    specialization = tuple(
-        (field, getattr(reduction, field))
-        for field in GemmReductionArguments.SPECIALIZATION_FIELDS
-    )
+    specialization = tuple(reduction.specialization_items())
     tensor_specialization = tuple(
         (
             field,
-            None
-            if (tensor := getattr(reduction, field)) is None
-            else _tensor_sig(tensor),
+            None if tensor is None else _tensor_sig(tensor),
         )
-        for field in ("output", "feed_output", "secondary_feed_output")
+        for field, tensor in reduction.tensor_items()
     )
     return specialization + tensor_specialization
 
@@ -740,8 +737,7 @@ def _update_reuse_args_tensors(
             val = epilogue_args.tensors[name]
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
     runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
-    for field in ("output", "feed_output", "secondary_feed_output"):
-        output = getattr(args.local_reduce, field)
+    for field, output in args.local_reduce.tensor_items():
         if output is not None:
             assert runtime_reduce is not None  # noqa: S101
             output._runtime_tensor = getattr(runtime_reduce, field)
@@ -785,11 +781,7 @@ def _clear_reuse_args_tensors(variant_name, args, epilogue_args):
                     example_inputs[name] = torch.empty_strided(
                         val.shape, val.stride(), dtype=val.dtype, device="meta"
                     )
-    for output in (
-        args.local_reduce.output,
-        args.local_reduce.feed_output,
-        args.local_reduce.secondary_feed_output,
-    ):
+    for _, output in args.local_reduce.tensor_items():
         if output is not None:
             output._runtime_tensor = None
 
@@ -1102,16 +1094,6 @@ class NVUniversalGemmKernelWrapper:
 # ── Kernel codegen class ─────────────────────────────────────────────────────
 
 
-# Module-level bias-add epilogue for benchmark tracing. Must be a real
-# (introspectable) function -- EpilogueArguments parses its source via
-# inspect.getsource -- and must contain NO string literals (the AST tracer
-# treats any constant as an immediate). The param name is deliberately not
-# ``C`` (see _build_bias_epilogue) so a 1D bias routes to the row-broadcast impl.
-def _nvgemm_bias_add_epilogue(accum, bias):
-    D = accum + bias
-    return D
-
-
 def _build_bias_epilogue(
     bias_name: str, out_name: str
 ) -> tuple[str, list[str], list[str], dict[str, str]]:
@@ -1316,6 +1298,12 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline(
                 "from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments"
             )
+            reduction_args = GemmReductionArguments.from_plan(self.local_reduce)
+            for field, value in reduction_args.specialization_items():
+                if field.endswith("_fn") and value is not None:
+                    code.writeline(
+                        f"{_local_reduce_source_constant(field)} = {value!r}"
+                    )
         if has_epilogue:
             if self.epilogue_is_cutedsl:
                 code.writeline(
@@ -1426,24 +1414,36 @@ class NVUniversalGemmKernel(Kernel):
 
                 feed_ptr = feed_output_ptr(reduction.feed_output)
                 secondary_feed_ptr = feed_output_ptr(reduction.secondary_feed_output)
+                rendered_reduction = GemmReductionArguments.from_plan(
+                    reduction,
+                    output=reduce_ptr,
+                    feed_output=feed_ptr,
+                    secondary_feed_output=secondary_feed_ptr,
+                )
+                tensor_args = {
+                    field: cast(str, value)
+                    for field, value in rendered_reduction.tensor_items()
+                }
+                reduction_args = {
+                    field: (
+                        _local_reduce_source_constant(field)
+                        if field.endswith("_fn") and value is not None
+                        else repr(value)
+                    )
+                    for field, value in rendered_reduction.specialization_items()
+                    if value is not None
+                }
+                reduction_args = tensor_args | reduction_args
+                reduction_args_expr = ", ".join(
+                    f"{field}={value}" for field, value in reduction_args.items()
+                )
                 run_variant_kwargs = (
                     "(_VARIANT_KWARGS or {}) | {"
-                    "'local_reduce': GemmReductionArguments("
-                    f"output={reduce_ptr}, "
-                    f"feed_output={feed_ptr}, "
-                    f"secondary_feed_output={secondary_feed_ptr}, "
-                    f"secondary_feed_type={reduction.secondary_feed_type!r}, "
-                    f"group={reduction.group}, "
-                    f"axis={reduction.axis}, "
-                    f"reduction_type={reduction.reduction_type!r}, "
-                    f"source_type={reduction.source_type!r}, "
-                    f"feeds_main={feed_main!r})"
+                    f"'local_reduce': GemmReductionArguments({reduction_args_expr})"
                     "}"
                 )
                 aux_tensors.extend(
-                    ptr
-                    for ptr in (reduce_ptr, feed_ptr, secondary_feed_ptr)
-                    if ptr != "None"
+                    value for value in tensor_args.values() if value != "None"
                 )
 
             aux_tensors_expr = f"({', '.join(aux_tensors)},)" if aux_tensors else "()"
@@ -1541,7 +1541,7 @@ class NVUniversalGemmKernel(Kernel):
         }
         kwargs_parts = []
         for var_name, buffer_name in self.epilogue_var_renames.items():
-            if var_name == _ACCUMULATOR_ARG_NAME:
+            if var_name == GEMM_ACCUMULATOR_ARG_NAME:
                 continue
             if buffer_name in out_ptr_of:
                 kwargs_parts.append(f"{var_name}={out_ptr_of[buffer_name]}")
