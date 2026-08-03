@@ -69,6 +69,46 @@ class XpuProfilerTest(TestCase):
             self.assertTrue("kernel" in count_cats)
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_profiler_overhead(self):
+        # The OVERHEAD activity type surfaces the profiler's own collection cost
+        # on a dedicated track, matching CUDA behaviour. It is enabled together
+        # with ProfilerActivity.XPU via kXpuTypes. PTI instruments the device
+        # operations it traces, so a workload that issues device ops is expected
+        # to produce overhead records.
+        a = torch.rand([100, 200]).to("xpu")
+        b = torch.rand([200, 300]).to("xpu")
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.XPU,
+            ],
+        ) as p:
+            for _ in range(10):
+                r = torch.matmul(a, b)
+
+        self.assertTrue(r.numel() > 0)
+
+        with tempfile.NamedTemporaryFile(mode="w+", delete=True) as tmp:
+            p.export_chrome_trace(tmp.name)
+            with open(tmp.name) as f:
+                data = json.load(f)
+
+            overhead_events = [
+                e
+                for e in data["traceEvents"]
+                if e.get("ph") == "X" and e.get("cat") == "overhead"
+            ]
+
+            if Verbose:
+                print(f"{len(overhead_events) = }")
+
+            self.assertGreater(len(overhead_events), 0)
+            for e in overhead_events:
+                args = e.get("args", {})
+                self.assertIn("overhead cost", args)
+                self.assertIn("overhead count", args)
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_profiler_xpu_driver(self):
         a = torch.rand([100, 200]).to("xpu")
         b = torch.rand([200, 300]).to("xpu")

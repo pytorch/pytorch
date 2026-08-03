@@ -1295,7 +1295,7 @@ def strip_extended_args(instructions: list[Instruction]) -> None:
 def overwrite_instruction(
     old_inst: Instruction, new_insts: list[Instruction]
 ) -> list[Instruction]:
-    # update old_inst.exnt_tab_entry.end if necessary
+    # update old_inst.exn_tab_entry.end if necessary
     if (
         old_inst.exn_tab_entry
         and old_inst.exn_tab_entry.end is old_inst

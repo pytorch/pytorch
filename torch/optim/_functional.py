@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Functional interface."""
 
 import math
@@ -53,7 +52,7 @@ def sparse_adam(
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
-        def make_sparse(values):
+        def make_sparse(values: Tensor) -> Tensor:
             constructor = grad.new
             if grad_indices.dim() == 0 or values.dim() == 0:
                 return constructor().resize_as_(grad)
