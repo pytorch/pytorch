@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """AMX/AVX-512 interleaved GEMM helpers for the CPU FlexAttention template.
 
 AMX tile registers only accept literal-immediate indices, so the two supported
