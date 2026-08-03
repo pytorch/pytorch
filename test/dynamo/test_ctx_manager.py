@@ -731,6 +731,8 @@ class GraphModule(torch.nn.Module):
         prev_enabled = torch.is_autocast_enabled("cpu")
         prev_dtype = torch.get_autocast_dtype("cpu")
         prev_cache = torch.is_autocast_cache_enabled()
+        prev_nesting = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
 
         try:
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
@@ -742,6 +744,11 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out.dtype, opt_out.dtype)
             self.assertFalse(torch.is_autocast_enabled("cpu"))
         finally:
+            # f unbalances the global autocast nesting counter; restore exactly
+            cur_nesting = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            for _ in range(prev_nesting - cur_nesting):
+                torch.autocast_increment_nesting()
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
             torch.set_autocast_cache_enabled(prev_cache)
