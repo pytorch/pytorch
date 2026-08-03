@@ -14,8 +14,7 @@ install_ubuntu() {
 }
 
 install_rocm() {
-    # ROCm from the multi-arch TheRock wheel index. This is distro-agnostic and
-    # used by both the AlmaLinux manywheel builder and Ubuntu ROCm CI images.
+    # ROCm from the multi-arch TheRock wheel index for Ubuntu ROCm CI images.
     # The ROCm SDK unpacks under <site-packages>/_rocm_sdk_*; discover the real
     # install root via `rocm-sdk path` and export it through /etc/rocm_env.sh.
     : "${THEROCK_INDEX_URL:?THEROCK_INDEX_URL must be set}"
@@ -68,9 +67,6 @@ ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
   ubuntu)
     install_ubuntu
-    ;;
-  almalinux)
-    install_rocm
     ;;
   *)
     echo "Unable to determine OS..."
