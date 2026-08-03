@@ -564,7 +564,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_finalize = local_reduce_finalize
         self.local_reduce_consumer = local_reduce_consumer
         self.has_cross_warp_local_reduce = cutlass.const_expr(
-            local_reduce_tensor is not None
+            (local_reduce_tensor is not None or local_reduce_feeds_main)
             and local_reduce_axis == 0
             and local_reduce_group > 4
         )

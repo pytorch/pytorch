@@ -40,6 +40,7 @@ from torch._inductor.ir import (
     PermuteView,
     TensorBox,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -68,6 +69,18 @@ class GemmVariant(Enum):
         if self == GemmVariant.SCALED_GEMM:
             return "nv_universal_scaled_gemm"
         return "nv_universal_gemm"
+
+    def supports_reduction(self, plan: GemmReductionPlan) -> bool:
+        """Whether this variant can lower a recognized reduction contract."""
+        if self == GemmVariant.SCALED_GEMM:
+            from .epilogue_capabilities import BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES
+
+            return BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        if self == GemmVariant.GEMM:
+            from .epilogue_capabilities import DENSE_GEMM_REDUCTION_CAPABILITIES
+
+            return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        return False
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -528,15 +541,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
         def make_kernel_render(
             out_node,
             hint_override=None,
-            epilogue_fn_code=None,
-            epilogue_is_cutedsl=False,
-            epilogue_reads=None,
-            epilogue_writes=None,
-            epilogue_var_renames=None,
+            epilogue: GemmEpiloguePlan | None = None,
             local_reduce=None,
-            local_reduce_finalizer_fn_code=None,
-            local_reduce_consumer_fn_code=None,
-            local_reduce_secondary_consumer_fn_code=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
 
@@ -570,15 +576,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 scale_type_b=scale_type_b,
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
-                epilogue_fn_code=epilogue_fn_code,
-                epilogue_is_cutedsl=epilogue_is_cutedsl,
-                epilogue_reads=epilogue_reads,
-                epilogue_writes=epilogue_writes,
-                epilogue_var_renames=epilogue_var_renames,
+                epilogue=epilogue,
                 local_reduce=local_reduce,
-                local_reduce_finalizer_fn_code=local_reduce_finalizer_fn_code,
-                local_reduce_consumer_fn_code=local_reduce_consumer_fn_code,
-                local_reduce_secondary_consumer_fn_code=local_reduce_secondary_consumer_fn_code,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
                 bias_node=bias_node,

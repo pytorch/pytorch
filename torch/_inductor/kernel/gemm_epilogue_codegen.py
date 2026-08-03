@@ -12,6 +12,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLOpOverrides,
     materialize_tensorssa_reduction,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -52,32 +53,83 @@ def materialize_epilogue_function(source: str, cute: Any) -> Any:
     return scope[function_names[0]]
 
 
-def with_reduction_finalizer(reduction: Any, source: str | None, cute: Any) -> Any:
-    if source is None:
-        return reduction
-    return dataclasses.replace(
-        reduction, finalize=materialize_epilogue_function(source, cute)
-    )
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class GemmReductionCompileConfig:
+    args: GemmReductionArguments
+    reduction: Any
+    consumer: Any
+    secondary_consumer: Any
 
+    @classmethod
+    def from_args(
+        cls, args: GemmReductionArguments, cute: Any
+    ) -> "GemmReductionCompileConfig":
+        def materialize(source: str | None) -> Any:
+            return (
+                None if source is None else materialize_epilogue_function(source, cute)
+            )
 
-def materialize_reduction_consumer(source: str | None, cute: Any) -> Any:
-    if source is None:
-        return None
-    return materialize_epilogue_function(source, cute)
+        reduction = materialize_tensorssa_reduction(
+            canonical_tensorssa_reduction_type(args.reduction_type),
+            args.source_type,
+            args.reduction_type,
+        )
+        finalizer = materialize(args.finalizer_fn)
+        if finalizer is not None:
+            reduction = dataclasses.replace(reduction, finalize=finalizer)
 
+        def materialize_consumer(source: str | None) -> Any:
+            consumer = materialize(source)
+            if consumer is None or finalizer is not None:
+                return consumer
 
-def materialize_reduction_callbacks(args: Any, cute: Any) -> tuple[Any, Any, Any]:
-    reduction = materialize_tensorssa_reduction(
-        canonical_tensorssa_reduction_type(args.reduction_type),
-        args.source_type,
-        args.reduction_type,
-    )
-    reduction = with_reduction_finalizer(reduction, args.finalizer_fn, cute)
-    return (
-        reduction,
-        materialize_reduction_consumer(args.consumer_fn, cute),
-        materialize_reduction_consumer(args.secondary_consumer_fn, cute),
-    )
+            def consume(accumulator, primary_reduction, secondary_reduction):
+                return consumer(
+                    accumulator,
+                    reduction.finalize(primary_reduction, args.group),
+                    secondary_reduction,
+                )
+
+            return consume
+
+        return cls(
+            args=args,
+            reduction=reduction,
+            consumer=materialize_consumer(args.consumer_fn),
+            secondary_consumer=materialize_consumer(args.secondary_consumer_fn),
+        )
+
+    def _common_constexprs(self) -> tuple[Any, ...]:
+        args = self.args
+        return (
+            args.group,
+            args.axis,
+            args.reduction_type,
+            args.source_type,
+            args.feeds_main,
+        )
+
+    def _primary_callbacks(self) -> tuple[Any, ...]:
+        reduction = self.reduction
+        return (
+            reduction.reduce_op,
+            reduction.init_val,
+            reduction.combine,
+            reduction.source,
+            reduction.finalize,
+            self.consumer,
+        )
+
+    def primary_constexprs(self) -> tuple[Any, ...]:
+        return self._common_constexprs() + self._primary_callbacks()
+
+    def constexprs(self) -> tuple[Any, ...]:
+        return (
+            *self._common_constexprs(),
+            self.args.secondary_feed_type,
+            *self._primary_callbacks(),
+            self.secondary_consumer,
+        )
 
 
 class GemmEpilogueCuteDSLBody:
