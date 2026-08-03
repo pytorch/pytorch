@@ -28,7 +28,6 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -37,14 +36,13 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 if not dist.is_available():
@@ -221,7 +219,10 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        torch.accelerator.current_accelerator() is None,
+        "Inductor+accelerator needs triton and a recent accelerator",
+    )
     @skip_if_lt_x_gpu(2)
     def test_fsdp_compile(self):
         self.run_subtests(
@@ -1399,12 +1400,16 @@ NUM_SIZE0_TENSORS = 1000
 
 
 class TestMultiTensorApply(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_multi_tensor_apply_size0_tensors_cpu(self):
         size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @unittest.skipIf(
+        torch.accelerator.current_accelerator() is None, "no accelerator available"
+    )
     def test_multi_tensor_apply_size0_tensors_cuda(self):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)
