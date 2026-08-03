@@ -20,18 +20,36 @@ during ``instantiate()`` while the template is still live.
 
 from __future__ import annotations
 
-from typing import Any
+import threading
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
 
 
 class _GraphDependencyRecorder:
     """Persistent recorder of graph_node_id -> predecessor graph_node_ids edges.
 
-    Edges are keyed by ``tools_id`` (== the CUPTI ``graph_node_id`` that joins to
-    profiler kernel records). Armed at most once via :meth:`arm`; :attr:`deps` is the
-    shared map read (by reference) by every observer's dependency resolver.
+    Process-wide singleton, like ``CuptiMonitor``: ``_GraphDependencyRecorder()`` returns
+    the one instance, constructed on first call. Edges are keyed by ``tools_id`` (== the
+    CUPTI ``graph_node_id`` that joins to profiler kernel records). Armed at most once via
+    :meth:`arm`; :attr:`deps` is the shared map read (by reference) by every observer's
+    dependency resolver.
     """
 
-    def __init__(self) -> None:
+    _instance: _GraphDependencyRecorder | None = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls) -> Self:
+        with cls._instance_lock:
+            if cls._instance is None:
+                inst = super().__new__(cls)
+                inst._init()
+                cls._instance = inst
+            return cls._instance
+
+    def _init(self) -> None:
         self.deps: dict[int, list[int]] = {}
         # graph_node_id -> cudaEvent_t handle for event-record nodes. The CUPTI record for the
         # node (a CUDA_EVENT activity) carries no event handle, so this is the only way to tag
@@ -76,19 +94,11 @@ class _GraphDependencyRecorder:
         torch_cuda_graph._recorded_exec_ids.add(any_id >> 32)
 
 
-_recorder = _GraphDependencyRecorder()
-
-
-def arm_graph_dependency_recording() -> None:
-    """Arm the process-global recorder (idempotent). Call before graphs are captured."""
-    _recorder.arm()
-
-
-def graph_dependencies() -> dict[int, list[int]]:
-    """The persistent, shared graph_node_id -> predecessor graph_node_ids map."""
-    return _recorder.deps
-
-
-def graph_event_record_events() -> dict[int, int]:
-    """The persistent, shared event-record node graph_node_id -> cudaEvent_t handle map."""
-    return _recorder.event_record_events
+def _reset_for_test() -> None:
+    """Test-only: unregister the instantiate hook and drop the singleton, so the next
+    ``_GraphDependencyRecorder()`` starts unarmed with empty maps."""
+    with _GraphDependencyRecorder._instance_lock:
+        inst = _GraphDependencyRecorder._instance
+        if inst is not None and inst._handle is not None:
+            inst._handle.remove()
+        _GraphDependencyRecorder._instance = None
