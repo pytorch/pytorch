@@ -1780,13 +1780,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
         """
-        type_ = self.python_type()
+        try:
+            type_ = self.python_type()
+        except NotImplementedError:
+            return "<unknown type>"
+        # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
+        # (and not execute user code)
         mod = type_.__module__
         qn = type_.__qualname__
-        if isinstance(mod, str) and mod not in ("__main__", "builtins"):
+        if mod not in ("__main__", "builtins"):
             return f"{mod}.{qn}"
         else:
-            return f"{qn}"
+            return qn
 
     def as_python_constant(self) -> Any:
         """For constants"""
