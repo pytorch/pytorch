@@ -135,5 +135,7 @@ def unify(
 
 
 @dispatch(object, object)  # type: ignore[no-redef]
+# The noqa suppresses F811 for this multipledispatch overload redefinition
+# (it replaces the bare-name-statement hack that previously silenced it).
 def unify(u: object, v: object) -> dict[Var, object] | bool:  # noqa: F811
     return unify(u, v, {})

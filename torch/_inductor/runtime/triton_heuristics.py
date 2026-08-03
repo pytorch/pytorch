@@ -3331,8 +3331,10 @@ def _find_names(obj):
 
     frame = inspect.currentframe()
     while frame is not None:
-        # accessing f_locals materializes the frame's locals dict so
-        # gc.get_referrers below can find obj inside it
+        # On CPython <= 3.12 this access materializes the frame's locals
+        # dict so gc.get_referrers below can find obj inside it. On 3.13+
+        # f_locals is a fresh write-through proxy (PEP 667) and this loop
+        # is a no-op, so function-local names are not discoverable there.
         _ = frame.f_locals
         frame = frame.f_back
     obj_names = []
