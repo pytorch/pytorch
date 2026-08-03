@@ -233,17 +233,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
       int shrink_flags = 0,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts_override =
           nullptr) override;
-  std::vector<uint8_t> getGrowId();
-  c10::intrusive_ptr<ProcessGroupNCCL> grow(
-      int new_size,
-      const std::optional<std::vector<uint8_t>>& grow_id = std::nullopt,
-      int new_rank = -1,
-      const c10::intrusive_ptr<Options>& opts_override = nullptr);
-  void revoke();
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
-  void addEphemeralTimeout(std::chrono::milliseconds timeout);
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   bool verifyWorkTimeoutForTest(
       const c10::intrusive_ptr<::c10d::Work>& work,
       std::chrono::milliseconds timeout);
@@ -409,9 +402,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
   void init(at::Device device);
   void finalize();
   void initNcclResources();
-  // Adopt a communicator created by ncclCommSplit and bring this backend to the
-  // INITIALIZED state, sharing the parent's NcclApi (port of TorchCommNCCL's
-  // split() child construction).
+  // Adopt a child communicator and bring this backend to the INITIALIZED state,
+  // sharing the parent's NcclApi.
   void initFromComm(
       ncclComm_t comm,
       at::Device device,
@@ -518,7 +510,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
-  void checkNoPendingWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);

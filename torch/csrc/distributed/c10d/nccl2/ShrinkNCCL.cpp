@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <algorithm>
-#include <cstring>
 #include <unordered_set>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -31,13 +30,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::Options> cloneOptions(
 }
 
 } // namespace
-
-void ProcessGroupNCCL::checkNoPendingWork() {
-  auto status = workq_.garbageCollect();
-  TORCH_CHECK(
-      status == WorkNCCL::WorkStatus::COMPLETED,
-      "NCCL communicator membership cannot change while work is pending");
-}
 
 c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& ranks_to_exclude,
@@ -76,7 +68,10 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       !seen.contains(getRank()),
       "An excluded rank must not call ProcessGroupNCCL::shrink");
   if (shrink_flags == 0) {
-    checkNoPendingWork();
+    auto status = workq_.garbageCollect();
+    TORCH_CHECK(
+        status == WorkNCCL::WorkStatus::COMPLETED,
+        "NCCL communicator cannot shrink while work is pending");
   }
 
   auto overrideOptions =
@@ -110,103 +105,6 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       childOptions);
   child->initFromComm(childComm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
-}
-
-std::vector<uint8_t> ProcessGroupNCCL::getGrowId() {
-  TORCH_CHECK(
-      NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0),
-      "nccl2 grow requires NCCL 2.29 or later");
-  TORCH_CHECK(
-      init_state_ == InitializationState::INITIALIZED,
-      "Cannot get a grow ID from an uninitialized communicator");
-  checkAndAbortIfTimedOutOrError();
-  checkNoPendingWork();
-
-  ncclUniqueId id{};
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->commGetUniqueId(nccl_comm_, &id),
-      "NCCL commGetUniqueId failed");
-  return std::vector<uint8_t>(
-      reinterpret_cast<uint8_t*>(&id),
-      reinterpret_cast<uint8_t*>(&id) + sizeof(id));
-}
-
-c10::intrusive_ptr<ProcessGroupNCCL> ProcessGroupNCCL::grow(
-    int new_size,
-    const std::optional<std::vector<uint8_t>>& grow_id,
-    int new_rank,
-    const c10::intrusive_ptr<Options>& opts_override) {
-  TORCH_CHECK(
-      NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0),
-      "nccl2 grow requires NCCL 2.29 or later");
-  const bool existingRank = init_state_ == InitializationState::INITIALIZED;
-  if (existingRank) {
-    TORCH_CHECK(new_size > getSize(), "Grow size must exceed the current size");
-    TORCH_CHECK(new_rank == -1, "Existing ranks must use new_rank=-1");
-    TORCH_CHECK(!grow_id, "Existing ranks must not pass a grow ID");
-    checkAndAbortIfTimedOutOrError();
-    checkNoPendingWork();
-  } else {
-    TORCH_CHECK(
-        init_state_ == InitializationState::UNINITIALIZED,
-        "Cannot grow a finalized communicator");
-    TORCH_CHECK(
-        grow_id && grow_id->size() == sizeof(ncclUniqueId),
-        "New ranks require a valid NCCL grow ID");
-    TORCH_CHECK(
-        new_rank >= 0 && new_rank < new_size,
-        "Invalid new rank ",
-        new_rank,
-        " for grow size ",
-        new_size);
-    if (!nccl_api_) {
-      nccl_api_ = std::make_shared<DefaultNcclApi>();
-    }
-  }
-
-  auto childOptions =
-      cloneOptions(opts_override ? opts_override : options_c10d_);
-  auto device = existingRank ? device_
-                             : getBoundDeviceId().value_or(at::Device(
-                                   at::kCUDA, at::cuda::current_device()));
-  c10::cuda::CUDAGuard guard(device);
-
-  ncclUniqueId id{};
-  const ncclUniqueId* idPtr = nullptr;
-  if (grow_id) {
-    std::memcpy(&id, grow_id->data(), sizeof(id));
-    idPtr = &id;
-  }
-
-  ncclComm_t childComm = nullptr;
-  NCCL_CHECK(
-      nccl_api_,
-      existingRank ? nccl_comm_ : nullptr,
-      nccl_api_->commGrow(
-          existingRank ? nccl_comm_ : nullptr,
-          new_size,
-          idPtr,
-          new_rank,
-          &childComm,
-          &childOptions->config),
-      "NCCL commGrow failed");
-
-  auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(),
-      existingRank ? getRank() : new_rank,
-      new_size,
-      childOptions);
-  child->initFromComm(childComm, device, nccl_api_);
-  return child;
-}
-
-void ProcessGroupNCCL::revoke() {
-  TORCH_CHECK(
-      init_state_ == InitializationState::INITIALIZED,
-      "Cannot revoke an uninitialized communicator");
-  revokeNcclComm();
 }
 
 } // namespace c10d::nccl2

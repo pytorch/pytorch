@@ -465,7 +465,8 @@ void ProcessGroupNCCL::releaseEphemeralTimeout(
   ephemeral_timeout_inflight_ -= timeout;
 }
 
-void ProcessGroupNCCL::addEphemeralTimeout(std::chrono::milliseconds timeout) {
+void ProcessGroupNCCL::addEphemeralTimeout(
+    const std::chrono::milliseconds& timeout) {
   std::lock_guard<std::mutex> lock(ephemeral_timeout_mutex_);
   ephemeral_timeout_active_ += timeout;
 }

@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import os
 import time
 from datetime import timedelta
 
@@ -93,11 +94,19 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def test_ephemeral_timeout(self) -> None:
         backend = dist.get_backend_impl(device=self.device)
         dist.set_timeout(timedelta(seconds=3))
+
+        existing_work = dist.all_reduce(
+            torch.ones(4, device=self.device), async_op=True
+        )
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
+        self.assertTrue(
+            backend._verify_work_timeout(existing_work, timedelta(seconds=3))
+        )
 
         tensor = torch.ones(4, device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
         self.assertTrue(backend._verify_work_timeout(work, timedelta(seconds=13)))
+        existing_work.wait()
         work.wait()
         torch.cuda.synchronize(self.device)
 
@@ -110,33 +119,6 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             work.wait()
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
-
-    @requires_nccl()
-    @requires_nccl_version((2, 29), "Need NCCL 2.29+ for communicator grow")
-    @skip_if_lt_x_gpu(2)
-    def test_manual_membership_change(self) -> None:
-        backend = dist.get_backend_impl(device=self.device)
-        store = dist.distributed_c10d._get_default_store()
-        dist.barrier()
-
-        if self.rank == 0:
-            shrunk = backend.shrink([1])
-            self.assertEqual(shrunk.size(), 1)
-            grow_id = shrunk._get_grow_id()
-            store.set("nccl2_manual_grow_id", grow_id)
-            grown = shrunk._grow(self.world_size)
-        else:
-            grow_id = store.get("nccl2_manual_grow_id")
-            opts = dist.ProcessGroupNCCL2.Options()
-            opts.group_name = "nccl2_manual_grow"
-            joiner = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
-            grown = joiner._grow(self.world_size, grow_id, self.rank)
-
-        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
-        grown.allreduce(tensor).wait()
-        self.assertEqual(tensor, torch.full_like(tensor, 3.0))
-        torch.cuda.synchronize(self.device)
-        grown._revoke()
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
@@ -163,6 +145,27 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         dist.all_reduce(t)
         expected = float(sum(range(self.world_size)))
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_group(self) -> None:
+        group = dist.new_group(device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        self.assertEqual(shrunk.size(), 1)
+        tensor = torch.ones(4, device=self.device)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
 
 
 class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
@@ -195,6 +198,18 @@ class ProcessGroupNCCL2SymmMemRendezvousTest(_ProcessGroupNCCL2OptionsTest):
     def test_option_propagated(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         self.assertTrue(pg.use_pg_for_symm_mem_rendezvous)
+
+
+class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
 
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):

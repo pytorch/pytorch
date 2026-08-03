@@ -178,6 +178,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " does not support setting timeout; the new value is ignored");
   }
 
+  // Experimental. Unsupported backends intentionally ignore temporary timeout
+  // extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
+
   // Fault Tolerance / Reconfigure API
   //
   // Backends that support dynamic membership override these.
