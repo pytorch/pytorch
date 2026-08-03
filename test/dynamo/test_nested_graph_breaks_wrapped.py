@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import unittest
 
 import torch
@@ -144,7 +145,6 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
 ]
 
 case = None
@@ -153,6 +153,22 @@ for case in xfails:
     unittest.expectedFailure(case)
 
 del case, xfails
+
+
+def _xfail_inherited_copy(fn):
+    # expectedFailure on the inherited method would leak into the original class
+    @functools.wraps(fn)
+    def copied(self):
+        return fn(self)
+
+    return unittest.expectedFailure(copied)
+
+
+NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision = (  # noqa: F821
+    _xfail_inherited_copy(
+        NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision  # noqa: F821
+    )
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

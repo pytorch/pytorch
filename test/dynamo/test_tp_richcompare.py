@@ -8,6 +8,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.variables.user_defined import _safe_c_slots
 from torch._library.opaque_object import register_custom_class
 
 
@@ -881,6 +882,8 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: works
+        safe_slots = _safe_c_slots()
+        self.addCleanup(safe_slots.intersection_update, set(safe_slots))
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_cmp_equals(row1, row1, operator.eq)
         self._assert_cmp_equals(row1, row2, operator.eq)
