@@ -7,12 +7,12 @@ from typing import Any, Protocol
 # This module is imported during torch initialization (via pytree ->
 # opaque_object -> _library). Keep top-level imports free of torch.autograd /
 # torch._functorch.pyfunctorch, which are not finished initializing yet.
-from torch import _C, _ops, Tensor, autograd
+from torch import _C, _ops, autograd, Tensor
 from torch._C._functorch import (
-    TransformType,
     _unwrap_for_grad,
     _wrap_for_grad,
     get_dynamic_layer_stack_depth,
+    TransformType,
 )
 from torch._functorch.utils import enable_single_level_autograd_function
 from torch.utils import _pytree
@@ -29,7 +29,8 @@ class InfoProtocol(Protocol):
 class Info:
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
-     
+
+
 def _backend_keyset_for_args(args: tuple[Any, ...]) -> Any:
     """DispatchKeySet for the tensor device backend (no FuncTorch / Autograd)."""
     DK = _C.DispatchKey
@@ -83,7 +84,6 @@ def _fake_tensor_mode_active() -> bool:
     except AttributeError:
         return False
     return _C._get_dispatch_mode(key) is not None
-
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
@@ -250,7 +250,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     def _apply_single_level(*operands: Any, backend_only: bool = False) -> Any:
         cls = GeneratedBackend if backend_only else Generated
         with enable_single_level_autograd_function():
-            return cls.apply(*operands)
+            return cls.apply(*operands)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
 
     def _generate_nested(interpreter: Any) -> Any:
         """One Grad/Jvp layer: unwrap → lower → redispatch → wrap.
@@ -305,9 +305,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
     def _dispatch_functorch(*operands: Any) -> Any:
         """Nest Grad/Jvp layers until depth 0, then run the backend kernel."""
-        from torch._functorch.pyfunctorch import (
-            retrieve_current_functorch_interpreter,
-        )
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 
         if not _C._are_functorch_transforms_active():
             return _apply_single_level(*operands, backend_only=True)
@@ -318,12 +316,10 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
         Nested = _generate_nested(interpreter)
         with enable_single_level_autograd_function():
-            return Nested.apply(*operands)
+            return Nested.apply(*operands)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
 
     def autograd_impl(keyset, *args, **keyword_only_args):
-        from torch._functorch.pyfunctorch import (
-            retrieve_current_functorch_interpreter,
-        )
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 
         if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
@@ -362,7 +358,6 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             return _dispatch_functorch(*operands)
 
     return autograd_impl
-
 
 
 def supports_tensorlist(cls: Any) -> Any:

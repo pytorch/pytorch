@@ -6737,7 +6737,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
 
     Hybrid training does::
 
-        energy, vjp_fn = torch.func.vjp(f, x)   # energy = custom-op primal
+        energy, vjp_fn = torch.func.vjp(f, x)  # energy = custom-op primal
         forces = vjp_fn(ones)
         loss = mse(energy) + mse(forces)
         torch.func.grad_and_value(loss, argnums=params)
@@ -6786,7 +6786,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         )
 
     def _scale_op(self, x, w):
-        return getattr(self.ns(), "ft_scale")(x, w)
+        return self.ns().ft_scale(x, w)
 
     def _scale_direct(self, x, w):
         return x * w
@@ -6894,7 +6894,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         return opaque_scale
 
     def _opaque_op(self, x, w):
-        return getattr(self.ns(), "opaque_scale")(x, w)
+        return self.ns().opaque_scale(x, w)
 
     def _register_saves_output(self):
         calls = self._saves_out_calls
@@ -6968,9 +6968,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
             tensors, w = list(saved[:-1]), saved[-1]
             relayed = getattr(torch.ops, ns).grad_relay(list(grad_outputs))
             grad_tensors = [g * w for g in relayed]
-            grad_w = sum(
-                (g * t).sum_to_size(w.shape) for g, t in zip(relayed, tensors)
-            )
+            grad_w = sum((g * t).sum_to_size(w.shape) for g, t in zip(relayed, tensors))
             return grad_tensors, grad_w
 
         scale_list.register_autograd(scale_backward, setup_context=scale_setup)
@@ -7111,7 +7109,6 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         self.assertGreater(float(g_direct.norm()), 0.0)
         self.assertEqual(g_op, g_direct, rtol=1e-5, atol=1e-6)
 
-
     @requires_compile
     @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
     @parametrize(
@@ -7245,7 +7242,11 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
     @requires_compile
     @parametrize(
         "pattern",
-        ["order2_vjp_cotangent", "order2_hybrid_e_plus_f", "order2_grad_and_value_hybrid"],
+        [
+            "order2_vjp_cotangent",
+            "order2_hybrid_e_plus_f",
+            "order2_grad_and_value_hybrid",
+        ],
     )
     def test_compile_eager_backend_dual_layer_force_paths_match_eager(
         self, device, pattern
@@ -7327,13 +7328,9 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
                     _e, vjp_fn = torch.func.vjp(
                         lambda z: test_self._quad_energy(z, w), xx
                     )
-                    (forces,) = vjp_fn(
-                        torch.ones((), device=xx.device, dtype=xx.dtype)
-                    )
+                    (forces,) = vjp_fn(torch.ones((), device=xx.device, dtype=xx.dtype))
                     return forces.pow(2).sum()
-                e, vjp_fn = torch.func.vjp(
-                    lambda z: test_self._quad_energy(z, w), xx
-                )
+                e, vjp_fn = torch.func.vjp(lambda z: test_self._quad_energy(z, w), xx)
                 (forces,) = vjp_fn(torch.ones_like(e))
                 return e + forces.pow(2).sum()
 
@@ -7502,7 +7499,6 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         g_e_only, _ = torch.func.grad_and_value(energy_only)(x.clone())
         self.assertGreater(float((g_eager - g_e_only).abs().max()), 1e-3)
 
-
     @requires_compile
     def test_compile_grad_vjp_missing_device_kernel_raises(self, device):
         lib = self.lib()
@@ -7529,7 +7525,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         torch.manual_seed(40)
         x = torch.randn(4, 3, device=device)
         w = torch.randn(3, device=device)
-        op = getattr(self.ns(), "ghost")
+        op = self.ns().ghost
 
         def loss(xx):
             e, vjp_fn = torch.func.vjp(lambda z: op(z.square(), w).sum(), xx)
@@ -7576,7 +7572,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         torch.manual_seed(41)
         x = torch.randn(4, 3, device=device)
         w = torch.randn(3, device=device)
-        op = getattr(self.ns(), "opaque")
+        op = self.ns().opaque
 
         def loss(xx):
             e, vjp_fn = torch.func.vjp(lambda z: op(z.square(), w).sum(), xx)
@@ -7708,7 +7704,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         self._register_saves_output()
         torch.manual_seed(51)
         x = torch.randn(4, 3, device=device)
-        saves_output = getattr(self.ns(), "saves_output")
+        saves_output = self.ns().saves_output
 
         def loss_op(xx):
             e, vjp_fn = torch.func.vjp(
@@ -7746,7 +7742,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         x = torch.randn(4, 3, device=device)
         y = torch.randn(4, 3, device=device)
         w = torch.randn(3, device=device)
-        scale_list = getattr(self.ns(), "scale_list")
+        scale_list = self.ns().scale_list
 
         def loss_op(xx):
             def energy(z):
@@ -7837,7 +7833,7 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
         self._register_ro_scale()
         torch.manual_seed(54)
         w = torch.randn(3, device=device)
-        ro_scale = getattr(self.ns(), "ro_scale")
+        ro_scale = self.ns().ro_scale
 
         def loss(xx):
             e, vjp_fn = torch.func.vjp(
@@ -7977,7 +7973,6 @@ class TestFuncTorchCompatibility(CustomOpTestCaseBase):
             ref = torch.func.hessian(lambda z: (z.square() * w).sum())(x)
             self.assertGreater(float(ref.norm()), 0.0)
             self.assertEqual(got, ref)
-
 
 
 only_for = ("cpu", "cuda", "xpu")
