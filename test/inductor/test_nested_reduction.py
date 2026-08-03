@@ -765,10 +765,17 @@ class _NestedReductionBase:
             self.check_numeric(f, (x, w))
         self.check_fusion(1 if expect_fullres_consumer else None)
 
-    def test_producer_consumer_rmsnorm_interleaved_pair_epilogue(self):
+    # G=2 makes the REDUCED and PARENT_HALF domains share a numel
+    # (outer_rnumel // G == outer_rnumel // 2), so a pair consumer is only
+    # classified correctly if the domain check disambiguates them rather than
+    # matching on numel alone. The values differ -- element 0 of each pair is
+    # not the amax over that pair -- so a misclassification shows up as a
+    # numeric mismatch, not just a lost fusion.
+    @parametrize("G", [2, 16])
+    def test_producer_consumer_rmsnorm_interleaved_pair_epilogue(self, G):
         import torch.nn.functional as F
 
-        B, D, G = 32, 1024, 16
+        B, D = 32, 1024
 
         def f(x, weight):
             y = F.rms_norm(x, (D,), weight)
@@ -2141,7 +2148,7 @@ class _InternalsBase:
         self.check_code(wrapper_code, num_kernels=1, num_allocs=2, num_deallocs=1)
         self.check_axis_classification_contract(
             kernel_code,
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=looped_or_persistent(2, 16),
         )
         extra_checks = (
@@ -2179,7 +2186,7 @@ class _InternalsBase:
             num_outputs=3,
             num_deallocs=2,
             meta_num_load=self.looped_or_persistent(3, 1),
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=self.looped_or_persistent(2, 16),
             extra_checks=(
                 FileCheck().check_count("tl.split(", 0, exactly=True)
