@@ -210,7 +210,8 @@ class TestBinaryUfuncBasic(TestCase):
             expected = np.subtract(scalar, np.asarray([True, False]))
             got = subtract(scalar, tnp.asarray([True, False]))
             assert_allclose(expected, got, atol=1e-7, check_dtype=False)
-            assert got.dtype.name == expected_dtype == expected.dtype.name
+            self.assertEqual(got.dtype.name, expected_dtype)
+            self.assertEqual(got.dtype.name, expected.dtype.name)
 
         # numpy rejects bool - bool; the promotion must not mask that.
         barr = tnp.asarray([True, False])

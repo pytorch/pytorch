@@ -930,7 +930,10 @@ if(USE_MPS)
                 cmake_path(GET SHADER STEM TGT_STEM)
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
-                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0")
+                # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
+                # deployment target (__TENSOR_OPS_SUPPORT_DEPLOYMENT_TARGET_26_2); the
+                # MPP kernels assume the 26.2+ layout, so pin the target explicitly.
+                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0;-mmacos-version-min=26.2")
             endforeach()
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
