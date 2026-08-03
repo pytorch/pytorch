@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/CollapseDims.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
@@ -847,18 +848,6 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   });
 }
 
-// True when dims [lo, hi] of t are laid out like one contiguous-in-order
-// block (stride(i-1) == stride(i) * size(i)), i.e. they can be collapsed
-// into a single dim without copying.
-static bool strides_collapse(const Tensor& t, int lo, int hi) {
-  for (int i = hi; i > lo; i--) {
-    if (t.stride(i - 1) != t.stride(i) * t.size(i)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Unified host-side dispatch for value-preserving reductions on MPS, shared
 // by sum/nansum/mean/count_nonzero and min/max/all/any. Kernel name pattern
 // is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
@@ -966,14 +955,14 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                                   uint32_t dim_stride,
                                   uint32_t inner_stride,
                                   uint32_t outer_stride) {
-    const uint32_t tg_height = is_small_dim ? 1u : OUTER_TG_HEIGHT;
+    const auto tg_height = is_small_dim ? 1u : OUTER_TG_HEIGHT;
     auto kname = fmt::format("{}reduction_{}_{}_{}",
                              prefix,
                              is_small_dim ? "outer_small_dim" : "outer",
                              scalarToMetalTypeString(in_dt),
                              scalarToMetalTypeString(out_dt));
     const auto num_tg_x = c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
-    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(
         ps, prefix + (is_small_dim ? "reduction_outer_small_dim" : "reduction_outer"), {in});
@@ -1056,7 +1045,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                            std::optional<float> divisor) {
     auto kname = fmt::format(
         "{}reduction_narrow_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
-    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_narrow", {in});
     [ce setComputePipelineState:ps];
@@ -1084,7 +1073,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                                    uint32_t outer_stride) {
     auto kname = fmt::format(
         "{}reduction_narrow_strided_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
-    id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+    auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_narrow_strided", {in});
     [ce setComputePipelineState:ps];
@@ -1139,23 +1128,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         std::clamp(at::ceil_div(SPLIT_TARGET_PARTIALS, std::max(num_rows, 1u)), 2u, std::max(max_segs, 2u));
     return at::ceil_div(row_len, at::ceil_div(row_len, segs));
   };
-  // Largest divisor of x at most cap. The outer split path uses it so the
-  // segments come out equal-sized; a non-divisor count would leave the tail
-  // segment (and its threadgroups) underloaded.
-  auto largest_divisor_leq = [](uint32_t x, uint32_t cap) -> uint32_t {
-    uint32_t best = 1;
-    for (uint32_t g = 2; g <= cap; ++g) {
-      if (x % g == 0) {
-        best = g;
-      }
-    }
-    return best;
-  };
-
-  const int nd = input_orig.dim();
-  int num_reduced = 0;
-  int reduced_dim = -1;
-  for (int d = 0; d < nd; d++) {
+  const auto nd = input_orig.dim();
+  auto num_reduced = 0;
+  auto reduced_dim = -1;
+  for (auto d = 0; d < nd; d++) {
     if (input_orig.size(d) != output.size(d)) {
       num_reduced++;
       reduced_dim = d;
@@ -1167,27 +1143,26 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
   const std::optional<float> p1_div = opts.divisor.has_value() ? std::optional<float>(0.0f) : std::nullopt;
 
   // Non-innermost reduction on a non-contiguous input whose dims still
-  // collapse to [outer_size, dim_size, inner_size] (e.g. a transposed
-  // matrix): the strided outer / outer_small_dim / narrow kernels index
+  // collapse to [outer_size, dim_size, inner_size] (e.g. a sliced or padded
+  // view): the strided outer / outer_small_dim / narrow kernels index
   // through explicit strides, skipping the .contiguous() copy the generic
   // path would need. All kernels index in 32 bits.
   if (output.numel() > 1 && !input_orig.is_contiguous() && output.is_contiguous() && canUse32BitIndexMath(input_orig)) {
     if (num_reduced == 1 && reduced_dim < nd - 1) {
-      const bool collapses =
-          strides_collapse(input_orig, reduced_dim + 1, nd - 1) && strides_collapse(input_orig, 0, reduced_dim - 1);
-      if (collapses) {
-        const auto outer_size =
-            safe_downcast<uint32_t, int64_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
-        const auto dim_size = safe_downcast<uint32_t, int64_t>(input_orig.size(reduced_dim));
-        const auto inner_size =
-            safe_downcast<uint32_t, int64_t>(input_orig.numel() / (static_cast<int64_t>(outer_size) * dim_size));
-        const auto dim_stride = safe_downcast<uint32_t, int64_t>(input_orig.stride(reduced_dim));
-        // A size-1 extent never contributes to indexing but can carry a
-        // stride past uint32 (canUse32BitIndexMath weighs it as
-        // (size - 1) * stride == 0); bind 0 instead of overflowing the cast.
-        const auto inner_stride = inner_size == 1 ? 0u : safe_downcast<uint32_t, int64_t>(input_orig.stride(nd - 1));
-        const auto outer_stride =
-            outer_size == 1 ? 0u : safe_downcast<uint32_t, int64_t>(input_orig.stride(reduced_dim - 1));
+      c10::DimVector sizes(input_orig.sizes().begin(), input_orig.sizes().end());
+      c10::DimVector strides(input_orig.strides().begin(), input_orig.strides().end());
+      const auto [collapsed_dim, collapsed_ndim] = at::collapse_dims(sizes.data(), strides.data(), nd, reduced_dim);
+      // Usable when at most one collapsed block remains on each side of the
+      // reduced dim: [dim], [dim, inner], [outer, dim] or [outer, dim, inner].
+      if (collapsed_ndim <= 2 || (collapsed_ndim == 3 && collapsed_dim == 1)) {
+        const auto has_outer = collapsed_dim > 0;
+        const auto has_inner = collapsed_dim < collapsed_ndim - 1;
+        const auto outer_size = has_outer ? safe_downcast<uint32_t, int64_t>(sizes[0]) : 1u;
+        const auto dim_size = safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim]);
+        const auto inner_size = has_inner ? safe_downcast<uint32_t, int64_t>(sizes[collapsed_dim + 1]) : 1u;
+        const auto dim_stride = safe_downcast<uint32_t, int64_t>(strides[collapsed_dim]);
+        const auto inner_stride = has_inner ? safe_downcast<uint32_t, int64_t>(strides[collapsed_dim + 1]) : 0u;
+        const auto outer_stride = has_outer ? safe_downcast<uint32_t, int64_t>(strides[0]) : 0u;
         const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
         // Only the sum family has narrow_strided kernels; value ops fall
         // through to the strided outer / small-dim layout below. Tensors
@@ -1304,7 +1279,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           });
           return;
         }
-        const bool use_small_dim = dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
+        const auto use_small_dim = dim_size <= OUTER_SMALL_DIM_MAX_SIZE && natural_tgs >= SPLIT_MIN_TGS;
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {
             encode_outer_strided(input_orig,
@@ -1332,7 +1307,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     // Any non-innermost dim routes here, viewed as [outer_size, dim_size,
     // inner_size] with the dim reduced (outer_size = 1 when reduced_dim ==
     // 0); the kernels index in 32 bits.
-    const bool non_innermost = num_reduced == 1 && reduced_dim != nd - 1 && canUse32BitIndexMath(input_orig);
+    const auto non_innermost = num_reduced == 1 && reduced_dim != nd - 1 && canUse32BitIndexMath(input_orig);
     if (non_innermost) {
       const auto outer_size =
           safe_downcast<uint32_t, int64_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
@@ -1435,38 +1410,34 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       // threadgroups to fill the GPU, so split the reduced dim into segments
       // and fold the [num_segs, inner_size] partials in a second pass.
       if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
-        const auto seg_cap =
+        const auto num_segs =
             std::min(dim_size / OUTER_SPLIT_MIN_SEG_LEN, std::max(2u, OUTER_SPLIT_MAX_TGS / natural_tgs));
-        const auto num_segs = largest_divisor_leq(dim_size, seg_cap);
-        if (num_segs >= 2) {
-          auto partials =
-              at::empty({(int64_t)num_segs, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
-          dispatch_sync_with_rethrow(stream->queue(), ^() {
-            @autoreleasepool {
-              encode_outer(input_orig,
-                           partials,
-                           dim_size,
-                           inner_size,
-                           num_segs,
-                           1,
-                           opts.prefix,
-                           opts.input_kernel_dtype,
-                           opts.partial_dtype,
-                           p1_div);
-              encode_outer(partials,
-                           output,
-                           num_segs,
-                           inner_size,
-                           1,
-                           1,
-                           opts.pass2_prefix,
-                           opts.partial_dtype,
-                           opts.output_kernel_dtype,
-                           opts.divisor);
-            }
-          });
-          return;
-        }
+        auto partials = at::empty({(int64_t)num_segs, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            encode_outer(input_orig,
+                         partials,
+                         dim_size,
+                         inner_size,
+                         num_segs,
+                         1,
+                         opts.prefix,
+                         opts.input_kernel_dtype,
+                         opts.partial_dtype,
+                         p1_div);
+            encode_outer(partials,
+                         output,
+                         num_segs,
+                         inner_size,
+                         1,
+                         1,
+                         opts.pass2_prefix,
+                         opts.partial_dtype,
+                         opts.output_kernel_dtype,
+                         opts.divisor);
+          }
+        });
+        return;
       }
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
