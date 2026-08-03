@@ -1,7 +1,9 @@
 # Owner(s): ["module: unknown"]
 
 import collections
+import sys
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -17,6 +19,35 @@ except ModuleNotFoundError:
 
 
 device = torch.device("cpu")
+
+
+class TestOpenMP(TestCase):
+    def test_find_openmp_lib(self):
+        with mock.patch.object(
+            torch, "_get_loaded_openmp_libraries", return_value=("/tmp/libomp.dylib",)
+        ):
+            self.assertEqual(
+                torch.backends.openmp.find_openmp_lib(), "/tmp/libomp.dylib"
+            )
+
+    def test_find_openmp_lib_rejects_multiple_runtimes(self):
+        libraries = ("/tmp/first/libomp.dylib", "/tmp/second/libomp.dylib")
+        with mock.patch.object(
+            torch, "_get_loaded_openmp_libraries", return_value=libraries
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Multiple OpenMP runtimes"):
+                torch.backends.openmp.find_openmp_lib()
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS-only OpenMP resolution")
+    def test_inductor_links_loaded_openmp_runtime(self):
+        from torch._inductor import cpp_builder
+
+        path = "/tmp/loaded/libomp.dylib"
+        with mock.patch.object(
+            torch.backends.openmp, "find_openmp_lib", return_value=path
+        ):
+            openmp_args = cpp_builder._get_openmp_args("/usr/bin/clang++")
+        self.assertEqual(openmp_args[4], [path])
 
 
 class Network(torch.nn.Module):
