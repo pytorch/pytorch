@@ -39,6 +39,11 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      enable-periodic-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Additionally run tests marked @periodic, on top of the regular test set (they are skipped by default).
       dashboard-tag:
         required: false
         type: string
@@ -214,6 +219,7 @@ jobs:
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          PYTORCH_TEST_WITH_PERIODIC: ${{ inputs.enable-periodic-tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -265,6 +271,7 @@ jobs:
             -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
+            -e PYTORCH_TEST_WITH_PERIODIC \
             -e TESTS_TO_INCLUDE \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \

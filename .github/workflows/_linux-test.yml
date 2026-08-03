@@ -39,6 +39,11 @@ on:
         type: string
         default: ""
         description: Space-separated tests to exclude (empty string implies none)
+      enable-periodic-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Additionally run tests marked @periodic, on top of the regular test set (they are skipped by default).
       use-gha:
         required: false
         type: string
@@ -295,6 +300,7 @@ jobs:
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          PYTORCH_TEST_WITH_PERIODIC: ${{ inputs.enable-periodic-tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}

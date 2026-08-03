@@ -1871,6 +1871,11 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# Enables tests that run only in periodic CI (disabled by default)
+TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PERIODIC",
+    env_var="PYTORCH_TEST_WITH_PERIODIC",
+)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -2887,10 +2892,48 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def periodic(fn):
+    """Marks a test to run only when periodic test mode is enabled.
+
+    Gating only, not scheduling: the test runs only in periodic workflows
+    that already execute its test file; if none does, the test never runs.
+
+    Composes with @slowTest: periodic CI does not set PYTORCH_TEST_WITH_SLOW,
+    so slow gating (static or dynamic) defers to periodic mode and a test
+    marked both still runs in periodic CI.
+    """
+    if isinstance(fn, type):
+        raise TypeError(f"@periodic cannot be applied to a class ({fn.__name__}); decorate its test methods instead")
+
+    # The passthrough wrapper keeps skipUnless and the periodic_test mark off
+    # fn itself, which parametrize subtests may share with sibling subtests.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    wrapper = unittest.skipUnless(
+        TEST_WITH_PERIODIC,
+        "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test",
+    )(wrapper)
+    wrapper.__dict__['periodic_test'] = True
+    return wrapper
+
+
+def _periodic_enabled(test):
+    # Slow gating defers to periodic mode because periodic CI does not set
+    # PYTORCH_TEST_WITH_SLOW; a @periodic test marked slow must still run there.
+    # The running test method is inspected (rather than the slowTest wrapper's
+    # own mark) so detection works regardless of decorator stacking order.
+    if not TEST_WITH_PERIODIC or not isinstance(test, unittest.TestCase):
+        return False
+    test_fn = getattr(test, test._testMethodName, None)
+    return test_fn is not None and test_fn.__dict__.get('periodic_test', False)
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW:
+        if not TEST_WITH_SLOW and not (args and _periodic_enabled(args[0])):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
         else:
             fn(*args, **kwargs)
@@ -3328,7 +3371,7 @@ def check_if_enable(test: unittest.TestCase):
 
     if any(matches_test(x) for x in slow_tests_dict):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:
+        if not TEST_WITH_SLOW and not _periodic_enabled(test):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
     if not IS_SANDCASTLE:
