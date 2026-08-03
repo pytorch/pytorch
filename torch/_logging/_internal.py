@@ -946,15 +946,19 @@ def _update_log_state_from_env() -> None:
         log_setting = os.environ.get(env_var, None)
         if log_setting is None:
             continue
+        # _parse_log_settings is lru_cache'd, so its return value is a shared,
+        # mutable LogState owned by the cache. Copy its fields into a fresh
+        # LogState instead of aliasing/mutating it directly, or later in-place
+        # updates here (or log_state.clear()/enable_log() elsewhere) would
+        # permanently corrupt the cache entry for that settings string.
         parsed = _parse_log_settings(log_setting)
         if new_state is None:
-            new_state = parsed
-        else:
-            # Merge on top of what's already set: registered env vars are
-            # additive to TORCH_LOGS, with later ones winning on conflicting
-            # qnames/artifacts.
-            new_state.log_qname_to_level.update(parsed.log_qname_to_level)
-            new_state.artifact_names.update(parsed.artifact_names)
+            new_state = LogState()
+        # Merge on top of what's already set: registered env vars are
+        # additive to TORCH_LOGS, with later ones winning on conflicting
+        # qnames/artifacts.
+        new_state.log_qname_to_level.update(parsed.log_qname_to_level)
+        new_state.artifact_names.update(parsed.artifact_names)
     if new_state is not None:
         log_state = new_state
 
