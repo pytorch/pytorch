@@ -31,7 +31,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -86,10 +85,6 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
 
     def keepdim_shape(self, source: Any) -> str:
         return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
-
-    @property
-    def needs_physical_combine(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.axis, self.group_size)
 
     @property
     def reduction_profile(self) -> str:
@@ -415,7 +410,7 @@ def lower_prepare_softmax_online(
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
-    if layout.needs_physical_combine:
+    if layout.needs_physical_callbacks:
         raise NotImplementedError(
             "unsupported FlexGEMM physical local reduction: prepare_softmax_online "
             "needs a multi-value generated physical reducer"
@@ -474,8 +469,8 @@ def lower_tensorssa_reduce(
         f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
     )
     source = _cute_arg(input_node, env)
-    needs_physical_combine = layout.needs_physical_combine
-    if needs_physical_combine:
+    needs_physical_callbacks = layout.needs_physical_callbacks
+    if needs_physical_callbacks:
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
@@ -487,7 +482,7 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_callbacks:
         reduced = _generate_like(
             kernel, f"{reduced} / {float(layout.group_size)!r}", reduced
         )
