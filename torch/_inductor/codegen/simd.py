@@ -1271,7 +1271,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
+    def mask_loads(
+        self, mask: str | OpsWrapper | CSEVariableType, value: int | float
+    ) -> Iterator[Any]:
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         prior_val = self._load_other
@@ -1287,6 +1289,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         finally:
             self._load_mask = prior
             self._load_other = prior_val
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        raise NotImplementedError(f"{type(self).__name__}: masked_store")
 
     def get_strides_of_load(self, index: sympy.Expr) -> dict[sympy.Symbol, sympy.Expr]:
         """
@@ -2046,6 +2057,18 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(k):
             self._inner.store(name, remapped_index, value, mode=mode)
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        k = self._kernel
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(k):
+            self._inner.masked_store(name, remapped_index, value, mask)
 
 
 class SIMDScheduling(BaseScheduling):

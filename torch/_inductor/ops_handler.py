@@ -256,6 +256,29 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: T,
+        mask: T,
+    ) -> None:
+        """
+        Store 'value' to 'name' offset by 'index', but only where 'mask' is
+        true. Elements where 'mask' is false are left *unmodified*, so this op
+        only partially initializes the physical allocation.
+
+        This is an internal operation for scheduler-created domain expansion,
+        not a general conditional mutation. Mask-false coordinates must be
+        outside the logical output domain, and therefore unobservable. This lets
+        codegen forward 'value' to later fused computation without reading the
+        smaller destination at an expanded-tail index.
+
+        Unlike 'store' there is no 'mode' -- an atomic masked store is not
+        supported, so backends never need to combine a mask with atomic_add.
+        """
+        raise NotImplementedError
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
@@ -1210,6 +1233,9 @@ class SimpleCSEHandler(WrapperHandler):
 
     def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
+
+    def masked_store(self, *args, **kwargs) -> None:
+        raise NotImplementedError("masked_store not implemented")
 
     def store_reduction(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")

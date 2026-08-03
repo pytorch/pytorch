@@ -607,6 +607,17 @@ class MetalKernel(SIMDKernel):
         else:
             self.stores.writeline(DeferredLine(name, line))
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        # store() above ignores self._load_mask, so the SIMDKernel
+        # implementation would silently write the masked-off elements.
+        raise NotImplementedError("mps: masked_store")
+
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         var = self.args.output(name)
         index = self.prepare_indexing(index)

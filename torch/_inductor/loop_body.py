@@ -37,6 +37,53 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+# Ops a body must not contain to be legal for masked expansion. Writes other
+# than a plain store would bypass the mask; the assert/indirect ops evaluate at
+# the raw expanded coordinate, so they can fire or read out of bounds in the
+# tail whose result is discarded.
+MASKED_EXPANSION_BANNED_OPS = (
+    "store_reduction",
+    "partial_accumulate",
+    "check_bounds",
+    "indirect_indexing",
+    "device_assert_async",
+    "sort",
+    "scan",
+)
+
+
+class _MaskStoresHandler(WrapperHandler):
+    """
+    Rewrite every store in a body into a masked_store. Ops that write memory by
+    another route would pass through unmasked and clobber the expanded tail, so
+    they are rejected; callers screen for them via MASKED_EXPANSION_BANNED_OPS
+    before mutating anything, and these are the backstop.
+    """
+
+    def __init__(self, inner: OpsHandler[Any], mask: Any) -> None:
+        super().__init__(inner)
+        self.mask = mask
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: Any,
+        mode: Any = None,
+    ) -> None:
+        if mode is not None:
+            raise AssertionError("masked store expansion requires a plain store")
+        self._inner.masked_store(name, index, value, self.mask)
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: Any) -> None:
+        raise AssertionError("masked store expansion does not support store_reduction")
+
+    def partial_accumulate(self, *args: Any, **kwargs: Any) -> None:
+        raise AssertionError(
+            "masked store expansion does not support partial_accumulate"
+        )
+
+
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
     @functools.cache
@@ -274,7 +321,40 @@ class LoopBody:
         Expand node on `dimension` to `new_range` and rely on index modular to avoid
         out-of-boundary access.
         """
+        return self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=False
+        )
 
+    def expand_dimension_for_pointwise_node_with_masked_stores(
+        self, dimension: int, new_range: int
+    ) -> LoopBody:
+        """
+        Expand a dimension while masking writes outside its original range.
+
+        PRECONDITION, enforced by the caller, not here: every *read* in the body
+        must be valid over `new_range`, not just over `original_range`. Unlike
+        expand_dimension_for_pointwise_node, this does not wrap the expanded
+        dimension in `Mod`, so loads, index_exprs and bounds checks all evaluate
+        at the raw expanded coordinate; only the writes are masked. The caller
+        must prove the added tail addresses are live (see
+        `_try_reindex_pointwise_for_reduction`, which requires every read to be
+        provably in bounds over the expanded domain or to match a read the
+        reduction already performs) and must reject bodies containing
+        MASKED_EXPANSION_BANNED_OPS.
+        """
+        if V.graph.sizevars.statically_known_equals(
+            self.sizes[0][dimension], new_range
+        ):
+            # Mask would be statically true; avoid the _load_mask codegen
+            # penalty (no block ptr/TMA, forced dense indexing) for no gain.
+            return self
+        return self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=True
+        )
+
+    def _expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int, *, mask_stores: bool
+    ) -> LoopBody:
         old_body = self
         old_sizes = self.sizes
 
@@ -300,8 +380,17 @@ class LoopBody:
             reduce_idx = index[len(iter_size) :]
 
             new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
 
+            if mask_stores:
+                handler = V.get_ops_handler()
+                mask = handler.lt(
+                    handler.index_expr(iter_idx[dimension], torch.int64),
+                    handler.index_expr(original_range, torch.int64),
+                )
+                with V.set_ops_handler(_MaskStoresHandler(handler, mask)):
+                    return old_body(new_iter_idx, reduce_idx)
+
+            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
             return old_body(new_iter_idx, reduce_idx)
 
         loop_body = LoopBody(
@@ -757,6 +846,13 @@ class CaptureIndexing(WrapperHandler):
             index, MemoryUsageType.STORE, buffer_name=name, mode=mode
         )
         return self._inner.store(name, index, value, mode)
+
+    def masked_store(self, name, index, value, mask):
+        index = self._simplify(index)
+        index = self._add_index(
+            index, MemoryUsageType.STORE, buffer_name=name, mode=None
+        )
+        return self._inner.masked_store(name, index, value, mask)
 
     def store_reduction(self, name, index, value):
         index = self._simplify(index)
