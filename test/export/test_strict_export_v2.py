@@ -49,7 +49,9 @@ for test in tests:
 del test
 
 for cls, instantiate_kwargs in test_export.DEVICE_EXPORT_TEST_CLASSES:
-    instantiate_device_type_tests(make_dynamic_cls(cls), globals(), **instantiate_kwargs)
+    instantiate_device_type_tests(
+        make_dynamic_cls(cls), globals(), **instantiate_kwargs
+    )
 del cls, instantiate_kwargs
 
 if __name__ == "__main__":
