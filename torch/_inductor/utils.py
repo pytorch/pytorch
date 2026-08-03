@@ -2217,6 +2217,34 @@ def ensure_nvmatmul_heuristics_available() -> bool:
         return False
 
 
+def use_flydsl_mxfp8_template(layout: Layout) -> bool:
+    """Return whether the gfx950 MXFP8 FlyDSL template may be selected."""
+    if not _use_autotune_backend("FLYDSL"):
+        return False
+    if torch.version.hip is None:
+        return False
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    if not _use_template_for_gpu(layout, [torch.float16, torch.bfloat16]):
+        return False
+
+    from .codegen.flydsl import flydsl_utils
+
+    if not flydsl_utils.runtime_available():
+        return False
+
+    try:
+        device_index = layout.device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_index)
+        gcn_arch = getattr(props, "gcnArchName", "") or ""
+    except Exception:
+        log.debug("Could not determine ROCm arch for MXFP8 FlyDSL gate", exc_info=True)
+        return False
+    return gcn_arch.split(":", 1)[0] == "gfx950"
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,
