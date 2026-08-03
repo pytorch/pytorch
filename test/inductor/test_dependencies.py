@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+from unittest.mock import Mock, patch
 
 import torch
 from torch._inductor.codegen.cpp_utils import CppCSEVariable
@@ -155,6 +156,22 @@ class TestDependencies(InductorTestCase):
         node.outputs = []
 
         self.assertFalse(node.can_inplace(object()))
+
+    def test_masked_expansion_rejects_non_plain_store_modes(self):
+        body = object.__new__(LoopBody)
+        node = object.__new__(SchedulerNode)
+        node._body = body
+        store = Mock(
+            op="call_method",
+            target="store",
+            kwargs={"name": "buf0", "mode": "atomic_max"},
+            args=(),
+        )
+
+        with patch.object(LoopBody, "get_nodes", return_value=[store]):
+            buffers = node._get_non_plain_store_buffers()
+
+        self.assertEqual(set(buffers), {"buf0"})
 
     def test_get_offset(self):
         x = sympy_index_symbol("x")

@@ -18,7 +18,14 @@ from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
+from torch._inductor.scheduler import (
+    _LoopMutationTracker,
+    _LoopStateSnapshot,
+    FusedMixOrderReductions,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -281,6 +288,58 @@ class ImplDetailTest(MockSchedulerTest):
 
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
+
+    def test_nested_loop_state_rollback_savepoint(self):
+        computed_node = SchedulerNode(
+            V.graph.scheduler, self._create_computed_buffer_ax2()
+        )
+        original_state = computed_node.snapshot_loop_state()
+        outer = _LoopMutationTracker.create((computed_node,))
+        try:
+            computed_node.apply_loop_reindexing([64, 32])
+            outer_progress_state = computed_node.snapshot_loop_state()
+            self.assertNotEqual(outer_progress_state, original_state)
+
+            inner = _LoopMutationTracker.create((computed_node,))
+            try:
+                computed_node.apply_loop_reindexing([16, 128])
+                self.assertNotEqual(
+                    computed_node.snapshot_loop_state(), outer_progress_state
+                )
+            finally:
+                inner.finish(rollback=True)
+
+            self.assertEqual(computed_node.snapshot_loop_state(), outer_progress_state)
+        finally:
+            outer.finish(rollback=True)
+
+        self.assertEqual(computed_node.snapshot_loop_state(), original_state)
+        self.assertEqual(computed_node._loop_mutation_listeners, [])
+
+    def test_nested_fused_group_rollback(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        child = object.__new__(FusedSchedulerNode)
+        child.snodes = [node1]
+        child.group = node1.group
+        root = object.__new__(FusedMixOrderReductions)
+        root.node1 = child
+        root.node2 = node2
+        root.snodes = [node1, node2]
+        root.group = node1.group
+        original_group = child.group
+        snapshot = _LoopStateSnapshot.create((root,))
+
+        child.group = (child.group[0], (sympy.Integer(7), sympy.Integer(11)))
+        with mock.patch(
+            "torch._inductor.scheduler.refresh_group_node_dependencies"
+        ) as refresh:
+            snapshot.restore()
+
+        self.assertEqual(child.group, original_group)
+        refresh.assert_any_call(root)
+        refresh.assert_any_call(child)
+        self.assertEqual(refresh.call_count, 2)
 
     def test_reorder_modular_indexing(self):
         """
