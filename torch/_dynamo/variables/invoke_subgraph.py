@@ -283,9 +283,12 @@ def sym_num_key(sym_num: Any) -> Any:
     (e.g. the atom count threaded through successive layers) are distinct
     objects. Equal expressions mean the same value, which is what reuse needs;
     distinct symbols still have distinct expressions.
+
+    ``expr`` rather than ``_expr`` on purpose: it has the ShapeEnv's
+    replacements applied, so a symbol that was specialized keys on the value it
+    was specialized to.
     """
-    node = getattr(sym_num, "node", None)
-    return node.expr if node is not None else sym_num
+    return sym_num.node.expr
 
 
 def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
