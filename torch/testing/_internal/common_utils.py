@@ -1840,6 +1840,12 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# Enables tests that run only in periodic CI (disabled by default)
+TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PERIODIC",
+    env_var="PYTORCH_TEST_WITH_PERIODIC",
+)
+
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -2850,10 +2856,34 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+
+def periodic(fn):
+    """Marks a test to run only when periodic test mode is enabled."""
+    # Mark every wrapper so @slowTest recognizes intervening decorators.
+    wrapped = fn
+    while wrapped is not None:
+        wrapped.__dict__['periodic_test'] = True
+        wrapped = getattr(wrapped, '__wrapped__', None)
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_PERIODIC:
+            raise unittest.SkipTest(
+                "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+            )
+        return fn(*args, **kwargs)
+
+    wrapper.__dict__['periodic_test'] = True
+    return wrapper
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW:
+        periodic_enabled = TEST_WITH_PERIODIC and wrapper.__dict__.get(
+            'periodic_test', False
+        )
+        if not TEST_WITH_SLOW and not periodic_enabled:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
         else:
             fn(*args, **kwargs)
@@ -3290,8 +3320,12 @@ def check_if_enable(test: unittest.TestCase):
         return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
 
     if any(matches_test(x) for x in slow_tests_dict):
-        getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:
+        test_fn = getattr(test, test._testMethodName)
+        test_fn.__dict__['slow_test'] = True
+        periodic_enabled = TEST_WITH_PERIODIC and test_fn.__dict__.get(
+            'periodic_test', False
+        )
+        if not TEST_WITH_SLOW and not periodic_enabled:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
     if not IS_SANDCASTLE:
