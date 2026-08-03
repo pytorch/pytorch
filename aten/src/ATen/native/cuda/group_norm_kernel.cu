@@ -44,11 +44,11 @@ template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
     T eps,
-    const T* X,
-    T* mean,
-    T* rstd,
-    T_ACC* mean_acc,
-    T_ACC* rstd_acc) {
+    const T* __restrict__ X,
+    T* __restrict__ mean,
+    T* __restrict__ rstd,
+    T_ACC* __restrict__ mean_acc,
+    T_ACC* __restrict__ rstd_acc) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp = WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
@@ -146,52 +146,18 @@ __global__ void RowwiseMomentsChannelsLastCUDAKernel(
   }
 }
 
-template <typename T>
-__global__ void ComputeInternalGradientsChannelsLastCUDAKernel(
-    int64_t C,
-    int64_t HxW,
-    const T* dY,
-    const T* X,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t nc = blockIdx.x;
-  const int64_t n = nc / C;
-  const int64_t c = nc % C;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = (n * HxW + hw) * C + c;
-    sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(dY[index]);
-  }
-  if (blockDim.x <= C10_WARP_SIZE) {
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
-    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  }
-  if (threadIdx.x == 0) {
-    ds[nc] = sum1;
-    db[nc] = sum2;
-  }
-}
-
 template <typename T, typename T_ACC>
 __global__ void GroupNormBackwardChannelsLastCUDAKernel(
     int64_t C,
     int64_t HxW,
     int64_t D,
-    const T* dY,
-    const T* X,
-    const T* rstd,
-    const T* gamma,
-    const T_ACC* c2,
-    const T_ACC* c3,
-    T* dX) {
+    const T* __restrict__ dY,
+    const T* __restrict__ X,
+    const T* __restrict__ rstd,
+    const T* __restrict__ gamma,
+    const T_ACC* __restrict__ c2,
+    const T_ACC* __restrict__ c3,
+    T* __restrict__ dX) {
   const int64_t ng = blockIdx.x / HxW;
   const int64_t hw = blockIdx.x % HxW;
   const int64_t n = ng / (C / D);
@@ -408,19 +374,29 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
   }
 }
 
-template <typename T>
+template <bool ChannelsLast, typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
+    int64_t C,
     int64_t HxW,
-    const T* dY,
-    const T* X,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
+    const T* __restrict__ dY,
+    const T* __restrict__ X,
+    acc_type<T, true>* __restrict__ ds,
+    acc_type<T, true>* __restrict__ db) {
   using T_ACC = acc_type<T, true>;
   const int64_t nc = blockIdx.x;
+  int64_t n = 0;
+  int64_t c = 0;
+  if constexpr (ChannelsLast) {
+    n = nc / C;
+    c = nc % C;
+  }
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-    const int64_t index = nc * HxW + hw;
+    int64_t index = nc * HxW + hw;
+    if constexpr (ChannelsLast) {
+      index = (n * HxW + hw) * C + c;
+    }
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
@@ -1035,12 +1011,13 @@ void GroupNormBackwardKernelImplInternal(
       ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
   if (channels_last) {
-    ComputeInternalGradientsChannelsLastCUDAKernel<T>
+    ComputeInternalGradientsCUDAKernel<true, T>
         <<<N * C, num_threads, 0, cuda_stream>>>(
             C, HxW, dY_data, X_data, ds_data, db_data);
   } else {
-    ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-        HxW, dY_data, X_data, ds_data, db_data);
+    ComputeInternalGradientsCUDAKernel<false, T>
+        <<<N * C, num_threads, 0, cuda_stream>>>(
+            C, HxW, dY_data, X_data, ds_data, db_data);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
