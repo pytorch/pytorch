@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import os
 import time
 from datetime import timedelta
 
@@ -195,6 +196,18 @@ class ProcessGroupNCCL2SymmMemRendezvousTest(_ProcessGroupNCCL2OptionsTest):
     def test_option_propagated(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         self.assertTrue(pg.use_pg_for_symm_mem_rendezvous)
+
+
+class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
 
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
