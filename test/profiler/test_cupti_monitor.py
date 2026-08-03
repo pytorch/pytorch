@@ -1096,25 +1096,98 @@ class TestCuptiRecords(TestCase):
             (s["ts"], f["ts"]), (4.4, 3.5)
         )  # end -> start, backwards under skew
 
+    def test_repair_replay_correlations(self):
+        # The rule that puts a correlationId-0 graphed row back in its replay: a node runs after
+        # its dependencies, so it belongs to the replay of the dependency that most recently
+        # finished before it started. Pure host-side.
+        from torch.profiler._cupti.monitor_trace import _repair_replay_correlations
+
+        B, H = (9 << 32) | 22, (9 << 32) | 21  # kernel B -> host node H
+        deps = {H: [B]}
+
+        # Three replays; H keeps its correlationId only on the first. Replay 3's host node runs
+        # LATE -- long after its own kernel -- and still resolves to replay 3, because the pick
+        # is "latest dependency that finished first", not "closest in time".
+        corr = [100, 100, 201, 0, 202, 0]
+        gnid = [B, H, B, H, B, H]
+        start = [1000, 2000, 3000, 4000, 5000, 99000]
+        end = [2000, 2100, 4000, 4100, 6000, 99100]
+        self.assertEqual(
+            _repair_replay_correlations(corr, gnid, start, end, deps),
+            [100, 100, 201, 201, 202, 202],
+        )
+
+        # Nothing orphaned -> the input is handed straight back.
+        clean = [100, 100, 201, 201]
+        self.assertIs(
+            _repair_replay_correlations(
+                clean, [B, H, B, H], [1, 2, 3, 4], [2, 3, 4, 5], deps
+            ),
+            clean,
+        )
+
+        # Two graphs in one window: dependencies are per node id, so an orphan can only take a
+        # correlationId from its own graph's rows, never the other graph's.
+        B2, H2 = (7 << 32) | 22, (7 << 32) | 21
+        self.assertEqual(
+            _repair_replay_correlations(
+                [300, 0, 400, 0],
+                [B2, H2, B, H],
+                [1000, 1100, 1200, 1300],
+                [1050, 1150, 1250, 1350],
+                {H: [B], H2: [B2]},
+            ),
+            [300, 300, 400, 400],
+        )
+
+        # A graph ROOT has no dependency to inherit from, so it resolves off the other side: the
+        # dependent that started first after it ended. Here the host node H leads and kernel B
+        # follows it; H keeps its correlationId on replay 1 and reports 0 on replay 2.
+        self.assertEqual(
+            _repair_replay_correlations(
+                [100, 100, 0, 202],
+                [H, B, H, B],
+                [1000, 1200, 3000, 3200],
+                [1100, 1300, 3100, 3300],
+                {B: [H]},
+            ),
+            [100, 100, 202, 202],
+        )
+
+        # Neither neighbour has a row in this window (the rest of the replay landed in the
+        # previous export window) -> left at 0 rather than guessed.
+        self.assertEqual(
+            _repair_replay_correlations([0], [H], [1000], [1100], deps), [0]
+        )
+        # A node isolated in the recorded DAG has no neighbour at all -> also left at 0, which
+        # costs nothing: with no edges it has no arrow to draw either way.
+        ISO = (9 << 32) | 30
+        self.assertEqual(
+            _repair_replay_correlations(
+                [0, 100, 100], [ISO, B, H], [1000, 1200, 1400], [1100, 1300, 1500], deps
+            ),
+            [0, 100, 100],
+        )
+
     def test_graph_dependency_flows_host_node_zero_correlation(self):
         # A CUDA-graph host node carries correlationId 0 on every replay after the first (a CUPTI
-        # limitation); without re-bucketing, those replays collapse together and their dependency
-        # arrows drop. Each corr-0 row is reassigned to the replay whose time window contains it,
-        # so a device-op -> host-node edge draws an arrow on every replay, not just the first.
+        # limitation); without repair those replays collapse into one bucket and their dependency
+        # arrows drop. Each corr-0 row is put back in its own replay (the replay whose rows are
+        # missing that node), so a device-op -> host-node edge draws an arrow on every replay.
         from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
 
-        # node 22 (device op, lane 8) -> node 21 (host node, lane 7) per replay. Host node keeps
-        # its correlationId only on replay 1 (100); replays 2/3 report 0 but fall inside the
-        # correlated device op's window (201: [3000,4000], 202: [5000,6000]).
+        # node B (device op, lane 8) -> node H (host node, lane 7) per replay. The host node keeps
+        # its correlationId only on replay 1 (100); replays 2/3 (201, 202) report 0.
+        B, H = (9 << 32) | 22, (9 << 32) | 21
         node_rows = [
-            (100, 22, 0, 8, 1000, 2000),
-            (100, 21, 0, 7, 2000, 2100),
-            (201, 22, 0, 8, 3000, 4000),
-            (0, 21, 0, 7, 4000, 4100),
-            (202, 22, 0, 8, 5000, 6000),
-            (0, 21, 0, 7, 6000, 6100),
+            (100, B, 0, 8, 1000, 2000),
+            (100, H, 0, 7, 2000, 2100),
+            (201, B, 0, 8, 3000, 4000),
+            (0, H, 0, 7, 4000, 4100),
+            (202, B, 0, 8, 5000, 6000),
+            (0, H, 0, 7, 6000, 6100),
         ]
-        events = _graph_dependency_flow_events(node_rows, {21: [22]}, base_ns=0)
+        events = _graph_dependency_flow_events(node_rows, {H: [B]}, base_ns=0)
         starts = [e for e in events if e["ph"] == "s"]
         fins = [e for e in events if e["ph"] == "f"]
         self.assertEqual(len(starts), 3)  # one edge per replay, incl. the corr-0 ones
@@ -1324,6 +1397,48 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(_json.loads(blob)["host fn"], "free")
         self.assertEqual(_json.loads(blob)["host fn addr"], hex(0x1234))
         self.assertEqual(meta_off[1] - meta_off[0], 0)  # kernel row: no spread blob
+
+    def test_pftrace_host_node_zero_correlation_still_arrowed(self):
+        # The .pftrace render-stage path groups dependencies per replay by correlationId too, so
+        # a host node reporting correlationId 0 on its later replays would strand there exactly
+        # as it did in the JSON path -- its event_wait_ids come out empty and the arrow is lost.
+        # The shared replay repair covers both exports. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _assign_render_event_ids
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        A, H = (1 << 32) | 1, (1 << 32) | 2  # kernel A -> host node H, replayed twice
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 5000),
+                "end_ns": i64(2000, 6000),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 60),
+                "graph_node_id": i64(A, A),
+                "name": np.array(["A", "A"], dtype=object),
+            },
+            "graph_host_node": {
+                "start_ns": i64(2100, 6100),
+                "end_ns": i64(2200, 6200),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 0),  # replay 2 lost its correlationId
+                "graph_node_id": i64(H, H),
+                "host_fn": np.array(["free", "free"], dtype=object),
+                "host_fn_addr": i64(0, 0),
+            },
+        }
+        _eid, _corr_to_eids, off, ids = _assign_render_event_ids(columns, {H: [A]})
+        # rows in _RENDER_STAGES order: kernel r1, kernel r2, host r1, host r2 (event_id == i + 1)
+        waits = [ids[off[i] : off[i + 1]].tolist() for i in range(len(off) - 1)]
+        self.assertEqual(waits[0], [])  # kernel A is the root of each replay
+        self.assertEqual(waits[1], [])
+        self.assertEqual(waits[2], [1])  # host node r1 waits on kernel r1
+        self.assertEqual(waits[3], [2])  # host node r2 waits on kernel r2, not r1
 
     def test_pftrace_lane_names_order_by_id(self):
         # Perfetto sorts GPU hardware-queue lanes lexicographically by name, so lane names must
