@@ -23,8 +23,8 @@ from torch.testing._internal.common_utils import (
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 
 
-class DistributedDataParallelSingleProcessTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class _DDPSingleProcessBase(TestCase):
+    """Shared setup and helpers for DDP single-process test classes."""
 
     def setUp(self):
         super().setUp()
@@ -74,9 +74,17 @@ class DistributedDataParallelSingleProcessTest(TestCase):
             for i, j in zip(ddp.parameters(), net.parameters()):
                 self.assertTrue(i.allclose(j))
 
+
+class DistributedDataParallelSingleProcessTest(_DDPSingleProcessBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_gloo()
     def test_cpu(self):
         self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
+
+
+class DistributedDataParallelSingleProcessCUDATest(_DDPSingleProcessBase):
+    hw_classification = HardwareClassification.CUDA
 
     @requires_gloo()
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
