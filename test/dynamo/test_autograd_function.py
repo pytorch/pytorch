@@ -531,6 +531,139 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_non_tensor_output_grad_fn_hook_arity(self):
+        # Non-tensor forward outputs are dropped from the traced fwd graph, but
+        # must be re-inserted into the reconstructed autograd node so grad_fn
+        # hooks observe the same number of grad_outputs as eager. Exercise
+        # leading / trailing / multiple non-tensor output orderings so the
+        # merge/strip/slice index arithmetic is covered beyond the single
+        # middle-non-tensor case.
+        class Leading(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, k, y):
+                return k, x * 2, y * 3
+
+            @staticmethod
+            def backward(ctx, gk, g1, g2):
+                return g1 * 2, None, g2 * 3
+
+        class Trailing(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, k, y):
+                return x * 2, y * 3, k
+
+            @staticmethod
+            def backward(ctx, g1, g2, gk):
+                return g1 * 2, None, g2 * 3
+
+        class Multiple(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, k, y):
+                return k, x * 2, k + 1, y * 3, k + 2
+
+            @staticmethod
+            def backward(ctx, gk0, g1, gk1, g2, gk2):
+                return g1 * 2, None, g2 * 3
+
+        def run(fn, compiled):
+            torch._dynamo.reset()
+            a = torch.ones(3, requires_grad=True)
+            b = torch.ones(3, requires_grad=True)
+            counts = []
+
+            def apply_fn(a, b):
+                out = fn.apply(a, 3, b)
+                tensors = [o for o in out if isinstance(o, torch.Tensor)]
+                tensors[0].grad_fn.register_prehook(
+                    lambda go: counts.append(len(go)) or None
+                )
+                return out
+
+            f = torch.compile(apply_fn, backend="eager") if compiled else apply_fn
+            out = f(a, b)
+            tensors = [o for o in out if isinstance(o, torch.Tensor)]
+            non_tensors = [o for o in out if not isinstance(o, torch.Tensor)]
+            sum(t.sum() for t in tensors).backward()
+            return counts, non_tensors, a.grad, b.grad
+
+        for fn in (Leading, Trailing, Multiple):
+            e_counts, e_nt, e_ga, e_gb = run(fn, compiled=False)
+            c_counts, c_nt, c_ga, c_gb = run(fn, compiled=True)
+            self.assertEqual(e_counts, c_counts)
+            self.assertEqual(e_nt, c_nt)
+            self.assertEqual(e_ga, c_ga)
+            self.assertEqual(e_gb, c_gb)
+
+    def test_non_tensor_output_with_mark_non_differentiable(self):
+        # A non-tensor output preceding a mark_non_differentiable tensor output
+        # previously misindexed mark_non_differentiable under compile.
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, k, y):
+                a = x * 2
+                aux = y * 3
+                ctx.mark_non_differentiable(aux)
+                return k, a, aux
+
+            @staticmethod
+            def backward(ctx, gk, ga, gaux):
+                return ga * 2, None, None
+
+        def run(compiled):
+            torch._dynamo.reset()
+            x = torch.ones(3, requires_grad=True)
+            y = torch.ones(3, requires_grad=True)
+
+            def apply_fn(x, y):
+                _k, a, aux = Fn.apply(x, 3, y)
+                return a, aux
+
+            f = torch.compile(apply_fn, backend="eager") if compiled else apply_fn
+            a, aux = f(x, y)
+            a.sum().backward()
+            return x.grad, aux.requires_grad
+
+        e_grad, e_req = run(compiled=False)
+        c_grad, c_req = run(compiled=True)
+        self.assertEqual(e_grad, c_grad)
+        self.assertEqual(e_req, c_req)
+        self.assertFalse(c_req)
+
+    def test_non_tensor_output_with_mark_dirty(self):
+        # A non-tensor output preceding a mark_dirty tensor output exercises the
+        # realigned dirty_idx: dirty_idx is computed over full output positions
+        # but was previously applied to the tensor-only reconstructed outputs.
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, k):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return k, x
+
+            @staticmethod
+            def backward(ctx, gk, gx):
+                return gx * 2, None
+
+        def run(compiled):
+            torch._dynamo.reset()
+
+            def apply_fn(w):
+                y = w * 1  # non-leaf intermediate so the in-place op is allowed
+                k, out = Fn.apply(y, 3)
+                return k, out
+
+            f = torch.compile(apply_fn, backend="eager") if compiled else apply_fn
+            w = torch.ones(3, requires_grad=True)
+            k, out = f(w)
+            out.sum().backward()
+            return k, out.detach().clone(), w.grad
+
+        e_k, e_out, e_grad = run(compiled=False)
+        c_k, c_out, c_grad = run(compiled=True)
+        self.assertEqual(e_k, c_k)
+        self.assertEqual(e_out, c_out)
+        self.assertEqual(e_grad, c_grad)
+
     def test_data_in_bwd(self):
         class Foo(torch.autograd.Function):
             @staticmethod
