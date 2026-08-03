@@ -512,6 +512,51 @@ graph():
         with self.assertRaisesRegex(RuntimeError, "empty stack"):
             torch._C._dynamo_restore_local_dispatch_key_set()
 
+    def test_tracing_context_tls_defaults_present(self):
+        # The _guards thread-local defaults tracing_context/compile_context to
+        # None per thread, so the hot-path try_get() calls (once per compiled
+        # call) hit a present attribute instead of a slow getattr-miss on a
+        # thread that never ran compilation itself (e.g. a worker thread running
+        # code compiled on another thread).
+        import threading
+
+        from torch._guards import _TLS, CompileContext, TracingContext
+
+        result = {}
+
+        def worker():
+            result["tc_present"] = "tracing_context" in _TLS.__dict__
+            result["cc_present"] = "compile_context" in _TLS.__dict__
+            result["tc"] = TracingContext.try_get()
+            result["cc"] = CompileContext.try_get()
+            # Off-context (compile_context defaulted to None), get() still raises
+            # -- the default makes this the "not set" AssertionError rather than
+            # an AttributeError, on every thread regardless of history.
+            try:
+                CompileContext.get()
+                result["get_raised"] = None
+            except AssertionError:
+                result["get_raised"] = "AssertionError"
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        self.assertTrue(result["tc_present"])
+        self.assertTrue(result["cc_present"])
+        self.assertIsNone(result["tc"])
+        self.assertIsNone(result["cc"])
+        self.assertEqual(result["get_raised"], "AssertionError")
+
+        # Exercise the set -> restore cycle against the new storage: try_get()
+        # sees the context inside tracing() and returns to the None default after.
+        from torch._guards import tracing
+
+        self.assertIsNone(TracingContext.try_get())
+        tc = TracingContext(None)
+        with tracing(tc):
+            self.assertIs(TracingContext.try_get(), tc)
+        self.assertIsNone(TracingContext.try_get())
+
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
