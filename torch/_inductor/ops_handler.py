@@ -266,9 +266,13 @@ class OpsHandler(Generic[T]):
         """
         Store 'value' to 'name' offset by 'index', but only where 'mask' is
         true. Elements where 'mask' is false are left *unmodified*, so this op
-        only partially initializes 'name': whatever those elements held before
-        is what they still hold. Analyses must not assume a masked store
-        defines the full extent of 'index'.
+        only partially initializes the physical allocation.
+
+        This is an internal operation for scheduler-created domain expansion,
+        not a general conditional mutation. Mask-false coordinates must be
+        outside the logical output domain, and therefore unobservable. This lets
+        codegen forward 'value' to later fused computation without reading the
+        smaller destination at an expanded-tail index.
 
         Unlike 'store' there is no 'mode' -- an atomic masked store is not
         supported, so backends never need to combine a mask with atomic_add.

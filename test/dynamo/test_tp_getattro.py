@@ -239,6 +239,24 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 123)
 
+    def test_udov_non_function_getattr_graph_breaks(self):
+        """Non-function __getattr__ (callable instance) triggers a graph break."""
+
+        class CallableGetattr:
+            def __call__(self, name):
+                return 42
+
+        class MyObj:
+            __getattr__ = CallableGetattr()
+
+        def fn(obj):
+            return obj.dynamic
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnt)(MyObj())
+        self.assertEqual(result, 42)
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_udov_getattribute_override(self):
         class MyObj:
             def __getattribute__(self, name):
@@ -582,6 +600,64 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 42)
 
+    def test_delattr_exposes_class_attr(self):
+        """Deleting an instance attr exposes the class attr underneath."""
+
+        class MyObj:
+            x = "class"
+
+            def __init__(self):
+                self.x = "instance"
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "class")
+
+    def test_delattr_then_hasattr_false(self):
+        """Deleting the only attr makes hasattr return False."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            del obj.x
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
+
+    def test_dict_replacement_attr_found(self):
+        """Replacing __dict__ wholesale; lookup finds the attr in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"x": 42, "y": 99}
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_dict_replacement_attr_not_found(self):
+        """Replacing __dict__ wholesale; attr not in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"y": 99}
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
+
     # --- UnspecializedNNModule pending mutation ---
 
     def test_unspecialized_nn_module_pending_mutation_graph_breaks(self):
@@ -849,6 +925,82 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         MyClass.value = 20
         self.assertEqual(fn(x), x + 20)
         self.assertEqual(cnt.frame_count, 2)
+
+    # --- C descriptor type check (descr_check equivalent) ---
+
+    def test_method_descriptor_incompatible_type(self):
+        class Borrower:
+            append = list.append
+
+        def fn(x, obj):
+            obj.append
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_wrapper_descriptor_incompatible_type(self):
+        class Borrower:
+            add = list.__add__
+
+        def fn(x, obj):
+            obj.add
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_member_descriptor_incompatible_type(self):
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            x = Alien.x
+
+        def fn(x, obj):
+            obj.x
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_getset_descriptor_incompatible_type(self):
+        class Borrower:
+            denominator = int.denominator
+
+        def fn(x, obj):
+            obj.denominator
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_method_descriptor_compatible_type(self):
+        def fn(x):
+            l = [1, 2, 3]
+            l.append(4)
+            return x
+
+        x = torch.randn(4)
+        eager = fn(x).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x).sum()
+        self.assertEqual(eager, compiled)
 
 
 if __name__ == "__main__":

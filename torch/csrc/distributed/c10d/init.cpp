@@ -3573,10 +3573,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           &::c10d::ProcessGroupGloo::setTimeout,
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_error",
-          &::c10d::ProcessGroupGloo::getError,
-          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,
@@ -3792,6 +3788,14 @@ for details.
 #endif
 #ifdef NCCL_HAS_MAX_P2P_PEERS
       .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
+#endif
+#ifdef NCCL_HAS_COMM_NAME
+      .def_property(
+          "comm_name",
+          [](const ncclConfig_t& self) { return self.commName; },
+          [](ncclConfig_t& self, const char* tmp) {
+            self.commName = strdup(tmp);
+          })
 #endif
       .def(
           "unsafe_get_ptr",
