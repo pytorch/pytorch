@@ -1810,8 +1810,7 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
 
             paths.append(_join_cuda_home(lib_dir))
             if CUDNN_HOME is not None:
-                cudnn_lib_dir = _windows_cuda_lib_dir() if IS_WINDOWS else lib_dir
-                paths.append(os.path.join(CUDNN_HOME, cudnn_lib_dir))
+                paths.append(os.path.join(CUDNN_HOME, lib_dir))
     elif device_type == "xpu":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')
