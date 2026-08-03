@@ -2246,10 +2246,8 @@ void grouped_gemm(
   auto ltworkspace = CublasLtWorkspace();
   auto stream = at::cuda::getCurrentCUDAStream();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
-  // As of CUDA 13.3u1, cuBLASLt grouped GEMM heuristics return suboptimal algos when inputs are row major
-  // Swap average rows and cols to recover optimal kernels, and update this once fixed in cuBLASLt
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgN);
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgN);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, avgK);
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
