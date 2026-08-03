@@ -13,9 +13,11 @@ import os.path
 import re
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from typing import Any, cast, TYPE_CHECKING
+
+import sympy
 
 import torch
 import torch._inductor.inductor_prims
@@ -38,17 +40,21 @@ from torch._inductor.fx_passes.control_dependencies import (
     get_subgraph_name,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
 from torch.fx.experimental.symbolic_shapes import (
+    _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
     free_symbols,
     is_symbol_binding_fx_node,
+    is_symbolic,
     optimization_hint,
     statically_known_false,
     statically_known_true,
@@ -89,7 +95,6 @@ from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 if TYPE_CHECKING:
     import networkx as nx
-    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -752,6 +757,46 @@ def _must_be_in_backward(node: fx.Node) -> bool:
     return _has_tag_is_backward(node) and is_mutable
 
 
+def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
+    # Keep this traversal in sync with symbolic_shapes._iterate_exprs.
+    if isinstance(val, py_sym_types):
+        if is_symbolic(val):
+            yield _get_placeholder_expr(val.node)
+    elif isinstance(val, SymNode):
+        yield _get_placeholder_expr(val)
+    elif isinstance(val, sympy.Basic):
+        yield val
+    elif isinstance(val, (int, float, bool, str)):
+        pass
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iter_input_exprs_without_replacements(s)
+    elif isinstance(val, dict):
+        for s in itertools.chain(val.keys(), val.values()):
+            yield from _iter_input_exprs_without_replacements(s)
+    elif is_sparse_any(val):
+        yield from _iter_input_exprs_without_replacements(val.size())
+    elif isinstance(val, torch.Tensor):
+        yield from _iter_input_exprs_without_replacements(val.size())
+        yield from _iter_input_exprs_without_replacements(val.stride())
+        yield from _iter_input_exprs_without_replacements(val.storage_offset())
+    elif val is None:
+        pass
+    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+        pass
+    elif isinstance(val, FakeScriptObject):
+        pass
+    else:
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+
+def _free_symbols_without_replacements(val: Any) -> OrderedSet[sympy.Symbol]:
+    symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+    for expr in _iter_input_exprs_without_replacements(val):
+        symbols.update(expr.free_symbols)
+    return symbols
+
+
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs: int
 ) -> tuple[list[fx.Node], list[fx.Node], list[AOTOutput], list[AOTOutput]]:
@@ -1398,7 +1443,17 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
-        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        # Bind both the unreplaced symbols (needed by runtime assertions, which
+        # preserve raw placeholder expressions -- see #155468) and the replaced
+        # symbols (needed by sizevar codegen and FxGraphCache guards, which use
+        # ShapeEnv replacements). Binding only one side can leave the other's
+        # symbols undefined in the backward: e.g. an offsets size that is a
+        # symbol replaced to `s + 1` leaves the base symbol `s` unbound, which
+        # surfaces as a KeyError during backward FxGraphCache guard evaluation.
+        new_symbols = (
+            _free_symbols_without_replacements(node.meta["val"])
+            | free_symbols(node.meta["val"])
+        ) - saved_symbols
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
@@ -3653,6 +3708,24 @@ def choose_saved_values_set(
     )[0]
 
 
+def _stable_target_str(target: Any) -> str:
+    """Stringify a node target stably across processes.
+
+    ``str()`` on a plain Python-function target (e.g. ``torch.sym_not``) renders
+    its ``repr`` including the object's memory address (``<function sym_not at
+    0x...>``), which differs per process. That poisons cross-rank graph hashing.
+    Use FX's qualified name for callables so equal graphs hash equally.
+    """
+    from torch.fx.node import _get_qualified_name
+
+    if callable(target):
+        try:
+            return _get_qualified_name(target)
+        except Exception:
+            return str(target)
+    return str(target)
+
+
 def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
     """Compute a forward-looking structural hash for each node.
 
@@ -3682,7 +3755,7 @@ def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
         elif node.op == "output":
             self_key = ("output",)
         else:
-            self_key = (node.op, str(node.target))
+            self_key = (node.op, _stable_target_str(node.target))
 
         user_hashes = tuple(sorted(hashes[u] for u in node.users))
         hashes[node] = hashlib.sha256(
@@ -3732,7 +3805,7 @@ def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
             return (3,)
         else:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, str(node.target), input_indices)
+            return (2, _stable_target_str(node.target), input_indices)
 
     # Seed the heap with nodes that have no dependencies.
     # The counter ensures deterministic ordering when keys are equal.
@@ -3794,7 +3867,7 @@ def _sync_decision_cross_ranks(
             # ranks. Use only the canonical name and op for these.
             if n.op == "placeholder":
                 return f"{canonical[n]}:{n.op}"
-            return f"{canonical[n]}:{n.op}:{n.target}"
+            return f"{canonical[n]}:{n.op}:{_stable_target_str(n.target)}"
 
         node_str = "/".join(
             _node_hash_str(n)
@@ -3805,7 +3878,14 @@ def _sync_decision_cross_ranks(
         with no_dispatch(), unset_fake_temporarily():
             # TODO: maybe use a different process group?
             torch.distributed.all_gather_object(all_inputs, inputs)
-        return all(all_inputs[0] == x for x in all_inputs)
+            for rank, x in enumerate(all_inputs):
+                if all_inputs[0] != x:
+                    log.debug(
+                        "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
+                        rank,
+                    )
+                    return False
+        return True
 
     if has_same_nodes(joint_graph):
         with no_dispatch(), unset_fake_temporarily():

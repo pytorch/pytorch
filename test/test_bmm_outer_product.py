@@ -3,7 +3,10 @@
 import unittest
 
 import torch
-from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
+from torch._native.ops.bmm_outer_product.triton_impl import (
+    _bmm_outer_product_cond,
+    _is_outer_product,
+)
 from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -115,6 +118,37 @@ class TestBmmOuterProduct(TestCase):
                 torch.bmm(mismatched_a, b)
         finally:
             torch.cuda.set_device(old_device)
+
+    def test_cow_inputs_accepted_by_override(self):
+        # The override accepts copy-on-write inputs (it wraps its read-only
+        # inputs in ConstTensorWrapper and reads through const_data_ptr()).
+        # Assert the cond fires on COW inputs -- it previously excluded them --
+        # so a regression back to declining COW would be caught here.
+        a = torch.randn(4, 64, 1, device=GPU_TYPE)
+        b = torch.randn(4, 1, 48, device=GPU_TYPE)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        self.assertTrue(_bmm_outer_product_cond(a_cow, b_cow))
+
+    def test_cow_inputs_not_materialized(self):
+        # A copy-on-write input routed through the override is read via
+        # const_data_ptr() and not materialized. Verify the result is correct
+        # and the inputs stay COW across the call.
+        a = torch.randn(4, 64, 1, device=GPU_TYPE)
+        b = torch.randn(4, 1, 48, device=GPU_TYPE)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        out = torch.bmm(a_cow, b_cow)
+
+        self.assertEqual(out, a @ b)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
 
 
 class TestOuterProductDetection(TestCase):

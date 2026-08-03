@@ -102,6 +102,18 @@ if(NOT BUILD_LIBTORCHLESS)
     message(STATUS ${Numa_LIBRARIES})
     target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
     target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+    # libnuma is a PRIVATE impl detail of c10, but libc10.so's DT_NEEDED
+    # libnuma.so.1 still has to resolve at link time when in-tree targets
+    # (test executables, extensions) link c10. The conda compat linker has a
+    # narrow sysroot view, so propagate libnuma's directory as an INTERFACE
+    # rpath-link entry. Wrapped in BUILD_INTERFACE so this build-machine path
+    # is not baked into the installed Caffe2Targets.cmake export (it is
+    # meaningless to downstream find_package(Torch) consumers). ELF/GNU-ld only.
+    if(NOT WIN32 AND NOT APPLE)
+      get_filename_component(_numa_dir "${Numa_LIBRARIES}" DIRECTORY)
+      target_link_options(
+        c10 INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,${_numa_dir}>")
+    endif()
   else()
     message(STATUS "don't use NUMA")
   endif()
