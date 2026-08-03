@@ -13963,12 +13963,16 @@ if __name__ == '__main__':
                         expected_weight_grad_max_ulp_diff = 8974  # rocm 5465
 
         # fp32 prob+bias on hardware-matmul accelerators rounds the input-grad
-        # relative error to ~3.8*eps -- the dense soft-target cancellation;
-        # cpu's higher-precision matmul stays under 3*eps -- so give it 5*eps.
-        # The weight/bias grad_error stays at feps. (The per-element grad ULP
-        # trip-wires are skipped for all bias=True legs; see the asserts.)
+        # relative error well above feps -- the dense soft-target cancellation,
+        # amplified by the bias shift toward one-hot. cuBLAS version matters:
+        # ~3.8*eps on A100, but up to 10.6*eps on CUDA 13 (L4); cpu's
+        # higher-precision matmul stays under 3*eps, and bias=False stays at
+        # feps on the same hardware (confirming the bias is what inflates it),
+        # so give the prob+bias accelerator legs 16*eps. The weight/bias
+        # grad_error stays at feps. (The per-element grad ULP trip-wires are
+        # skipped for all bias=True legs; see the asserts.)
         if prob_target and bias and dtype == torch.float32 and "cpu" not in device:
-            input_grad_err_mult = max(input_grad_err_mult, 5)
+            input_grad_err_mult = max(input_grad_err_mult, 16)
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 3
