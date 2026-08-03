@@ -239,7 +239,7 @@ S390X_BLOCKLIST = [
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
     "inductor/test_best_config",
-    "inductor/test_cudacodecache",
+    "inductor/test_device_codecache",
     "inductor/test_inductor_utils",
     "inductor/test_inplacing_pass",
     "inductor/test_kernel_benchmark",
