@@ -2168,6 +2168,10 @@ class FakeTensorMode(TorchDispatchMode):
         metadata.shape = tuple(state.convert_output(v) for v in metadata.shape)
         metadata.stride = tuple(state.convert_output(v) for v in metadata.stride)
         metadata.storage_offset = state.convert_output(metadata.storage_offset)
+        is_canonical_contiguous = is_canonical_contiguous and not any(
+            isinstance(value, _SymIntOutputStub) and isinstance(value.value, int)
+            for value in (*metadata.stride, metadata.storage_offset)
+        )
         metadata.storage_bytes = (
             None
             if metadata.storage_bytes is None
@@ -2378,7 +2382,6 @@ class FakeTensorMode(TorchDispatchMode):
         is_view = isinstance(func, torch._ops.OpOverload) and func.is_view
         view_arg = None
         if is_view:
-            # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("view_arg must be a FakeTensor")
@@ -2413,12 +2416,17 @@ class FakeTensorMode(TorchDispatchMode):
                     requires_grad=metadata.requires_grad,
                 )
 
-        if metadata.is_conj:
-            torch._C._set_conj(empty, True)
-        if metadata.is_neg:
-            torch._C._set_neg(empty, True)
+        if view_dtype_matches:
+            torch._C._set_conj(empty, metadata.is_conj)
+            torch._C._set_neg(empty, metadata.is_neg)
+        else:
+            if metadata.is_conj:
+                torch._C._set_conj(empty, True)
+            if metadata.is_neg:
+                torch._C._set_neg(empty, True)
 
         if is_view and not view_dtype_matches:
+            # For view ops, the storage should be the same as the tensor input.
             view_base = cast(FakeTensor, view_arg)
             storage = view_base.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
