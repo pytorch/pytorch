@@ -71,7 +71,7 @@ class WorkNCCL : public c10d::Work {
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
 
-  std::chrono::milliseconds getTimeout() const {
+  std::chrono::milliseconds getTimeout() const override {
     return timeout_ms_;
   }
 

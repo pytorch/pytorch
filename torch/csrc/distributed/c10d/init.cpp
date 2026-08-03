@@ -3811,15 +3811,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setTimeout,
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_verify_work_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::intrusive_ptr<::c10d::Work>& work,
-                 const std::chrono::milliseconds& timeout) {
-                return self->verifyWorkTimeoutForTest(work, timeout);
-              },
-              py::arg("work"),
-              py::arg("timeout"))
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupNCCL::getOptions,
@@ -4180,11 +4171,6 @@ Returns:
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_verify_work_timeout",
-              &::c10d::nccl2::ProcessGroupNCCL::verifyWorkTimeoutForTest,
-              py::arg("work"),
-              py::arg("timeout"))
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4226,11 +4212,6 @@ Returns:
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_verify_work_timeout",
-          &::c10d::nccl2::ProcessGroupNCCLLazy::verifyWorkTimeoutForTest,
-          py::arg("work"),
-          py::arg("timeout"))
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
@@ -4506,6 +4487,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   The process group collective sequence number of the
                   corresponding collective communication.
             )")
+          .def("_get_timeout", &::c10d::Work::getTimeout)
           .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {
