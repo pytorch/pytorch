@@ -489,37 +489,35 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             This creates a recursive data dependency structure where each output yst
             depends on all prior inputs xs0 through xst. The dependency can be visualized as:
 
-        Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
-                            \    /       |      |      |
-                            \  /        |      |      |
-        Level 1:               ys1 ───────┘      |      |
-                                \               /       |
-                                \             /        |
-        Level 2:                  ys2 ────────┘         |
-                                \                   /
-                                    \                 /
-        Level 3:                     ys3 ────────────┘
-                                    \
-                                    \
-        Level 4:                        ys4
+        Level 0 (Input):    xs0      xs1      xs2      xs3      xs4
+                              \      /          |        |        |
+                               \    /           |        |        |
+        Level 1:                ys1 ────────────┘        |        |
+                                  \                     /         |
+                                   \                   /          |
+        Level 2:                    ys2 ───────────────┘          |
+                                      \                          /
+                                       \                        /
+        Level 3:                        ys3 ────────────────────┘
+                                          \
+        Level 4:                           ys4
 
 
         We could get the following backward gradient graph:
 
 
-        Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                            \      /       |       |     |
-                            \    /        |       |     |
-        Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
-                                \                  /      |
-                                \                /       |
-        Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
-                                \                     /
-                                    \                   /
-        Level 3:    gl_ys3        ─> g_ys3  ───────────┘
-                                    \
-                                    \
-        Level 4:    gl_ys4           ─> g_ys4,
+        Level 0 (output):   g_xs0    g_xs1    g_xs2    g_xs3    g_xs4
+                              \      /          |        |        |
+                               \    /           |        |        |
+        Level 1:    gl_ys1 ──> g_ys1 ───────────┘        |        |
+                                  \                     /         |
+                                   \                   /          |
+        Level 2:    gl_ys2 ──> g_ys2 ───────────────────┘         |
+                                      \                          /
+                                       \                        /
+        Level 3:    gl_ys3 ──> g_ys3 ────────────────────────────┘
+                                          \
+        Level 4:    gl_ys4 ──> g_ys4
 
         where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
 
@@ -540,9 +538,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         g_ys1 = gl_ys1 + g_ys2 * bw(ys2, ys1)
               = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
               = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
-              = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                    + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
-        g_ys1 = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
+              = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1)
                     + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
 
         Let's do the same for all the g_ys:
@@ -561,7 +557,13 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         where bwys21 is an abbreviation for bw(ys2, ys1),
         bwys321 is an abbreviation for bw(ys3, ys2) * bw(ys2, ys1) so on and so forth.
 
-        g_ys = generic_associative_scan(g_ys_combine_fn_flat, [bwys_pinit, gl_ys_pinit], reverse=True)[1][:-1]
+        The 1s appended to bwys_pinit are length-padding so that bwys_pinit and
+        gl_ys_pinit have the same shape; they do not affect the final g_ys values.
+
+        g_ys is recovered by flipping, scanning left-to-right, and flipping back:
+            leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
+            result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
+            g_ys = result_rev[1].flip([0])[:-1]
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -594,17 +596,15 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         5.) Compute the gradients using a right-to-left associative scan
 
-            As shown in the example above, each input xst affects all later outputs ysi for i ≥ t.
+            As shown in the example above, each input xst affects all later outputs ysi for i >= t.
             According to the chain rule, each such path contributes a product of local gradients g_ysk.
 
             For example:
                 g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
 
             This motivates a right-to-left associative scan over bwys and gl_ys.
-            We use generic_associative_scan directly (bypassing dynamo) with a flat operator:
-
-                def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-                    return bw * bw_next, gl_next + bw_next * gl
+            We call generic_associative_scan directly (bypassing dynamo and torch.compile)
+            with the flat operator g_ys_combine_fn_flat above.
 
             5.1) Append the initial values to gl_ys and bwys
 
@@ -612,17 +612,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 bwys_pinit = torch.cat([bwys[1:], torch.ones_like(bwys[0:1]), torch.ones_like(bwys[0:1])], 0)
 
                 The zero appended to gl_ys is the identity for the accumulation.
-                The two ones appended to bwys reflect that ys0 = xs0 (bwys[0] = 1)
-                and the scan's initial state has no further propagation.
+                The two ones appended to bwys are length-padding so bwys_pinit and
+                gl_ys_pinit have the same shape; they do not affect the final g_ys.
 
-            5.2) Flip, scan left-to-right, flip back, and drop the last (identity) element
+            5.2) Flip, scan left-to-right, flip back, and drop the last (padding) element
 
-                leaves_rev = [bwys_pinit.flip([dim]), gl_ys_pinit.flip([dim])]
-                result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev, dim=dim)
-                g_ys = result_rev[1].flip([dim])[:-1]
+                leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
+                result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
+                g_ys = result_rev[1].flip([0])[:-1]
 
         6.) Scale with the instantaneous input gradients bwxs
-            g_xs = summed_y_mat * bwxs
+            g_xs = g_ys * bwxs
 
             This gives the final input gradients:
                 g_xs = [∂L/∂xs0, ∂L/∂xs1, ..., ∂L/∂xsT]
@@ -738,7 +738,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         bwys, bwxs = split_into_chunks(grads, [num_xs, num_xs])
 
         def compute_gys_associative_scan(
-            gl_ys: torch.Tensor, bwys: torch.Tensor, dim: int
+            gl_ys: torch.Tensor, bwys: torch.Tensor
         ) -> torch.Tensor:
             """
             Computes the gradient g_ys via a right-to-left associative scan:
@@ -752,19 +752,16 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 [bwys[1:], torch.ones_like(bwys[0:1]), torch.ones_like(bwys[0:1])], 0
             )
 
-            def g_ys_combine_fn_rev(bw_gl, bw_next_gl_next):
-                bw, gl = bw_gl
-                bw_next, gl_next = bw_next_gl_next
-                bw_prod = bw * bw_next
-                gl_acc = gl_next + bw_next * gl
-                return bw_prod, gl_acc
+            def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
+                return bw * bw_next, gl_next + bw_next * gl
 
-            # 5.2) Perform the associative_scan from right-to-left and cut off the irrelevant values
-            # in order to compute the g_ys
-            g_ys_inputs = (bwys_pinit, gl_ys_pinit)
-            g_ys = associative_scan(
-                g_ys_combine_fn_rev, g_ys_inputs, dim=dim, reverse=True
-            )[1][:-1]
+            # 5.2) Flip, scan left-to-right via generic_associative_scan (bypassing dynamo/compile),
+            # flip back, and drop the last (padding) element to get g_ys.
+            result_rev = generic_associative_scan(
+                g_ys_combine_fn_flat,
+                [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])],
+            )
+            g_ys = result_rev[1].flip([0])[:-1]
 
             return g_ys
 
@@ -776,7 +773,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             torch.select(bwxs, dim, 0).fill_(1.0)
 
             # 5.) Compute the gradients via an associative_scan
-            g_ys = compute_gys_associative_scan(gl_ys, bwys, dim)
+            g_ys = compute_gys_associative_scan(gl_ys, bwys)
 
             # 6.) Scale with the instantaneous input gradients bwxs
             g_xs = g_ys * bwxs
@@ -821,8 +818,6 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
         # Build a wrapper that re-appends the non-tensor constants so the underlying
         # combine_fn GraphModule (compiled by dynamo with extra integer placeholders)
         # still gets all its expected positional arguments.
-        # generic_associative_scan calls operator(*lhs_leaves, *rhs_leaves, *additional_inputs)
-        # so the wrapper receives the xs leaves plus any tensor additional_inputs.
         _inner_combine_fn = combine_fn
         _non_tensor = non_tensor_additional
 

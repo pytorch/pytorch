@@ -6447,6 +6447,24 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_non_pointwise_generic_autograd(self):
+        device = torch.device("cuda")
+
+        def matmul_combine(x, y):
+            return x @ y
+
+        x = torch.eye(2, device=device).unsqueeze(0).repeat(4, 1, 1).requires_grad_(True)
+        result = associative_scan(matmul_combine, x, dim=0, combine_mode="generic")
+        result_ref = _fake_associative_scan(matmul_combine, x, dim=0)
+
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), x)
+        grads_ref = torch.autograd.grad(result_ref.sum(), x)
+        self.assertEqual(grads, grads_ref)
+
     @requires_cuda
     def test_associative_scan_input_mutation(self):
         device = torch.device("cuda")
