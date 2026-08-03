@@ -1008,10 +1008,10 @@ class TestAutograd(TestCase):
         MyFunc.apply(torch.randn(3, requires_grad=True))
 
         gc.collect()
-        # Dynamo traces setup_context instead of routing through the C++ apply
-        # path and keeps the traced return value alive, so the object is only
-        # expected to die in eager. Still run the rest under dynamo to check
-        # that returning a non-None value traces without erroring.
+        # Dynamo never reaches the C++ apply path: it inlines setup_context and
+        # parks the return value in a generated local of the frame still running
+        # here, so the object cannot have died yet. Run the rest under dynamo
+        # anyway to check that returning a non-None value traces without error.
         if not TEST_WITH_TORCHDYNAMO:
             self.assertIsNone(sentinel_ref())
 
