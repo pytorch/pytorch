@@ -1068,6 +1068,13 @@ def _load_aoti(
     for k, v in current_device_info.items():
         if k in loaded_metadata:
             if v != loaded_metadata[k]:
+                if k == "AOTI_CPU_ISA":
+                    from torch._inductor.cpu_vec_isa import is_cpu_isa_compatible
+
+                    if is_cpu_isa_compatible(
+                        host_isa=v, artifact_isa=loaded_metadata[k]
+                    ):
+                        continue
                 logger.warning(
                     "Device information mismatch for %s: %s vs %s. "
                     "This could cause some issues when loading the AOTInductor compiled artifacts.",

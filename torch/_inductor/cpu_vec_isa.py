@@ -601,6 +601,47 @@ def get_isa_from_cpu_capability(
     return vec_isa_list[0]
 
 
+def is_cpu_isa_compatible(host_isa: str, artifact_isa: str) -> bool:
+    """Checks if host_isa capability is compatible with (equal to or a superset of)
+    artifact_isa capability.
+
+    For example, a host with AVX512 (or AVX512_VNNI, AMX_TILE) capability can run
+    artifacts compiled for AVX2. However, a host with AVX2 cannot run artifacts
+    compiled for AVX512.
+    """
+    if not artifact_isa or not host_isa:
+        return True
+
+    host_tokens = set(host_isa.lower().split())
+    artifact_tokens = set(artifact_isa.lower().split())
+
+    if artifact_tokens.issubset(host_tokens):
+        return True
+
+    expanded_host_tokens = set(host_tokens)
+
+    # Alias mappings
+    if "neon" in host_tokens or "asimd" in host_tokens:
+        expanded_host_tokens.update({"neon", "asimd"})
+
+    # x86 SIMD hierarchy
+    if any(t in host_tokens for t in ("amx_tile", "avx512_vnni", "avx512")):
+        expanded_host_tokens.add("avx2")
+
+    if any(t in host_tokens for t in ("amx_tile", "avx512_vnni")):
+        expanded_host_tokens.add("avx512")
+
+    if "amx_tile" in host_tokens:
+        expanded_host_tokens.add("avx512_vnni")
+
+    # ARM hierarchy
+    if any(t.startswith("sve") for t in host_tokens):
+        expanded_host_tokens.update({"neon", "asimd"})
+
+    return artifact_tokens.issubset(expanded_host_tokens)
+
+
+
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
