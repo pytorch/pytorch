@@ -2295,6 +2295,18 @@ class TestMetaKernelRegistrations(TestCase):
         check(inp.contiguous(memory_format=torch.channels_last), grid)
         check(inp.transpose(2, 3).contiguous().transpose(2, 3), grid)
 
+        # The C++ impls run check_grid_sampler_common/_2d themselves, so the
+        # metas must reject the same inputs rather than indexing past the end of
+        # a too-small shape.
+        bad_inp, bad_grid = torch.randn(2, 3, 4), grid
+        with self.assertRaises(RuntimeError):
+            torch._grid_sampler_2d_cpu_fallback(bad_inp, bad_grid, 0, 0, True)
+        with FakeTensorMode() as mode:
+            with self.assertRaises(RuntimeError):
+                torch._grid_sampler_2d_cpu_fallback(
+                    mode.from_tensor(bad_inp), mode.from_tensor(bad_grid), 0, 0, True
+                )
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
         cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
