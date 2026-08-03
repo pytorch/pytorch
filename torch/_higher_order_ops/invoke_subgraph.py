@@ -11,7 +11,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
-import torch._functorch.config as functorch_config
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
@@ -999,8 +998,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
-        from torch._dynamo.utils import dynamo_timed
-
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
@@ -1086,7 +1083,11 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             )
             cache_hit = bw_graph is not None
 
-        if bw_graph is None and functorch_config.invoke_subgraph_lazy_joint_tracing:
+        if bw_graph is None:
+            if suffix is not None:
+                raise AssertionError(
+                    f"suffix should be None when bw_graph is None, got {suffix}"
+                )
             # Hand the proxy tracer a callable so it traces the joint once,
             # instead of tracing it here and re-tracing it there.
             bw_graph = LazyJointCallable(
@@ -1099,29 +1100,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 ),
                 tuple(isinstance(t, torch.Tensor) and t.requires_grad for t in primals),
             )
-
-        if bw_graph is None:
-            if suffix is not None:
-                raise AssertionError(
-                    f"suffix should be None when bw_graph is None, got {suffix}"
-                )
-            with dynamo_timed(
-                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
-            ):
-                bw_graph = trace_joint_graph_as_bwd(
-                    subgraph,
-                    len(primals),
-                    primals_and_tangents,
-                    ctx._fw_include_key_set,
-                    ctx._fw_exclude_key_set,
-                )
-                if (
-                    hasattr(subgraph, "meta")
-                    and "nested_region_config" in subgraph.meta
-                ):
-                    bw_graph.meta["nested_region_config"] = subgraph.meta[
-                        "nested_region_config"
-                    ]
 
         if invoke_subgraph_cache and not cache_hit:
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
