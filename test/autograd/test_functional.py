@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -113,7 +114,6 @@ class _AutogradFunctionalHelpers:
         expected = torch.eye(results[0].shape[0], dtype=torch.float)
         self.assertEqual(results, expected)
 
-
     def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
         expected = autogradF.jacobian(f, inputs, vectorize=False)
         result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
@@ -127,6 +127,8 @@ class _AutogradFunctionalHelpers:
 
 
 class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
         if isinstance(base, torch.Tensor):
@@ -1726,6 +1728,8 @@ class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
 
 
 class TestAutogradFunctionalDevice(_AutogradFunctionalHelpers, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @base_and_logging_tensor
     def test_construct_standard_basis(self, device, ctors):
