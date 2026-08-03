@@ -27,6 +27,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     TestCase,
 )
@@ -446,6 +447,7 @@ class DTensorExportTest(TestCase):
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
+    @requires_cuda
     @parametrize(
         "export_fn",
         [
@@ -453,9 +455,6 @@ class DTensorExportTest(TestCase):
         ],
     )
     def test_flex_attention_dtensor_export(self, export_fn):
-        if self.device_type != "cuda":
-            self.skipTest("flex_attention DTensor export is CUDA-only today")
-
         device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
         model = FlexAttentionModel(self.device_type)
 
