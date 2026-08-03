@@ -2,6 +2,7 @@
 # flake8: noqa: E731
 
 import contextlib
+import enum
 import re
 import unittest
 import unittest.mock as mock
@@ -4128,6 +4129,116 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(4)
         with self.assertRaisesRegex(RuntimeError, "exceeded maximum reuse entries"):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_subgraph_reuse_enum_arg(self):
+        """Enum members are UserDefinedObjectVariable but reuse like constants."""
+
+        class Mode(enum.IntEnum):
+            ADD = 1
+            SUB = 2
+
+        @nested_compile_region
+        def gn(x, mode):
+            if mode == Mode.ADD:
+                return x.sin()
+            return x.cos()
+
+        def fn(x, mode):
+            return gn(x, mode) + gn(x, mode)
+
+        x = torch.randn(8)
+        for mode in (Mode.ADD, Mode.SUB):
+            torch._dynamo.reset()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, mode)
+            self.assertEqual(res, fn(x, mode))
+            self.assertEqual(count(), 1)
+
+        # Distinct enum members must not share a traced subgraph.
+        def fn2(x):
+            return gn(x, Mode.ADD) + gn(x, Mode.SUB)
+
+        torch._dynamo.reset()
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn2(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_user_defined_object_arg(self):
+        """A sourceful user-defined object arg reuses via guards on its source."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x, batch):
+            return gn(x, batch) + gn(x, batch)
+
+        x = torch.randn(8)
+        batch = Batch(torch.randn(8))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, batch)
+        self.assertEqual(res, fn(x, batch))
+        self.assertEqual(count(), 1)
+
+        # An attribute whose tensor metadata differs must not be reused.
+        def fn2(x, b1, b2):
+            return gn(x, b1) + gn(x, b2)
+
+        torch._dynamo.reset()
+        b2 = Batch(torch.randn(1))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x, batch, b2)
+        self.assertEqual(res, fn2(x, batch, b2))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_sourceless_object_not_eligible(self):
+        """An object created during tracing has no guards, so it is not reused."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x):
+            return gn(x, Batch(x.cos())) + gn(x, Batch(x.cos()))
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_sourceless_module_not_eligible(self):
+        """Sourceless modules carry no guards, so differing attrs must retrace."""
+
+        class Scale(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        @nested_compile_region
+        def gn(mod, x):
+            return mod(x)
+
+        def fn(x):
+            return gn(Scale(3.0), x) + gn(Scale(5.0), x)
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_module_different_instances_retrace(self):
         """Different module instances with different weights require separate traces."""
