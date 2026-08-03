@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -253,6 +254,51 @@ class TestScheduler(TestCase):
         self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
+
+    def test_fusable_read_and_write_requires_exact_index_match(self):
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+        s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+        scheduler = Scheduler.__new__(Scheduler)
+
+        # Gapped (stride 33 across a 32 wide dim) so loop merging cannot
+        # collapse these deps and hide which branch accepted them.
+        gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+        extended = MemoryDep("buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7))
+        narrowed = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (64, 32))
+        renamed = MemoryDep("buf", 33 * w0 + w1, (w0, w1), (128, 32))
+
+        # Reads that reach the write only through index *equivalence*: a
+        # quotient broadcast, a pure broadcast, and dense loops differing only
+        # in variable naming. Exact matching must reject all three.
+        simple_write = MemoryDep("buf", w0, (w0,), (16,))
+        quotient = MemoryDep("buf", 32 * d0 + FloorDiv(d1, 128), (d0, d1), (128, 4096))
+        dense_read = MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1))
+        equivalent_only = [
+            (quotient, MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))),
+            (MemoryDep("buf", d1, (d0, d1), (1024, 16)), simple_write),
+            (dense_read, MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1))),
+        ]
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            for loop_ordering in (False, True):
+                with (
+                    self.subTest(loop_ordering=loop_ordering),
+                    inductor_config.patch(loop_ordering_after_fusion=loop_ordering),
+                ):
+                    # _same_index_with_prefix_size: identical index, and read
+                    # sizes that cover the write sizes as a prefix.
+                    self.assertTrue(scheduler.fusable_read_and_write(gapped, gapped))
+                    self.assertTrue(scheduler.fusable_read_and_write(extended, gapped))
+                    self.assertFalse(scheduler.fusable_read_and_write(narrowed, gapped))
+                    # Loop merging is the only thing that bridges renamed vars.
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(extended, renamed),
+                        loop_ordering,
+                    )
+                    for read, write in equivalent_only:
+                        self.assertFalse(scheduler.fusable_read_and_write(read, write))
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
