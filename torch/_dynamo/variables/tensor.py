@@ -62,7 +62,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
