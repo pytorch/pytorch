@@ -339,19 +339,10 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t ekvTail = need_pack && (kvTail % 2 != 0) ? kvTail + 1 : kvTail;
   int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
 
-  // AMX and AVX512 are reqiored for overlapping softmax and GEMM
-  static const bool amx_avx512_available = []() {
-    const auto caps = at::cpu::get_cpu_capabilities();
-    const auto it = caps.find("avx512_f");
-    const bool has_avx512 = it != caps.end() && it->second.toBool();
-    return at::cpu::init_amx() && has_avx512;
-  }();
-
   // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
-  bool use_amx_overlap = amx_avx512_available
+  bool use_amx_overlap = at::cpu::init_amx()
       && need_pack
       && std::is_same_v<scalar_t, at::BFloat16>
-      && headSize_even
       && (headSize % 32 == 0)
       && (headSize_v % 32 == 0)
       && (kvSplitSize % 32 == 0);
@@ -369,8 +360,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
   // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
-  // Double-buffers of the qk scores for overlapping
-  {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "num_thread*eqSplitSize*kvSplitSize")}}
+  // Double-buffers of the qk scores for overlapping; only the AMX path ping-pongs
+  int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
+  {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
@@ -442,9 +434,10 @@ FLEX_ATTENTION_TEMPLATE = r"""
     // amx_state is released at the end of each q-block so it never carries a stale tile config across a
     // brgemm fallback (tail case).
     AMXState amx_state;
-    // Ping-pong score buffers
+    // Ping-pong score buffers; qk_data2_data is unallocated off the AMX path
     accum_t* amx_score_buf[2] = {
-        qk_data_buf, qk_data2_data + ompIdx * eqSplitSize * kvSplitSize};
+        qk_data_buf,
+        use_amx_overlap ? qk_data2_data + ompIdx * eqSplitSize * kvSplitSize : nullptr};
     scalar_t* scaled_q_ptr = use_amx_overlap
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
