@@ -15,7 +15,7 @@ The join is instead POSITIONAL, per launch, from records that already flow:
     ``correlation_id -> exec_graph_id``.
   * The same launch's ``CUDA_EVENT`` records share that ``correlation_id`` and carry an
     increasing ``cuda_event_sync_id`` that follows NODE-ID order.
-  * :func:`arm_event_node_recording` records, at graph instantiate, each graph's ``event_record``
+  * :meth:`_EventNodeRecorder.arm` records, at graph instantiate, each graph's ``event_record``
     node ids in node-id order (from ``get_graph_data()``).
 
 The invariant the join rests on:
@@ -42,7 +42,12 @@ away -- the record would join like any other graphed activity.)
 
 from __future__ import annotations
 
-from typing import Any
+import threading
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
 
 
 # Node kinds whose bodies get_graph_data() does not descend into. Their event nodes are
@@ -56,13 +61,24 @@ _OPAQUE_BODY_NODE_TYPES = ("child_graph", "conditional")
 class _EventNodeRecorder:
     """Process-global record of each CUDA graph's event-record nodes, in node-id order.
 
-    Armed once via :meth:`arm` (before graphs are captured), like the graph-dependency
-    recorder. :attr:`graph_event_nodes` maps ``exec_graph_id -> event-node tools_ids`` in
-    node-id order. Resolution is positional against this map (see :func:`resolve_window`);
-    there is no learned ``event_id`` map.
+    Process-wide singleton armed once via :meth:`arm` (before graphs are captured), like
+    the graph-dependency recorder. :attr:`graph_event_nodes` maps ``exec_graph_id ->
+    event-node tools_ids`` in node-id order. Resolution is positional against this map (see
+    :func:`resolve_window`); there is no learned ``event_id`` map.
     """
 
-    def __init__(self) -> None:
+    _instance: _EventNodeRecorder | None = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls) -> Self:
+        with cls._instance_lock:
+            if cls._instance is None:
+                inst = super().__new__(cls)
+                inst._init()
+                cls._instance = inst
+            return cls._instance
+
+    def _init(self) -> None:
         self.graph_event_nodes: dict[int, list[int]] = {}
         self._handle: Any = None
 
@@ -146,14 +162,11 @@ def resolve_window(
     return resolved
 
 
-_recorder = _EventNodeRecorder()
-
-
-def arm_event_node_recording() -> None:
-    """Arm the process-global recorder (idempotent). Call before graphs are captured."""
-    _recorder.arm()
-
-
-def event_node_recorder() -> _EventNodeRecorder:
-    """The shared recorder (its ``graph_event_nodes`` map is read by the observer)."""
-    return _recorder
+def _reset_for_test() -> None:
+    """Test-only: unregister the instantiate hook and drop the singleton, so the next
+    ``_EventNodeRecorder()`` starts unarmed with an empty map."""
+    with _EventNodeRecorder._instance_lock:
+        inst = _EventNodeRecorder._instance
+        if inst is not None and inst._handle is not None:
+            inst._handle.remove()
+        _EventNodeRecorder._instance = None
