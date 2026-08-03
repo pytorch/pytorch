@@ -7969,6 +7969,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
+            node1, node2
+        ):
+            why("incompatible reduction contracts")
+            return False
 
         if node1.is_template() and self.get_backend(
             node1.get_device()
@@ -10438,6 +10443,11 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
+
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return True
 
     def can_fuse_reduction_chain(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
