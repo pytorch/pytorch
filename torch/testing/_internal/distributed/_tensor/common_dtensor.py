@@ -57,6 +57,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
+    skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -620,8 +621,7 @@ class Transformer(nn.Module):
 
 def skip_unless_torch_gpu(method: T) -> T:
     """
-    Test decorator which skips the test unless there are enough accelerator
-    devices available to torch.
+    Test decorator which skips the test unless there's a GPU available to torch.
 
     >>> # xdoctest: +SKIP
     >>> @skip_unless_torch_gpu
@@ -629,21 +629,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>>   ...
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    # Keep the historical name for compatibility, but use torch.accelerator so
-    # PrivateUse1 and other accelerator backends are handled consistently.
-    @wraps(method)
-    def wrapper(*args, **kwargs):
-        if torch.accelerator.device_count() >= NUM_DEVICES:
-            return method(*args, **kwargs)
-        test_skip = TEST_SKIPS[f"multi-gpu-{NUM_DEVICES}"]
-        if len(args) > 0:
-            _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
-            if _handle_test_skip is not None:
-                _handle_test_skip(test_skip.message)
-                return None
-        sys.exit(test_skip.exit_code)
-
-    return cast(T, wrapper)
+    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
 class DTensorTestMixin:
