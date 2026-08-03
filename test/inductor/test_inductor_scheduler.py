@@ -255,116 +255,50 @@ class TestScheduler(TestCase):
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
 
-    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+    def test_fusable_read_and_write_requires_exact_index_match(self):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
-
+        s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
         scheduler = Scheduler.__new__(Scheduler)
-        scheduler.mutation_renames = {}
-        scheduler.mode_requires_synchronization = lambda mode: False
+
+        # Gapped (stride 33 across a 32 wide dim) so loop merging cannot
+        # collapse these deps and hide which branch accepted them.
+        gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+        extended = MemoryDep("buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7))
+        narrowed = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (64, 32))
+        renamed = MemoryDep("buf", 33 * w0 + w1, (w0, w1), (128, 32))
+
+        # Reads that reach the write only through index *equivalence*: a
+        # quotient broadcast, a pure broadcast, and dense loops differing only
+        # in variable naming. Exact matching must reject all three.
+        simple_write = MemoryDep("buf", w0, (w0,), (16,))
+        quotient = MemoryDep("buf", 32 * d0 + FloorDiv(d1, 128), (d0, d1), (128, 4096))
+        dense_read = MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1))
+        equivalent_only = [
+            (quotient, MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))),
+            (MemoryDep("buf", d1, (d0, d1), (1024, 16)), simple_write),
+            (dense_read, MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1))),
+        ]
 
         graph = Mock(sizevars=SizeVarAllocator())
         with V.set_graph_handler(graph):
-            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
-            simple_write = MemoryDep("buf", w0, (w0,), (16,))
-            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
-            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
-            cases = [
-                (
-                    "quotient broadcast",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128),
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    True,
-                ),
-                (
-                    "quotient tail remains",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128) + d1,
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    False,
-                ),
-                (
-                    "pure broadcast",
-                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
-                    simple_write,
-                    False,
-                    True,
-                ),
-                (
-                    "dynamic dense",
-                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
-                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
-                    False,
-                    True,
-                ),
-                (
-                    "exact gapped",
-                    exact_gapped,
-                    exact_gapped,
-                    True,
-                    True,
-                ),
-                (
-                    "producer broadcast",
-                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
-                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
-                    False,
-                    False,
-                ),
-                (
-                    "producer alias",
-                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
-                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
-                    False,
-                    False,
-                ),
-            ]
-            for name, read, write, expected_default, expected_relaxed in cases:
-                with self.subTest(name):
+            for loop_ordering in (False, True):
+                with (
+                    self.subTest(loop_ordering=loop_ordering),
+                    inductor_config.patch(loop_ordering_after_fusion=loop_ordering),
+                ):
+                    # _same_index_with_prefix_size: identical index, and read
+                    # sizes that cover the write sizes as a prefix.
+                    self.assertTrue(scheduler.fusable_read_and_write(gapped, gapped))
+                    self.assertTrue(scheduler.fusable_read_and_write(extended, gapped))
+                    self.assertFalse(scheduler.fusable_read_and_write(narrowed, gapped))
+                    # Loop merging is the only thing that bridges renamed vars.
                     self.assertEqual(
-                        scheduler.fusable_read_and_write(read, write),
-                        expected_default,
+                        scheduler.fusable_read_and_write(extended, renamed),
+                        loop_ordering,
                     )
-                    self.assertEqual(
-                        scheduler.fusable_read_and_write(
-                            read,
-                            write,
-                            allow_index_equivalence=True,
-                        ),
-                        expected_relaxed,
-                    )
-
-            normalized_exact_gapped_read = MemoryDep(
-                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
-            )
-            normalized_exact_gapped_write = MemoryDep(
-                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
-            )
-            with inductor_config.patch(loop_ordering_after_fusion=True):
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                    )
-                )
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                        allow_index_equivalence=True,
-                    )
-                )
+                    for read, write in equivalent_only:
+                        self.assertFalse(scheduler.fusable_read_and_write(read, write))
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
@@ -434,6 +368,33 @@ class TestScheduler(TestCase):
                     group_size=16,
                 )
             )
+
+    def test_nested_reduction_parent_half_domain(self):
+        self.assertEqual(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.R,
+                16,
+                128,
+                512,
+            ),
+            (128, 256),
+        )
+        self.assertIsNone(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.X,
+                16,
+                128,
+                512,
+            )
+        )
+        self.assertIsNone(
+            NestedReduction._parent_half_domain(
+                NestedReduction.GroupedAxis.R,
+                1,
+                128,
+                512,
+            )
+        )
 
     def test_nested_reduction_axis_from_loop_body(self):
         outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
