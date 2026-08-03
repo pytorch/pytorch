@@ -111,6 +111,33 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
+    @requires_nccl()
+    @requires_nccl_version((2, 29), "Need NCCL 2.29+ for communicator grow")
+    @skip_if_lt_x_gpu(2)
+    def test_manual_membership_change(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        store = dist.distributed_c10d._get_default_store()
+        dist.barrier()
+
+        if self.rank == 0:
+            shrunk = backend.shrink([1])
+            self.assertEqual(shrunk.size(), 1)
+            grow_id = shrunk._get_grow_id()
+            store.set("nccl2_manual_grow_id", grow_id)
+            grown = shrunk._grow(self.world_size)
+        else:
+            grow_id = store.get("nccl2_manual_grow_id")
+            opts = dist.ProcessGroupNCCL2.Options()
+            opts.group_name = "nccl2_manual_grow"
+            joiner = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+            grown = joiner._grow(self.world_size, grow_id, self.rank)
+
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        grown.allreduce(tensor).wait()
+        self.assertEqual(tensor, torch.full_like(tensor, 3.0))
+        torch.cuda.synchronize(self.device)
+        grown._revoke()
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""

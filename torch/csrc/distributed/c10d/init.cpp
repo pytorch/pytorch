@@ -4180,6 +4180,43 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::verifyWorkTimeoutForTest,
               py::arg("work"),
               py::arg("timeout"))
+          .def(
+              "_get_grow_id",
+              [](const c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL>&
+                     self) {
+                std::vector<uint8_t> id;
+                {
+                  py::gil_scoped_release nogil{};
+                  id = self->getGrowId();
+                }
+                return py::bytes(
+                    reinterpret_cast<const char*>(id.data()), id.size());
+              })
+          .def(
+              "_grow",
+              [](const c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL>&
+                     self,
+                 int new_size,
+                 const py::object& grow_id,
+                 int new_rank,
+                 const c10::intrusive_ptr<
+                     ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
+                std::optional<std::vector<uint8_t>> id;
+                if (!grow_id.is_none()) {
+                  std::string bytes = grow_id.cast<py::bytes>();
+                  id.emplace(bytes.begin(), bytes.end());
+                }
+                py::gil_scoped_release nogil{};
+                return self->grow(new_size, id, new_rank, options);
+              },
+              py::arg("new_size"),
+              py::arg("grow_id") = py::none(),
+              py::arg("new_rank") = -1,
+              py::arg("options") = nullptr)
+          .def(
+              "_revoke",
+              &::c10d::nccl2::ProcessGroupNCCL::revoke,
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
