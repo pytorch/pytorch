@@ -23,6 +23,12 @@ namespace {
 
 using namespace vec;
 
+// The barebones unsigned types have no Vectorized specialization, and gcc-13
+// ICEs auto-vectorizing the vec_base.h emulation for fixed-length SVE.
+template <typename scalar_t>
+constexpr bool use_vectorized_minmax =
+    !isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
+
 template <
     typename scalar_t,
     typename Op,
@@ -664,12 +670,18 @@ void maximum_kernel(TensorIteratorBase& iter) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a || b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
     AT_DISPATCH_V2(iter.dtype(), "maximum_cpu", AT_WRAP([&]() {
-      cpu_kernel_vec(
-          iter,
-          [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-            return at::vec::maximum(a, b);
-          });
+      const auto max_op = [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); };
+
+      if constexpr (use_vectorized_minmax<scalar_t>) {
+        cpu_kernel_vec(
+            iter,
+            max_op,
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+              return at::vec::maximum(a, b);
+            });
+      } else {
+        cpu_kernel(iter, max_op);
+      }
     }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -699,12 +711,18 @@ void minimum_kernel(TensorIteratorBase& iter) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a && b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
     AT_DISPATCH_V2(iter.dtype(), "minimum_cpu", AT_WRAP([&]() {
-      cpu_kernel_vec(
-          iter,
-          [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-            return at::vec::minimum(a, b);
-          });
+      const auto min_op = [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); };
+
+      if constexpr (use_vectorized_minmax<scalar_t>) {
+        cpu_kernel_vec(
+            iter,
+            min_op,
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+              return at::vec::minimum(a, b);
+            });
+      } else {
+        cpu_kernel(iter, min_op);
+      }
     }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
