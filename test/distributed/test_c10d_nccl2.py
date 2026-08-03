@@ -132,6 +132,20 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2SymmMemRendezvousTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.use_pg_for_symm_mem_rendezvous = True
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_option_propagated(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        self.assertTrue(pg.use_pg_for_symm_mem_rendezvous)
+
+
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:

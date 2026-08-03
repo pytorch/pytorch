@@ -91,6 +91,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+  setUsePgForSymmMemRendezvous(options_c10d_->use_pg_for_symm_mem_rendezvous);
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
