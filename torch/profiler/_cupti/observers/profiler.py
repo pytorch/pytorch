@@ -274,13 +274,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # shared process-global recorder; None unless enabled. See _attach_event_node_ids.
         self._event_node_recorder: Any = None
         if enable_event_node_ids:
-            from torch.profiler._cupti._event_nodes import (
-                arm_event_node_recording,
-                event_node_recorder,
-            )
+            from torch.profiler._cupti._event_nodes import _EventNodeRecorder
 
-            arm_event_node_recording()
-            self._event_node_recorder = event_node_recorder()
+            self._event_node_recorder = _EventNodeRecorder()
+            self._event_node_recorder.arm()
         # pid -> {opaque_tid: system_tid}, for naming GPU/CPU lanes.
         self._thread_resource_map: dict[int, dict[int, int]] = {}
         self._open_start: int | None = None  # open window start (None when none open)
