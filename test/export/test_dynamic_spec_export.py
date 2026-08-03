@@ -28,7 +28,11 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _reset_uid_counter():
@@ -103,6 +107,8 @@ class _ModBranch(torch.nn.Module):
 
 
 class _TestExportDynamicSpecBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
 
     def setUp(self):
@@ -997,6 +1003,8 @@ del _TestExportDynamicSpecBase
 
 
 class _TestContainerSpecBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
