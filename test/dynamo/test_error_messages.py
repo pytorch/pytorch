@@ -2658,7 +2658,7 @@ User code traceback:
         def outer(x):
             return middle_with_try(x)
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             torch.compile(outer, backend="eager")(torch.ones(3))
 
         full_messages = [
@@ -2757,7 +2757,7 @@ Call to `torch._dynamo.graph_break()`
             x = inner(x + 4) + 8
             return inner(x) + 16
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             outer(torch.ones(3))
 
         self.assertEqual(
