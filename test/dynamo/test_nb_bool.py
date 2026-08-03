@@ -224,7 +224,9 @@ class NbBoolTests(TestCase):
 
         x = torch.rand(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, MyObj()), fn(x, MyObj()))
+        out = compiled(x, MyObj())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(out, fn(x, MyObj()))
 
     def test_bool_user_defined_object_raises_typeerror(self):
         class Baz(int):
@@ -238,7 +240,9 @@ class NbBoolTests(TestCase):
                 return str(e)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(Baz()), opt_fn(Baz()))
+        out = opt_fn(Baz())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(fn(Baz()), out)
 
     # --- Blocked slot: __bool__ = None ---
 
