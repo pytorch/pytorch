@@ -596,8 +596,11 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-# TDM host-side test does NOT require TDM-capable device.
-@unittest.skipUnless(TEST_WITH_ROCM, "requires ROCm")
+# These host-side tests validate ROCm-specific TDM logic; TDM hardware is not required.
+@unittest.skipUnless(
+    TEST_WITH_ROCM,
+    "ROCm-specific TDM host-side test; no TDM-capable device required",
+)
 class TestFlexAttentionTDMOptions(InductorTestCase):
     def test_flex_tdm_gate_checks_layout_and_offset(self):
         from torch._inductor.utils import use_flex_tdm_descriptor
