@@ -63,13 +63,6 @@ class EpilogueInputPack:
     values: tuple
 
 
-@dataclasses.dataclass(frozen=True)
-class EpilogueOutputPack:
-    tensors: tuple
-    count: cutlass.Constexpr
-    primary: cutlass.Constexpr
-
-
 """
 This example provides an experimental implementation of the SM100 batched dense blockscaled GEMM kernel, please note that the APIs and implementation details related to this kernel may change in future releases.
 
@@ -444,7 +437,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_input_dtype: cutlass.Constexpr = cutlass.Float32,
         alpha_tensor: cute.Tensor = None,
         epilogue_inputs: EpilogueInputPack = EpilogueInputPack(()),
-        epilogue_outputs: EpilogueOutputPack = EpilogueOutputPack((), 1, 0),
+        epilogue_outputs: tuple = (),
+        epilogue_output_count: cutlass.Constexpr = 1,
+        primary_epilogue_output: cutlass.Constexpr = 0,
         local_reduce_tensor: cute.Tensor = None,
         local_reduce_feed_tensor: cute.Tensor = None,
         local_reduce_config: cutlass.Constexpr = None,
@@ -566,7 +561,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_source_op = local_reduce_source_op
         self.local_reduce_finalize = local_reduce_finalize
         self.has_cross_warp_local_reduce = cutlass.const_expr(
-            local_reduce_tensor is not None
+            (local_reduce_tensor is not None or local_reduce_feeds_main)
             and local_reduce_axis == 0
             and local_reduce_group > 4
         )
@@ -593,18 +588,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 for value in epilogue_inputs.values
             )
         )
-        epilogue_outputs = EpilogueOutputPack(
-            tuple(
-                epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs.tensors
-            ),
-            epilogue_outputs.count,
-            epilogue_outputs.primary,
+        epilogue_outputs = tuple(
+            epilogue_tensor_to_mnl(tensor) for tensor in epilogue_outputs
         )
         if cutlass.const_expr(local_reduce_feed_tensor is not None):
             local_reduce_feed_tensor = epilogue_tensor_to_mnl(local_reduce_feed_tensor)
 
-        self.epilogue_output_count = epilogue_outputs.count
-        self.primary_epilogue_output = epilogue_outputs.primary
+        self.epilogue_output_count = epilogue_output_count
+        self.primary_epilogue_output = primary_epilogue_output
 
         # Setup static attributes before smem/grid/tma computation
         self.a_dtype: Type[cutlass.Numeric] = a_tensor.element_type
@@ -891,7 +882,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         epilogue_input_dtype: cutlass.Constexpr,
         alpha_tensor: cute.Tensor,
         epilogue_inputs: EpilogueInputPack,
-        epilogue_outputs: EpilogueOutputPack,
+        epilogue_outputs: tuple,
         local_reduce_tensor: cute.Tensor,
         local_reduce_feed_tensor: cute.Tensor,
     ):
@@ -1913,7 +1904,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     mma_tile_coord_mnl[2],
                                 ] = feed_fragment_flt[i]
                     if cutlass.const_expr(has_epilogue_outputs):
-                        for output_index, tensor in enumerate(epilogue_outputs.tensors):
+                        for output_index, tensor in enumerate(epilogue_outputs):
                             result_index = cutlass.const_expr(
                                 output_index
                                 if output_index < self.primary_epilogue_output

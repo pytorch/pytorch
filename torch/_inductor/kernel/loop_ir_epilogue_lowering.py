@@ -10,7 +10,11 @@ import sympy
 
 import torch
 from torch._inductor.ir import ComputedBuffer
-from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionConfig,
+    GemmReductionDescriptor,
+    GemmReductionGeometry,
+)
 from torch._inductor.ops_handler import DefaultHandler
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
@@ -60,6 +64,12 @@ class GemmEpilogueIRRegion:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmEpilogueIRSyntheticReduction:
+    geometry: GemmReductionGeometry
+    region: GemmEpilogueIRRegion
+
+
+@dataclasses.dataclass(frozen=True)
 class GemmEpilogueIRStore:
     """Symbolic store produced by replaying a lowered epilogue loop body.
 
@@ -70,19 +80,6 @@ class GemmEpilogueIRStore:
 
     index: sympy.Expr
     value: GemmEpilogueIRExpression
-
-
-@dataclasses.dataclass(frozen=True)
-class GemmEpilogueIROutputRole:
-    """Transitive inputs that determine one captured epilogue output.
-
-    Attributes:
-        transitive_inputs: All buffers loaded directly or through stored values.
-        reduction_inputs: Loaded buffers whose captured values contain reductions.
-    """
-
-    transitive_inputs: frozenset[str]
-    reduction_inputs: frozenset[str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -202,16 +199,18 @@ class GemmEpilogueIRAnalysis:
     """Candidate-wide semantic view of existing lowered loop bodies."""
 
     stores: dict[str, GemmEpilogueIRStore]
+    buffers: tuple[ComputedBuffer, ...] = ()
 
     @classmethod
     def from_buffers(
         cls, buffers: Sequence[ComputedBuffer]
     ) -> "GemmEpilogueIRAnalysis":
+        buffers = tuple(buffers)
         handler = _GemmEpilogueIRHandler()
         with V.set_ops_handler(handler):
             for buffer in buffers:
                 buffer.get_store_function()(*buffer.data.inner_fn_args())
-        return cls(handler.stores)
+        return cls(handler.stores, buffers)
 
     @classmethod
     def store_from_buffer(cls, buffer: ComputedBuffer) -> GemmEpilogueIRStore | None:
@@ -220,15 +219,44 @@ class GemmEpilogueIRAnalysis:
     def store(self, name: str) -> GemmEpilogueIRStore | None:
         return self.stores.get(name)
 
-    def output_role(self, name: str) -> GemmEpilogueIROutputRole | None:
-        store = self.store(name)
+    def _source_load_width(self, output_name: str, source_name: str) -> int:
+        store = self.store(output_name)
         if store is None:
-            return None
-        transitive_inputs = store.value.loads or _loaded_names(store.value)
-        return GemmEpilogueIROutputRole(
-            transitive_inputs,
-            transitive_inputs & self.reduction_stores,
-        )
+            return 0
+        indices = [
+            expr.args[1]
+            for expr in _walk(store.value)
+            if expr.op == "load" and expr.args[0] == source_name
+        ]
+        unique_indices = []
+        for index in indices:
+            if not any(sympy.simplify(index - other) == 0 for other in unique_indices):
+                unique_indices.append(index)
+        return len(unique_indices)
+
+    def synthetic_reduction_region(
+        self,
+        output_name: str,
+        source_name: str,
+        source_dtype: torch.dtype,
+        n: int,
+    ) -> GemmEpilogueIRSyntheticReduction | None:
+        matches = []
+        width = self._source_load_width(output_name, source_name)
+        for group in range(2, width + 1):
+            region = self.reduction_region(
+                output_name, source_name, group, source_dtype
+            )
+            if region is None or len(region.reductions) != 1:
+                continue
+            axis = grouped_reduction_axis_ir(region.reductions[0], group, n)
+            if axis is not None:
+                matches.append(
+                    GemmEpilogueIRSyntheticReduction(
+                        GemmReductionGeometry(group, axis), region
+                    )
+                )
+        return max(matches, key=lambda match: match.geometry.group, default=None)
 
     def grouped_reduction(
         self,
@@ -248,7 +276,11 @@ class GemmEpilogueIRAnalysis:
             return None
         reduction_type, source_type = classified
         return GemmReductionConfig(
-            output_name, group, axis, reduction_type, source_type
+            output_name=output_name,
+            group=group,
+            axis=axis,
+            reduction_type=reduction_type,
+            source_type=source_type,
         )
 
     def reduction_region(
@@ -302,14 +334,6 @@ class GemmEpilogueIRAnalysis:
         else:
             return None
         return GemmEpilogueIRFinalizer(output_name, source_name, kind)
-
-    @property
-    def reduction_stores(self) -> frozenset[str]:
-        return frozenset(
-            name
-            for name, store in self.stores.items()
-            if store.value.reductions or _contains_reduction(store.value)
-        )
 
 
 def _constant_value(expr: Any) -> Any | None:
@@ -672,7 +696,7 @@ def centered_mean_consumer_type_ir(
         or not all(math.isfinite(value) for value in coefficients)
     ):
         return None
-    return "mean_linear:" + ":".join(format(value, ".17g") for value in coefficients)
+    return GemmReductionDescriptor("mean_linear", coefficients).serialize()
 
 
 def single_source_affine_ir(
@@ -914,7 +938,7 @@ def sum_normalize_consumer_type_ir(
         else "normalize_sum_reverse_affine"
     )
     values = (*affine, *parameters[1:])
-    return kind + ":" + ":".join(format(value, ".17g") for value in values)
+    return GemmReductionDescriptor(kind, values).serialize()
 
 
 def sum_multiply_consumer_type_ir(
@@ -931,9 +955,7 @@ def sum_multiply_consumer_type_ir(
             continue
         affine = _sum_affine_ir(reduction, source_name, reduction_names, group)
         if affine is not None and all(math.isfinite(value) for value in affine):
-            return "sum_mul_affine:" + ":".join(
-                format(value, ".17g") for value in affine
-            )
+            return GemmReductionDescriptor("sum_mul_affine", affine).serialize()
     return None
 
 
@@ -1026,7 +1048,7 @@ def centered_mean_consumer_type_unrolled_ir(
         or not all(math.isfinite(value) for value in values)
     ):
         return None
-    return "mean_linear:" + ":".join(format(value, ".17g") for value in values)
+    return GemmReductionDescriptor("mean_linear", values).serialize()
 
 
 def is_logsumexp_ir(store: GemmEpilogueIRStore, source_name: str, group: int) -> bool:
