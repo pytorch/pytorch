@@ -99,6 +99,7 @@ from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 try:
@@ -332,7 +333,7 @@ class _CyclicOpaque(torch._custom_class_base.CustomClassBase):
         self.child = None
 
 
-if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
+if not torch._library.opaque_object.is_custom_class(_CyclicOpaque):
     torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="symbolic")
 
 
@@ -1186,6 +1187,50 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    @torch._dynamo.config.patch(
+        {
+            "caching_precompile": True,
+        }
+    )
+    def test_cache_hot_load_caching_precompile_autocast(self):
+        def fn(x):
+            return x + 1 * x
+
+        x = torch.randn(3, 2, device="cuda")
+
+        with fresh_cache():
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifact_bytes, cache_info = artifacts
+        self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+            self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
     @config.patch(
@@ -3049,6 +3094,41 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
+    def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
+        @torch._dynamo.allow_in_graph
+        def to_subclass(x):
+            return TwoTensor(x.clone(), x.clone())
+
+        def f(x):
+            return to_subclass(x).view(-1)
+
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f, dynamic=True)(x)
+            if kwargs:
+                raise AssertionError
+
+        output_node = next(iter(reversed(gm.graph.nodes)))
+        value_node = output_node.args[0][0]
+        self.assertIsInstance(value_node, torch.fx.Node)
+        output_example_value = value_node.meta["example_value"]
+        self.assertIsInstance(output_example_value, TwoTensor)
+        fake_mode = output_example_value.a.fake_mode
+
+        seen_fake_modes = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+            return lambda *args: args
+
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(gm, args, dynamic_shapes="from_graph")
+
+        self.assertIs(seen_fake_modes[0], fake_mode)
+
     def test_standalone_compile_fake_mode_requires_shape_env(self):
         def f(x):
             return x + 1
@@ -3498,6 +3578,128 @@ class TestFxGraphCacheHashing(TestCase):
 
         with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
+
+    def _nested_region_gm(self, patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        return gm
+
+    def test_nested_region_config_patches_affect_cache_key(self):
+        # A region's inductor_config_patches must be part of the cache key,
+        # otherwise two regions differing only in their patches would collide
+        # and reuse a stale compiled artifact.
+        same1 = self._nested_region_gm({"max_autotune": True})
+        same2 = self._nested_region_gm({"max_autotune": True})
+        different = self._nested_region_gm({"max_autotune": False})
+
+        self.assertEqual(
+            FxGraphHashDetails(
+                same1, [], cast(Any, {}), []
+            ).nested_inductor_config_patches,
+            (("", (("max_autotune", True),)),),
+        )
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
+
+    def test_nested_region_uncacheable_config_bypasses_cache(self):
+        # A callable patch value can't be hashed into the cache key.
+        def custom_pass(graph):
+            return graph
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                require_shape_env=False,
+            ).validate()
+
+        # A non-callable value under a custom-pass key is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
+            CacheabilityValidator(
+                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
+                require_shape_env=False,
+            ).validate()
+
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
+    def _nested_region_bw_gm(self, bw_patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        fw_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=bw_patches
+        )
+        bw_config = get_backward_nested_region_config(fw_config)
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
+        return gm
+
+    def test_nested_region_bw_config_patches_affect_cache_key(self):
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        # Backward config replaces (does not merge with) the forward config.
+        bw_config = get_backward_nested_region_config(
+            get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"max_autotune": True}
+            )
+        )
+        self.assertEqual(
+            bw_config.inductor_config_patches,
+            {"max_autotune": True},
+        )
+
+        same1 = self._nested_region_bw_gm({"max_autotune": True})
+        same2 = self._nested_region_bw_gm({"max_autotune": True})
+        different = self._nested_region_bw_gm({"max_autotune": False})
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
@@ -5060,7 +5262,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
-            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+            msg=lambda msg: f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}",
         )
 
     def test_probe_load_returns_false_on_called_process_error(self):

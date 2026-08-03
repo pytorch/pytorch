@@ -153,6 +153,7 @@ std::tuple<Tensor, std::optional<int64_t>> _unsafe_view_batch_rule(
 std::tuple<Tensor, std::optional<int64_t>> flip_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, IntArrayRef dims) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
+  new_dims.reserve(dims.size());
   for (auto i: dims) {
     new_dims.push_back(getPhysicalDim(self_, true, i));
   }
@@ -317,6 +318,7 @@ std::tuple<Tensor, std::optional<int64_t>> roll_batch_rule(const Tensor& self, s
   auto self_ = moveBatchDimToFront(self, bdim);
   VmapDimVector new_dims;
   if (!dims.empty()) {
+    new_dims.reserve(dims.size());
     for (auto i: dims) {
       new_dims.push_back(getPhysicalDim(self, true, i));
     }
