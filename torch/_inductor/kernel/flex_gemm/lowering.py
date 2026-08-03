@@ -505,8 +505,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_reduction_plan(
-        epilogue_analysis.reduction_plan, local_reduce_out_index
+    template_local_reduce = (
+        None
+        if outputs.local_reduce is None
+        else FlexGemmEpilogueLocalReduceConfig(
+            outputs.local_reduce.match.geometry,
+            local_reduce_out_index,
+            outputs.local_reduce.feeds_main,
+        )
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
