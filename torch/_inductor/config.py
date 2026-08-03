@@ -257,6 +257,10 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
+# Use slower compare/select reductions for their ordered signed-zero tie behavior.
+# NaNs are propagated regardless of this setting.
+strict_signed_zero = False
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -641,7 +645,7 @@ multi_kernel_hints: list[int] = []
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
-# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -651,10 +655,14 @@ max_autotune_gemm_backends = os.environ.get(
 
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to 0, None, or env var "none"/"all" to tune all configs.
+# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
+# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
+# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
+# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
+# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
+# "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
-    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
@@ -669,6 +677,11 @@ nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default
 nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
+
+# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
+# large N dimension goes on the M-axis. Improves tile utilization for
+# small-M decode shapes typical in LLM inference (M << N).
+nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
@@ -879,6 +892,10 @@ cache_sdpa_constraint = (
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
+# Whether view outputs must match eager strides exactly instead of only matching
+# their stride order. Exact matching can introduce additional copy kernels.
+strict_output_strides = False
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -1087,6 +1104,15 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
+# combo_kernel_per_subkernel_blocks.
+combo_kernel_compile_time_autotune: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_compile_time_autotune",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_COMPILE_TIME_AUTOTUNE",
+    default=False,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
@@ -1978,12 +2004,10 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - enable by default
-    coalesce_tiling_analysis: bool = (
-        os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
-        )
-        == "1"
+    coalesce_tiling_analysis: bool = Config(
+        justknob="pytorch/inductor:coalesce_tiling_analysis",
+        env_name_force="TORCHINDUCTOR_COALESCE_TILING_ANALYSIS",
+        default=True,
     )
 
     # limit tiling dimensions

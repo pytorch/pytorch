@@ -465,6 +465,10 @@ inductor_override_kwargs["cuda"] = {
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("atanh", f16): {"reference_in_float": True},
@@ -565,9 +569,10 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -735,9 +740,13 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    # fp16 backward accumulates ~1e-3 rounding across the aten kernel and
+    # inductor decomposition; loosen tolerances to match the CUDA override
+    # added in pytorch/pytorch#190245.
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1296,6 +1305,7 @@ class TestInductorOpInfo(TestCase):
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef

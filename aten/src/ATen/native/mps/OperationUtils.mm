@@ -955,7 +955,9 @@ class BundledShaderLibrary : public MetalShaderLibrary {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
 #ifdef CAN_BUILD_METAL_4
-      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_0) ? "metal_40" : "metal_basic";
+      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+      // cooperative-tensor ABI), so only load it on 26.2+.
+      const auto section_name = is_macos_at_least(MacOSVersion::MACOS_26_2) ? "metal_40" : "metal_basic";
 #else
       const auto section_name = "metal_basic";
 #endif
@@ -1213,7 +1215,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   }
 }
 
-void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
                                                MTLBuffer_t src_buf,
                                                uint32_t src_offs_bytes,
                                                c10::ScalarType src_dtype,
@@ -1233,7 +1235,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      getMPSProfiler().beginProfileKernel(cplState, kernel_name, /*isGraph=*/false);
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
       [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
