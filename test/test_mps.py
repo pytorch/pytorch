@@ -9790,6 +9790,42 @@ class TestMPS(TestCaseMPS):
         torch.mps.synchronize()
         self.assertEqual(back, src)
 
+    def test_solo_no_corruption_on_reuse(self):
+        """A recycled solo buffer must not corrupt data still referenced by an
+        in-flight command buffer: solo buffers are hazard-tracked, and one still
+        used by a pending copy is parked (not recycled) until its GPU work ends."""
+        self._reset_solo_allocator()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        N = 30 * 1024 * 1024 // 4  # 30 MB, above the threshold
+
+        # (a) hazard tracking: queue a device->host copy behind GPU work, free the
+        # source, force a same-size solo reuse; the copied data must stay intact.
+        a = torch.empty(N, device="mps").fill_(1.0)
+        junk = torch.randn(4096, 4096, device="mps")
+        for _ in range(60):
+            junk = junk @ junk
+        back = torch.empty(N, pin_memory=True)
+        back.copy_(a, non_blocking=True)
+        del a
+        b = torch.full((N,), 2.0).to("mps")  # same size -> candidate for reuse
+        torch.mps.synchronize()
+        self.assertEqual(int((back != 1.0).sum()), 0, "hazard-tracked reuse corrupted an in-flight copy")
+        del b, junk
+
+        # (b) pending-free: a pinned buffer read by an in-flight blit must not be
+        # handed to a new allocation and CPU-overwritten before the GPU is done.
+        p = torch.empty(N, pin_memory=True).fill_(1.0)
+        junk = torch.randn(4096, 4096, device="mps")
+        for _ in range(60):
+            junk = junk @ junk
+        d = p.to("mps", non_blocking=True)
+        del p
+        q = torch.empty(N, pin_memory=True)
+        q.fill_(2.0)
+        torch.mps.synchronize()
+        self.assertEqual(int((d != 1.0).sum().item()), 0, "recycled in-flight solo buffer was overwritten")
+        del d, q, junk
+
     def test_heap_mode_restored(self):
         """Setting the threshold to 0 should revert to default 1 GB heap behaviour."""
         self._reset_solo_allocator()

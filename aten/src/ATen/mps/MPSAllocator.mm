@@ -484,7 +484,6 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
     const size_t alloc_size = get_allocation_size(size, usage);
     id<MTLBuffer> buf = nil;
     {
-      std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
       auto it = m_solo_cache.find(alloc_size);
       if (it != m_solo_cache.end()) {
         buf = (id<MTLBuffer>)it->second;
@@ -492,7 +491,10 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
       }
     }
     if (!buf) {
-      const MTLResourceOptions options = HeapBlock::getOptions(usage);
+      // Solo buffers must be hazard-tracked: a freed one is recycled directly to
+      // a new allocation, and without tracking Metal will not order a new use
+      // against a still-in-flight prior use of the same buffer (data corruption).
+      const MTLResourceOptions options = HeapBlock::getOptions(usage | UsageFlags::HAZARD);
       // Honor the high-watermark limit and, on failure, free cached memory and
       // retry, mirroring the heap path so solo allocations raise the same OOM
       // error instead of silently returning a null buffer.
@@ -937,10 +939,17 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
     if (buffer_block->heap == nullptr) {
       m_allocated_buffers.erase(ptr);
       m_current_allocated_memory.decrease(buffer_block->size);
-      void* raw = (void*)buffer_block->buffer;
-      std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
-      m_solo_cache.insert({buffer_block->size, raw});
-      delete buffer_block;
+      // A solo buffer marked by recordEvents and still referenced by an in-flight
+      // command buffer must not be recycled yet: handing it to a new allocation
+      // could let the CPU overwrite it before the GPU is done. Park it;
+      // freeInactiveBuffers() returns it to the free list once its command buffer
+      // completes. Same rule as the heap path below.
+      if (buffer_block->event && buffer_block->retainCount() > 1) {
+        m_solo_pending_free.insert(buffer_block);
+      } else {
+        m_solo_cache.insert({buffer_block->size, (void*)buffer_block->buffer});
+        delete buffer_block;
+      }
       return;
     }
     BufferPool& pool = *buffer_block->heap->pool;
@@ -985,10 +994,32 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
       }
     }
   }
+  // Reclaim parked solo buffers whose command buffer has completed: return them
+  // to the per-size free list for reuse.
+  for (auto it = m_solo_pending_free.begin(), last = m_solo_pending_free.end(); it != last;) {
+    BufferBlock* buffer_block = *it;
+    if (buffer_block->retainCount() <= 1) {
+      m_solo_cache.insert({buffer_block->size, (void*)buffer_block->buffer});
+      it = m_solo_pending_free.erase(it);
+      delete buffer_block;
+    } else {
+      ++it;
+    }
+  }
 }
 
 void MPSHeapAllocatorImpl::release_cached_solo_buffers() {
-  std::lock_guard<std::mutex> solo_lock(m_solo_mutex);
+  // Callers (emptyCache, the alloc retry) run this after release_cached_buffers()
+  // has done a COMMIT_AND_WAIT, so the GPU is idle and parked buffers are safe to
+  // release too.
+  for (BufferBlock* buffer_block : m_solo_pending_free) {
+    m_total_allocated_memory.decrease(buffer_block->size);
+    id<MTLBuffer> buf = buffer_block->buffer;
+    [buf setPurgeableState:MTLPurgeableStateEmpty];
+    [buf release];
+    delete buffer_block;
+  }
+  m_solo_pending_free.clear();
   for (auto& [sz, raw] : m_solo_cache) {
     m_total_allocated_memory.decrease(sz);
     id<MTLBuffer> buf = (id<MTLBuffer>)raw;

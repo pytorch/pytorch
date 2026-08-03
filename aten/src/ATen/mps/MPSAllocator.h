@@ -9,7 +9,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <mach/vm_page_size.h>
 #include <cstdio>
-#include <atomic>
 #include <mutex>
 #include <set>
 #include <unordered_map>
@@ -439,9 +438,13 @@ class MPSHeapAllocatorImpl {
   // Solo allocator: direct per-buffer MTLBuffer for large tensors; bypasses MTLHeap
   // sub-allocation. Threshold comes from the shared accelerator config
   // (mps_large_alloc_threshold_mb, read via MPSAllocatorConfig on the alloc path).
+  // All access is under m_mutex (alloc/free/emptyCache paths all hold it).
   // Per-size free list: size_bytes -> retained id<MTLBuffer> (as void* to avoid ObjC ARC in header)
-  std::mutex m_solo_mutex;
   std::unordered_multimap<size_t, void*> m_solo_cache;
+  // Freed solo buffers still referenced by an in-flight command buffer, parked
+  // here until freeInactiveBuffers() reclaims them to m_solo_cache (mirrors the
+  // heap pool's buffers_pending_free).
+  std::unordered_set<BufferBlock*> m_solo_pending_free;
   // default MPS stream
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
