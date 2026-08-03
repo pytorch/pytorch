@@ -1655,7 +1655,7 @@ jobs:
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: python:3.11
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -1668,6 +1668,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cpu"
             build_name: "libtorch-cpu-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cpu"
           - desired_cuda: "cu126"
             gpu_arch_type: "cuda"
             gpu_arch_version: "12.6"
@@ -1675,6 +1677,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda12_6"
             build_name: "libtorch-cuda12_6-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda12.6"
           - desired_cuda: "cu130"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.0"
@@ -1682,6 +1686,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_0"
             build_name: "libtorch-cuda13_0-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.0"
           - desired_cuda: "cu132"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.2"
@@ -1689,6 +1695,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_2"
             build_name: "libtorch-cuda13_2-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.2"
           - desired_cuda: "rocm7.1"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.1"
@@ -1696,6 +1704,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-rocm7_1"
             build_name: "libtorch-rocm7_1-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.1"
           - desired_cuda: "rocm7.2"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.2"
@@ -1703,6 +1713,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-rocm7_2"
             build_name: "libtorch-rocm7_2-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.2"
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
@@ -1719,24 +1731,31 @@ jobs:
         name: Download Wheel Artifact
         with:
           name: ${{ matrix.source_wheel_build_name }}
-          path: "${{ runner.temp }}/wheel_artifact/"
+          path: "${{ github.workspace }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${RUNNER_TEMP}/libtorch_output"
+          # In container jobs the github.workspace context is the host path; the
+          # mount is at $GITHUB_WORKSPACE. Use the env var so run steps and the
+          # translated download/upload action paths resolve to the same dir.
+          mkdir -p "${GITHUB_WORKSPACE}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
-            --output-dir "${RUNNER_TEMP}/libtorch_output" \
+            --wheel-dir "${GITHUB_WORKSPACE}/wheel_artifact" \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
+      - name: Smoke test extracted libtorch
+        run: |
+          python3 .ci/libtorch/smoke_test_extract_libtorch.py \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
+          path: "${{ github.workspace }}/libtorch_output/"
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
