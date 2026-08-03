@@ -38,6 +38,7 @@
     is_available
     is_bf16_supported
     is_initialized
+    is_scaled_mm_supported
     is_tf32_supported
     memory_usage
     set_device

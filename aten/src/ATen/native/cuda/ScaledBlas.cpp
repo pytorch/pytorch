@@ -473,7 +473,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           Tensor& out) {
   // Check sizes
   bool allowed_device = scaled_mm_arch_allowed();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK(
+      allowed_device,
+      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, ROCm gfx942, ROCm 6.3+ gfx1200/gfx1201, ROCm 7.0+ gfx950, or ROCm 7.14+ gfx1250");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -531,10 +533,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     TORCH_CHECK(ROCM_VERSION >= 70000, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
   }
   if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 7.0 and above");
   }
   if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 7.0 and above");
   }
 #endif
   if (bias) {
@@ -1311,8 +1313,9 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
           bool use_fast_accum,
           const Tensor& out) {
   bool allowed_device = scaled_mm_arch_allowed();
-  TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
-      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      allowed_device,
+      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, ROCm gfx942, ROCm 6.3+ gfx1200/gfx1201, ROCm 7.0+ gfx950, or ROCm 7.14+ gfx1250");
 
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
@@ -1364,11 +1367,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
   }
   if (mat_a.scalar_type() == ScalarType::Float8_e5m2 || mat_b.scalar_type() == ScalarType::Float8_e5m2) {
     TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
-        "Float8_e5m2 is only supported for ROCm 6.5 and above");
+        "Float8_e5m2 is only supported for ROCm 7.0 and above");
   }
   if (mat_a.scalar_type() == ScalarType::Float8_e4m3fn || mat_b.scalar_type() == ScalarType::Float8_e4m3fn) {
     TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
-        "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+        "Float8_e4m3fn is only supported for ROCm 7.0 and above");
   }
 #endif
   if (bias.has_value()) {

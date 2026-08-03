@@ -4,6 +4,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
+#include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -26,6 +27,7 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -2189,6 +2191,12 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
 
 static void initCudaMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  m.def(
+      "_cuda_isScaledMMAllowed",
+      [](c10::DeviceIndex device_index) {
+        const c10::cuda::CUDAGuard device_guard(device_index);
+        return at::native::scaled::scaled_mm_arch_allowed();
+      });
   m.def(
       "_cuda_getStreamFromExternal",
       [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
