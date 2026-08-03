@@ -578,8 +578,10 @@ class _FailingFileSystem(FileSystem):
 class TestFileSystemWriterErrorPropagation(TestCase):
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_write_data_propagates_thread_errors(self, thread_count) -> None:
-        """Regression test for gh-191391: background writer thread exceptions must
-        propagate through the returned future, not be silently swallowed."""
+        """Regression test for gh-191391: writer thread exceptions must propagate
+        through the returned future, not be silently swallowed. thread_count=1
+        exercises the calling-thread path; thread_count=2 also exercises a spawned
+        writer thread."""
         with tempfile.TemporaryDirectory() as path:
             state_dict = {"weight": torch.randn(10, 10)}
             fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
@@ -593,6 +595,9 @@ class TestFileSystemWriterErrorPropagation(TestCase):
             rank_0_exc = cm.exception.failures[0][0]
             self.assertIsInstance(rank_0_exc, OSError)
             self.assertIn("Injected write failure", str(rank_0_exc))
+            # finish() must not run on a failed write, so no metadata is published
+            # for the partial checkpoint.
+            self.assertFalse(os.path.exists(os.path.join(path, ".metadata")))
 
 
 instantiate_parametrized_tests(TestFileSystemWriterErrorPropagation)
