@@ -1064,15 +1064,21 @@ _SLOTDEFS: list[SlotDef] = [
     # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
+    # __getattribute__ and __getattr__ must dispatch differently, matching
+    # CPython _Py_slot_tp_getattr_hook: __getattribute__ is GenericGetAttr with
+    # NO __getattr__ fallback (call_getattribute), while an explicit __getattr__
+    # call invokes only the type's __getattr__ hook (call_getattr_dunder).
+    # Both are the same TP_GETATTRO slot but route to different impls.
+    # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
     TPSLOT(
         "__getattribute__",
-        "getattro_impl",
+        "call_getattribute",
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
     TPSLOT(
         "__getattr__",
-        "getattro_impl",
+        "call_getattr_dunder",
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
@@ -1948,11 +1954,60 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker | None:
         """Call __getattr__ fallback (step 6 of GenericGetAttr).
 
+        CPython invokes __getattr__ from _Py_slot_tp_getattr_hook, only after
+        GenericGetAttr raises AttributeError:
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+
         Returns a VT if the type defines __getattr__ and it succeeds,
         None otherwise.  The base returns None (most types have no
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def call_getattribute(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Polymorphic hook for obj.__getattribute__(name).
+
+        This is a distinct hook (not just a getattro_impl call at the caller)
+        because UDOV overrides it to give the correct __getattribute__
+        semantics: it dispatches to a user-defined __getattribute__ when one
+        exists, and passes skip_getattr_fallback=True so lookup never chains to
+        __getattr__ (only the normal obj.attr path in getattro_impl does that).
+        UDOV.getattro_impl differs -- it invokes the __getattr__ fallback -- so
+        inlining getattro_impl here would break __getattribute__ for UDOVs.
+
+        The base delegates to getattro_impl.  That is equivalent for VTs whose
+        __getattr__ hook (if any) is call_getattr_fallback, which the base
+        implements as returning None; a VT that instead folds an equivalent
+        lookup into its own getattro_impl override should override this too.
+
+        CPython: explicit __getattribute__ resolves to _Py_slot_tp_getattro /
+        PyObject_GenericGetAttr, bypassing the __getattr__ chain that
+        _Py_slot_tp_getattr_hook adds for the implicit obj.attr path.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9603-L9608"""
+        return self.getattro_impl(tx, name)
+
+    def call_getattr_dunder(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """obj.__getattr__(name): invoke only the type's __getattr__ hook.
+
+        Unlike normal access / __getattribute__, this does not run the descriptor
+        protocol or instance dict -- it calls just __getattr__ (via
+        call_getattr_fallback).  If the type defines no __getattr__, then
+        obj.__getattr__ is itself a missing attribute, so raise AttributeError.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9635-L9682
+        """
+        result = self.call_getattr_fallback(tx, name)
+        if result is not None:
+            return result
+        type_name = self.python_type_name()
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type_name}' object has no attribute '__getattr__'"],
+        )
 
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
