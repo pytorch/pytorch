@@ -22,6 +22,26 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
+def my_bitwise_and(self, other):
+    """Stable ``bitwise_and.Tensor`` (2.14+)."""
+    return torch.ops.libtorch_agn_2_14.my_bitwise_and.default(self, other)
+
+
+def my_bitwise_or(self, other):
+    """Stable ``bitwise_or.Tensor`` (2.14+)."""
+    return torch.ops.libtorch_agn_2_14.my_bitwise_or.default(self, other)
+
+
+def my_bitwise_left_shift(self, other):
+    """Stable ``bitwise_left_shift.Tensor`` (2.14+)."""
+    return torch.ops.libtorch_agn_2_14.my_bitwise_left_shift.default(self, other)
+
+
+def my_bitwise_right_shift(self, other):
+    """Stable ``bitwise_right_shift.Tensor`` (2.14+)."""
+    return torch.ops.libtorch_agn_2_14.my_bitwise_right_shift.default(self, other)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

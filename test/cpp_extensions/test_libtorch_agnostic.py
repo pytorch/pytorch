@@ -268,6 +268,51 @@ class TestLibtorchAgnostic(TestCase):
         # Sparse tensors do not own a contiguous storage.
         self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_bitwise_ops(self, device):
+        """Test bitwise_and/or/left_shift/right_shift.Tensor stable ops."""
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        a = torch.randint(0, 256, (3, 4), device=device, dtype=torch.int64)
+        b = torch.randint(0, 256, (3, 4), device=device, dtype=torch.int64)
+
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_and(a, b), torch.bitwise_and(a, b)
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_or(a, b), torch.bitwise_or(a, b)
+        )
+
+        shifts = torch.randint(0, 8, (3, 4), device=device, dtype=torch.int64)
+
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_left_shift(a, shifts),
+            torch.bitwise_left_shift(a, shifts),
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_right_shift(a, shifts),
+            torch.bitwise_right_shift(a, shifts),
+        )
+
+        # Test broadcasting
+        c = torch.randint(0, 256, (4,), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_and(a, c), torch.bitwise_and(a, c)
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_or(a, c), torch.bitwise_or(a, c)
+        )
+
+        shift_1d = torch.randint(0, 8, (4,), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_left_shift(a, shift_1d),
+            torch.bitwise_left_shift(a, shift_1d),
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_bitwise_right_shift(a, shift_1d),
+            torch.bitwise_right_shift(a, shift_1d),
+        )
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
