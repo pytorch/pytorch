@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/bit_cast.h>
 
 /// Defines the Float4_e2m1fn_x2 type (4-bit floating-point, two elements packed
 /// into one byte). This is the FP4 dtype from the OCP MX format spec
@@ -18,6 +19,46 @@
 ///
 
 namespace c10 {
+
+namespace detail {
+
+/// Convert a single fp32 value to its 4-bit e2m1 code (sign, 2 exponent, 1
+/// mantissa), returned in the low nibble of a uint8_t. Values are rounded to
+/// nearest even and clamped to the max representable magnitude (6.0); there is
+/// no NaN/inf support. This is a scalar specialization (ebits=2, mbits=1) of
+/// the branchless algorithm in
+/// torch/testing/_internal/common_quantized.py::_f32_to_floatx_unpacked.
+inline C10_HOST_DEVICE uint8_t fp4e2m1_from_fp32_value(float f) {
+  constexpr uint32_t denorm_mask_int = 149u << 23;
+  const float denorm_mask_float = c10::bit_cast<float>(denorm_mask_int);
+  // (exp_bias - F32_EXP_BIAS) << MBITS_F32 + magic_adder == (-126 << 23) + 2^21-1
+  constexpr int32_t val_to_add = -1054867457;
+
+  const uint32_t bits = c10::bit_cast<uint32_t>(f);
+  const uint32_t sign = bits & 0x80000000u;
+  const float x = c10::bit_cast<float>(bits ^ sign);
+
+  uint8_t mag;
+  if (x >= 6.0f) {
+    // saturate to max magnitude code
+    mag = 7;
+  } else if (x < 1.0f) {
+    // denormal
+    const uint32_t d = c10::bit_cast<uint32_t>(x + denorm_mask_float);
+    mag = static_cast<uint8_t>(d - denorm_mask_int);
+  } else {
+    // normal: adjust exponent and round to nearest even
+    int32_t nx = static_cast<int32_t>(bits ^ sign);
+    const int32_t mant_odd = (nx >> 22) & 1;
+    nx += val_to_add;
+    nx += mant_odd;
+    mag = static_cast<uint8_t>(nx >> 22);
+  }
+  const uint8_t sign_lp = static_cast<uint8_t>(sign >> 28) & 0x8;
+  return (mag | sign_lp) & 0xF;
+}
+
+} // namespace detail
 
 struct alignas(1) Float4_e2m1fn_x2 {
   uint8_t val_;

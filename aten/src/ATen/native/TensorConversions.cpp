@@ -2,6 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <c10/util/Float4_e2m1fn_x2.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/quantized/Quantizer.h>
@@ -17,6 +18,8 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_convert_to_float4_e2m1fn_x2.h>
+#include <ATen/ops/_convert_to_float4_e2m1fn_x2_native.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
@@ -229,6 +232,59 @@ static inline std::optional<Device> ensure_has_index(
   return ensure_has_index(device.value());
 }
 
+// Output sizes for packing a floating tensor into Float4_e2m1fn_x2: the last
+// dimension is halved because two fp4 values share one byte. Symbolic-aware so
+// the meta path preserves dynamic shapes instead of specializing to constants.
+static SymDimVector float4_e2m1fn_x2_packed_sizes(const Tensor& self) {
+  TORCH_CHECK(
+      self.dim() >= 1,
+      "conversion to Float4_e2m1fn_x2 requires the last dimension to be even, got shape ",
+      self.sym_sizes());
+  auto last = self.sym_size(-1);
+  TORCH_SYM_CHECK(
+      (last % 2).sym_eq(0),
+      "conversion to Float4_e2m1fn_x2 requires the last dimension to be even, got shape ",
+      self.sym_sizes());
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+  sizes.back() = last / 2;
+  return sizes;
+}
+
+static void check_convert_to_float4_input(const Tensor& self) {
+  TORCH_CHECK(
+      isFloatingType(self.scalar_type()) &&
+          self.scalar_type() != kFloat4_e2m1fn_x2,
+      "conversion to Float4_e2m1fn_x2 is only supported from a floating point "
+      "dtype, got ",
+      self.scalar_type());
+}
+
+Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
+  check_convert_to_float4_input(self);
+  auto input = self.to(kFloat).contiguous();
+  auto out = at::empty_symint(
+      float4_e2m1fn_x2_packed_sizes(input),
+      input.options().dtype(kFloat4_e2m1fn_x2));
+  const float* in_ptr = input.const_data_ptr<float>();
+  auto* out_ptr = reinterpret_cast<uint8_t*>(out.data_ptr());
+  const int64_t n = out.numel();
+  at::parallel_for(0, n, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      uint8_t lo = c10::detail::fp4e2m1_from_fp32_value(in_ptr[2 * i]);
+      uint8_t hi = c10::detail::fp4e2m1_from_fp32_value(in_ptr[2 * i + 1]);
+      out_ptr[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+  });
+  return out;
+}
+
+Tensor _convert_to_float4_e2m1fn_x2_meta(const Tensor& self) {
+  check_convert_to_float4_input(self);
+  return at::empty_symint(
+      float4_e2m1fn_x2_packed_sizes(self),
+      self.options().dtype(kFloat4_e2m1fn_x2));
+}
+
 Tensor _to_copy(
     const Tensor& self,
     std::optional<ScalarType> dtype,
@@ -435,6 +491,21 @@ static inline Tensor to_impl(
   if (to_will_alias(
           self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
+  }
+  // Casting a floating tensor to the packed fp4 dtype changes the element count
+  // (two fp4 values per byte), so it cannot go through the shape-preserving
+  // copy_ path. Route it to a dedicated, non-differentiable conversion here,
+  // above _to_copy, so no (shape-mismatched) ToCopyBackward is recorded.
+  if (dtype == kFloat4_e2m1fn_x2 &&
+      self.scalar_type() != kFloat4_e2m1fn_x2) {
+    TORCH_CHECK(
+        !layout.has_value() || self.layout() == layout.value(),
+        "conversion to Float4_e2m1fn_x2 does not support changing layout");
+    auto result = at::_convert_to_float4_e2m1fn_x2(self);
+    if (device.has_value() && device.value() != self.device()) {
+      result = result.to(device.value(), non_blocking);
+    }
+    return result;
   }
   return at::_to_copy(
       self,

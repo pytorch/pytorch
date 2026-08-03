@@ -288,6 +288,11 @@
   self: angle_backward(grad, self)
   result: handle_r_to_c(result.scalar_type(), angle_backward(self_t.conj(), self_p).conj())
 
+# Casting a float tensor to the packed fp4 dtype is a lossy, element-count
+# changing quantization; there is no meaningful gradient.
+- name: _convert_to_float4_e2m1fn_x2(Tensor self) -> Tensor
+  output_differentiability: [False]
+
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
 - name: any(Tensor self) -> Tensor
