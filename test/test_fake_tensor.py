@@ -4123,6 +4123,55 @@ class FakeTensorDispatchCache(TestCase):
         self.assertTrue(count_invoke_subgraph_keys() == 0)
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
+    def test_invoke_subgraph_symint_output(self):
+        """
+        A subgraph returning a symint alongside tensors must still be cacheable.
+        This is the shape of a partitioned forward, which saves symints for the
+        backward.
+        """
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return (x + 1, x.shape[0])
+
+        class Derived(torch.nn.Module):
+            def forward(self, x):
+                return (x + 1, x.shape[0] * 2)
+
+        mod = torch.fx.symbolic_trace(Mod())
+
+        t = torch.randn(6, 4)
+        torch._dynamo.mark_dynamic(t, 0)
+        mode = FakeTensorMode(shape_env=ShapeEnv(), allow_non_fake_inputs=True)
+        with mode:
+            x = mode.from_tensor(t, static_shapes=False)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(mod, "subgraph", x)
+            self.assertIsInstance(ref[1], torch.SymInt)
+            self.assertHitsMisses(0, 2)
+
+            res = invoke_subgraph(mod, "subgraph", x)
+            self.assertHitsMisses(1, 2)
+            self.assertBypasses("non-FakeTensor output", 0)
+
+            self.assertEqual(ref[1], res[1])
+            # The caller gets back its own SymInt, not the one cached earlier.
+            self.assertIs(ref[1].node, res[1].node)
+            self.assertEqual(
+                extract_tensor_metadata(ref[0]), extract_tensor_metadata(res[0])
+            )
+
+            # A symint that is not passed straight through would have to be
+            # rebuilt as a fresh SymNode, so it stays uncached.
+            derived = torch.fx.symbolic_trace(Derived())
+            invoke_subgraph(derived, "derived", x)
+            self.assertBypasses("symint output not passed through", 1)
+
+    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph_cacheable_inplace(self):
         invoke_subgraph = torch._higher_order_ops.invoke_subgraph
 
