@@ -1182,7 +1182,7 @@ class DeviceCachingAllocator {
         !is_capture_context()) {
       synchronize_and_free_events(context);
       // See Note [Safe to Free Blocks on BlockPool]
-      c10::xpu::syncStreamsOnDevice(device_index);
+      c10::xpu::device_synchronize(device_index);
       streams_synced = true;
 
       release_blocks(large_blocks, context);
@@ -1205,7 +1205,7 @@ class DeviceCachingAllocator {
 
       if (!streams_synced) {
         // See Note [Safe to Free Blocks on BlockPool]
-        c10::xpu::syncStreamsOnDevice(device_index);
+        c10::xpu::device_synchronize(device_index);
         streams_synced = true;
       }
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);

@@ -2,6 +2,7 @@
 
 #include <c10/core/Stream.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/util/Deprecated.h>
 #include <c10/xpu/XPUFunctions.h>
 
 namespace c10::xpu {
@@ -200,9 +201,13 @@ C10_XPU_API void setCurrentXPUStream(XPUStream stream);
 C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
 
 /**
- * Block all reserved SYCL queues in the stream pools on the device, and wait
- * for their synchronizations.
+ * Wait for all commands previously submitted to any SYCL queue on the device to
+ * complete.
  */
+C10_XPU_API void device_synchronize(DeviceIndex device = -1);
+
+C10_DEPRECATED_MESSAGE(
+    "c10::xpu::syncStreamsOnDevice is deprecated. Please use c10::xpu::device_synchronize instead.")
 C10_XPU_API void syncStreamsOnDevice(DeviceIndex device = -1);
 
 } // namespace c10::xpu

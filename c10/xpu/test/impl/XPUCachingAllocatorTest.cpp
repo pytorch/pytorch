@@ -59,7 +59,7 @@ TEST(XPUCachingAllocatorTest, AllocateMemory) {
   auto stream = c10::xpu::getStreamFromPool();
   // H2D
   stream.queue().memcpy(deviceData, hostData, sizeof(int) * numel);
-  c10::xpu::syncStreamsOnDevice();
+  c10::xpu::device_synchronize();
 
   for (const auto i : c10::irange(numel)) {
     hostData[i] = 0;
@@ -67,7 +67,7 @@ TEST(XPUCachingAllocatorTest, AllocateMemory) {
 
   // D2H
   stream.queue().memcpy(hostData, deviceData, sizeof(int) * numel);
-  c10::xpu::syncStreamsOnDevice();
+  c10::xpu::device_synchronize();
 
   for (const auto i : c10::irange(numel)) {
     EXPECT_EQ(hostData[i], i);
