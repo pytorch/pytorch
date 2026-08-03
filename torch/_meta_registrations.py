@@ -8752,6 +8752,29 @@ def meta_scaled_grouped_mm(
     )
 
 
+@register_meta([aten._scaled_grouped_mm_v2.default])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    """Shape inference only, since the structured C++ meta doesn't support
+    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    """
+    _out_dtype = out_dtype or torch.bfloat16
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
+
+
 @register_meta(aten._foreach_norm.Scalar)
 def meta_foreach_norm(tensors, ord=2, dtype=None):
     if float(ord) == float("inf"):
