@@ -464,7 +464,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   }
 }
 
-int64_t ProcessGroupNCCL::getCommPtr() const {
+int64_t ProcessGroupNCCL::getCommPtr() {
   return reinterpret_cast<int64_t>(nccl_comm_);
 }
 
@@ -765,7 +765,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           tensor.data_ptr(), // In-place operation
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
           stream),
       "NCCL AllReduce failed");
@@ -809,7 +809,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           rank_ == root ? tensor.data_ptr() : nullptr,
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
           stream),
@@ -1028,7 +1028,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input_list[i]),
           i,
           nccl_comm_,
           stream);
@@ -1039,7 +1039,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
           nullptr, // Non-root ranks don't receive
           input_list[i].numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input_list[i]),
           i,
           nccl_comm_,
           stream);
@@ -1103,7 +1103,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
           stream),
       "NCCL ReduceScatter failed");

@@ -3,12 +3,14 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
@@ -56,6 +58,58 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduction_semantics(self) -> None:
+        tensor = torch.ones(4, dtype=torch.bool, device=self.device)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        self.assertEqual(
+            tensor.view(torch.uint8),
+            torch.ones(4, dtype=torch.uint8, device=self.device),
+        )
+
+        with self.assertRaisesRegex(TypeError, "ReduceOp.AVG"):
+            dist.all_reduce(tensor, op=dist.ReduceOp.AVG)
+
+        for dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, "Unsupported Float8"):
+                dist.all_reduce(tensor)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_if_lt_x_gpu(2)
+    def test_float8_reduction(self) -> None:
+        if torch.cuda.get_device_capability(self.device) < (9, 0):
+            self.skipTest("Float8 reductions require sm90 or newer")
+        for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            dist.all_reduce(tensor)
+            self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ephemeral_timeout(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        dist.set_timeout(timedelta(seconds=3))
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
+
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        self.assertTrue(backend._verify_work_timeout(work, timedelta(seconds=13)))
+        work.wait()
+        torch.cuda.synchronize(self.device)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            work = dist.all_reduce(tensor, async_op=True)
+            if backend._verify_work_timeout(work, timedelta(seconds=3)):
+                work.wait()
+                return
+            work.wait()
+            time.sleep(0.1)
+        self.fail("ephemeral timeout was not reset after collective completion")
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):

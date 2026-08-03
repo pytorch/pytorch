@@ -124,11 +124,16 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
 
   if (end_completed) {
     setStatus(WorkStatus::COMPLETED);
+    if (owned_ephemeral_timeout_.count() > 0 &&
+        !ephemeral_timeout_released_.exchange(true)) {
+      comm_->releaseEphemeralTimeout(owned_ephemeral_timeout_);
+    }
   } else {
     auto current_time = std::chrono::steady_clock::now();
+    TORCH_INTERNAL_ASSERT(start_completed_time_.has_value());
     auto elapsed_milliseconds =
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            current_time - start_completed_time_.value());
+            current_time - *start_completed_time_);
 
     if (elapsed_milliseconds > timeout_ms_) {
       TC_LOG(ERROR, comm_) << "Operation timed out after "
