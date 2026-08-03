@@ -7,6 +7,7 @@ import re
 import unittest
 import unittest.mock as mock
 import warnings
+from dataclasses import dataclass
 
 from parameterized import parameterized_class
 
@@ -3496,6 +3497,9 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+_reuse_test_global = None
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
     @contextlib.contextmanager
@@ -4215,6 +4219,95 @@ class GraphModule(torch.nn.Module):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(res, fn(x))
         self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_rebound_global_read_via_side_effects(self):
+        """A region reading a global that is rebound between calls must retrace."""
+        global _reuse_test_global
+
+        @dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        @nested_compile_region
+        def gn():
+            return _reuse_test_global.hidden + 1
+
+        def fn(hidden):
+            global _reuse_test_global
+            for _ in range(2):
+                _reuse_test_global = RegionInput(hidden)
+                hidden = gn()
+            return hidden
+
+        try:
+            x = torch.tensor(0)
+            ref = fn(x)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_rebound_global_read_via_builder(self):
+        """Same, when the first read of the global predates the rebinding."""
+        global _reuse_test_global
+
+        @nested_compile_region
+        def gn(x):
+            return x + _reuse_test_global
+
+        def fn(x):
+            global _reuse_test_global
+            a = gn(x)
+            _reuse_test_global = torch.tensor(100)
+            return a + gn(x)
+
+        try:
+            x = torch.tensor(0)
+            _reuse_test_global = torch.tensor(10)
+            ref = fn(x)
+            _reuse_test_global = torch.tensor(10)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_global_written_once_before_loop(self):
+        """Conservative: a global written once, before any region runs, blocks reuse.
+
+        has_mutated_vars asks whether a source was ever mutated, not whether it
+        changed since the entry was saved, so every call retraces even though
+        the global is stable by the time the first region runs. Results stay
+        correct; only reuse is lost. Versioning mutations per source would let
+        this collapse back to a single trace -- update the count here if that
+        lands.
+        """
+        global _reuse_test_global
+
+        class Ctx:
+            def __init__(self, scale):
+                self.scale = scale
+
+        @nested_compile_region
+        def gn(w, x):
+            return x * w + _reuse_test_global.scale
+
+        def fn(x, ws):
+            global _reuse_test_global
+            _reuse_test_global = Ctx(2.0)
+            for w in ws:
+                x = gn(w, x)
+            return x
+
+        try:
+            ws = [torch.full((4,), float(i + 1)) for i in range(4)]
+            x = torch.ones(4)
+            ref = fn(x, ws)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, ws)
+            self.assertEqual(res, ref)
+            self.assertEqual(count(), 4)
+        finally:
+            _reuse_test_global = None
 
     def test_subgraph_reuse_sourceless_module_not_eligible(self):
         """Sourceless modules carry no guards, so differing attrs must retrace."""
