@@ -15,6 +15,7 @@ from torch.distributed.tensor.parallel import parallelize_module, RowwiseParalle
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -41,6 +42,8 @@ def extract_graph(fx_g, _, graph_cell):
 
 
 class TestCompileOnOneRank(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _assert_graphs_identical_across_ranks(self, local_graph_code):
         """Gather compiled graph code from all ranks and assert they are identical."""
         self.assertIsNotNone(local_graph_code, "Graph was not captured")
@@ -267,6 +270,8 @@ def _current_device_nodes(gm):
 
 
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
     Under compile_on_one_rank, a factory/cast op whose device matches the current
@@ -788,6 +793,8 @@ def _drop_distributed_meta(key):
 
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestCompileOnOneRankLegacyCollective(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Legacy in-place c10d collectives (dist.all_reduce) under compile_on_one_rank.
 
     The in-place op ``c10d.allreduce_`` binds the ProcessGroup directly, so make_fx
