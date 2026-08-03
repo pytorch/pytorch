@@ -1033,7 +1033,10 @@ class LoopOrderingTest(TestCase):
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
 
-    @inductor_config.patch(force_disable_caches=True)
+    @inductor_config.patch(
+        layout_optimization=True,
+        force_layout_optimization=True,
+    )
     @inductor_config.patch("triton.coalesce_tiling_analysis", True)
     def test_upsample_into_reduction_keeps_coalesced_loops(self):
         """Reindexing upsample onto GroupNorm's split loses coalescing (#189488)."""
