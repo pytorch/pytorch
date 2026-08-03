@@ -42,7 +42,7 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 }
 
 void clamp_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_cuda", AT_WRAP([&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
       scalar_t result = (v < lower) ? lower : v;
       result = (upper < result) ? upper : result;
@@ -55,11 +55,11 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 
       return result;
     });
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
 }
 
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_scalar_cuda", AT_WRAP([&] {
     using opmath_t = at::opmath_type<scalar_t>;
     auto lim0_val = lim0.to<opmath_t>();
     auto lim1_val = lim1.to<opmath_t>();
@@ -85,7 +85,7 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
         return scalar_t((lim1_val < result) ? lim1_val : result);
       }
     });
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
 }
 
 
