@@ -10,7 +10,11 @@ from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if not dist.is_available():
@@ -28,6 +32,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestUnevenParamShard(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _get_ref_results(self, device, model, input, my_lr):
         with torch.no_grad():
             # Compute one iteration local output.
@@ -68,9 +74,8 @@ class TestUnevenParamShard(FSDPTestContinuous):
             self.assertEqual(ref_weight_out, weight_out)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestUnevenParamShard, globals(), only_for=devices, allow_xpu=True
+    TestUnevenParamShard, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
