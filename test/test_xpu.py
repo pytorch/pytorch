@@ -3531,17 +3531,18 @@ class TestXpuAutocast(TestAutocast):
             self.assertEqual(result.dtype, torch.float16)
 
     def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("xpu")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
         self.assertEqual(
             torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
         )
-        with torch.amp.autocast("xpu"):
-            self.assertEqual(
-                torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
-            )
-        with torch.amp.autocast("xpu", enabled=False):
-            self.assertEqual(
-                torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
-            )
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(
+            torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
+        )
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
