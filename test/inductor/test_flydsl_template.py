@@ -401,10 +401,16 @@ class TestFlyDSLTemplate(TestCase):
             storage_offset=1,
         )
 
-        self._assert_compiled_mm(*supported)
-        with torch._inductor.config.patch(max_autotune_gemm_backends="ATEN,FLYDSL"):
+        with torch._inductor.config.patch(
+            {
+                "max_autotune_gemm_backends": "ATEN,FLYDSL",
+                "test_configs.autotune_choice_name_regex": "^mm$",
+            }
+        ):
+            self._assert_compiled_mm(*supported, expect_flydsl=False)
             self._assert_compiled_mm(bad_stride, b, expect_flydsl=False)
             self._assert_compiled_mm(a, bad_offset, expect_flydsl=False)
+        self._assert_compiled_mm(*supported)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")

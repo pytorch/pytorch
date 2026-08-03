@@ -499,11 +499,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
         counters["inductor"]["decompose_mm_pointwise"] += 1
-        # Clone both to force contiguous strides (#189401): unrolled sum
-        # reduction computes wrong indices for transposed views. Clone both
-        # rather than detecting the transposed side; scheduler fuses the copy.
-        mat1 = L.clone(mat1)
-        mat2 = L.clone(mat2)
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
         return L.sum_(L.mul(mat1, mat2), axis=1)
@@ -601,7 +596,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             layout, mat1, mat2, static_shape, is_nonzero
         )
         if flydsl_configs:
-            flydsl_input_nodes = kernel_inputs.nodes()
+            flydsl_input_nodes = list(kernel_inputs.nodes())
             flydsl_input_nodes[1] = PermuteView.create(flydsl_input_nodes[1], [1, 0])
             for flydsl_kwargs in flydsl_configs:
                 flydsl_mm_template.maybe_append_choice(

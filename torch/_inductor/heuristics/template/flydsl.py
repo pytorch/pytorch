@@ -15,12 +15,9 @@ class FlyDSLGemmConfig:
     TILE_N: int = 128
     TILE_K: int = 64
     STAGES: int = 2
-    SPLIT_K: int = 1
     BLOCK_M_WARPS: int = 4
     BLOCK_N_WARPS: int = 4
-    BLOCK_K_WARPS: int = 1
     GROUP_M: int = 0
-    B_TO_LDS: bool = True
     USE_HALF_TILE_INTERLEAVED: bool = False
 
 
@@ -29,17 +26,14 @@ class FlyDSLGemmConfigDict(TypedDict):
     TILE_N: int
     TILE_K: int
     STAGES: int
-    SPLIT_K: int
     BLOCK_M_WARPS: int
     BLOCK_N_WARPS: int
-    BLOCK_K_WARPS: int
     GROUP_M: int
-    B_TO_LDS: bool
     USE_HALF_TILE_INTERLEAVED: bool
 
 
-FlyDSLGemmConfigArgs = tuple[int, int, int, int, int, int, int, int, int, bool]
-FlyDSLHTIGemmConfigArgs = tuple[int, int, int, int, int, int, int, int, int, bool, bool]
+FlyDSLGemmConfigArgs = tuple[int, int, int, int, int, int, int]
+FlyDSLHTIGemmConfigArgs = tuple[int, int, int, int, int, int, int, bool]
 
 
 def _make_gemm_param(gemm_config: dict[str, int | bool]):
@@ -119,10 +113,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "STAGES": list(range(2, 10)),
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
-        "SPLIT_K": [1],
-        "BLOCK_K_WARPS": [1],
         "GROUP_M": [0, 4],
-        "B_TO_LDS": [True],
         "USE_HALF_TILE_INTERLEAVED": [False, True],
     }
     keys = selections.keys()
@@ -151,45 +142,45 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     Returns the default configuration set for the gfx950 FlyDSL GEMM kernel.
     """
     config_tuples: list[FlyDSLGemmConfigArgs] = [
-        (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
-        (128, 128, 64, 4, 1, 4, 4, 1, 0, True),
-        (256, 256, 64, 2, 1, 4, 4, 1, 0, True),
-        (128, 256, 64, 2, 1, 4, 4, 1, 0, True),
-        (256, 128, 64, 2, 1, 4, 4, 1, 0, True),
-        (64, 256, 64, 2, 1, 2, 4, 1, 0, True),
-        (256, 64, 64, 2, 1, 4, 2, 1, 0, True),
-        (64, 128, 64, 2, 1, 2, 4, 1, 0, True),
-        (128, 64, 64, 2, 1, 4, 2, 1, 0, True),
-        (96, 128, 64, 2, 1, 2, 4, 1, 0, True),
-        (128, 96, 64, 2, 1, 4, 2, 1, 0, True),
-        (64, 64, 64, 2, 1, 2, 2, 1, 0, True),
-        (128, 128, 128, 2, 1, 4, 4, 1, 0, True),
-        (64, 128, 128, 2, 1, 2, 4, 1, 0, True),
-        (128, 64, 128, 2, 1, 4, 2, 1, 0, True),
-        (64, 64, 128, 2, 1, 2, 2, 1, 0, True),
-        (64, 64, 256, 2, 1, 2, 2, 1, 0, True),
-        (128, 128, 64, 4, 1, 4, 4, 1, 4, True),
-        (256, 256, 64, 2, 1, 4, 4, 1, 4, True),
+        (128, 128, 64, 2, 4, 4, 0),
+        (128, 128, 64, 4, 4, 4, 0),
+        (256, 256, 64, 2, 4, 4, 0),
+        (128, 256, 64, 2, 4, 4, 0),
+        (256, 128, 64, 2, 4, 4, 0),
+        (64, 256, 64, 2, 2, 4, 0),
+        (256, 64, 64, 2, 4, 2, 0),
+        (64, 128, 64, 2, 2, 4, 0),
+        (128, 64, 64, 2, 4, 2, 0),
+        (96, 128, 64, 2, 2, 4, 0),
+        (128, 96, 64, 2, 4, 2, 0),
+        (64, 64, 64, 2, 2, 2, 0),
+        (128, 128, 128, 2, 4, 4, 0),
+        (64, 128, 128, 2, 2, 4, 0),
+        (128, 64, 128, 2, 4, 2, 0),
+        (64, 64, 128, 2, 2, 2, 0),
+        (64, 64, 256, 2, 2, 2, 0),
+        (128, 128, 64, 4, 4, 4, 4),
+        (256, 256, 64, 2, 4, 4, 4),
         # Small-N tiles help small-M decode GEMMs.
-        (16, 16, 128, 8, 1, 1, 1, 1, 4, True),
-        (16, 16, 64, 8, 1, 1, 1, 1, 0, True),
-        (32, 32, 64, 8, 1, 2, 2, 1, 4, True),
-        (64, 32, 128, 4, 1, 4, 2, 1, 4, True),
-        (64, 64, 64, 7, 1, 4, 2, 1, 4, True),
-        (64, 128, 64, 6, 1, 2, 4, 1, 4, True),
-        (128, 128, 64, 4, 1, 2, 4, 1, 4, True),
-        (128, 256, 64, 3, 1, 4, 4, 1, 4, True),
-        (32, 64, 64, 8, 1, 2, 2, 1, 0, True),
-        (16, 64, 128, 3, 1, 1, 4, 1, 4, True),
-        (64, 64, 64, 6, 1, 4, 2, 1, 4, True),
+        (16, 16, 128, 8, 1, 1, 4),
+        (16, 16, 64, 8, 1, 1, 0),
+        (32, 32, 64, 8, 2, 2, 4),
+        (64, 32, 128, 4, 4, 2, 4),
+        (64, 64, 64, 7, 4, 2, 4),
+        (64, 128, 64, 6, 2, 4, 4),
+        (128, 128, 64, 4, 2, 4, 4),
+        (128, 256, 64, 3, 4, 4, 4),
+        (32, 64, 64, 8, 2, 2, 0),
+        (16, 64, 128, 3, 1, 4, 4),
+        (64, 64, 64, 6, 4, 2, 4),
     ]
     hti_config_tuples: list[FlyDSLHTIGemmConfigArgs] = [
-        (128, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
-        (128, 128, 64, 2, 1, 2, 2, 1, 4, True, True),
-        (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
-        (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
-        (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
-        (256, 256, 64, 2, 1, 2, 4, 1, 4, True, True),
+        (128, 128, 64, 2, 2, 2, 0, True),
+        (128, 128, 64, 2, 2, 2, 4, True),
+        (128, 256, 64, 2, 2, 4, 0, True),
+        (256, 128, 64, 2, 2, 2, 0, True),
+        (256, 256, 64, 2, 2, 4, 0, True),
+        (256, 256, 64, 2, 2, 4, 4, True),
     ]
     # Tuple order must match the FlyDSLGemmConfig field declaration order.
     configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
@@ -216,11 +207,10 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
         and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
     ):
         configs = get_exhaustive_gemm_configs()
-    elif config.flydsl_enable_autotuning:
-        configs = get_default_gemm_configs()
     else:
         configs = get_default_gemm_configs()
-        configs = configs[:1]
+        if not config.flydsl_enable_autotuning:
+            configs = [c for c in configs if c == FlyDSLGemmConfig()]
     if not configs:
         log.warning("No valid FlyDSL GEMM configuration is available")
         return []
