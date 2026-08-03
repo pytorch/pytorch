@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -16,6 +15,7 @@ from torch._inductor.ir import (
 )
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
+from torch._logging import getArtifactLogger
 
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 MAIN_SUFFIX = "main"
 
-log = logging.getLogger(__name__)
+kernel_code_log = getArtifactLogger(__name__, "kernel_code")
 
 
 class FlyDSLKernelWrapper:
@@ -34,7 +34,7 @@ class FlyDSLKernelWrapper:
     def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
-        log.info("FlyDSL kernel path: %s", kernel_path)
+        kernel_code_log.info("FlyDSL kernel path: %s", kernel_path)
 
     def run(self, *args, stream=None, **kwargs):
         return self.kernel_fn(*args, stream=stream, **kwargs)

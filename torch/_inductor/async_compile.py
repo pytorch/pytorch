@@ -760,10 +760,14 @@ class AsyncCompile:
         `{kernel_name}_main` entry point is exposed through the standard
         kernel ``.run()`` interface.
         """
+        from torch._inductor.codegen.flydsl import flydsl_utils
         from torch._inductor.codegen.flydsl.flydsl_kernel import (
             FlyDSLKernelWrapper,
             MAIN_SUFFIX,
         )
+
+        if not flydsl_utils.runtime_available():
+            raise RuntimeError("FlyDSL runtime is unavailable")
 
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
@@ -772,10 +776,9 @@ class AsyncCompile:
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
-            if "FLYDSL_RUNTIME_CACHE_DIR" in os.environ:
-                extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ[
-                    "FLYDSL_RUNTIME_CACHE_DIR"
-                ]
+            extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ.get(
+                "FLYDSL_RUNTIME_CACHE_DIR"
+            )
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
