@@ -16,7 +16,11 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+)
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -45,6 +49,8 @@ hop_export_failures = {
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestHOP(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare(self, eager_model, export, args, kwargs):
         eager_args = copy.deepcopy(args)
         eager_kwargs = copy.deepcopy(kwargs)
