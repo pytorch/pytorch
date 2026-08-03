@@ -264,11 +264,11 @@ from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallMethodVariable,
     ComptimeVariable,
     ConstantLikeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
-    GetAttrVariable,
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
@@ -1483,13 +1483,12 @@ class VariableBuilder:
                     GuardBuilder.CLOSURE_MATCH
                 )
             )
-            return GetAttrVariable(
+            return CallMethodVariable(
                 AutogradFunctionVariable(
                     value.__self__,
                     source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
-                py_type=type(value),
             )
         elif (
             isinstance(value, types.MethodType)
@@ -1507,18 +1506,13 @@ class VariableBuilder:
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
-            return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
+            return CallMethodVariable(obj_vt, value.__name__)
         elif (
             isinstance(value, types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
         ):
-            # Module-level random.random is a C builtin method bound to the
-            # module-global random.Random instance (unlike randint/randrange/
-            # uniform, which are Python-level methods). Route it through
-            # UserDefinedObjectVariable so its call_random_fn / RandomValueSource
-            # path models the RNG value instead of skipping into the C builtin.
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedObjectVariable(value, source=self.source)
         elif isinstance(value, torch._C._ImperativeEngine):
@@ -1848,10 +1842,9 @@ class VariableBuilder:
             return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return GetAttrVariable(
+            return CallMethodVariable(
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
-                py_type=type(value),
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
@@ -5122,7 +5115,7 @@ class SourcelessBuilder:
             # NamedTuple._make uses an alias of tuple.__new__
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
-            return GetAttrVariable(obj, "__new__", py_type=type(value))
+            return CallMethodVariable(obj, "__new__")
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)

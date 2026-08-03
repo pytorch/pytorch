@@ -680,8 +680,8 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
     # --- object_generic_getattr on converted VTs ---
 
     def test_constant_method_via_generic_getattr(self):
-        """ConstantVariable now resolves methods through the descriptor protocol
-        via object_generic_getattr, instead of falling back to GetAttrVariable.
+        """ConstantVariable resolves methods through the descriptor protocol
+        via object_generic_getattr.
         """
 
         def fn():
@@ -1522,6 +1522,355 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(torch.tensor(1))
         self.assertEqual(result, torch.tensor(2))
         self.assertFalse(hasattr(MyClass, "y"))
+
+    # --- Explicit comparison dunder access (CallMethodVariable) ---
+
+    def test_function_explicit_dunder_eq(self):
+        """Accessing __eq__ on a function and calling it routes through call_method."""
+
+        def target_fn():
+            pass
+
+        def fn(f):
+            eq_method = f.__eq__
+            return eq_method(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(target_fn)
+        self.assertTrue(result)
+
+    def test_function_explicit_dunder_ne(self):
+        def target_fn():
+            pass
+
+        def fn(f):
+            # f.__ne__(f) on a function uses identity, so same-object returns False
+            return f.__ne__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(target_fn)
+        self.assertFalse(result)
+
+    def test_slice_explicit_dunder_eq(self):
+        """Accessing __eq__ on a slice and calling it."""
+
+        def fn():
+            s = slice(1, 10, 2)
+            return s.__eq__(slice(1, 10, 2))
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_udcv_comparison_dunder(self):
+        """Comparison dunder on a class (non-function type attr)."""
+
+        class MyClass:
+            pass
+
+        def fn(cls):
+            # cls.__eq__(cls) is like MyClass == MyClass (identity)
+            return cls.__eq__(cls)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyClass)
+        self.assertTrue(result)
+
+    def test_closure_explicit_dunder_eq(self):
+        """Accessing __eq__ on a closure (NestedUserFunctionVariable)."""
+
+        def make_closure():
+            x = 10
+
+            def inner():
+                return x
+
+            return inner
+
+        closure = make_closure()
+
+        def fn(f):
+            return f.__eq__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(closure)
+        self.assertTrue(result)
+
+    def test_partial_explicit_dunder_eq(self):
+        """Accessing __eq__ on a functools.partial."""
+        import functools
+
+        def add(a, b):
+            return a + b
+
+        p = functools.partial(add, 1)
+
+        def fn(f):
+            return f.__eq__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(p)
+        self.assertTrue(result)
+
+    def test_slice_explicit_dunder_eq_false(self):
+        """__eq__ on non-equal slices returns False."""
+
+        def fn():
+            s1 = slice(1, 10, 2)
+            s2 = slice(3, 20, 4)
+            return s1.__eq__(s2)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_slice_explicit_dunder_ne_true(self):
+        """__ne__ on non-equal slices returns True."""
+
+        def fn():
+            s1 = slice(1, 10, 2)
+            s2 = slice(3, 20, 4)
+            return s1.__ne__(s2)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_skip_function_explicit_dunder_eq(self):
+        """Accessing __eq__ on a skip function (SkipFunctionVariable)."""
+
+        def fn(f):
+            return f.__eq__(f)
+
+        # len is a builtin that Dynamo wraps as SkipFunctionVariable
+        result = torch.compile(fn, backend="eager", fullgraph=True)(len)
+        self.assertTrue(result)
+
+    # --- Eager attribute resolution (VT.build / CallMethodVariable) ---
+
+    def test_autograd_function_apply_alias(self):
+        """Aliased autograd Function.apply routes through CallMethodVariable."""
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        apply_alias = MyFunc.apply
+
+        def fn(x):
+            return apply_alias(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x)
+
+    def test_float_fromhex_inline(self):
+        """float.fromhex accessed inline routes through BuiltinVariable.getattro_impl."""
+
+        def fn():
+            return float.fromhex("0x1.0p10")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1024.0)
+
+    def test_float_fromhex_captured(self):
+        """float.fromhex captured as a variable routes through builder.py."""
+        fh = float.fromhex
+
+        def fn():
+            return fh("0x1.0p10")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1024.0)
+
+    def test_builtin_non_callable_attr(self):
+        """Non-callable builtin attribute resolved eagerly via VT.build."""
+
+        def fn():
+            return len.__module__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "builtins")
+
+    def test_builtin_callable_attr_as_constant(self):
+        """Callable builtin attribute accessible as python constant via BMV."""
+
+        def fn():
+            return len.__class__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, type(len))
+
+    def test_specialized_builtin_non_callable_attr(self):
+        """Non-callable attr on a specialized builtin (DictBuiltinVariable) via
+        BaseBuiltinVariable.getattro_impl."""
+
+        def fn():
+            return dict.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "dict")
+
+    def test_torch_function_non_op_attr(self):
+        """Non-op attribute on a TorchInGraphFunctionVariable resolves via VT.build."""
+
+        def fn():
+            return torch.sin.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "sin")
+
+    def test_class_bases_via_meta_descriptor(self):
+        """__bases__ on a UDCV resolves through resolve_meta_data_descriptor."""
+
+        class MyBase:
+            pass
+
+        class MyChild(MyBase):
+            pass
+
+        def fn():
+            return MyChild.__bases__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (MyBase,))
+
+    # --- bound tensor methods (via CallMethodVariable) ---
+
+    def test_bound_tensor_method_call(self):
+        """Bound tensor method dispatches through BMV's call_function."""
+
+        def fn(x):
+            return x.add(x)
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + x)
+
+    def test_bound_tensor_method_as_value(self):
+        """Bound tensor method captured as a variable and called later."""
+
+        def fn(x):
+            m = x.mul
+            return m(x)
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * x)
+
+    # --- UDCV metaclass non-data descriptor (via CallMethodVariable) ---
+
+    def test_metaclass_function_method_call(self):
+        """FunctionType on metaclass is resolved by _resolve_descriptor_get."""
+
+        class Meta(type):
+            def greet(cls):
+                return "hello from " + cls.__name__
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.greet()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "hello from MyClass")
+
+    def test_metaclass_builtin_callable_attr(self):
+        """BuiltinFunctionType on metaclass falls through _resolve_descriptor_get
+        to the callable BMV path."""
+
+        class Meta(type):
+            action = len
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.action
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, len)
+
+    def test_metaclass_non_callable_attr(self):
+        """Non-callable attribute from metaclass resolves via VT.build."""
+
+        class Meta(type):
+            registry_name = "default"
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.registry_name
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "default")
+
+    # --- UDCV C-level method descriptor (via CallMethodVariable) ---
+
+    def test_inherited_dunder_get_descriptor(self):
+        """__get__ inherited from a C parent bypasses WrapperDescriptorVariable
+        (name exclusion) and reaches the ismethoddescriptor BMV fallback."""
+
+        class MyProp(property):
+            pass
+
+        def fn():
+            return MyProp.__get__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, property.__get__)
+
+    def test_unresolved_attr_graph_breaks(self):
+        """Accessing an attribute that getattro_impl cannot resolve graph-breaks
+        instead of silently deferring via GetAttrVariable."""
+
+        def fn():
+            s = frozenset((1, 2, 3))
+            return s.add
+
+        with self.assertRaises(torch._dynamo.exc.TorchDynamoException):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_autograd_function_apply_call(self):
+        """AutogradFunctionVariable.apply resolves via getattro_impl BMV."""
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            return MyFunc.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * 2)
+
+    def test_tensor_subclass_method_via_bound_method(self):
+        """Tensor subclass methods not in all_tensor_attrs resolve via BMV."""
+        import torch.nested
+
+        def fn(values, offsets):
+            t = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return t.offsets()
+
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        result = torch.compile(fn, backend="eager", fullgraph=True)(values, offsets)
+        self.assertEqual(result, offsets)
+
+    def test_tensor_hasattr_unresolvable_returns_false(self):
+        """hasattr on a tensor for a non-existent attr returns False without
+        graph-breaking, even though generic_getattr would graph-break."""
+
+        def fn(x):
+            return hasattr(x, "nonexistent_custom_attr")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

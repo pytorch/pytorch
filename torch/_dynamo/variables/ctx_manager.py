@@ -1195,6 +1195,23 @@ class ProfilerContextVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return torch.profiler.profile
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # Dynamo ignores the profiler's side effects, so attributes populated at
+        # runtime (e.g. `.profiler`, `.kineto_results`) are not modeled here.
+        # Graph break so eager resolves them on the real profiler object instead
+        # of raising a spurious AttributeError that skips the whole frame.
+        unimplemented(
+            gb_type="Attribute access on torch.profiler object",
+            context=f"getattr({self}, {name})",
+            explanation="Dynamo ignores torch.profiler side effects, so runtime "
+            f"attributes like `{name}` on a profiler object cannot be traced.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self
 

@@ -5474,10 +5474,16 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             s.clear()
             return len(s)
 
+        # frozenset has no mutating methods, so eager raises AttributeError.
+        # Dynamo resolves the attribute the same way and surfaces the observed
+        # AttributeError, which escapes the compiled region as Unsupported
+        # under fullgraph.
         for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
+            with self.assertRaises(AttributeError):
+                fn()
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
                 opt_fn()
 
     def test_is_tensor_tensor(self):

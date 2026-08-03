@@ -221,11 +221,6 @@ class SetVariable(VariableTracker):
             return VariableTracker.build(tx, self.python_type())
         return super().getattro_impl(tx, name)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
-
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
@@ -746,16 +741,17 @@ class OrderedSetClassVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == "__new__":
-            from .misc import GetAttrVariable
+        # Mirror the names call_method below can dispatch (__new__ plus the set
+        # methods invoked unbound, e.g. OrderedSet.add(s, x)).  Without this the
+        # generic MRO walk finds nothing on the class and raises AttributeError.
+        if name == "__new__" or getattr(set, name, None) in set_methods:
+            from .misc import CallMethodVariable
 
             if self.source:
                 attr_source = AttrSource(self.source, name)
             else:
                 attr_source = None
-            return GetAttrVariable(
-                self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
-            )
+            return CallMethodVariable(self, name, source=attr_source)
         else:
             return super().getattro_impl(tx, name)
 
