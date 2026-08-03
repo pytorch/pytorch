@@ -977,8 +977,10 @@ class PaddingTest(TestCaseBase):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
         # This reduction sums ~100k fp32 values, so eager and inductor differ
-        # only by floating-point accumulation order. Relaxed tolerance to account
-        # for potential differences
+        # only by floating-point accumulation order, which slightly exceeds the
+        # default fp32 tolerance on some backends (e.g. ROCm MI200). The
+        # regression guarded here is a stride mismatch during compilation, not
+        # the last-ULP numerics, so a relaxed tolerance is appropriate.
         self.assertEqual(eager, compiled, atol=1e-3, rtol=1e-4)
 
 
