@@ -299,17 +299,15 @@ class _KinetoProfile:
             # graph's one-time instantiate(); the per-window ProfilerObserver registers it
             # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
             if self._custom_profiler_config.get("enable_graph_dependencies"):
-                from torch.profiler._cupti._graph_deps import (
-                    arm_graph_dependency_recording,
-                )
+                from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
 
-                arm_graph_dependency_recording()
+                _GraphDependencyRecorder().arm()
             # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
             # the recorder reads each graph's event nodes at its one-time instantiate().
             if self._custom_profiler_config.get("enable_event_node_ids"):
-                from torch.profiler._cupti._event_nodes import arm_event_node_recording
+                from torch.profiler._cupti._event_nodes import _EventNodeRecorder
 
-                arm_event_node_recording()
+                _EventNodeRecorder().arm()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
