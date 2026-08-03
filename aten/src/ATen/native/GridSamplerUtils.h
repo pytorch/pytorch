@@ -88,6 +88,45 @@ inline void check_grid_sampler_3d(
 }
 
 // See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_2d_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  auto N = input.size(0);
+  auto C = input.size(1);
+  auto H = grid.size(1);
+  auto W = grid.size(2);
+
+  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
+  TORCH_CHECK_VALUE(
+    grad_output.sizes() == IntArrayRef({N, C, H, W}),
+    "grid_sampler(): expected grad_output to have sizes ",
+    IntArrayRef({N, C, H, W}),
+    " but got grad_output with sizes ", grad_output.sizes());
+}
+
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_3d_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  auto N = input.size(0);
+  auto C = input.size(1);
+  auto D = grid.size(1);
+  auto H = grid.size(2);
+  auto W = grid.size(3);
+
+  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
+  TORCH_CHECK_VALUE(
+    grad_output.sizes() == IntArrayRef({N, C, D, H, W}),
+    "grid_sampler(): expected grad_output to have sizes ",
+    IntArrayRef({N, C, D, H, W}),
+    " but got grad_output with sizes ", grad_output.sizes());
+}
+
+// See NOTE [ grid_sampler Native Functions ].
 // cudnn does not support inputs larger than 1024.
 inline bool cond_cudnn_grid_sampler(
   const TensorBase& input,

@@ -4632,6 +4632,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
+    def test_grid_sample_backward_error_checking(self):
+        input = torch.empty(1, 1, 2, 2)
+        grid = torch.empty(1, 1, 1, 2)
+        grad_output = torch.empty(1, 1, 1, 1)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_2d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            torch.ops.aten.grid_sampler_2d_backward(torch.empty(2, 1, 1, 1), input, grid, 0, 0, False, (True, True))
+
+        input = torch.empty(1, 1, 2, 2, 2)
+        grid = torch.empty(1, 1, 1, 1, 3)
+        grad_output = torch.empty(1, 1, 1, 1, 1)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_3d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            torch.ops.aten.grid_sampler_3d_backward(torch.empty(2, 1, 1, 1, 1), input, grid, 0, 0, False, (True, True))
+
     def test_affine_grid_error_checking(self):
         # 2D affine
         theta = torch.empty(1, 2, 3, dtype=torch.double)
