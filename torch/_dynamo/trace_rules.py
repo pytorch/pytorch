@@ -222,8 +222,12 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.set_rng_state": SkipFunctionVariable,
     "torch.cuda.manual_seed": SkipFunctionVariable,
     "torch.cuda.manual_seed_all": SkipFunctionVariable,
+    "torch.xpu.manual_seed": SkipFunctionVariable,
+    "torch.xpu.manual_seed_all": SkipFunctionVariable,
     "torch.cuda.random.manual_seed": SkipFunctionVariable,
     "torch.cuda.random.manual_seed_all": SkipFunctionVariable,
+    "torch.xpu.random.manual_seed": SkipFunctionVariable,
+    "torch.xpu.random.manual_seed_all": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
