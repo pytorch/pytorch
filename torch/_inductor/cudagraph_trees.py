@@ -57,6 +57,7 @@ import torch.fx
 from torch import Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo.callback import CallbackTrigger
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     set_external_object_by_index,
@@ -78,6 +79,7 @@ from torch._inductor.compile_fx import (
     static_input,
 )
 from torch._inductor.cudagraph_utils import (
+    _graph_capture_device_type,
     check_for_mutation,
     CheckInvariantStatus,
     collect_cuda_data_ptrs,
@@ -164,6 +166,46 @@ class GraphID:
     id: int
 
 
+def _graph_device_type() -> str:
+    """See cudagraph_utils._graph_capture_device_type — shared with
+    compile_fx.cudagraphify_impl and the caching-allocator precheck so all
+    three resolve the device identically (CUDA-first)."""
+    return _graph_capture_device_type()
+
+
+def _graph_device_interface(device_type: str | None = None) -> type[DeviceInterface]:
+    return get_interface_for_device(device_type or _graph_device_type())
+
+
+@contextlib.contextmanager
+def _graph_capture_context(
+    device_interface: type[DeviceInterface],
+    device_type: str,
+    graph: Any,
+    stream: Any,
+    pool: tuple[int, int] | None,
+    capture_error_mode: str = "thread_local",
+) -> Generator[None, None, None]:
+    """Capture-context fork: CUDA keeps its untouched torch.cuda.graph path;
+    registered accelerator backends use torch.accelerator.Graph, which is
+    itself a capture context manager on the current stream (pool and
+    capture_error_mode are constructor arguments of the graph object)."""
+    if device_type == "cuda":
+        with torch.cuda.graph(
+            graph,
+            stream=stream,
+            pool=pool,
+            capture_error_mode=capture_error_mode,
+        ):
+            yield
+    else:
+        # NB: the pool argument is intentionally unused here — the graph
+        # object already carries the pool from its constructor; callers must
+        # construct the graph with the same pool they pass to this context.
+        with device_interface.stream(stream), graph:
+            yield
+
+
 def clear_cublass_cache() -> None:
     """
     Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
@@ -177,6 +219,10 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
+    if _graph_device_type() != "cuda":
+        # cublas workspaces are a CUDA-only concern; other backends have
+        # nothing to clear here.
+        return
     torch.cuda._clear_cublas_workspaces()
 
 
@@ -192,6 +238,10 @@ def clear_cublas_manager() -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def disable_conv_cache_emptying() -> Generator[None, None, None]:
+    if _graph_device_type() != "cuda":
+        # cudnn benchmark cache emptying is a CUDA-only concern.
+        yield
+        return
     prev = torch._C._cuda_get_conv_benchmark_empty_cache()
     torch._C._cudnn_set_conv_benchmark_empty_cache(False)
     try:
@@ -203,6 +253,10 @@ def disable_conv_cache_emptying() -> Generator[None, None, None]:
 @contextlib.contextmanager
 def enable_history_recording() -> Generator[None, None, None]:
     "Turns on history recording in the CUDA Caching Allocator"
+    if _graph_device_type() != "cuda":
+        # Allocator history recording is only wired up for CUDA.
+        yield
+        return
     enabled = torch._C._cuda_isHistoryEnabled()
     try:
         if not enabled:
@@ -256,7 +310,7 @@ class TreeManagerContainer:
         # the cudagraphify_fns. Reference to the Graph is needed to keep the private pool from
         # deallocation.
         self.live_storages_count = 0
-        self.graph: torch.cuda.CUDAGraph | None = None
+        self.graph: Any | None = None
 
         self.lock = threading.Lock()
 
@@ -407,9 +461,16 @@ def get_manager(
     device_index: int | None = None, create_if_none_exists: bool = True
 ) -> CUDAGraphTreeManager | None:
     if device_index is None:
-        if not torch.cuda.is_initialized():
-            return None
-        device_index = torch.cuda.current_device()
+        device_type = _graph_device_type()
+        if device_type == "cuda":
+            if not torch.cuda.is_initialized():
+                return None
+            device_index = torch.cuda.current_device()
+        else:
+            di = _graph_device_interface(device_type)
+            if not di.is_available():
+                return None
+            device_index = di.current_device()
 
     if create_if_none_exists:
         return get_container(device_index).get_tree_manager()
@@ -652,7 +713,7 @@ def maybe_deref(
 
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(
-    device: int, mem_pool: tuple[int, int], stream: torch.cuda.Stream
+    device: int, mem_pool: tuple[int, int], stream: Any
 ) -> Generator[None, None, None]:
     """
     Context manager to use cuda graph pool for new allocations. If you use this manager
@@ -660,21 +721,22 @@ def _use_cuda_memory_pool_manager(
     existing_graph should already have been used in a capture, and the mem_pool must already exist,
     because this manager will not preserve a reference to the pool which keeps it alive.
     """
-    torch.cuda.synchronize()
-    stream.wait_stream(torch.cuda.current_stream())
+    di = _graph_device_interface()
+    di.synchronize()
+    stream.wait_stream(di.current_stream())
 
-    with torch.cuda.stream(stream), torch.device(device):
+    with di.stream(stream), torch.device(device):
         # Begin allocate to mem pool for all memory allocation on the current thread.
         # This is thread safe since a thread can only warmup or record 1 cudagraph
         # at the same time.
-        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+        di.GraphOps.begin_allocate_current_thread_to_pool(device, mem_pool)
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateToPool(device, mem_pool)
-            torch._C._cuda_releasePool(device, mem_pool)
+            di.GraphOps.end_allocate_to_pool(device, mem_pool)
+            di.GraphOps.release_pool(device, mem_pool)
 
-    torch.cuda.current_stream().wait_stream(stream)
+    di.current_stream().wait_stream(stream)
 
 
 @contextlib.contextmanager
@@ -686,7 +748,9 @@ def _update_current_stream_external_object() -> Generator[None, None, None]:
     must reflect the actual current stream so that custom ops (e.g. event
     record/wait) executed during capture use the right stream.
     """
-    set_external_object_by_index(CURRENT_STREAM_INDEX, torch.cuda.current_stream())
+    set_external_object_by_index(
+        CURRENT_STREAM_INDEX, _graph_device_interface().current_stream()
+    )
     yield
 
 
@@ -740,10 +804,10 @@ class CUDAWarmupNode:
         wrapped_function: WrappedFunction,
         parent: CUDAGraphNode | CUDAWarmupNode | None,
         cuda_graphs_pool: tuple[int, int],
-        existing_cuda_graph: torch.cuda.CUDAGraph | None,
+        existing_cuda_graph: Any | None,
         device_index: int,
         stack_traces: StackTraces | None,
-        stream: torch.cuda.Stream,
+        stream: Any,
         already_warm: bool,
         id: GraphID,
     ) -> None:
@@ -751,6 +815,8 @@ class CUDAWarmupNode:
         self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.parent: CUDAGraphNode | CUDAWarmupNode | None = parent
         self.cuda_graphs_pool = cuda_graphs_pool
+        self.device_type = _graph_device_type()
+        self.device_interface = _graph_device_interface(self.device_type)
         self.outputs_weakrefs: list[StorageWeakRefWrapper | None] = []
         self.tensor_weakrefs: list[TensorWeakRef | None] = []
         self.existing_cuda_graph = existing_cuda_graph
@@ -793,7 +859,7 @@ class CUDAWarmupNode:
             check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
         with (
-            torch.cuda.device(self.device_index),
+            self.device_interface.device(self.device_index),
             disable_conv_cache_emptying(),
             clear_cublas_manager(),
             _use_cuda_memory_pool_manager(
@@ -947,7 +1013,7 @@ class CUDAGraphNode:
         cuda_graphs_pool: _POOL_HANDLE,
         device_index: int,
         stack_traces: StackTraces | None,
-        stream: torch.cuda.Stream,
+        stream: Any,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
     ) -> None:
@@ -960,6 +1026,8 @@ class CUDAGraphNode:
         self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.id = id
         self.device = device_index
+        self.device_type = _graph_device_type()
+        self.device_interface = _graph_device_interface(self.device_type)
         self.stack_traces = stack_traces
         self.stream = stream
 
@@ -1119,9 +1187,17 @@ class CUDAGraphNode:
         inputs.clear()
         del inputs
 
-        self.graph: torch.cuda.CUDAGraph | None = (
-            None if wrapped_function.kernel_free_cudagraph else torch.cuda.CUDAGraph()
-        )
+        if wrapped_function.kernel_free_cudagraph:
+            self.graph: Any | None = None
+        elif self.device_type == "cuda":
+            # CUDA keeps its untouched legacy graph object.
+            self.graph = torch.cuda.CUDAGraph()
+        else:
+            # Registered accelerator backends resolve their GraphImplInterface
+            # implementation from the C++ registry via torch.accelerator.Graph.
+            self.graph = torch.accelerator.Graph(
+                pool=self.cuda_graphs_pool, capture_error_mode="thread_local"
+            )
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -1275,7 +1351,7 @@ class CUDAGraphNode:
             self.debug_check_invariants_after_invocation()
 
         if config.triton.force_cudagraph_sync:
-            torch.cuda.synchronize()
+            self.device_interface.synchronize()
 
         # Reset this to run the check in the future
         self.static_inputs_stable = False
@@ -1424,7 +1500,7 @@ class CUDAGraphNode:
         if self.wrapped_function.kernel_free_cudagraph:
             with (
                 preserve_rng_state(),
-                torch.cuda.device(self.device),
+                self.device_interface.device(self.device),
                 clear_cublas_manager(),
                 _use_cuda_memory_pool_manager(
                     self.device, self.cuda_graphs_pool, self.stream
@@ -1467,15 +1543,16 @@ class CUDAGraphNode:
 
         with (
             preserve_rng_state(),
-            torch.cuda.device(self.device),
+            self.device_interface.device(self.device),
             clear_cublas_manager(),
-            torch.cuda.graph(
+            _graph_capture_context(
+                self.device_interface,
+                self.device_type,
                 self.graph,
-                stream=self.stream,
-                pool=self.cuda_graphs_pool,
-                capture_error_mode="thread_local",
+                self.stream,
+                self.cuda_graphs_pool,
             ),
-            # NB: must go after torch.cuda.graph which switches the stream
+            # NB: must go after the capture context which switches the stream
             _update_current_stream_external_object(),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
@@ -1583,8 +1660,10 @@ class CUDAGraphNode:
                 self.tensor_weakrefs.append(TensorWeakRef(out))
 
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
-        self.checkpointed_caching_state = torch._C._cuda_getCheckpointState(
-            self.device, self.cuda_graphs_pool
+        self.checkpointed_caching_state = (
+            self.device_interface.GraphOps.get_checkpoint_state(
+                self.device, self.cuda_graphs_pool
+            )
         )
 
         # now, get liveness with outputs added
@@ -1916,13 +1995,13 @@ class CUDAGraphNode:
         and copy over the tensor values.
         """
 
-        torch.cuda.synchronize()
-        self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_interface.synchronize()
+        self.stream.wait_stream(self.device_interface.current_stream())
         recording_inputs: list[InputType] = []
 
         with (
             warnings.catch_warnings(record=True),
-            torch.cuda.device(self.device),
+            self.device_interface.device(self.device),
             _use_cuda_memory_pool_manager(
                 self.device,
                 mem_pool=self.cuda_graphs_pool,
@@ -2110,7 +2189,11 @@ def collect_path_user_visible_storage_groups(
 
 
 def get_cudagraph_segments(pool_id: tuple[int, int]) -> Any:
-    segments = torch.cuda.memory_snapshot()
+    segments = _graph_device_interface().GraphOps.memory_snapshot()
+    if segments is None:
+        # Backends without a snapshot API: skip the (debug-only) slow-path
+        # segment inspection instead of failing.
+        return []
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
 
@@ -2149,15 +2232,16 @@ def check_memory_pool(
         )
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
+    di = _graph_device_interface()
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
-    if torch._C._cuda_checkPoolLiveAllocations(device, pool_id, unique_storages):
+    if di.GraphOps.check_pool_live_allocations(device, pool_id, unique_storages):
         return
 
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
     # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
     gc.collect()
-    torch.cuda.synchronize()
+    di.synchronize()
 
     segments = get_cudagraph_segments(pool_id)
 
@@ -2310,22 +2394,40 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with graph_capture_lock, torch.cuda.device(device_index):
-            torch.cuda.synchronize()
-            self.stream = torch.cuda.Stream()
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = _graph_device_type()
+        self.device_interface = _graph_device_interface(self.device_type)
+
+        with graph_capture_lock, self.device_interface.device(device_index):
+            self.device_interface.synchronize()
+            self.stream = self.device_interface.Stream()
+            self.stream.wait_stream(self.device_interface.current_stream())
 
             # Keeps Memory Pool Alive
-            self.graph: torch.cuda.CUDAGraph | None = torch.cuda.CUDAGraph()
-            self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
+            if self.device_type == "cuda":
+                # CUDA keeps its untouched legacy path: graph object first,
+                # then the pool handle, exactly as before.
+                self.graph: Any | None = torch.cuda.CUDAGraph()
+                self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
+            else:
+                # accelerator.Graph takes the pool at construction time, so
+                # the pool handle is created first for registered backends.
+                self.cuda_graphs_thread_pool = cast(
+                    "_POOL_HANDLE",
+                    self.device_interface.GraphOps.graph_pool_handle(),
+                )
+                self.graph = torch.accelerator.Graph(
+                    pool=self.cuda_graphs_thread_pool,
+                    capture_error_mode="thread_local",
+                )
 
             with (
                 warnings.catch_warnings(record=True),
-                torch.cuda.graph(
+                _graph_capture_context(
+                    self.device_interface,
+                    self.device_type,
                     self.graph,
-                    pool=self.cuda_graphs_thread_pool,
-                    stream=self.stream,
-                    capture_error_mode="thread_local",
+                    self.stream,
+                    self.cuda_graphs_thread_pool,
                 ),
             ):
                 pass
@@ -2655,7 +2757,7 @@ class CUDAGraphTreeManager:
                 graph_id.id,
                 format_inputs_log(new_inputs),
             )
-            torch.cuda.synchronize()
+            self.device_interface.synchronize()
             node = CUDAGraphNode(
                 self.ids_to_funcs[function_id],
                 graph_id,
@@ -2675,7 +2777,7 @@ class CUDAGraphTreeManager:
             self.current_node = node
             self.path_state = ExecutionState.RECORDING
             self.update_generation()
-            torch.cuda.synchronize()
+            self.device_interface.synchronize()
             return node.run_first_inputs(new_inputs)
 
     def execute_node(
@@ -2879,7 +2981,7 @@ class CUDAGraphTreeManager:
             ]
         ] = []
 
-        with torch.cuda.device(self.device_index):
+        with self.device_interface.device(self.device_index):
             source_tensors = []
             replacement_tensors = []
 
@@ -3189,7 +3291,7 @@ class CUDAGraphTreeManager:
         # path_live_weakrefs guarantees that t() will not be None
         live_storages_weak_refs: list[int] = [t() for t in live_storages_wrappers]  # type: ignore[misc]
         ptrs_to_deallocate = self.current_node.data_ptrs_dead_since_invocation()
-        torch._C._cuda_setCheckpointPoolState(
+        self.device_interface.GraphOps.set_checkpoint_pool_state(
             device,
             # pyrefly: ignore [bad-argument-type]
             state,
@@ -3199,7 +3301,7 @@ class CUDAGraphTreeManager:
 
         # NB: deduplicate aliased outputs
         for ptr in OrderedSet(ptrs_to_deallocate):
-            torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
+            self.device_interface.GraphOps.raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
         if config.triton.slow_path_cudagraph_asserts:
