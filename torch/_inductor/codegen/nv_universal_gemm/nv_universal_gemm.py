@@ -26,9 +26,10 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
-    _nvgemm_bias_add_epilogue,
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
+    CuTeDSLEpilogueArguments,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import (
@@ -39,6 +40,7 @@ from torch._inductor.ir import (
     PermuteView,
     TensorBox,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -67,6 +69,18 @@ class GemmVariant(Enum):
         if self == GemmVariant.SCALED_GEMM:
             return "nv_universal_scaled_gemm"
         return "nv_universal_gemm"
+
+    def supports_reduction(self, plan: GemmReductionPlan) -> bool:
+        """Whether this variant can lower a recognized reduction contract."""
+        if self == GemmVariant.SCALED_GEMM:
+            from .epilogue_capabilities import BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES
+
+            return BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        if self == GemmVariant.GEMM:
+            from .epilogue_capabilities import DENSE_GEMM_REDUCTION_CAPABILITIES
+
+            return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
+        return False
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -256,14 +270,15 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         precompile (which writes the same key) hands off to the benchmark
         instead of recompiling serially.
         """
-        from cutlass.operators.arguments import EpilogueArguments
         from cutlass.operators.artifact import CompiledArtifact
 
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
         *gemm_tensors, bias = input_tensors
         gemm_tensors = tuple(gemm_tensors)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
 
         kernel_name = self.kernel.metadata.operator_name
         cache_key = _create_gemm_cache_key(
@@ -301,7 +316,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_name=kernel_name,
             epilogue_args=epilogue_args,
-            epilogue_source="nvgemm_addmm_bias_v1",
+            epilogue_source="nvgemm_addmm_bias_v2",
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
         )
@@ -502,6 +517,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return info
 
     def get_make_kernel_render(self):
+        """Create the callable that renders this NVGEMM choice."""
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
