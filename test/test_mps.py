@@ -10305,11 +10305,9 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("N", [4095, 4097])
     def test_fused_rms_norm_weight_multiply_in_fp32(self, dtype, N):
+        # Values on either side of 4096 exercise the single-row and looped kernels.
         # Keep x*inv*weight in fp32 and cast once, like the CPU composite
         # (#147203). Compare the half path to the same fused kernel run in fp32.
-        if dtype == torch.bfloat16 and MACOS_VERSION < 15.0:
-            self.skipTest("bfloat16 requires macOS 15+")
-        torch.manual_seed(0)
         x = torch.randn(2, N, dtype=dtype, device="mps")
         w = (torch.randn(N, dtype=torch.float32, device="mps") * 8).to(dtype)
         with torch.inference_mode():
