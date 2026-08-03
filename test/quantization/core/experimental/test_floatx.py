@@ -436,51 +436,83 @@ class TestFloat4Dtype(TestCase):
         x1[:, 0:2048].contiguous()
 
     @parametrize("input_dtype", [torch.float, torch.float16, torch.bfloat16])
-    def test_float4_e2m1fn_x2_cast(self, device, input_dtype):
-        # exact representable values, sign, saturation and rounding cases
-        x = torch.tensor(
-            [
-                [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
-                [-0.5, -6.0, 0.3, 100.0, -100.0, 5.0, 2.7, 1.1],
-            ],
+    def test_float4_e2m1fn_x2_cast_finite(self, device, input_dtype):
+        # The fp4 grid, plus the midpoint between each adjacent pair and the
+        # values just below / just above it. RTNE sends an exact midpoint to the
+        # neighbor with an even mantissa bit, which are the grid values at even
+        # indices (0.0, 1.0, 2.0, 4.0); just-below rounds down, just-above up.
+        grid = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+        grid_t = torch.tensor(grid, device=device, dtype=input_dtype)
+        mid = (grid_t[:-1] + grid_t[1:]) / 2
+        below = torch.nextafter(mid, torch.zeros_like(mid))
+        above = torch.nextafter(mid, torch.full_like(mid, float("inf")))
+        even_neighbor = torch.tensor(
+            [grid[i] if i % 2 == 0 else grid[i + 1] for i in range(len(grid) - 1)],
             device=device,
             dtype=input_dtype,
         )
+
+        x_pos = torch.cat([grid_t, below, mid, above])
+        exp_pos = torch.cat([grid_t, grid_t[:-1], even_neighbor, grid_t[1:]])
+        # include negatives (sign must be preserved) and give a 2D shape with an
+        # even last dim so the pack path is exercised over more than one row
+        x = torch.cat([x_pos, -x_pos]).reshape(-1, 2)
+        expected = torch.cat([exp_pos, -exp_pos]).reshape(-1, 2)
 
         out = x.to(torch.float4_e2m1fn_x2)
 
         # the cast packs two fp4 values per byte, halving the last dim
         self.assertEqual(out.dtype, torch.float4_e2m1fn_x2)
-        self.assertEqual(out.shape, (2, 4))
+        self.assertEqual(out.shape, (x.shape[0], x.shape[1] // 2))
 
         # byte-exact match against the reference encode + pack
         ref = pack_uint4(_f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS))
         self.assertEqual(out.view(torch.uint8), ref, atol=0, rtol=0)
 
-    def test_float4_e2m1fn_x2_cast_inf_nan(self, device):
+        # decoding reproduces the RTNE-rounded grid values (independent of the
+        # reference), pinning the tie-to-even behavior at each midpoint
+        self.assertEqual(out.to(torch.float32), expected.float(), atol=0, rtol=0)
+
+    @parametrize("input_dtype", [torch.float, torch.float16, torch.bfloat16])
+    def test_float4_e2m1fn_x2_cast_inf_nan(self, device, input_dtype):
         # fp4 has no inf/NaN encoding; per the OCP MX spec inf/overflow saturate
         # to the max magnitude (sign preserved) and NaN (implementation-defined)
         # is clamped the same way, so every NaN payload maps deterministically.
+        # All input dtypes reach the same scalar encode after the internal
+        # narrow to float32, so parametrize to pin each one.
+        # inf and finite overflow: the sign is meaningful and preserved.
         inf = float("inf")
-        nan = float("nan")
         x = torch.tensor(
-            [[inf, -inf, nan, -nan, 1e30, -1e30, 6.0, -6.0]],
+            [[inf, -inf, 1e30, -1e30, 6.0, -6.0]],
             device=device,
+            dtype=input_dtype,
         )
         out = x.to(torch.float4_e2m1fn_x2).to(torch.float32)
         expected = torch.tensor(
-            [[6.0, -6.0, 6.0, -6.0, 6.0, -6.0, 6.0, -6.0]],
+            [[6.0, -6.0, 6.0, -6.0, 6.0, -6.0]],
             device=device,
         )
         self.assertEqual(out, expected, atol=0, rtol=0)
 
-        # NaN with an arbitrary payload must also saturate, not slip through
-        payloaded = torch.tensor([0x7FABCDEF], dtype=torch.int32, device=device).view(
-            torch.float32
+        # NaN saturates to the max magnitude too. Its sign is not meaningful and
+        # is not preserved by narrowing casts to float16/bfloat16, so only pin
+        # the magnitude. Build a payloaded NaN (exponent all ones, non-zero
+        # mantissa) from a bit pattern of the input dtype so every dtype
+        # exercises an arbitrary payload rather than a canonical NaN.
+        nan_bits = {
+            torch.float: (torch.int32, 0x7FABCDEF),
+            torch.float16: (torch.int16, 0x7D55),
+            torch.bfloat16: (torch.int16, 0x7FD5),
+        }
+        int_dtype, bits = nan_bits[input_dtype]
+        payloaded = torch.tensor([bits], dtype=int_dtype, device=device).view(
+            input_dtype
         )
         x2 = torch.cat([payloaded, payloaded]).reshape(1, 2)
         out2 = x2.to(torch.float4_e2m1fn_x2).to(torch.float32)
-        self.assertEqual(out2, torch.full((1, 2), 6.0, device=device), atol=0, rtol=0)
+        self.assertEqual(
+            out2.abs(), torch.full((1, 2), 6.0, device=device), atol=0, rtol=0
+        )
 
     def test_float4_e2m1fn_x2_cast_non_differentiable(self, device):
         x = torch.randn(2, 4, device=device, requires_grad=True)
@@ -492,6 +524,44 @@ class TestFloat4Dtype(TestCase):
         x = torch.randn(2, 3, device=device)
         with self.assertRaisesRegex(RuntimeError, "last dimension to be even"):
             x.to(torch.float4_e2m1fn_x2)
+
+    def test_float4_e2m1fn_x2_cast_zero_dim(self, device):
+        x = torch.tensor(1.0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "at least 1 dimension"):
+            x.to(torch.float4_e2m1fn_x2)
+
+    def test_float4_e2m1fn_x2_cast_float64_rejected(self, device):
+        # float64 would narrow through an intermediate float32 and could
+        # double-round near an fp4 midpoint, so it is rejected outright
+        x = torch.randn(2, 4, device=device, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "other than float64"):
+            x.to(torch.float4_e2m1fn_x2)
+
+    def test_float4_e2m1fn_x2_cast_non_contiguous(self, device):
+        # the pack/unpack kernels assume row-major layout, so non-contiguous
+        # inputs are rejected rather than silently made contiguous
+        x = torch.randn(4, 8, device=device).t()
+        with self.assertRaisesRegex(RuntimeError, "requires a contiguous input"):
+            x.to(torch.float4_e2m1fn_x2)
+        f4 = torch.randn(4, 8, device=device).to(torch.float4_e2m1fn_x2)
+        with self.assertRaisesRegex(RuntimeError, "requires a contiguous input"):
+            f4[:, ::2].to(torch.float32)
+
+    def test_float4_e2m1fn_x2_cast_cross_device(self, device):
+        # dtype + device together: the conversion kernel runs on the source
+        # device (CPU) and the requested device move is deferred to _to_copy,
+        # so this pins the device-move tail of the forward branch.
+        if torch.device(device).type == "cpu":
+            self.skipTest("cross-device cast needs a non-CPU device")
+        x = torch.randn(2, 8)
+        out = x.to(dtype=torch.float4_e2m1fn_x2, device=device)
+        self.assertEqual(out.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(out.device.type, torch.device(device).type)
+        # bytes must match the same cast performed entirely on CPU
+        ref = x.to(torch.float4_e2m1fn_x2)
+        self.assertEqual(
+            out.cpu().view(torch.uint8), ref.view(torch.uint8), atol=0, rtol=0
+        )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
     def test_float4_e2m1fn_x2_cast_compile(self, device):
@@ -562,6 +632,18 @@ class TestFloat4Dtype(TestCase):
         out = f4.to(target_dtype)
         self.assertEqual(out.dtype, target_dtype)
         self.assertEqual(out, f4.to(torch.float32).to(target_dtype), atol=0, rtol=0)
+
+    def test_float4_e2m1fn_x2_cast_from_cross_device(self, device):
+        # fp4 -> float32 with a device move: the unpack runs on the source
+        # device (CPU) and the device change falls through to _to_copy, so this
+        # pins the non-aliasing tail of the reverse branch.
+        if torch.device(device).type == "cpu":
+            self.skipTest("cross-device cast needs a non-CPU device")
+        f4 = torch.randn(2, 8).to(torch.float4_e2m1fn_x2)
+        out = f4.to(dtype=torch.float32, device=device)
+        self.assertEqual(out.dtype, torch.float32)
+        self.assertEqual(out.device.type, torch.device(device).type)
+        self.assertEqual(out.cpu(), f4.to(torch.float32), atol=0, rtol=0)
 
     def test_float4_e2m1fn_x2_cast_from_non_differentiable(self, device):
         f4 = torch.randn(2, 4, device=device).to(torch.float4_e2m1fn_x2)

@@ -49,18 +49,33 @@ __global__ void convert_from_float4_e2m1fn_x2_kernel(
 } // namespace
 
 Tensor _convert_to_float4_e2m1fn_x2_cuda(const Tensor& self) {
+  // float64 is rejected: the kernel narrows the input through an intermediate
+  // float32 (self.to(kFloat)), and a double within half a float32 ULP of an
+  // exact fp4 midpoint would double-round to the wrong bucket.
+  // TODO(future PR): implement cast from float64 if there is a need, for now
+  // not worth the extra complexity
   TORCH_CHECK(
       isFloatingType(self.scalar_type()) &&
-          self.scalar_type() != kFloat4_e2m1fn_x2,
+          self.scalar_type() != kFloat4_e2m1fn_x2 &&
+          self.scalar_type() != kDouble,
       "conversion to Float4_e2m1fn_x2 is only supported from a floating point "
-      "dtype, got ",
+      "dtype other than float64, got ",
       self.scalar_type());
+  // Require a contiguous input: the pack kernel assumes row-major layout (two
+  // fp4 values share a byte along the last dim). Supporting arbitrary strides
+  // would need stride-aware kernels, which is not worth it right now.
   TORCH_CHECK(
-      self.dim() >= 1 && self.size(-1) % 2 == 0,
+      self.is_contiguous(),
+      "conversion to Float4_e2m1fn_x2 requires a contiguous input");
+  TORCH_CHECK(
+      self.dim() >= 1,
+      "conversion to Float4_e2m1fn_x2 requires at least 1 dimension, got a 0-dim tensor");
+  TORCH_CHECK(
+      self.size(-1) % 2 == 0,
       "conversion to Float4_e2m1fn_x2 requires the last dimension to be even, got shape ",
       self.sizes());
 
-  auto input = self.to(kFloat).contiguous();
+  auto input = self.to(kFloat);
   auto sizes = input.sizes().vec();
   sizes.back() /= 2;
   auto out = at::empty(sizes, input.options().dtype(kFloat4_e2m1fn_x2));
@@ -90,7 +105,13 @@ Tensor _convert_from_float4_e2m1fn_x2_cuda(const Tensor& self) {
       "conversion from Float4_e2m1fn_x2 is only supported from a "
       "Float4_e2m1fn_x2 dtype, got ",
       self.scalar_type());
-  auto input = self.contiguous();
+  // Require a contiguous input: the unpack kernel assumes row-major layout (two
+  // fp4 values share a byte along the last dim). Supporting arbitrary strides
+  // would need stride-aware kernels, which is not worth it right now.
+  TORCH_CHECK(
+      self.is_contiguous(),
+      "conversion from Float4_e2m1fn_x2 requires a contiguous input");
+  const Tensor& input = self;
   auto sizes = input.sizes().vec();
   TORCH_CHECK(
       !sizes.empty(),

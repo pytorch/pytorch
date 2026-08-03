@@ -240,8 +240,7 @@ static inline std::optional<Device> ensure_has_index(
 static SymDimVector float4_e2m1fn_x2_packed_sizes(const Tensor& self) {
   TORCH_CHECK(
       self.dim() >= 1,
-      "conversion to Float4_e2m1fn_x2 requires the last dimension to be even, got shape ",
-      self.sym_sizes());
+      "conversion to Float4_e2m1fn_x2 requires at least 1 dimension, got a 0-dim tensor");
   auto last = self.sym_size(-1);
   TORCH_SYM_CHECK(
       (last % 2).sym_eq(0),
@@ -253,12 +252,24 @@ static SymDimVector float4_e2m1fn_x2_packed_sizes(const Tensor& self) {
 }
 
 static void check_convert_to_float4_input(const Tensor& self) {
+  // float64 is rejected: the kernels narrow the input through an intermediate
+  // float32 (self.to(kFloat)), and a double within half a float32 ULP of an
+  // exact fp4 midpoint would double-round to the wrong bucket.
+  // TODO(future PR): implement cast from float64 if there is a need, for now
+  // not worth the extra complexity
   TORCH_CHECK(
       isFloatingType(self.scalar_type()) &&
-          self.scalar_type() != kFloat4_e2m1fn_x2,
+          self.scalar_type() != kFloat4_e2m1fn_x2 &&
+          self.scalar_type() != kDouble,
       "conversion to Float4_e2m1fn_x2 is only supported from a floating point "
-      "dtype, got ",
+      "dtype other than float64, got ",
       self.scalar_type());
+  // Require a contiguous input: the pack kernel assumes row-major layout (two
+  // fp4 values share a byte along the last dim). Supporting arbitrary strides
+  // would need stride-aware kernels, which is not worth it right now.
+  TORCH_CHECK(
+      self.is_contiguous(),
+      "conversion to Float4_e2m1fn_x2 requires a contiguous input");
 }
 
 // Output sizes for unpacking a Float4_e2m1fn_x2 tensor: the last dimension is
@@ -280,11 +291,17 @@ static void check_convert_from_float4_input(const Tensor& self) {
       "conversion from Float4_e2m1fn_x2 is only supported from a "
       "Float4_e2m1fn_x2 dtype, got ",
       self.scalar_type());
+  // Require a contiguous input: the unpack kernel assumes row-major layout (two
+  // fp4 values share a byte along the last dim). Supporting arbitrary strides
+  // would need stride-aware kernels, which is not worth it right now.
+  TORCH_CHECK(
+      self.is_contiguous(),
+      "conversion from Float4_e2m1fn_x2 requires a contiguous input");
 }
 
 Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
   check_convert_to_float4_input(self);
-  auto input = self.to(kFloat).contiguous();
+  auto input = self.to(kFloat);
   auto out = at::empty_symint(
       float4_e2m1fn_x2_packed_sizes(input),
       input.options().dtype(kFloat4_e2m1fn_x2));
@@ -311,7 +328,7 @@ Tensor _convert_to_float4_e2m1fn_x2_meta(const Tensor& self) {
 
 Tensor _convert_from_float4_e2m1fn_x2_cpu(const Tensor& self) {
   check_convert_from_float4_input(self);
-  auto input = self.contiguous();
+  const Tensor& input = self;
   auto out = at::empty_symint(
       float4_e2m1fn_x2_unpacked_sizes(input), input.options().dtype(kFloat));
   const auto* in_ptr = reinterpret_cast<const uint8_t*>(input.const_data_ptr());
@@ -542,26 +559,48 @@ static inline Tensor to_impl(
     return self;
   }
   // Casting to fp4 is shape-changing, so we cannot reuse the _to_copy machinery
-  // like we do for whole-byte casts and have to use a custom kernel.
+  // like we do for whole-byte casts and have to use a custom kernel. The kernel
+  // produces a contiguous, unpinned fp4 tensor on self's device; defer any
+  // requested device or memory-format change to _to_copy (dtype is already fp4,
+  // so it is unchanged), gated by to_will_alias to avoid a redundant copy on
+  // the common no-op tail. The conversion output is always a fresh tensor, so
+  // copy=true is already satisfied.
   if (dtype == kFloat4_e2m1fn_x2 && self.scalar_type() != kFloat4_e2m1fn_x2) {
     TORCH_CHECK(
         !layout.has_value() || self.layout() == layout.value(),
         "conversion to Float4_e2m1fn_x2 does not support changing layout");
     auto result = at::_convert_to_float4_e2m1fn_x2(self);
-    if (device.has_value() && device.value() != self.device()) {
-      result = result.to(device.value(), non_blocking);
+    if (!pin_memory.value_or(false) &&
+        to_will_alias(
+            result, std::nullopt, layout, device, false, optional_memory_format)) {
+      return result;
     }
-    return result;
+    return at::_to_copy(
+        result,
+        std::nullopt,
+        layout,
+        device,
+        pin_memory,
+        non_blocking,
+        optional_memory_format);
   }
   // Casting from fp4 is shape-changing too (each byte unpacks to two values),
-  // so it likewise cannot use the _to_copy machinery. Unpack to fp32 here, then
-  // let the normal cast handle any remaining dtype/device change.
+  // so it likewise cannot use the _to_copy machinery. Unpack to fp32 here; the
+  // unpack always yields a fresh contiguous fp32 tensor on self's device, so if
+  // the caller only wants fp32 with no device/memory-format change (the common
+  // x.to(float32) case) return it directly, gated by to_will_alias. Otherwise
+  // defer the remaining dtype/device change to _to_copy.
   if (self.scalar_type() == kFloat4_e2m1fn_x2 && dtype.has_value() &&
       dtype.value() != kFloat4_e2m1fn_x2) {
     TORCH_CHECK(
         !layout.has_value() || self.layout() == layout.value(),
         "conversion from Float4_e2m1fn_x2 does not support changing layout");
     auto result = at::_convert_from_float4_e2m1fn_x2(self);
+    if (!pin_memory.value_or(false) &&
+        to_will_alias(
+            result, dtype, layout, device, false, optional_memory_format)) {
+      return result;
+    }
     return at::_to_copy(
         result,
         dtype,
