@@ -4798,9 +4798,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     @parametrize("output", ["tensor", "none"])
     @parametrize("autograd", [False, True])
     def test_scan_xs_none_length(self, compile_mode, output, autograd):
-        if output == "none" and autograd:
-            self.skipTest("None output + autograd not yet supported in scan")
-
         if output == "tensor":
 
             def body(c, x):
@@ -4812,12 +4809,32 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         init = torch.tensor(0.5, requires_grad=autograd)
         scan_fct = compile_mode_helper(scan, compile_mode)
+
+        if output == "none" and autograd:
+            # None ys + autograd is not yet supported; pin the limitation so this
+            # starts failing (and prompts an update) once support is added.
+            with self.assertRaises(RuntimeError):
+                result = scan_fct(body, init, None, length=3)
+                torch.autograd.grad(result[0], init, torch.ones_like(result[0]))
+            return
+
         result = scan_fct(body, init, None, length=3)
         result_exp = _fake_scan(body, init, None, length=3)
         self.assertEqual(result, result_exp)
 
         if autograd:
             self.check_autograd(result, result_exp, (init,))
+
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_make_fx_none_output(self):
+        def body(c, x):
+            return torch.sin(c), None
+
+        init = torch.tensor(0.5)
+        gm = make_fx(lambda i: scan(body, i, None, length=3))(init)
+        result = gm(init)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
 
     @parametrize("output", ["tensor", "none"])
     def test_scan_xs_none_length_zero(self, output):

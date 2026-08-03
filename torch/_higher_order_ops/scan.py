@@ -208,6 +208,8 @@ def scan(
                     )
                 return init, _build_empty_output_for_length_zero(combine_fn, init)
 
+            # No real xs: fabricate a length-N dummy purely as an iteration counter.
+            # the wrapped combine_fn below discards each slice and passes x=None to the body.
             leaves_xs_orig = [torch.zeros(length, dtype=torch.int64)]
             spec_xs = pytree.tree_structure(None)
             _user_combine_fn = combine_fn
@@ -1210,6 +1212,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
         def combine_fn(carry, _ignored):
             return _user_combine_fn(carry, None)
 
+        # Dummy length-N iteration counter; the wrapped combine_fn passes x=None.
         inp_leaves = [torch.zeros(length, dtype=torch.int64)]
         inp_spec = pytree.tree_structure(None)
         xs_has_tensors = True
