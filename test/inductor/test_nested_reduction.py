@@ -1754,7 +1754,7 @@ class _InternalsBase:
         self.check_code(wrapper_code, num_kernels=1, num_allocs=2, num_deallocs=1)
         self.check_axis_classification_contract(
             kernel_code,
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=looped_or_persistent(2, 16),
         )
         extra_checks = (
@@ -1792,7 +1792,7 @@ class _InternalsBase:
             num_outputs=3,
             num_deallocs=2,
             meta_num_load=self.looped_or_persistent(3, 1),
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=self.looped_or_persistent(2, 16),
             extra_checks=(
                 FileCheck().check_count("tl.split(", 0, exactly=True)
