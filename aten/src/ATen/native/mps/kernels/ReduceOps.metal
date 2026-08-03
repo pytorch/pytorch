@@ -863,6 +863,8 @@ kernel void sum_reduction_inner_chunk(
   REGISTER_SUM_INNER_IMPL(TI, TO, "norm_l2_", LOAD_SQUARE, FINAL_SQRT)
 
 REGISTER_SUM_INNER(float, float);
+REGISTER_SUM_INNER(float, half);
+REGISTER_SUM_INNER(float, bfloat);
 REGISTER_SUM_INNER(half, half);
 REGISTER_SUM_INNER(half, float);
 REGISTER_SUM_INNER(bfloat, bfloat);
@@ -879,7 +881,9 @@ REGISTER_SUM_INNER(uchar, long);
 REGISTER_SUM_INNER(bool, long);
 REGISTER_SUM_INNER(bool, int);
 REGISTER_SUM_INNER(float2, float2);
+REGISTER_SUM_INNER(float2, half2);
 REGISTER_SUM_INNER(half2, half2);
+REGISTER_SUM_INNER(half2, float2);
 
 REGISTER_NORM_INNER(float, float);
 REGISTER_NORM_INNER(half, half);
@@ -1010,7 +1014,9 @@ REGISTER_SUM(uchar, long);
 REGISTER_SUM(bool, long);
 REGISTER_SUM(bool, int);
 REGISTER_SUM(float2, float2);
+REGISTER_SUM(float2, half2);
 REGISTER_SUM(half2, half2);
+REGISTER_SUM(half2, float2);
 
 // nansum variants (floating-point only — integers can't have NaN)
 REGISTER_NANSUM(float, float);

@@ -5981,6 +5981,27 @@ class TestMPS(TestCaseMPS):
         x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
         self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
 
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.complex32])
+    def test_sum_splitk_fp32_partials(self, dtype):
+        # Split-K partials must be stored in opmath_t, not the output dtype.
+        # (4, 1048576) splits into 2048 segments of 512; every even segment
+        # sums to a rounding tie of the output dtype (2049 for fp16, 513 for
+        # bf16) and every odd one to its negation plus 2, so rounding the
+        # partials loses half of each row's sum (1024 instead of 2048).
+        a, b = (1.0, 2.0) if dtype == torch.bfloat16 else (4.0, 5.0)
+        rdtype = torch.half if dtype == torch.complex32 else dtype
+        pos = torch.full((512,), a, dtype=rdtype)
+        pos[-1] = b
+        neg = -pos
+        neg[-1] += 2.0
+        row = torch.cat([pos, neg]).repeat(1024)
+        if dtype == torch.complex32:
+            row = torch.complex(row, row)
+        x = row.repeat(4, 1)
+        # sum_cpu is not implemented for chalf; the complex64 detour is exact.
+        ref = x.to(torch.complex64).sum(-1).to(dtype) if dtype == torch.complex32 else x.sum(-1)
+        self.assertEqual(x.to("mps").sum(-1).cpu(), ref)
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)

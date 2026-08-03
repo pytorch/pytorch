@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/Pool.h>
@@ -863,8 +864,11 @@ struct ReductionDispatch {
                                  // bool -> char for min/max).
   ScalarType output_kernel_dtype; // may differ from output.scalar_type() for
                                   // the same remap reason.
-  ScalarType partial_dtype; // pass-1 output dtype: output.scalar_type() for
-                            // sum/min/max, uchar for all/any.
+  ScalarType partial_dtype; // pass-1 output dtype: opmath of
+                            // output.scalar_type() for sum (fp16/bf16/chalf
+                            // partials would round once per segment),
+                            // output.scalar_type() for min/max, uchar for
+                            // all/any.
   std::string pass2_prefix; // pass-2 op prefix. count_nonzero -> "sum_" (the
                             // partials are already per-block counts), all/any
                             // -> "min_"/"max_" (predicate ran in pass 1).
@@ -1216,7 +1220,7 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
                              .prefix = kernel_prefix,
                              .input_kernel_dtype = input.scalar_type(),
                              .output_kernel_dtype = output.scalar_type(),
-                             .partial_dtype = output.scalar_type(),
+                             .partial_dtype = at::toOpMathType(output.scalar_type()),
                              .pass2_prefix = "sum_",
                              .has_strided_pass1 = true,
                              .divisor = divisor,
