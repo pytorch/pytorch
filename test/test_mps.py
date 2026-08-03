@@ -43,9 +43,10 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes, largeTensorTest
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes, largeMPSBufferTest, largeTensorTest
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
+from torch.utils._cpp_embed_headers import embed_headers
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
@@ -971,9 +972,13 @@ class TestMPS(TestCaseMPS):
             ptr_s1_second = make_and_free_get_ptr(s1)
             self.assertEqual(ptr_s1_second, ptr_s1_first)
 
-            # Different stream: must not reuse s1's freed buffer
-            ptr_s2 = make_and_free_get_ptr(s2)
-            self.assertNotEqual(ptr_s2, ptr_s1_second)
+            # Different stream: s1's cached buffer is never handed over as is, a new
+            # buffer is placed over its range instead. data_ptr() can't tell the two
+            # apart, since Metal reuses the released buffer's address for the new one.
+            torch._C._mps_setStream(s2)
+            t_s2 = torch.full((1 << 16,), 3.0, device='mps')
+            s2.synchronize()
+            self.assertEqual(t_s2, torch.full((1 << 16,), 3.0))
 
         finally:
             torch._C._mps_setStream(None)
@@ -7438,20 +7443,21 @@ class TestMPS(TestCaseMPS):
             check(make(shape), dim)
         check(make(strided_shape)[:, ::2], -1)
 
-    def test_linalg_cholesky(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_cholesky(self, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_cholesky_test(size, *batch_dims, upper=False, check_errors=False):
             if check_errors:
                 # expect failure for non-positive definite matrix
-                input_mps = torch.eye(size, dtype=torch.float32, device="mps")
+                input_mps = torch.eye(size, dtype=dtype, device="mps")
                 input_mps[0, 0] = -1
                 error_msg = r'The factorization could not be completed because the input is not positive-definite'
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
                 return
             # output checks for positive definite matrix
-            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=dtype, device="cpu")
             input_mps = input_cpu.to('mps')
             output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
             output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
@@ -10839,6 +10845,35 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
+    def test_conv3d_int32_overflow(self, C, O):
+        x = torch.randn(1, C, 1, 182, 181, dtype=torch.float16, device='mps')
+        w = torch.randn(O, C, 1, 1, 1, dtype=torch.float16, device='mps') * 0.01
+        y = F.conv3d(x, w)
+        hs, ws = [0, 91, 181], [0, 90, 180]
+        ref = w.view(O, C).float().cpu() @ x[0, :, 0, hs, ws].float().cpu()
+        self.assertEqual(y[0, :, 0, hs, ws].float().cpu(), ref, atol=2e-2, rtol=2e-2)
+        del x, w, y
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeTensorTest("16GB", device="mps")
+    @serialTest()
+    def test_conv3d_tile_count_int32_overflow(self):
+        output_channels = torch.iinfo(torch.int32).max - 1
+        # Stride 2 bypasses the pointwise matmul path while keeping the output
+        # spatial volume at one, so only the channel tile count is large.
+        x = torch.ones(1, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        w = torch.ones(output_channels, 1, 1, 1, 1, dtype=torch.float16, device="mps")
+        y = F.conv3d(x, w, stride=2)
+        indices = torch.tensor([0, output_channels // 2, output_channels - 1], device="mps")
+        self.assertEqual(y[0, indices, 0, 0, 0].cpu(), torch.ones(3, dtype=torch.float16))
+        del x, w, y, indices
+        gc.collect()
+        torch.mps.empty_cache()
+
     @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
@@ -11874,7 +11909,11 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
         y_mps_cl = m_mps_cl(x_mps_cl)
 
         # Fast-path invariant: CL output must match contiguous in same dtype.
-        cl_vs_cont = dict(atol=1e-5, rtol=1e-5) if dtype == torch.float32 else dict(atol=1e-3, rtol=1e-3)
+        cl_vs_cont = {
+            torch.float32: dict(atol=1e-5, rtol=1e-5),
+            torch.float16: dict(atol=1e-3, rtol=1e-3),
+            torch.bfloat16: dict(atol=1e-3, rtol=1.6e-2),
+        }[dtype]
         self.assertEqual(y_mps_cont, y_mps_cl, **cl_vs_cont)
         self.assertTrue(y_mps_cl.is_contiguous(memory_format=torch.channels_last_3d))
         if dtype == torch.float32:
@@ -14274,6 +14313,34 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
+    @parametrize("case", ["catalog", "simd_miss"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv3d_precompiled_and_simd_miss(self, dtype, case):
+        torch.manual_seed(0)
+        if case == "catalog":
+            input_shape = (2, 3, 7, 9, 11)
+            weight_shape = (8, 3, 3, 3, 3)
+            stride, padding = (1, 1, 1), (1, 1, 1)
+            bias = torch.randn(weight_shape[0]).to(dtype).float()
+        else:
+            input_shape = (2, 5, 8, 10, 12)
+            weight_shape = (7, 5, 2, 3, 2)
+            stride, padding = (1, 2, 1), (0, 1, 0)
+            bias = None
+
+        x = torch.randn(input_shape).to(dtype).float()
+        weight = torch.randn(weight_shape).to(dtype).float()
+        expected = F.conv3d(x, weight, bias, stride=stride, padding=padding)
+        actual = F.conv3d(
+            x.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            padding=padding,
+        )
+        tol = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
@@ -16475,8 +16542,8 @@ class TestConsistency(TestCaseMPS):
     # Test large tensor inputs to `group_norm`. This test currently passes
     # because 64-bit indexing is supported. But if 64-bit is turned off, the
     # test fails.
-    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
     @serialTest()
+    @largeMPSBufferTest(int(8.1 * 1024**3), device='mps')
     @largeTensorTest("25GB", device='mps')
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
@@ -17122,6 +17189,15 @@ class TestMetalLibrary(TestCaseMPS):
         lib.square(x)
         self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
 
+    def test_nchw_to_nhwc_kernel(self):
+        path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/Convolution.metal")
+        lib = torch.mps.compile_shader(embed_headers(path))
+        src = torch.arange(2 * 11 * 35, dtype=torch.float32, device="mps").reshape(2, 11, 35)
+        dst = torch.empty(2, 35, 11, device="mps")
+        kernel = lib.nchw_to_nhwc_float_16_64_false_false
+        kernel(src, dst, [11, 35], threads=(256, 1, 2), group_size=(256, 1, 1), arg_casts="int32")
+        self.assertEqual(dst, src.permute(0, 2, 1))
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
@@ -17141,6 +17217,8 @@ instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
 instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
+instantiate_parametrized_tests(TestConvolutionMPS)
+instantiate_parametrized_tests(TestLargeTensors)
 
 if __name__ == "__main__":
     run_tests()
