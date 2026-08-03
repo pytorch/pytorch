@@ -464,7 +464,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   }
 }
 
-int64_t ProcessGroupNCCL::getCommPtr() const {
+int64_t ProcessGroupNCCL::getCommPtr() {
   return reinterpret_cast<int64_t>(nccl_comm_);
 }
 
