@@ -492,10 +492,8 @@ static inline Tensor to_impl(
           self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
-  // Casting a floating tensor to the packed fp4 dtype changes the element count
-  // (two fp4 values per byte), so it cannot go through the shape-preserving
-  // copy_ path. Route it to a dedicated, non-differentiable conversion here,
-  // above _to_copy, so no (shape-mismatched) ToCopyBackward is recorded.
+  // Casting to fp4 is shape-changing, so we cannot reuse the _to_copy machinery
+  // like we do for whole-byte casts and have to use a custom kernel.
   if (dtype == kFloat4_e2m1fn_x2 &&
       self.scalar_type() != kFloat4_e2m1fn_x2) {
     TORCH_CHECK(

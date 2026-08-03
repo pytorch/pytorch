@@ -59,6 +59,8 @@ Tensor _convert_to_float4_e2m1fn_x2_cuda(const Tensor& self) {
   const int64_t blocks = std::min<int64_t>(
       (n_out + threads - 1) / threads, static_cast<int64_t>(65535));
   auto stream = at::cuda::getCurrentCUDAStream();
+  // TODO(future PR): use hardware intrinsics instead of bitshifting on 
+  // CUDA 10.0+
   convert_to_float4_e2m1fn_x2_kernel<<<blocks, threads, 0, stream>>>(
       input.const_data_ptr<float>(),
       reinterpret_cast<uint8_t*>(out.data_ptr()),
