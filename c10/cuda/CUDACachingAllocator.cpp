@@ -954,7 +954,11 @@ struct ExpandableSegment {
 #endif
       if (h.shareable_handle) {
 #ifndef _WIN32
-        close(std::get<int>(*h.shareable_handle));
+        // shareable_handle also holds CUmemFabricHandle for fabric segments;
+        // std::get_if skips those (no fd to close) instead of throwing.
+        if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
+          close(*fd);
+        }
 #endif
       }
 #ifdef USE_ROCM
@@ -1341,9 +1345,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     return "";
   }
   static bool nvml_init [[maybe_unused]] = []() {
-    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-    return true;
+    return NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_();
   }();
+  if (!nvml_init) {
+    TORCH_WARN_ONCE(
+        "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
+        "out-of-memory messages.");
+    return "";
+  }
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1356,10 +1365,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
       prop.pciDeviceID);
 
   nvmlDevice_t nvml_device = nullptr;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
+  if (NVML_SUCCESS !=
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-          pci_id, &nvml_device));
+          pci_id, &nvml_device)) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetHandleByPciBusId failed; omitting per-process memory "
+        "info from CUDA out-of-memory messages.");
+    return "";
+  }
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
@@ -1369,9 +1382,15 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
+  if (NVML_SUCCESS != r) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetComputeRunningProcesses failed; omitting per-process "
+        "memory info from CUDA out-of-memory messages. This is expected on "
+        "platforms with partial NVML support such as Tegra/Jetson.");
+    return "";
+  }
   unsigned int self_pid = get_self_pid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -1930,10 +1949,12 @@ class DeviceCachingAllocator {
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
-          " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          CUDAAllocatorConfig::expandable_segments()
+              ? ""
+              : " If reserved but unallocated memory is large try setting"
+                " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+                " fragmentation.  See documentation for Memory Management "
+                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
     }
 
     bool split_remainder = should_split(

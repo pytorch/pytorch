@@ -2348,7 +2348,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // In that window, timeout checks can report false positives for
       // otherwise-complete work, so we defer timeout enforcement.
       // TODO: Remove once all supported HIP runtimes include:
-      // https://github.com/ROCm/clr/pull/3176
+      // https://github.com/ROCm/rocm-systems/pull/3176
       if (!at::cuda::is_graph_capture_active()) {
         timedout = !work.exception() && work.checkTimeout();
       }

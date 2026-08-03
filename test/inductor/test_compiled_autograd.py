@@ -5667,6 +5667,13 @@ skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
 
+# Dynamo support for the curried checkpoint API is added in a later commit
+skipped_tests.add(
+    "test_checkpoint_curried_kwargs_do_not_collide_with_checkpoint_kwargs"
+)
+skipped_tests.add("test_checkpoint_zero_arg_function")
+skipped_tests.add("test_checkpoint_curried_method")
+
 # boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
 skipped_tests.add("test_custom_function_boxed_grads")
 skipped_tests.add("test_custom_function_boxed_grads_multi_output")

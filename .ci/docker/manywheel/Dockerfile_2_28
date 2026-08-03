@@ -159,7 +159,7 @@ RUN python3 -m pip install --upgrade pip && \
 # replace the libdrm in /opt/amdgpu with custom amdgpu.ids lookup path
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh /opt/amdgpu && rm install_rocm_drm.sh
-# ROCm 6.4 rocm-smi depends on system drm.h header
+# amd-smi depends on system drm.h header
 RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
@@ -178,6 +178,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
-ENV XPU_VERSION 2026.0
+ENV XPU_VERSION 2026.1
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd
