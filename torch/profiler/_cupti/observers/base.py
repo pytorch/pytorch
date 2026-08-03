@@ -149,19 +149,14 @@ class CuptiMonitorObserver:
         # windows, so it holds topology this per-window observer -- created at prepare_trace,
         # long after warm-up capture, and torn down each window -- would otherwise never see.
         if record_deps:
-            from torch.profiler._cupti._graph_deps import (
-                arm_graph_dependency_recording,
-                graph_dependencies,
-                graph_event_record_events,
-            )
+            from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
 
-            arm_graph_dependency_recording()
-            self._graph_dependencies: dict[int, list[int]] = graph_dependencies()
+            rec = _GraphDependencyRecorder()
+            rec.arm()
+            self._graph_dependencies: dict[int, list[int]] = rec.deps
             # event-record node graph_node_id -> cudaEvent_t handle, recorded by the same
             # recorder (its CUDA_EVENT record has no event handle). Shared by reference.
-            self._graph_event_record_events: dict[int, int] = (
-                graph_event_record_events()
-            )
+            self._graph_event_record_events: dict[int, int] = rec.event_record_events
         else:
             self._graph_dependencies = {}
             self._graph_event_record_events = {}

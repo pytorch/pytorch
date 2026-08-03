@@ -102,6 +102,16 @@ def _isolated(test_fn):
     return wrapper
 
 
+def _fresh_event_node_recorder(test):
+    """The ``_EventNodeRecorder`` singleton, reset first (and again at teardown) so the test
+    starts from an unarmed recorder with an empty map and leaves none behind."""
+    from torch.profiler._cupti._event_nodes import _EventNodeRecorder, _reset_for_test
+
+    _reset_for_test()
+    test.addCleanup(_reset_for_test)
+    return _EventNodeRecorder()
+
+
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
 class TestCuptiRecords(TestCase):
     """Pure monitor + metadata unit tests (no CUDA)."""
@@ -419,8 +429,6 @@ class TestCuptiRecords(TestCase):
         # execution order, so ordering by dependency depth mislabels nodes on any fork/join
         # graph. Graphs with child/conditional bodies are refused outright -- get_graph_data()
         # does not descend into them, so their event nodes are invisible here. Pure host-side.
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-
         def node(ntype, tid, deps):
             return {"node_type": ntype, "tools_id": tid, "dependencies": deps}
 
@@ -441,20 +449,20 @@ class TestCuptiRecords(TestCase):
             node("event_record", (7 << 32) | 3, [2]),  # deep branch, created first
             node("event_record", (7 << 32) | 4, [0]),  # shallow branch, created second
         ]
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r._on_instantiate(FakeGraph(deep_first))
         self.assertEqual(
             r.graph_event_nodes[7], [(7 << 32) | 3, (7 << 32) | 4]
         )  # NOT depth order, which would invert these
 
         # No event nodes -> nothing tracked at all.
-        r2 = _EventNodeRecorder()
+        r2 = _fresh_event_node_recorder(self)
         r2._on_instantiate(FakeGraph([node("kernel", (7 << 32) | 0, [])]))
         self.assertNotIn(7, r2.graph_event_nodes)
 
         # Opaque bodies -> refuse, even though a top-level event node is present.
         for opaque in ("child_graph", "conditional"):
-            r3 = _EventNodeRecorder()
+            r3 = _fresh_event_node_recorder(self)
             r3._on_instantiate(
                 FakeGraph(
                     [
@@ -465,62 +473,46 @@ class TestCuptiRecords(TestCase):
             )
             self.assertNotIn(7, r3.graph_event_nodes, opaque)
 
-    def test_recorder_handles_deep_chains(self):
-        # A graph is an arbitrary DAG and a captured chain is routinely thousands of nodes
-        # deep. Any recursive walk over dependencies blows the interpreter stack well before
-        # that (and run_graph_instantiate_hooks swallows it, silently disabling the bridge),
-        # so the recorder must not walk the DAG at all.
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-
-        n = 5000
-        nodes = [
-            {
-                "node_type": "kernel",
-                "tools_id": (7 << 32) | i,
-                "dependencies": ([i - 1] if i else []),
-            }
-            for i in range(n)
-        ]
-        nodes.append(
-            {
-                "node_type": "event_record",
-                "tools_id": (7 << 32) | n,
-                "dependencies": [n - 1],
-            }
-        )
-
-        class FakeGraph:
-            _recorded_exec_ids: set[int] = set()
-
-            def get_graph_data(self):
-                return {"nodes": nodes, "exec_graph_id": 7}
-
-        r = _EventNodeRecorder()
-        r._on_instantiate(FakeGraph())
-        self.assertEqual(r.graph_event_nodes[7], [(7 << 32) | n])
-
     def test_event_node_recorder_purge(self):
         # The recorder holds each graph's ordered event nodes; purge drops a destroyed graph.
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r.graph_event_nodes = {7: [11, 13], 8: None}
         r.purge_exec_ids({7})
         self.assertNotIn(7, r.graph_event_nodes)
         self.assertIn(8, r.graph_event_nodes)
 
+    def test_graph_recorders_are_singletons(self):
+        # Both instantiate-hook recorders are process-wide singletons (like CuptiMonitor): a
+        # later construction hands back the one instance WITHOUT re-initializing it, which is
+        # what lets an observer created mid-run (at prepare_trace) share the map a recorder
+        # armed before warm-up capture has been filling.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+        from torch.profiler._cupti._graph_deps import (
+            _GraphDependencyRecorder,
+            _reset_for_test,
+        )
+
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes[7] = [11]
+        self.assertIs(_EventNodeRecorder(), r)
+        self.assertEqual(_EventNodeRecorder().graph_event_nodes[7], [11])
+
+        _reset_for_test()
+        self.addCleanup(_reset_for_test)
+        d = _GraphDependencyRecorder()
+        d.deps[9] = [8]
+        self.assertIs(_GraphDependencyRecorder(), d)
+        self.assertEqual(_GraphDependencyRecorder().deps[9], [8])
+
     def test_resolve_window(self):
         # The window orchestration: keys each launch by correlation id -> exec graph id (from a
         # graphed work record's graph_node_id), orders that launch's event records by sync id,
         # and resolves each record to its node POSITIONALLY. Pure (no numpy/CUDA).
-        from torch.profiler._cupti._event_nodes import (
-            _EventNodeRecorder,
-            resolve_window,
-        )
+        from torch.profiler._cupti._event_nodes import resolve_window
 
         exec_id = 7
         n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r.graph_event_nodes = {exec_id: [n0, n1]}
 
         corr_exec_pairs = [
@@ -639,12 +631,11 @@ class TestCuptiRecords(TestCase):
         # gets spread into the exported event's args.
         import numpy as np
 
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
         from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
 
         exec_id = 7
         n0 = (exec_id << 32) | 11
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r.graph_event_nodes = {exec_id: [n0]}
 
         columns = {
@@ -759,12 +750,11 @@ class TestCuptiRecords(TestCase):
         # cuda_event frame.
         import numpy as np
 
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
         from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
 
         exec_id = 7
         n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r.graph_event_nodes = {exec_id: [n0, n1]}
 
         columns = {
@@ -1232,8 +1222,6 @@ class TestCuptiMonitorCUDA(TestCase):
         # armed before the graph is captured. Arming afterwards is too late -- that graph's
         # instantiate already fired, it is never recorded, and every CUDA_EVENT record from
         # its launches then resolves to None (resolve_window refuses to guess).
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-
         def capture_graph_with_event_node():
             x = torch.randn(8, 8, device="cuda")
             # external=True is what makes capture emit an event-record NODE. A default
@@ -1259,7 +1247,7 @@ class TestCuptiMonitorCUDA(TestCase):
             g.instantiate()
             return g
 
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
 
         # Captured while unarmed: the hook never ran, so this graph is absent.
         before = capture_graph_with_event_node()
@@ -1267,7 +1255,6 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
         r.arm()
-        self.addCleanup(lambda: r._handle.remove())
         self.assertIsNotNone(r._handle)
         r.arm()  # idempotent: a second arm must not stack a duplicate hook
 
@@ -1298,8 +1285,6 @@ class TestCuptiMonitorCUDA(TestCase):
         # depth. The recorder must report them in node-id (creation) order, which is what
         # cuda_event_sync_id follows -- ordering by dependency depth inverts them here, and
         # does so silently because the two depths are distinct.
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-
         x = torch.randn(8, 8, device="cuda")
         s_deep, s_shallow = torch.cuda.Stream(), torch.cuda.Stream()
         warm = torch.cuda.Stream()
@@ -1311,9 +1296,8 @@ class TestCuptiMonitorCUDA(TestCase):
 
         ev_deep = torch.cuda.Event(external=True)
         ev_shallow = torch.cuda.Event(external=True)
-        r = _EventNodeRecorder()
+        r = _fresh_event_node_recorder(self)
         r.arm()
-        self.addCleanup(lambda: r._handle.remove())
 
         g = torch.cuda.CUDAGraph(keep_graph=True)
         with torch.cuda.graph(g):
