@@ -5012,15 +5012,28 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
+        # Route __init__ to tp_init_impl explicitly: UserDefinedObjectVariable
+        # otherwise delegates it to the underlying list VT (list.__init__ is in
+        # _base_methods), bypassing the tp_init override below.
+        if name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
         # list.__init__ ignores excess keyword args when the instance's type
         # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
         # them. See the generated list___init__ wrapper's tp_new comparison:
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
-        if name == "__init__" and kwargs:
-            overrides_new = type(self.value).__new__ is not list.__new__
-            if overrides_new:
-                kwargs = {}
-        return super().call_method(tx, name, args, kwargs)
+        if kwargs and type(self.value).__new__ is not list.__new__:
+            kwargs = {}
+        # The actual init delegates to the underlying list VT via
+        # UserDefinedObjectVariable.call_method's _base_methods dispatch.
+        return super().call_method(tx, "__init__", args, kwargs)
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
