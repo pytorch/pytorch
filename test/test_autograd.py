@@ -979,6 +979,35 @@ class TestAutograd(TestCase):
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
+    def test_custom_function_setup_context_refcount(self):
+        # setup_context's return value is discarded, so the caller owns the
+        # reference and must release it. Returning a sentinel is what makes the
+        # leak observable: the documented None return is a singleton that is
+        # never freed, so a leaked reference to it is invisible. Dynamo traces
+        # setup_context rather than going through the C++ apply path, so there
+        # this only checks that returning a non-None value does not error.
+        sentinel = object()
+        initial_refcount = sys.getrefcount(sentinel)
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                return sentinel
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        x = torch.randn(3, requires_grad=True)
+        for _ in range(5):
+            MyFunc.apply(x)
+
+        self.assertEqual(sys.getrefcount(sentinel), initial_refcount)
+
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
         try:
