@@ -1548,8 +1548,12 @@ def _get_openmp_args(
         cflags.append("Xclang")
         cflags.append("fopenmp")
 
+        loaded_openmp = torch.backends.openmp.find_openmp_lib()
+        if loaded_openmp is not None:
+            libs.append(loaded_openmp)
+
         # only Apple builtin compilers (Apple Clang++) require openmp
-        omp_available = not _is_apple_clang(cpp_compiler)
+        omp_available = loaded_openmp is not None or not _is_apple_clang(cpp_compiler)
 
         # check the `OMP_PREFIX` environment first
         omp_prefix = os.getenv("OMP_PREFIX")
@@ -2503,6 +2507,8 @@ class CppBuilder:
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
                 self._libraries_args += f'"{lib}.lib" '
+            elif os.path.isabs(lib):
+                self._libraries_args += f"{shlex.quote(lib)} "
             else:
                 self._libraries_args += f"-l{lib} "
 
