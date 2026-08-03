@@ -137,8 +137,6 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
-    ContextVarExplicitValueSource,
-    ContextVarGetSource,
     DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
@@ -2560,13 +2558,14 @@ class OutputGraph(OutputGraphCommon):
         if config.replay_side_effects and self.side_effects.contextvar_mutations:
             self._cache_contextvar_get_sources(cg, stack_values)
         if config.replay_side_effects:
-            self.side_effects.codegen_contextvar_mutations(cg, log_side_effects)
+            self.side_effects.codegen_contextvar_mutations(cg)
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg, log_side_effects)
 
     def _cache_contextvar_get_sources(
         self, cg: PyCodegen, stack_values: list[VariableTracker]
     ) -> None:
+        from .source import ContextVarExplicitValueSource, ContextVarGetSource
         from .variables.hashable import HashableTracker
 
         contextvar_get_sources: OrderedSet[Source] = OrderedSet()
