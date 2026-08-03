@@ -1554,7 +1554,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         output = graph.placeholder("output")
         reduced = graph.placeholder("reduced")
         match = FlexGemmLocalReduceMatch(
-            reduced, FlexGemmLocalReduceGeometry(8, 0), "max"
+            reduced, FlexGemmLocalReduceGeometry(8, 0), reduction_type="max"
         )
         outputs = FlexGemmOutputPlan(
             output,
