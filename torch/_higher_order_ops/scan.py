@@ -46,7 +46,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
 
@@ -152,18 +151,9 @@ def scan(
     Kwargs:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
-        parallel_backward (bool): selects the backward algorithm: the default sequential reversed-scan
-            (``False``), or an associative-scan based parallel backward (``True``). The parallel backward
-            trades memory that grows with the scan length for a backward pass whose wall-clock time does
-            not scale with it, so it's only worth it for long scans; see the associative_scan-based
-            implementation in ``ScanAutogradImpl._call_backward_parallel`` for details.
-        addi_grad_chunk_budget_elems (int): only used when ``parallel_backward=True``. The parallel
-            backward's additional-inputs gradient is reduced over time in chunks to bound a
-            ``[scan_length, additional_inputs_numel]`` temporary; below this many total elements, no
-            chunking is applied. Default ``2**22``.
-        addi_grad_max_chunks (int): only used when ``parallel_backward=True``. Caps the number of chunks
-            used by the reduction above so that too many small chunks don't cost more in extra passes than
-            they save in memory. Default ``16``.
+        parallel_backward (bool): selects the sequential (default, ``False``) or associative-scan based parallel (``True``) backward algorithm; see ``ScanAutogradImpl._call_backward_parallel`` for details.
+        addi_grad_chunk_budget_elems (int): only used when ``parallel_backward=True``; below this many total elements (``scan_length * additional_inputs_numel``), no chunking is applied. Default ``2**22``.
+        addi_grad_max_chunks (int): only used when ``parallel_backward=True``; caps the number of chunks used to reduce the additional-inputs gradient over time. Default ``16``.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
