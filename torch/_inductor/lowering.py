@@ -5197,8 +5197,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if not (isinstance(self, TensorBox)):
         raise AssertionError("expected: isinstance(self, TensorBox)")
-    if "int" not in str(index.get_dtype()):
-        raise AssertionError('expected: "int" in str(index.get_dtype())')
 
     ndim = len(self.get_size())
     if ndim == 0:
@@ -5212,6 +5210,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if index.get_numel() == 0:
         return self
+
+    if "int" not in str(index.get_dtype()):
+        raise AssertionError('expected: "int" in str(index.get_dtype())')
 
     dim = _validate_dim(self, dim)
 
