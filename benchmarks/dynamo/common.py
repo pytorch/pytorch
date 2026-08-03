@@ -198,8 +198,16 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "tf_efficientnet_b0",
     "ghostnet_100",
+    "tf_efficientnet_b0",
+}
+
+# These CUDA Inductor TIMM models fail fp16 training accuracy with the default
+# eager Adam reference, but this has not been validated for non-accuracy runs,
+# non-Inductor, or ROCm periodic baselines.
+CUDA_INDUCTOR_ACCURACY_USE_SGD = {
+    "convnextv2_nano.fcmae_ft_in22k_in1k",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 # These models OOM in CI
@@ -415,7 +423,7 @@ def output_json(filename, headers, row):
                     "benchmark_values": [value],
                 }
 
-            print(json.dumps(record), file=f)
+            print(json.dumps(record, default=str), file=f)
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -456,6 +464,7 @@ def output_signpost(data, args, suite, error=None):
         "disable_output",
         "export_profiler_trace",
         "profiler_trace_name",
+        "profile_details",
         "explain",
         "stats",
         "print_memory",
@@ -1748,6 +1757,12 @@ def get_dynamo_stats():
         {
             "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
             "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            # Frames Dynamo saw but could not convert (SkipFrame / error), so
+            # they fell back to running eagerly.
+            "fallbacks_to_eager": (
+                torch._dynamo.utils.counters["frames"]["total"]
+                - torch._dynamo.utils.counters["frames"]["ok"]
+            ),
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
@@ -1855,7 +1870,17 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+            use_sgd = (
+                (name in CI_USE_SGD and self.args.ci)
+                or name in BENCHMARK_USE_SGD
+                or (
+                    torch.version.hip is None
+                    and self.args.backend == "inductor"
+                    and self.args.accuracy
+                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
+                )
+            )
+            if use_sgd:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
@@ -4331,6 +4356,27 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
+        if (
+            torch.version.hip is not None
+            and args.training
+            and args.only is not None
+            and args.only
+            in {
+                "DistillGPT2",
+            }
+        ):
+            # With the harness-wide fallback_random=True, inductor falls back
+            # to ATen rng for the dropout decomposition. That fallback Philox
+            # path indexes randoms by flat element offset, whereas eager ROCm
+            # rng indexes by (thread_id, intra_thread_iter), so the two produce
+            # different dropout masks for the same seed and trip DistillGPT2's
+            # tight accuracy tolerance (observed on ROCm/gfx942). Setting
+            # fallback_random=False re-enables inductor's replace_random passes,
+            # which align the masks with eager on that backend. Leave CUDA on
+            # the default fallback path; the Triton RNG path is not
+            # eager-equivalent there and regresses A100 DistillGPT2 accuracy.
+            inductor_config.fallback_random = False
+
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
             args.device_index = "0"
@@ -4640,15 +4686,20 @@ def run(runner, args, original_dir=None):
     args.profile_details = {}
     if args.export_profiler_trace:
         if should_profile_details:
+            device_activity = {
+                "cuda": torch.profiler.ProfilerActivity.CUDA,
+                "xpu": torch.profiler.ProfilerActivity.XPU,
+            }
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            for dev in args.devices:
+                if dev in device_activity:
+                    activities.append(device_activity[dev])
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
-                "activities": [
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
+                "activities": activities,
             }
 
         if args.profiler_trace_name is None:

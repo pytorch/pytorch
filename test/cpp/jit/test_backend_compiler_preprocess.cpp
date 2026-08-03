@@ -59,7 +59,7 @@ c10::IValue preprocess(
       }
       ss << ',';
     }
-    std::string blob = ss.str();
+    std::string blob = std::move(ss).str();
     if (!blob.empty()) {
       blob.pop_back();
     }
