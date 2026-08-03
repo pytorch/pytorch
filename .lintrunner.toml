@@ -37,6 +37,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -67,7 +69,8 @@ include_patterns = [
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
-    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/**/group_norm*',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -162,6 +165,8 @@ include_patterns = [
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
+    'aten/src/ATen/native/group_norm*',
+    'aten/src/ATen/native/cpu/group_norm*',
     'aten/src/ATen/native/nested/cuda/*.cpp',
     'aten/src/ATen/native/nested/cuda/*.h',
     'aten/src/ATen/native/nested/*.cpp',
@@ -410,6 +415,8 @@ include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -422,6 +429,8 @@ include_patterns=['.github/workflows/**/*.yml']
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -983,6 +992,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -1001,6 +1012,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1119,6 +1132,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1205,6 +1220,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1223,6 +1240,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1234,6 +1253,8 @@ code = 'CODESPELL'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1269,6 +1290,8 @@ include_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1552,6 +1575,8 @@ code = 'PYPROJECT'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1566,6 +1591,8 @@ code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1650,6 +1677,8 @@ exclude_patterns = [
 command = [
     'uv',
     'run',
+    '--python',
+    '3.10',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1900,7 +1929,10 @@ command = [
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
-    'torch/csrc/inductor/aoti_torch/c/shim.h'
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
 ]
 command = [
     'python3',
@@ -1917,6 +1949,9 @@ include_patterns = [
     # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want
     # to update that file.
     'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/c/shim_xpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h',
     'torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h',

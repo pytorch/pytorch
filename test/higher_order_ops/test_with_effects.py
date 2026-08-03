@@ -309,8 +309,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             lib.impl("op_a", lambda x: None, "Meta")
             lib.impl("op_b", lambda x: x + 1, "CompositeExplicitAutograd")
             lib.impl("op_b", lambda x: torch.empty_like(x), "Meta")
-            torch.library._register_effectful_op("mylib::op_a", _EffectType.ORDERED)
-            torch.library._register_effectful_op("mylib::op_b", _EffectType.ORDERED)
+            torch.library._register_effectful_op(
+                "mylib::op_a", _EffectType.ORDERED, lib=lib
+            )
+            torch.library._register_effectful_op(
+                "mylib::op_b", _EffectType.ORDERED, lib=lib
+            )
 
             op_b = torch.ops.mylib.op_b.default
 
@@ -342,6 +346,57 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 self.assertLess(pos_a, pos_b, "op_a must be emitted before op_b")
             finally:
                 del lowerings[op_b]
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_inductor_pins_effectful_op_input_buffers(self):
+        # An ORDERED effectful op may retain its input tensor in hidden state
+        # that inductor cannot see (e.g. a torchbind queue). The with_effects
+        # lowering must therefore add that input buffer to never_reuse_buffers
+        # so its storage is never recycled for a later buffer; otherwise the
+        # retained tensor is silently corrupted. We assert the pin directly
+        # (buffer in never_reuse_buffers) rather than via numerics, since
+        # whether the scheduler would actually recycle a given buffer depends
+        # on fusion/memory-planning heuristics and is not a stable signal.
+        from unittest import mock
+
+        from torch._inductor.graph import GraphLowering
+
+        captured_graphs = []
+        orig_init = GraphLowering.__init__
+
+        def capture_init(self, *args, **kwargs):
+            orig_init(self, *args, **kwargs)
+            captured_graphs.append(self)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            # stash has no ScriptObject argument and is registered ORDERED
+            # manually, so it exercises the case where pinning must not be
+            # scoped to torchbind-argument ops: a ScriptObject arg only
+            # triggers the default effect, it is not required for an op to be
+            # effectful and retain its inputs.
+            torch.library.define("mylib::stash", "(Tensor x) -> ()", lib=lib)
+            lib.impl("stash", lambda x: None, "CompositeExplicitAutograd")
+            lib.impl("stash", lambda x: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::stash", _EffectType.ORDERED, lib=lib
+            )
+
+            def f(x):
+                torch.ops.mylib.stash(x + 1)
+                return x * 3
+
+            x = torch.arange(64, dtype=torch.float32)
+            torch._dynamo.reset()
+            with mock.patch.object(GraphLowering, "__init__", capture_init):
+                torch.compile(f, fullgraph=True, backend="inductor")(x)
+
+            pinned = set()
+            for graph in captured_graphs:
+                pinned |= set(graph.never_reuse_buffers)
+            # The buffer holding `x + 1` (the effectful op's input) must be
+            # pinned; without the fix this set is empty.
+            self.assertTrue(pinned, "no buffers were pinned for the effectful op")
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):

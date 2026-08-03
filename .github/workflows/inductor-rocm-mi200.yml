@@ -2,8 +2,8 @@
 name: inductor-rocm-mi200
 
 on:
-  #schedule:
-    #- cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
     #branches:
       #- release/*
@@ -43,8 +43,10 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "inductor", shard: 1, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "inductor", shard: 2, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "inductor", shard: 3, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "inductor", shard: 4, num_shards: 4, runner: "linux.rocm.gpu.mi210.1" },
         ]}
     secrets: inherit
 

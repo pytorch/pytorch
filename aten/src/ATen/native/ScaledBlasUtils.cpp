@@ -556,4 +556,60 @@ void validate_scaled_mm_v2_inputs(
   }
 }
 
+// Recipe-independent validation for `_scaled_grouped_mm_v2`. Mirrors the
+// non-recipe checks at the top of `_scaled_grouped_mm_cuda_v2` so that
+// torch.compile tracing fails fast with the same messages users get in eager.
+// Per-recipe scale-shape checks (`_check_scales_*`), the device-capability
+// gate, and the `find_scaled_gemm_impl` dispatch stay in the kernel -- they
+// depend on layout/arch and the (data-dependent) offset values.
+//
+// Uses sym_size() so dynamic-shape tracing through Dynamo still goes through
+// this path -- raw size() throws on symbolic shapes.
+void validate_scaled_grouped_mm_v2_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    at::OptionalTensorRef offs,
+    at::OptionalTensorRef bias,
+    ArrayRef<int64_t> contraction_dim,
+    std::optional<c10::ScalarType> out_dtype) {
+  TORCH_CHECK_VALUE(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK_VALUE(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+
+  if (!a_is_2d || !b_is_2d) {
+    if (!contraction_dim.empty()) {
+      TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
+      const int dim_a = contraction_dim[0], dim_b = contraction_dim[1];
+      TORCH_CHECK_VALUE(mat_a.sym_size(dim_a) == mat_b.sym_size(dim_b),
+          "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ",
+          mat_a.sym_size(dim_a), " and ", mat_b.sym_size(dim_b));
+      // Note: only (-1, -2) is currently supported
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
+    } else {
+      TORCH_CHECK_VALUE(mat_a.sym_size(-1) == mat_b.sym_size(-2),
+          "contraction dimension of mat_a and mat_b must match");
+    }
+  }
+  TORCH_CHECK_VALUE(
+      mat_a.sym_size(-1) % 16 == 0,
+      "Expected trailing dimension of mat_a to be divisible by 16 ",
+      "but got mat1 shape: (", mat_a.sym_sizes(), ").");
+  TORCH_CHECK_VALUE(
+      mat_b.sym_size(-2) % 16 == 0 && mat_b.sym_size(-1) % 16 == 0,
+      "Expected mat_b shape to be divisible by 16 ",
+      "but got mat_b shape: (", mat_b.sym_sizes(), ").");
+
+  TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
+  TORCH_CHECK_VALUE(offs.has_value() == (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
+
+  if (offs.has_value()) {
+    TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+
+  const auto out_dtype_ = out_dtype.value_or(ScalarType::BFloat16);
+  TORCH_CHECK_VALUE(out_dtype_ == ScalarType::BFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+}
+
 }  // at::scaled

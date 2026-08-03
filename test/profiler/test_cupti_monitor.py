@@ -460,6 +460,241 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(args["func"], "AllReduce")
         self.assertEqual(args["count"], 4096)
 
+    def test_graph_kernel_reassigned_to_logical_lane(self):
+        # A graphed kernel the lane resolver maps to a logical lane is placed on that lane
+        # (tid + args["stream"]), its real CUDA stream is preserved as original_stream, the
+        # lane is named by the resolver, and its ac2g flow arrow follows -- all in the single
+        # merge pass, so no read-trace/reassign/rewrite round trip is needed. A kernel the
+        # resolver leaves on its CUDA stream is untouched (no original_stream) and its lane
+        # keeps the default "stream N" name. Reassignment is driven by the logical_lane /
+        # lane_name columns the observer fills from the lane resolver (supplied here
+        # directly). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),  # both replayed on the capture stream
+                "correlation_id": i64(11, 12),
+                "graph_id": i64(1, 1),
+                # graph id packed into the upper 32 bits; only the lower node id is kept
+                "graph_node_id": i64((1 << 32) | 101, (1 << 32) | 102),
+                "name": np.array(["graphKernelA", "graphKernelB"], dtype=object),
+                "annotation": np.array(
+                    [{"ann_id": "a"}, {"ann_id": "b"}], dtype=object
+                ),
+                # resolver output: A -> lane 8 named "side comms"; B -> its own stream 7 (no move)
+                "logical_lane": i64(8, 7),
+                "lane_name": np.array(["side comms", None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(1, 1),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            }
+        }
+        metadata, events = _trace_window_entries({"columns": columns}, base_ns=0)
+        kernels = {e["name"]: e for e in events if e.get("cat") == "kernel"}
+
+        # resolved to a logical lane: moved onto lane 8, real CUDA stream preserved
+        a = kernels["graphKernelA"]
+        self.assertEqual(a["tid"], 8)
+        self.assertEqual(a["args"]["stream"], 8)
+        self.assertEqual(a["args"]["original_stream"], 7)
+        self.assertEqual(a["args"]["ann_id"], "a")
+        self.assertEqual(a["args"]["graph node id"], 101)
+
+        # resolver left it on its CUDA stream lane: untouched, no original_stream
+        b = kernels["graphKernelB"]
+        self.assertEqual(b["tid"], 7)
+        self.assertEqual(b["args"]["stream"], 7)
+        self.assertNotIn("original_stream", b["args"])
+
+        # the ac2g flow arrow for the reassigned kernel follows it to lane 8
+        flow_by_id = {
+            e["id"]: e for e in events if e.get("cat") == "ac2g" and e.get("ph") == "f"
+        }
+        self.assertEqual(flow_by_id[11]["tid"], 8)
+        self.assertEqual(flow_by_id[12]["tid"], 7)
+
+        # the reassigned lane is named by the resolver; the default lane keeps "stream N"
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in metadata
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, 8)], "side comms")
+        self.assertEqual(names[(0, 7)].strip(), "stream 7")
+
+    def test_gpu_user_annotation_stays_on_capture_stream(self):
+        # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
+        # resolver reassigned kernels onto. But when a capture stream has no work left to
+        # show (all its ops moved to a logical lane), the span would be orphaned on an empty
+        # lane, so it is dropped instead. A stream that still has non-reassigned work keeps
+        # its annotation. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "external_correlation": {
+                "correlation_id": i64(11, 12, 13, 14),
+                "user_external_id": i64(555, 666, 777, 999),
+            },
+            "kernel": {
+                "correlation_id": i64(11, 12, 13, 14),
+                "device_id": i64(0, 0, 0, 0),
+                "stream_id": i64(7, 9, 5, 5),
+                "start_ns": i64(1000, 3000, 5000, 5500),
+                "end_ns": i64(2000, 4000, 6000, 6500),
+                # k11 graphed -> lane 8 (orphans stream 7); k12 eager on 9; k13 graphed -> lane
+                # 6 but k14 is eager on the same stream 5, so stream 5 still shows work.
+                "graph_node_id": i64(101, 0, 103, 0),
+                "logical_lane": i64(8, 9, 6, 5),
+            },
+        }
+        trace_window = {
+            "columns": columns,
+            "user_annotations": {
+                555: "all_reduce",
+                666: "matmul",
+                777: "reduce_scatter",
+            },
+        }
+        events = _gpu_user_annotation_events(trace_window, base_ns=0)
+        by_name = {e["name"]: e for e in events}
+
+        # graphed op moved off stream 7 and nothing else renders there -> annotation dropped
+        self.assertNotIn("all_reduce", by_name)
+        # eager: stays on the kernel's capture stream
+        self.assertEqual(by_name["matmul"]["cat"], "gpu_user_annotation")
+        self.assertEqual(by_name["matmul"]["tid"], 9)
+        # stream 5 still has non-reassigned work (k14), so its annotation is kept there
+        self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
+
+    def test_graph_dependency_flows_json(self):
+        # CUDA-graph node->node dependency arrows in the JSON export: one flow per edge from the
+        # predecessor's end to the successor's start, resolved within the same replay
+        # (correlation_id) so arrows never cross replays, on the ops' display lanes. No CUDA.
+        from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
+
+        # replay 100: node 11 on lane 7 [1000,2000]; node 12 on lane 8 [3000,4000], 12 -> 11.
+        # replay 200 repeats the same nodes and stays self-contained.
+        node_rows = [
+            (100, 11, 0, 7, 1000, 2000),
+            (100, 12, 0, 8, 3000, 4000),
+            (200, 11, 0, 7, 5000, 6000),
+            (200, 12, 0, 8, 7000, 8000),
+        ]
+        events = _graph_dependency_flow_events(node_rows, {12: [11]}, base_ns=0)
+        starts = [e for e in events if e["ph"] == "s"]
+        fins = [e for e in events if e["ph"] == "f"]
+        self.assertEqual(len(starts), 2)  # one edge per replay
+        self.assertEqual(len(fins), 2)
+        s0 = starts[0]
+        f0 = next(f for f in fins if f["id"] == s0["id"])
+        # arrow leaves the predecessor's end on its lane and lands on the successor's start
+        self.assertEqual((s0["tid"], s0["ts"]), (7, 2.0))
+        self.assertEqual((f0["tid"], f0["ts"], f0["bp"]), (8, 3.0, "e"))
+        self.assertNotEqual(
+            starts[0]["id"], starts[1]["id"]
+        )  # replays don't share a flow
+        # no recorded dependencies -> no flows
+        self.assertEqual(_graph_dependency_flow_events(node_rows, {}, base_ns=0), [])
+
+        # Clock skew: predecessor 13 ends at 4400 -- AFTER successor 14 starts at 3500 -- so the
+        # flow goes end(4.4) -> start(3.5), i.e. backwards. The JSON export renders that oddly (a
+        # known limitation, see the function docstring); the .pftrace export does not.
+        skewed = [
+            (300, 13, 0, 7, 1000, 4400),
+            (300, 14, 0, 8, 3500, 4500),
+        ]
+        ev = _graph_dependency_flow_events(skewed, {14: [13]}, base_ns=0)
+        s = next(e for e in ev if e["ph"] == "s")
+        f = next(e for e in ev if e["ph"] == "f")
+        self.assertEqual(
+            (s["ts"], f["ts"]), (4.4, 3.5)
+        )  # end -> start, backwards under skew
+
+    def test_cpu_launch_flow_targets_only_graph_roots(self):
+        # With graph node->node arrows drawn (graph_deps present), the CPU-launch -> GPU-op flow
+        # links only to root graph nodes; a non-root node gets its incoming edge from the dep
+        # arrow, so the cudaGraphLaunch does not fan out to every replayed kernel. Diamond, one
+        # replay (shared correlation): A (root) -> B, A -> C, {B, C} -> D. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*v):
+            return np.array(v, dtype=np.int64)
+
+        A, B, C, D, corr = 1001, 1002, 1003, 1004, 77
+        kernel = {
+            "start_ns": i64(1000, 3000, 3000, 5000),  # A, B||C, D
+            "end_ns": i64(2000, 4000, 4000, 6000),
+            "device_id": i64(0, 0, 0, 0),
+            "context_id": i64(1, 1, 1, 1),
+            "stream_id": i64(7, 7, 7, 7),
+            "correlation_id": i64(corr, corr, corr, corr),
+            "graph_id": i64(1, 1, 1, 1),
+            "graph_node_id": i64(A, B, C, D),
+            "name": np.array(["A", "B", "C", "D"], dtype=object),
+            "annotation": np.array([None] * 4, dtype=object),
+            "grid_x": i64(1, 1, 1, 1),
+            "grid_y": i64(1, 1, 1, 1),
+            "grid_z": i64(1, 1, 1, 1),
+            "block_x": i64(1, 1, 1, 1),
+            "block_y": i64(1, 1, 1, 1),
+            "block_z": i64(1, 1, 1, 1),
+            "registers_per_thread": i64(0, 0, 0, 0),
+            "static_shared_memory": i64(0, 0, 0, 0),
+            "dynamic_shared_memory": i64(0, 0, 0, 0),
+            "priority": i64(0, 0, 0, 0),
+            "queued": i64(0, 0, 0, 0),
+            "channel": i64(0, 0, 0, 0),
+            "channel_type": i64(0, 0, 0, 0),
+        }
+        window = {
+            "columns": {"kernel": kernel},
+            "user_annotations": {},
+            "graph_deps": {B: [A], C: [A], D: [B, C]},
+        }
+        _, events = _trace_window_entries(window, base_ns=0)
+        # Launch flow = "f" events keyed by the correlation id; only the root A (ts 1.0us) keeps it.
+        launch_ts = [
+            e["ts"] for e in events if e.get("ph") == "f" and e.get("id") == corr
+        ]
+        self.assertEqual(launch_ts, [1.0])
+        # The four dep edges are drawn as arrows (1<<40 flow-id base): A->B, A->C, B->D, C->D.
+        dep_starts = [
+            e for e in events if e.get("ph") == "s" and e.get("id", 0) >= (1 << 40)
+        ]
+        self.assertEqual(len(dep_starts), 4)
+        # Deps OFF: every kernel keeps its launch flow (no suppression).
+        window["graph_deps"] = {}
+        _, ev_off = _trace_window_entries(window, base_ns=0)
+        off = [e for e in ev_off if e.get("ph") == "f" and e.get("id") == corr]
+        self.assertEqual(len(off), 4)
+
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
@@ -739,15 +974,10 @@ class TestCuptiMonitorCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_approx_timestamp_callback_engages_under_udr(self):
-        # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
-        # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
-        # clock. Unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
-        # user-defined records), the subscriber attribute coexists with the UDR path. It only
-        # re-times device records when the monitor subscribes before any CUDA context exists
-        # (cuptiSubscribe otherwise latches device correlation on the pre-existing context), so
-        # this runs in an inline-script child that never imports common_cuda (which would init
-        # CUDA at import) and subscribes first. Assert the callback engaged and that device
-        # records land on the approx clock (~1e14-1e15 ticks), not CLOCK_REALTIME ns (~1e18).
+        # use_approx hands CUPTI a per-subscriber timestamp callback so records ride the
+        # profiler's approx clock. Runs in a child that subscribes before any CUDA context
+        # (use_approx is snapshotted at singleton construction). Assert the callback engaged and
+        # device records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         script = textwrap.dedent(
             """
             import torch
@@ -785,50 +1015,145 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertIn("OK", p.stdout)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_approx_timestamp_callback_skipped_with_existing_context(self):
-        # cuptiSubscribe latches device-record correlation against a pre-existing CUDA context,
-        # so the (post-subscribe) per-subscriber callback can't re-time device records. When a
-        # context already exists, the monitor must refuse to engage rather than silently drop
-        # device records; collection still proceeds on the CLOCK_REALTIME pass-through.
+    def test_approx_timestamp_callback_engages_with_existing_context(self):
+        # With a CUDA context already established, use_approx must still re-time DEVICE records
+        # onto the approx clock. Reset the singleton so use_approx (snapshotted at construction)
+        # takes effect, establish a context first, then assert the callback engaged and device
+        # records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.cupti_python import CuptiError, pylibcupti
         from torch.profiler._cupti.monitor import CuptiMonitor
         from torch.profiler._cupti.records import Kernel
 
-        kind = ActivityKind.CONCURRENT_KERNEL
-        want = {kind: {Kernel.START, Kernel.END}}
+        if pylibcupti().get_version() < 130303:
+            self.skipTest(
+                "libcupti cannot re-time device records with an existing context"
+            )
+
+        cupti_monitor._reset_for_test()
+        self.addCleanup(cupti_monitor._reset_for_test)
+
+        # Establish a CUDA context first: this is the pre-existing-context case.
         torch.randn(8, device="cuda").sum().item()
         torch.cuda.synchronize()
         self.assertTrue(torch.cuda.is_initialized())
 
-        lock = threading.Lock()
-        columns: list = []
+        kind = ActivityKind.CONCURRENT_KERNEL
+        seen: list = []
         cupti_monitor.configure(use_approx_timestamps=True)
-        monitor = CuptiMonitor()
+        m = CuptiMonitor()
 
         def on_columns(cols):
             if kind in cols:
-                with lock:
-                    columns.append(cols[kind])
+                seen.append(cols[kind])
 
         try:
-            obs = monitor.register(want, on_columns)
+            obs = m.register({kind: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
-            self.skipTest(f"monitor could not subscribe: {e}")
-        self.addCleanup(monitor.unregister, obs)
-        self.assertFalse(monitor._timestamp_callback_active)
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.assertTrue(m._timestamp_callback_active, "callback did not engage")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(4):
+                x = torch.relu(x @ x)
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
 
-        x = torch.randn(256, 256, device="cuda")
-        for _ in range(4):
-            x = torch.relu(x @ x)
-        x.sum().item()
-        torch.cuda.synchronize()
-        monitor.flush(sync=True)
-        monitor.unregister(obs)
+        starts = [int(v) for c in seen for v in c[int(Kernel.START)]]
+        self.assertTrue(starts, "no kernel records")
+        self.assertLess(
+            max(starts), 1e17, f"device records off the approx clock: {max(starts)}"
+        )
 
-        self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_noisy_apis_suppressed_at_collection(self):
+        # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
+        # should keep the pure-noise cbids out of the records. Assert 0 records for them while
+        # kernels + other records still flow (so the check is not vacuous).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import (
+            _noisy_driver_cbids,
+            _noisy_runtime_cbids,
+            CuptiError,
+            pylibcupti,
+        )
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Api, Kernel
+
+        if pylibcupti().get_version() < 130303:
+            self.skipTest("libcupti predates the UDR per-cbid disable fix")
+
+        noisy_runtime = set(_noisy_runtime_cbids())
+        noisy_driver = set(_noisy_driver_cbids())
+        self.assertTrue(
+            noisy_runtime, "no noisy runtime cbids resolved from the cupti enum"
+        )
+
+        runtime_seen: dict[int, int] = {}
+        driver_seen: dict[int, int] = {}
+        kernels = 0
+
+        def cb(cols):
+            nonlocal kernels
+            for kind, seen in (
+                (ActivityKind.RUNTIME, runtime_seen),
+                (ActivityKind.DRIVER, driver_seen),
+            ):
+                col = cols.get(kind)
+                if col and int(Api.CBID.id) in col:
+                    for v in col[int(Api.CBID.id)]:
+                        seen[int(v)] = seen.get(int(v), 0) + 1
+            kk = cols.get(ActivityKind.CONCURRENT_KERNEL)
+            if kk:
+                kernels += len(next(iter(kk.values())))
+
+        cupti_monitor.configure(buffer_size=1 << 20)
+        m = CuptiMonitor()
+        want = {
+            ActivityKind.CONCURRENT_KERNEL: {Kernel.START, Kernel.END},
+            ActivityKind.RUNTIME: {Api.CBID},
+            ActivityKind.DRIVER: {Api.CBID},
+        }
+        try:
+            obs = m.register(want, cb)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        try:
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(50):
+                x = torch.relu(
+                    x @ x
+                )  # each op calls cudaGetDevice/GetLastError internally
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+        finally:
+            m.unregister(obs)
+
+        # Records must actually be flowing, else the assertions below are vacuous.
+        self.assertGreater(kernels, 0, "no kernel records -- monitor not collecting")
+        self.assertGreater(
+            sum(runtime_seen.values()), 0, "no RUNTIME records collected"
+        )
+
+        leaked_rt = {c: n for c, n in runtime_seen.items() if c in noisy_runtime}
+        self.assertEqual(
+            leaked_rt, {}, f"noisy runtime cbids not suppressed: {leaked_rt}"
+        )
+        # DRIVER records only flow on some stacks (e.g. NCCL/driver launches); assert only when
+        # driver records are present so the check stays meaningful rather than vacuous.
+        if driver_seen:
+            leaked_dr = {c: n for c, n in driver_seen.items() if c in noisy_driver}
+            self.assertEqual(
+                leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
+            )
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
