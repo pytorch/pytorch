@@ -32,6 +32,4 @@ if _ops_ns is not None and hasattr(_ops_ns, "my_exception_what"):
 
     def my_exception_get_what_without_backtrace() -> str:
         """Stable exception what-without-backtrace shim (ABI >= 2.13 builds)."""
-        return (
-            torch.ops.libtorch_agn_frozen.my_exception_get_what_without_backtrace.default()
-        )
+        return torch.ops.libtorch_agn_frozen.my_exception_get_what_without_backtrace.default()

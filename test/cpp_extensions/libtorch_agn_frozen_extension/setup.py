@@ -22,9 +22,9 @@ from setuptools import find_packages, setup
 
 import torch
 from torch.utils.cpp_extension import (
-    CUDA_HOME,
     BuildExtension,
     CppExtension,
+    CUDA_HOME,
     CUDAExtension,
     IS_WINDOWS,
 )
@@ -33,6 +33,7 @@ from torch.utils.cpp_extension import (
 ROOT_DIR = Path(__file__).parent
 CSRC_DIR = ROOT_DIR / "csrc"
 PACKAGE = "libtorch_agn_frozen"
+
 
 # Same encoding as the other libtorch_agn_*_extension setup.py files:
 #   (major, minor) -> 0xMMNN000000000000
