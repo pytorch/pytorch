@@ -384,18 +384,18 @@ void device_synchronize(DeviceIndex device) {
   }
   check_device_index(device);
 
-  bool synced_device_wide = false;
+  bool ext_oneapi_device_wait_supported = false;
 // TODO: drop the legacy fallback below once a driver supporting
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
 #if SYCL_COMPILER_VERSION >= 20260100
   if (c10::xpu::get_raw_device(device).has(
           sycl::aspect::ext_oneapi_device_wait)) {
     c10::xpu::get_raw_device(device).ext_oneapi_wait_and_throw();
-    synced_device_wide = true;
+    ext_oneapi_device_wait_supported = true;
   }
 #endif
 
-  if (!synced_device_wide) {
+  if (!ext_oneapi_device_wait_supported) {
     initXPUStreamsOnce();
     // Initializes the stream pools (once)
     initDeviceStreamOnce(device);
