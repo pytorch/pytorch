@@ -197,7 +197,9 @@ class TestGetSetItem(TestCase):
         self.assertIsInstance(result1, Tensor)
 
         # Use mask with correct shape
-        correct_mask = torch.tensor([True, False, True, False, False, True, True], device=device)
+        correct_mask = torch.tensor(
+            [True, False, True, False, False, True, True], device=device
+        )
         result2 = tensor[..., correct_mask]
         self.assertIsInstance(result2, torch.Tensor)
 
