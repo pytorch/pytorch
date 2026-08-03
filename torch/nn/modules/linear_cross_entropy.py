@@ -1471,6 +1471,17 @@ def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
     #  batch_chunk_size, acc_policy, acc_dtype).
     input, linear_weight, target, linear_bias, weight = ctx.saved_tensors
     needs = ctx.needs_input_grad
+    if needs[2]:
+        # needs[2] is the target slot. This backward never sets result[2], so a
+        # probability target requiring grad would silently get no gradient.
+        # Raise instead, matching the scalar op's intent (whose forward guard
+        # covers the same case). Unreachable in eager -- functional.py routes a
+        # grad-requiring target to the reference -- but reliable under tracing,
+        # where needs_input_grad reflects the actual requested gradients.
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: gradients w.r.t. a probability "
+            "target are not supported on the chunked path; use options=None."
+        )
     compute_input_grad = needs[0]
     compute_linear_weight_grad = needs[1]
     compute_linear_bias_grad = linear_bias is not None and needs[3]

@@ -402,6 +402,8 @@ class TORCH_API Context {
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
+  bool preferCublasltGroupedGemm() const;
+  void setPreferCublasltGroupedGemm(bool /*b*/);
 
   // Matmuls can use a so-called "persistent" kernel which launches one CUDA
   // block for each SM on the GPU, and each block then iterates over multiple
@@ -504,6 +506,7 @@ class TORCH_API Context {
   CuBLASReductionOption allow_bf16_reduction_cublas =
       CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
+  bool prefer_cublaslt_grouped_gemm = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
   bool allow_tf32_onednn = false;

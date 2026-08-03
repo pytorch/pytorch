@@ -505,6 +505,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
+    std::string logPrefix_;
     friend class ProcessGroupNCCL;
   };
 
@@ -929,6 +930,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const GatherOptions& opts = GatherOptions()) override;
+
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -938,10 +944,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
