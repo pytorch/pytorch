@@ -23,7 +23,7 @@ def my_has_storage(t) -> bool:
 
 
 def my_bitwise_and(self, other):
-    """Stable ``bitwise_and.Tensor`` (2.14+)."""
+    """Stable ``bitwise_and.Tensor`` (requires build time 2.14+)."""
     return torch.ops.libtorch_agn_2_14.my_bitwise_and.default(self, other)
 
 
