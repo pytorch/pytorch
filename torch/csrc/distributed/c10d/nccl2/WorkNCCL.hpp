@@ -91,9 +91,6 @@ class WorkNCCL : public c10d::Work {
   void setSequenceNumber(uint64_t seq) {
     seq_ = seq;
   }
-  void setOwnedEphemeralTimeout(std::chrono::milliseconds timeout) {
-    owned_ephemeral_timeout_ = timeout;
-  }
 
  protected:
   void recordStart(std::string_view coll_name);
@@ -125,8 +122,6 @@ class WorkNCCL : public c10d::Work {
   at::cuda::CUDAStream stream_;
 
   std::chrono::milliseconds timeout_ms_;
-  std::chrono::milliseconds owned_ephemeral_timeout_{0};
-  std::atomic<bool> ephemeral_timeout_released_{false};
   // Whether the events above were created with CUDA timing enabled, i.e.
   // whether getDuration() can be served for this work.
   bool timing_enabled_{false};

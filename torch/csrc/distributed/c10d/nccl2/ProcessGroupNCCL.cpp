@@ -185,7 +185,7 @@ void ProcessGroupNCCL::initNcclResources() {
   publishComm();
 }
 
-void ProcessGroupNCCL::initFromComm(
+void ProcessGroupNCCL::initFromSplitComm(
     ncclComm_t comm,
     at::Device device,
     std::shared_ptr<NcclApi> nccl_api) {
@@ -280,7 +280,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
-  child->initFromComm(new_comm, device_, nccl_api_);
+  child->initFromSplitComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
