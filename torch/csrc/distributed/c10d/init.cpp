@@ -2751,6 +2751,14 @@ Arguments:
             py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::ProcessGroup::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
@@ -3056,6 +3064,14 @@ Arguments:
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::Backend::addEphemeralTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Temporarily extends timeouts for subsequently issued work.
+
+Unsupported backends ignore this call. This API is experimental and subject to change.)")
           .def(
               "shrink",
               &::c10d::Backend::shrink,
@@ -3796,13 +3812,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_add_ephemeral_timeout",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const std::chrono::milliseconds& timeout) {
-                self->addEphemeralTimeout(timeout);
-              },
-              py::arg("timeout"))
-          .def(
               "_verify_work_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                  const c10::intrusive_ptr<::c10d::Work>& work,
@@ -4172,10 +4181,6 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_add_ephemeral_timeout",
-              &::c10d::nccl2::ProcessGroupNCCL::addEphemeralTimeout,
-              py::arg("timeout"))
-          .def(
               "_verify_work_timeout",
               &::c10d::nccl2::ProcessGroupNCCL::verifyWorkTimeoutForTest,
               py::arg("work"),
@@ -4221,10 +4226,6 @@ Returns:
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_add_ephemeral_timeout",
-          &::c10d::nccl2::ProcessGroupNCCLLazy::addEphemeralTimeout,
-          py::arg("timeout"))
       .def(
           "_verify_work_timeout",
           &::c10d::nccl2::ProcessGroupNCCLLazy::verifyWorkTimeoutForTest,

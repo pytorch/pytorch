@@ -6,7 +6,9 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
@@ -49,6 +51,9 @@ class NCCLBootstrap {
 
  private:
   ncclUniqueId exchangeUniqueId(std::string_view name);
+  std::vector<ncclUniqueId> exchangeUniqueIds(
+      std::string_view name,
+      int numIds);
 
  private:
   const std::chrono::milliseconds timeout_;
