@@ -7655,6 +7655,13 @@
     CUDA: _convert_to_float4_e2m1fn_x2_cuda
     Meta: _convert_to_float4_e2m1fn_x2_meta
 
+- func: _convert_from_float4_e2m1fn_x2(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _convert_from_float4_e2m1fn_x2_cpu
+    CUDA: _convert_from_float4_e2m1fn_x2_cuda
+    Meta: _convert_from_float4_e2m1fn_x2_meta
+
 - func: quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:

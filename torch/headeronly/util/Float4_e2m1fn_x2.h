@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 
 #include <torch/headeronly/macros/Macros.h>
@@ -31,14 +32,15 @@ namespace detail {
 inline C10_HOST_DEVICE uint8_t fp4e2m1_from_fp32_value(float f) {
   constexpr uint32_t denorm_mask_int = 149u << 23;
   const float denorm_mask_float = c10::bit_cast<float>(denorm_mask_int);
-  // (exp_bias - F32_EXP_BIAS) << MBITS_F32 + magic_adder == (-126 << 23) + 2^21-1
+  // (exp_bias - F32_EXP_BIAS) << MBITS_F32 + magic_adder == (-126 << 23) +
+  // 2^21-1
   constexpr int32_t val_to_add = -1054867457;
 
   const uint32_t bits = c10::bit_cast<uint32_t>(f);
   const uint32_t sign = bits & 0x80000000u;
   const float x = c10::bit_cast<float>(bits ^ sign);
 
-  uint8_t mag;
+  uint8_t mag = 0;
   if (x >= 6.0f) {
     // saturate to max magnitude code
     mag = 7;
@@ -56,6 +58,17 @@ inline C10_HOST_DEVICE uint8_t fp4e2m1_from_fp32_value(float f) {
   }
   const uint8_t sign_lp = static_cast<uint8_t>(sign >> 28) & 0x8;
   return (mag | sign_lp) & 0xF;
+}
+
+/// Convert a single 4-bit e2m1 code (in the low nibble of a uint8_t) back to
+/// fp32. e2m1 has only 8 magnitudes, so the magnitude is a direct table lookup
+/// (indexed by the 3 sign-less bits); the sign bit (bit 3) is applied
+/// separately. This is the inverse of fp4e2m1_from_fp32_value.
+inline C10_HOST_DEVICE float fp4e2m1_to_fp32_value(uint8_t code) {
+  constexpr std::array<float, 8> mag_lut = {
+      0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f};
+  const float mag = mag_lut[code & 0x7];
+  return (code & 0x8) ? -mag : mag;
 }
 
 } // namespace detail

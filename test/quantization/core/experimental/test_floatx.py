@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
+    _floatx_unpacked_to_f32,
     FP4_EBITS,
     FP4_MBITS,
     pack_uint4,
@@ -494,7 +495,82 @@ class TestFloat4Dtype(TestCase):
             x = torch.randn(2, n, device=device)
             torch._dynamo.mark_dynamic(x, 1)
             out = compiled(x)
-            self.assertEqual(out.view(torch.uint8), fn(x).view(torch.uint8), atol=0, rtol=0)
+            self.assertEqual(
+                out.view(torch.uint8), fn(x).view(torch.uint8), atol=0, rtol=0
+            )
+        # a single graph should cover every size if the last dim stays symbolic
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_float4_e2m1fn_x2_cast_from(self, device):
+        # decode all 16 codes (8 magnitudes x sign), two per byte, and match the
+        # reference dequant applied to the same unpacked nibbles
+        codes = torch.arange(16, dtype=torch.uint8, device=device).reshape(1, 16)
+        packed = pack_uint4(codes).view(torch.float4_e2m1fn_x2)
+        out = packed.to(torch.float32)
+
+        # unpacking doubles the last dim (two fp4 values per byte)
+        self.assertEqual(out.shape, (1, 16))
+        ref = _floatx_unpacked_to_f32(codes, FP4_EBITS, FP4_MBITS)
+        self.assertEqual(out, ref, atol=0, rtol=0)
+
+    def test_float4_e2m1fn_x2_roundtrip_exact(self, device):
+        # values already on the fp4 grid round-trip bit-exactly
+        grid = torch.tensor(
+            [
+                [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+                [-0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0, -0.0],
+            ],
+            device=device,
+        )
+        back = grid.to(torch.float4_e2m1fn_x2).to(torch.float32)
+        self.assertEqual(back, grid, atol=0, rtol=0)
+
+    @parametrize(
+        "target_dtype",
+        [torch.float16, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2],
+    )
+    def test_float4_e2m1fn_x2_cast_from_targets(self, device, target_dtype):
+        # unpack composes with the normal cast for non-fp32 targets
+        f4 = torch.tensor([[0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]], device=device).to(
+            torch.float4_e2m1fn_x2
+        )
+        out = f4.to(target_dtype)
+        self.assertEqual(out.dtype, target_dtype)
+        self.assertEqual(out, f4.to(torch.float32).to(target_dtype), atol=0, rtol=0)
+
+    def test_float4_e2m1fn_x2_cast_from_non_differentiable(self, device):
+        f4 = torch.randn(2, 4, device=device).to(torch.float4_e2m1fn_x2)
+        with torch.enable_grad():
+            out = f4.to(torch.float32)
+        self.assertFalse(out.requires_grad)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
+    def test_float4_e2m1fn_x2_cast_from_compile(self, device):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randn(2, 8, device=device).to(torch.float4_e2m1fn_x2)
+        ref = fn(x)
+        out = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(out, ref, atol=0, rtol=0)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
+    def test_float4_e2m1fn_x2_cast_from_dynamic_shape(self, device):
+        # the unpack doubles the last dim, so the meta kernel must stay symbolic:
+        # a dynamic last dim must not be specialized to a constant.
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            return x.to(torch.float32)
+
+        torch._dynamo.reset()
+        counters.clear()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for n in (4, 8, 16):
+            x = torch.randn(2, 2 * n, device=device).to(torch.float4_e2m1fn_x2)
+            torch._dynamo.mark_dynamic(x, 1)
+            out = compiled(x)
+            self.assertEqual(out, fn(x), atol=0, rtol=0)
         # a single graph should cover every size if the last dim stays symbolic
         self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
