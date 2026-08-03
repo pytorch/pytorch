@@ -499,12 +499,14 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-_run_symm_mem_tests() {
+_run_fabric_handle_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -515,7 +517,7 @@ test_h100_symm_mem() {
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
   export NCCL_NVLS_ENABLE=0
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_fabric() {
@@ -524,7 +526,7 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_cutlass_backend() {
