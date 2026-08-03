@@ -3,12 +3,14 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
@@ -57,6 +59,85 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduction_semantics(self) -> None:
+        tensor = torch.ones(4, dtype=torch.bool, device=self.device)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        self.assertEqual(
+            tensor.view(torch.uint8),
+            torch.ones(4, dtype=torch.uint8, device=self.device),
+        )
+
+        with self.assertRaisesRegex(TypeError, "ReduceOp.AVG"):
+            dist.all_reduce(tensor, op=dist.ReduceOp.AVG)
+
+        for dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, "Unsupported Float8"):
+                dist.all_reduce(tensor)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_if_lt_x_gpu(2)
+    def test_float8_reduction(self) -> None:
+        if torch.cuda.get_device_capability(self.device) < (9, 0):
+            self.skipTest("Float8 reductions require sm90 or newer")
+        for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            dist.all_reduce(tensor)
+            self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ephemeral_timeout(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        dist.set_timeout(timedelta(seconds=3))
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
+
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        self.assertTrue(backend._verify_work_timeout(work, timedelta(seconds=13)))
+        work.wait()
+        torch.cuda.synchronize(self.device)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            work = dist.all_reduce(tensor, async_op=True)
+            if backend._verify_work_timeout(work, timedelta(seconds=3)):
+                work.wait()
+                return
+            work.wait()
+            time.sleep(0.1)
+        self.fail("ephemeral timeout was not reset after collective completion")
+
+    @requires_nccl()
+    @requires_nccl_version((2, 29), "Need NCCL 2.29+ for communicator grow")
+    @skip_if_lt_x_gpu(2)
+    def test_manual_membership_change(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        store = dist.distributed_c10d._get_default_store()
+        dist.barrier()
+
+        if self.rank == 0:
+            shrunk = backend.shrink([1])
+            self.assertEqual(shrunk.size(), 1)
+            grow_id = shrunk._get_grow_id()
+            store.set("nccl2_manual_grow_id", grow_id)
+            grown = shrunk._grow(self.world_size)
+        else:
+            grow_id = store.get("nccl2_manual_grow_id")
+            opts = dist.ProcessGroupNCCL2.Options()
+            opts.group_name = "nccl2_manual_grow"
+            joiner = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+            grown = joiner._grow(self.world_size, grow_id, self.rank)
+
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        grown.allreduce(tensor).wait()
+        self.assertEqual(tensor, torch.full_like(tensor, 3.0))
+        torch.cuda.synchronize(self.device)
+        grown._revoke()
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
@@ -100,6 +181,20 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self.assertEqual(backend.options.config.max_ctas, 4)
         self.assertTrue(backend.options.is_high_priority_stream)
         self._check_all_reduce()
+
+
+class ProcessGroupNCCL2SymmMemRendezvousTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.use_pg_for_symm_mem_rendezvous = True
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_option_propagated(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        self.assertTrue(pg.use_pg_for_symm_mem_rendezvous)
 
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):

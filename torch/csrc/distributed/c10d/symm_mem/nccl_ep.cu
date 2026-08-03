@@ -4,8 +4,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/distributed/c10d/NCCLCommProvider.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <nccl_ep.h>
 
 namespace c10d::nccl_ep {
@@ -43,10 +43,13 @@ struct EpTensor {
 
 static ncclComm_t get_nccl_comm(
     const c10::intrusive_ptr<::c10d::ProcessGroup>& pg) {
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
+    auto* provider = dynamic_cast<c10d::NCCLCommProvider*>(
         pg->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    return reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    TORCH_CHECK(
+        provider != nullptr, "backend does not expose an NCCL communicator");
+    auto comm = reinterpret_cast<ncclComm_t>(provider->getCommPtr());
+    TORCH_CHECK(comm != nullptr, "NCCL communicator is not initialized");
+    return comm;
 }
 
 NcclEpGroup::~NcclEpGroup() {

@@ -790,6 +790,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.cpp",
+    "torch/csrc/distributed/c10d/nccl2/ManualMembershipNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/ReconfigureNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/WindowNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLUtils.cpp",

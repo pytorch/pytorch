@@ -185,7 +185,7 @@ void ProcessGroupNCCL::initNcclResources() {
   publishComm();
 }
 
-void ProcessGroupNCCL::initFromSplitComm(
+void ProcessGroupNCCL::initFromComm(
     ncclComm_t comm,
     at::Device device,
     std::shared_ptr<NcclApi> nccl_api) {
@@ -280,7 +280,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
-  child->initFromSplitComm(new_comm, device_, nccl_api_);
+  child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
@@ -464,7 +464,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   }
 }
 
-int64_t ProcessGroupNCCL::getCommPtr() const {
+int64_t ProcessGroupNCCL::getCommPtr() {
   return reinterpret_cast<int64_t>(nccl_comm_);
 }
 
@@ -765,7 +765,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           tensor.data_ptr(), // In-place operation
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
           stream),
       "NCCL AllReduce failed");
@@ -809,7 +809,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           rank_ == root ? tensor.data_ptr() : nullptr,
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
           stream),
@@ -1028,7 +1028,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input_list[i]),
           i,
           nccl_comm_,
           stream);
@@ -1039,7 +1039,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
           nullptr, // Non-root ranks don't receive
           input_list[i].numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input_list[i]),
           i,
           nccl_comm_,
           stream);
@@ -1103,7 +1103,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
           stream),
       "NCCL ReduceScatter failed");

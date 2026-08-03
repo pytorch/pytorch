@@ -34,6 +34,7 @@
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/NCCLCommProvider.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -91,7 +92,8 @@ class NCCLException : public std::exception {
     }                                                                      \
   } while (0)
 
-class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
+class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
+                                   public ::c10d::NCCLCommProvider {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
@@ -208,6 +210,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     return true;
   }
+  bool supportsShrinking() const override {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+    return true;
+#else
+    return false;
+#endif
+  }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
 
@@ -219,9 +228,25 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const c10::intrusive_ptr<::c10d::Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
+  c10::intrusive_ptr<::c10d::Backend> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0,
+      const c10::intrusive_ptr<::c10d::Backend::Options>& opts_override =
+          nullptr) override;
+  std::vector<uint8_t> getGrowId();
+  c10::intrusive_ptr<ProcessGroupNCCL> grow(
+      int new_size,
+      const std::optional<std::vector<uint8_t>>& grow_id = std::nullopt,
+      int new_rank = -1,
+      const c10::intrusive_ptr<Options>& opts_override = nullptr);
+  void revoke();
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
+  void addEphemeralTimeout(std::chrono::milliseconds timeout);
+  bool verifyWorkTimeoutForTest(
+      const c10::intrusive_ptr<::c10d::Work>& work,
+      std::chrono::milliseconds timeout);
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -292,7 +317,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     return name_;
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
-  int64_t getCommPtr() const;
+  int64_t getCommPtr() override;
   bool collectivesTimingEnabled() const {
     return timing_enabled_.load();
   }
@@ -387,7 +412,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Adopt a communicator created by ncclCommSplit and bring this backend to the
   // INITIALIZED state, sharing the parent's NcclApi (port of TorchCommNCCL's
   // split() child construction).
-  void initFromSplitComm(
+  void initFromComm(
       ncclComm_t comm,
       at::Device device,
       std::shared_ptr<NcclApi> nccl_api);
@@ -488,11 +513,15 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   RedOpRAII getNcclReduceOp(
       const ::c10d::ReduceOp& op,
       ncclComm_t comm,
-      const ncclDataType_t dataType);
+      const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void checkNoPendingWork();
+  std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
+  applyEphemeralTimeout(std::chrono::milliseconds timeout);
+  void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
   void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
@@ -552,6 +581,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  std::mutex ephemeral_timeout_mutex_;
+  std::chrono::milliseconds ephemeral_timeout_active_{0};
+  std::chrono::milliseconds ephemeral_timeout_inflight_{0};
 
   // Identifies the current communicator generation in the reconfigure regime;
   // -1 until the first reconfigure(). Baked into the reconfigure handle so
