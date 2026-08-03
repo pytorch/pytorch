@@ -1742,7 +1742,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -2331,7 +2331,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
