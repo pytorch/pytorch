@@ -224,7 +224,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
-  void addEphemeralTimeout(std::chrono::milliseconds timeout);
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   bool verifyWorkTimeoutForTest(
       const c10::intrusive_ptr<::c10d::Work>& work,
       std::chrono::milliseconds timeout);
