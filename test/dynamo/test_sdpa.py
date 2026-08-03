@@ -4,9 +4,12 @@ import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
 from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestSDPA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assert_ref_equals_params(self, actual, expected):
         self.assertIs(actual.query, expected.query)
         self.assertIs(actual.key, expected.key)
