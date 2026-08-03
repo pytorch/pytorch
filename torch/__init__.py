@@ -162,6 +162,39 @@ if __all__ != sorted(__all__):
 # Load the extension module
 ################################################################################
 
+
+def _get_loaded_openmp_libraries() -> tuple[str, ...]:
+    if sys.platform != "darwin":
+        return ()
+
+    libdyld = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libdyld._dyld_image_count.restype = ctypes.c_uint32
+    libdyld._dyld_get_image_name.argtypes = [ctypes.c_uint32]
+    libdyld._dyld_get_image_name.restype = ctypes.c_char_p
+
+    libraries: list[str] = []
+    for i in builtins.range(libdyld._dyld_image_count()):
+        image_name = libdyld._dyld_get_image_name(i)
+        if image_name is None:
+            continue
+        path = os.fsdecode(image_name)
+        name = os.path.basename(path)
+        if name.endswith(".dylib") and name.startswith(("libomp", "libiomp")):
+            libraries.append(os.path.realpath(path))
+    return tuple(dict.fromkeys(libraries))
+
+
+def _find_openmp_lib() -> str | None:
+    libraries = _get_loaded_openmp_libraries()
+    if len(libraries) > 1:
+        paths = "\n  ".join(libraries)
+        raise RuntimeError(
+            "Multiple OpenMP runtimes were loaded into the process. This can cause "
+            f"crashes or incorrect results:\n  {paths}"
+        )
+    return libraries[0] if libraries else None
+
+
 # If PyTorch was built against the ROCm runtime wheels, then there will be
 # a _rocm_init module and it will define an initialize() function which can
 # prepare ROCm for use. See general documentation on ROCm runtime wheels:
@@ -543,6 +576,10 @@ def _load_global_deps() -> None:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
+# Check before and after loading the native libraries so an existing collision is
+# reported before PyTorch uses OpenMP and a collision introduced by dyld is caught.
+_find_openmp_lib()
+
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
     platform.system() != "Windows"
 ):
@@ -583,6 +620,9 @@ else:
     if USE_GLOBAL_DEPS:
         _load_global_deps()
     from torch._C import *  # noqa: F403
+
+
+_find_openmp_lib()
 
 
 _PrimType = _TypeVar("_PrimType")
