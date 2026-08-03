@@ -185,6 +185,23 @@ class NbIntTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__int__ returned non-int", result)
 
+    def test_int_returning_float_raises(self):
+        # A numeric-but-wrong-type return (float is not int) must still raise.
+        class Bad:
+            def __int__(self):
+                return 3.0
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__int__ returned non-int (type float)", result)
+
     def test_int_raising_exception_propagates(self):
         class RaisingInt:
             def __int__(self):

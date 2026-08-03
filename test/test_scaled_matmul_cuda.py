@@ -732,6 +732,45 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_float8_scale_result(self, device) -> None:
+        torch.manual_seed(0)
+        a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
+        scale = torch.ones((), device=device)
+        scale_result = torch.full((), 0.5, device=device)
+
+        actual = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=e4m3_type,
+        )
+        expected = (a.float() @ b.float()).mul(scale_result).to(e4m3_type)
+
+        self.assertEqual(actual, expected)
+
+        high_precision = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=torch.bfloat16,
+        )
+        unscaled = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            out_dtype=torch.bfloat16,
+        )
+        self.assertEqual(high_precision, unscaled)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
