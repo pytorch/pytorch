@@ -1782,6 +1782,12 @@ def swiglu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
 
     See `GLU Variants Improve Transformer <https://arxiv.org/abs/2002.05202>`_.
 
+    .. note::
+        The gated half differs from :func:`~torch.nn.functional.glu`. Following the
+        paper, SwiGLU applies the nonlinearity to the first half,
+        :math:`\text{SiLU}(a) \otimes b`, while :func:`~torch.nn.functional.glu`
+        applies it to the second half, :math:`a \otimes \sigma(b)`.
+
     Args:
         input (Tensor): input tensor
         dim (int): dimension on which to split the input. Default: -1

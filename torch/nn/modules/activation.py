@@ -787,6 +787,12 @@ class SwiGLU(Module):
 
     See `GLU Variants Improve Transformer <https://arxiv.org/abs/2002.05202>`_.
 
+    .. note::
+        The gated half differs from :class:`~torch.nn.GLU`. Following the paper,
+        SwiGLU applies the nonlinearity to the first half,
+        :math:`\text{SiLU}(a) \otimes b`, while :class:`~torch.nn.GLU` applies it
+        to the second half, :math:`a \otimes \sigma(b)`.
+
     Args:
         dim (int): the dimension on which to split the input. Default: -1
 
