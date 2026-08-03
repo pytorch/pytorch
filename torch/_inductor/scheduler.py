@@ -121,6 +121,7 @@ cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+_FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=True)
 
 
 @dataclasses.dataclass
@@ -3462,6 +3463,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def combinable_nodes(
         cls, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
+        """Filter a node list down to combo-kernel candidates.
+
+        Drops node kinds that can't or shouldn't share a combo kernel:
+        extern, grouped, mixed-order reduction, existing foreach, and
+        template nodes.
+        """
         extern = [x for x in nodes if isinstance(x, ExternKernelSchedulerNode)]
         if extern:
             log.debug(
@@ -3528,6 +3535,28 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     len(reduction_nodes),
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
+        # Synthetic benchmark inputs cannot preserve indirect-index constraints and may
+        # produce out-of-bounds indices. Keep these nodes out of benchmarked combos.
+        if config.benchmark_combo_kernel or (
+            config.combo_kernels_autotune > 0
+            and config.combo_kernel_per_subkernel_blocks
+            and config.combo_kernel_compile_time_autotune
+        ):
+            indirect_nodes = [
+                n
+                for n in filtered_nodes
+                if any(
+                    isinstance(dep, MemoryDep) and dep.is_indirect()
+                    for dep in n.read_writes.reads_and_writes()
+                )
+            ]
+            if indirect_nodes:
+                log.debug(
+                    "ComboKernels: %d indirect-indexing nodes are filtered",
+                    len(indirect_nodes),
+                )
+                filtered_nodes = [n for n in filtered_nodes if n not in indirect_nodes]
 
         return filtered_nodes
 
@@ -4179,7 +4208,6 @@ class Scheduler:
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
-
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
@@ -7131,7 +7159,6 @@ class Scheduler:
         consumer: SchedulerNode,
         read_expr: sympy.Expr,
     ) -> bool:
-        """Return whether flattening the consumer produces an invertible read."""
         if consumer.is_reduction() or consumer_read.size != consumer_write.size:
             return False
 
@@ -7154,23 +7181,65 @@ class Scheduler:
         if len(iter_vars) != len(iter_sizes):
             return False
 
+        return (
+            self._get_flattened_read_inverse(
+                read_expr, tuple(iter_vars), tuple(iter_sizes), flat_size
+            )
+            is not None
+        )
+
+    def _get_flattened_read_inverse(
+        self,
+        read_expr: sympy.Expr,
+        iter_vars: tuple[sympy.Symbol, ...],
+        iter_sizes: tuple[sympy.Expr, ...],
+        flat_size: sympy.Expr,
+    ) -> tuple[sympy.Symbol, sympy.Expr] | None:
+        if V.graph.sizevars.statically_known_equals(flat_size, 0):
+            return None
+
         # A flat reindex decomposes one new loop variable into the old loop domain.
         # Apply that substitution to the read without rebuilding the LoopBody.
-        flat_var = sympy.Dummy("reindex_flat", integer=True, nonnegative=True)
+        flat_var = _FLATTENED_READ_VAR
         flattened_read = sympy_subs(
             read_expr,
             dict(zip(iter_vars, decompose_index(flat_var, iter_sizes))),
         )
-        flattened_read = V.graph.sizevars.simplify_with_ranges(
-            sympy.expand(flattened_read), {flat_var: flat_size}
-        )
 
+        inverse = self._get_indexing_inverse(flattened_read, flat_var, flat_size)
+        if inverse is None:
+            return None
+        return flat_var, inverse
+
+    def _get_indexing_inverse(
+        self,
+        read_expr: sympy.Expr,
+        index_var: sympy.Symbol,
+        index_size: sympy.Expr,
+    ) -> sympy.Expr | None:
+        # Canonicalize the loop variable so preflight and the rebuilt LoopBody
+        # share one scheduler-local cache entry.
+        canonical_read = sympy_subs(read_expr, {index_var: _FLATTENED_READ_VAR})
+        canonical_read = V.graph.sizevars.simplify_with_ranges(
+            sympy.expand(canonical_read), {_FLATTENED_READ_VAR: index_size}
+        )
+        inverse = self._get_canonical_indexing_inverse(canonical_read, index_size)
+        if inverse is None:
+            return None
+        return sympy_subs(inverse, {_FLATTENED_READ_VAR: index_var})
+
+    @cache_on_self_and_args("Scheduler")
+    def _get_canonical_indexing_inverse(
+        self, read_expr: sympy.Expr, index_size: sympy.Expr
+    ) -> sympy.Expr | None:
         from torch._inductor.invert_expr_analysis import generate_inverse_formula
 
-        return generate_inverse_formula(flattened_read, flat_var, flat_size) is not None
+        return generate_inverse_formula(read_expr, _FLATTENED_READ_VAR, index_size)
 
     def shared_data_after_inverting_indexing(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
     ) -> int:
         """
         Attempts to enable fusion between two nodes by inverting indexing patterns.
@@ -7251,15 +7320,13 @@ class Scheduler:
         read_expr = next(iter(node2_read_exprs))
 
         # Check the flattened read before rebuilding the consumer LoopBody.
-        if self._can_reindex_consumer_for_index_inversion(
+        can_reindex = self._can_reindex_consumer_for_index_inversion(
             node1_write, node2_read, node2_write, node2, read_expr
-        ):
-            reindex_snapshot = _LoopStateSnapshot.create((node2,))
+        )
+        if can_reindex:
             node2.apply_loop_reindexing([sympy_product(node1_write.size)])
-            score = self.shared_data_after_inverting_indexing(node1, node2)
-            if score < 0:
-                reindex_snapshot.restore()
-            return score
+            # Re-enter with refreshed dependencies; inverse lookup uses the cache.
+            return self.shared_data_after_inverting_indexing(node1, node2)
 
         if not node2_write.is_contiguous():
             return -1
@@ -7296,9 +7363,7 @@ class Scheduler:
         if len(index_vars) != 1:
             return -1
 
-        from torch._inductor.invert_expr_analysis import generate_inverse_formula
-
-        inverse_formula = generate_inverse_formula(
+        inverse_formula = self._get_indexing_inverse(
             read_expr, index_vars[0], node2_read.size[0]
         )
 

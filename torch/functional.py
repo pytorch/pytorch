@@ -536,7 +536,7 @@ def stft(
         such as :func:`torch.hann_window`.
 
     The STFT computes the Fourier transform of short overlapping windows of the
-    input. This giving frequency components of the signal as they change over
+    input. This gives frequency components of the signal as they change over
     time. The interface of this function is modeled after (but *not* a drop-in
     replacement for) librosa_ stft function.
 
@@ -1482,7 +1482,7 @@ def block_diag(*tensors):
 
 def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # type: (Tensor, Tensor, float, str) -> (Tensor)
-    r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
+    r"""Computes the batched p-norm distance between each pair of the two collections of row vectors.
 
     Args:
         x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
