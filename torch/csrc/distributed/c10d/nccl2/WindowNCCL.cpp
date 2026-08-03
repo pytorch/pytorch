@@ -4,6 +4,7 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
 
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
@@ -31,6 +32,7 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(win_ == nullptr, "WindowNCCL: double registration");
   TORCH_CHECK(tensor.is_contiguous(), "WindowNCCL: contiguous tensor required");
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
 
   // Each segment from the NCCL mempool is tracked by the allocator hook.
   // Register the underlying segment as a NCCL_WIN_COLL_SYMMETRIC window
@@ -92,6 +94,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
       " bytes) exceeds the window size (",
       win_size_,
       " bytes)");
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
 
   // Ensure the source tensor's underlying segment is registered as a
   // symmetric window -- NCCL's ncclPutSignal looks it up internally. This is
@@ -134,6 +137,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
     bool asyncOp,
     const ::c10d::SignalOptions& opts) {
   checkWindowAndThrow();
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
   auto work = pg_->createWork(stream, pg_->operationTimeout(opts.timeout));
   work->recordStart("signal");
@@ -158,6 +162,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
     bool asyncOp,
     const ::c10d::WaitSignalOptions& opts) {
   checkWindowAndThrow();
+  c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
   auto work = pg_->createWork(stream, pg_->operationTimeout(opts.timeout));
   work->recordStart("wait_signal");
