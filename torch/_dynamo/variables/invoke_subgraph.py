@@ -338,29 +338,8 @@ class LiftedBoundSymbol:
     expr: Any  # sympy.Expr
 
 
-@dataclass
-class LiftedSpecializedSymInt:
-    """Lifted arg for a SymInt that got specialized while tracing the body.
-
-    The symbol was free when the subgraph lifted it, and the body then pinned
-    it to a constant (e.g. matmul against a statically shaped weight). By the
-    time the entry is saved there is no symbol left to bind, so LiftedBoundSymbol
-    cannot look it up. Reuse the original call's proxy: the placeholder is still
-    an input of the same outer graph (the reuse cache lives on the tracing
-    context, which is per output graph). Passing the constant instead would make
-    the invoke_subgraph call sites disagree on that argument, which Inductor
-    rejects.
-    """
-
-    proxy: Proxy
-
-
 LiftedArgOrigin = (
-    LiftedUserArg
-    | LiftedCapturedSource
-    | LiftedSyntheticObject
-    | LiftedBoundSymbol
-    | LiftedSpecializedSymInt
+    LiftedUserArg | LiftedCapturedSource | LiftedSyntheticObject | LiftedBoundSymbol
 )
 
 
@@ -996,8 +975,6 @@ def stamp_out_subgraph(
     for subgraph_input in cached.subgraph_input_mapping:
         if isinstance(subgraph_input, LiftedUserArg):
             new_lifted_args.append(flat_proxies[subgraph_input.index])
-        elif isinstance(subgraph_input, LiftedSpecializedSymInt):
-            new_lifted_args.append(subgraph_input.proxy)
         elif isinstance(subgraph_input, LiftedBoundSymbol):
             from torch._dynamo.output_graph import LazyProxy
 
@@ -1130,11 +1107,11 @@ def build_subgraph_input_mapping(
                 else outer_proxy.node.meta.get("example_value", None)
             )
             if isinstance(example, torch.SymInt):
-                expr = example.node.expr
-                if expr.is_number:
-                    subgraph_input_mapping.append(LiftedSpecializedSymInt(outer_proxy))
-                else:
-                    subgraph_input_mapping.append(LiftedBoundSymbol(expr))
+                # _expr rather than expr: expr applies the ShapeEnv's
+                # replacements, so a symbol the region lifted before it was
+                # specialized comes back as a constant, which bound_symbols has
+                # no entry for.
+                subgraph_input_mapping.append(LiftedBoundSymbol(example.node._expr))
                 continue
             if source is None:
                 raise AssertionError(
