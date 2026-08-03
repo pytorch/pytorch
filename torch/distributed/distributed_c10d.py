@@ -2217,7 +2217,10 @@ def _add_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
         cur_device = torch.accelerator.current_accelerator() or torch.device("cpu")
         if cur_device in devices:
             backend = pg._get_backend(cur_device)
-            if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            if is_nccl_available() and isinstance(
+                backend,
+                (ProcessGroupNCCL, ProcessGroupNCCL2, ProcessGroupNCCLLazy),
+            ):
                 backend._add_ephemeral_timeout(timeout)
 
 

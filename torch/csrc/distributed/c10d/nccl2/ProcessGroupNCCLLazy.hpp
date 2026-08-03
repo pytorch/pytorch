@@ -40,6 +40,16 @@ class TORCH_API ProcessGroupNCCLLazy
   int64_t getCommPtr() override {
     return getPrimary()->getCommPtr();
   }
+
+  void addEphemeralTimeout(std::chrono::milliseconds timeout) {
+    getPrimary()->addEphemeralTimeout(timeout);
+  }
+
+  bool verifyWorkTimeoutForTest(
+      const c10::intrusive_ptr<::c10d::Work>& work,
+      std::chrono::milliseconds timeout) {
+    return getPrimary()->verifyWorkTimeoutForTest(work, timeout);
+  }
 };
 
 } // namespace c10d::nccl2

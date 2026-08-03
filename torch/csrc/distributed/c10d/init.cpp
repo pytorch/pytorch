@@ -4171,6 +4171,15 @@ Returns:
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_add_ephemeral_timeout",
+              &::c10d::nccl2::ProcessGroupNCCL::addEphemeralTimeout,
+              py::arg("timeout"))
+          .def(
+              "_verify_work_timeout",
+              &::c10d::nccl2::ProcessGroupNCCL::verifyWorkTimeoutForTest,
+              py::arg("work"),
+              py::arg("timeout"))
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4212,6 +4221,15 @@ Returns:
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_add_ephemeral_timeout",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::addEphemeralTimeout,
+          py::arg("timeout"))
+      .def(
+          "_verify_work_timeout",
+          &::c10d::nccl2::ProcessGroupNCCLLazy::verifyWorkTimeoutForTest,
+          py::arg("work"),
+          py::arg("timeout"))
       .def(
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
