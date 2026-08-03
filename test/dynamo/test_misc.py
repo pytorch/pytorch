@@ -202,6 +202,9 @@ class UserDefineSetAttr:
             return None
 
 
+_pybind11_enum_mod = None
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -246,7 +249,12 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 .value("B", E::B);
         }
         """
-        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+        global _pybind11_enum_mod
+        if _pybind11_enum_mod is None:
+            _pybind11_enum_mod = load_inline(
+                name="pybind11_enum_test", cpp_sources=cpp_source
+            )
+        mod = _pybind11_enum_mod
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
@@ -7421,8 +7429,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def gn(x):
             return
 
-        torch._dynamo.config.reorderable_logging_functions.add(gn)
-
         @torch.compile(backend="eager")
         def fn(x):
             x = x + 1
@@ -7431,7 +7437,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 4
 
         # If this doesn't crash, the test passes
-        fn(torch.ones(3))
+        with torch._dynamo.config.patch(reorderable_logging_functions={gn}):
+            fn(torch.ones(3))
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
