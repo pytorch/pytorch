@@ -4319,8 +4319,66 @@ class GraphModule(torch.nn.Module):
         opaque = Opaque(1)
         x = torch.randn(8)
         ref = fn((x, opaque))
-        res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
+
+        # has_unknown must actually be reached: every call retraces rather
+        # than misclassifying Opaque as something reusable.
+        self.assertEqual(count(), 4)
         self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_registry_change_stays_correct(self):
+        """Correctness must hold even if the pytree registry changes
+        between calls to an already-compiled function.
+
+        build_fingerprint_with_pytree's fast path no longer installs a
+        guard on the pytree registry itself for plain-function flatten_fns
+        (see its docstring), on the theory that the registry can't change
+        mid-trace, and a stale/changed registry can only affect whether a
+        subgraph gets reused at compile time -- never the values the
+        compiled graph actually computes. This pins that: after
+        deregistering the pytree node the compiled artifact was built
+        against, calling that artifact again (whether or not it triggers a
+        recompile) must still produce correct results.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x1 = torch.randn(8)
+        ref1 = fn(x1)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(ref1, compiled(x1))
+
+        # Deregister the pytree node the compiled artifact was built
+        # against, then call it again -- via the same compiled wrapper, not
+        # a fresh torch.compile call, so this exercises whatever guard
+        # check (or lack thereof) protects the existing compiled artifact.
+        self._cleanup_pytree_registration(RegionInput)
+
+        x2 = torch.randn(8)
+        ref2 = fn(x2)
+        self.assertEqual(ref2, compiled(x2))
 
     def test_subgraph_reuse_different_constants_retrace(self):
         """Constant args with different values each require a fresh trace.

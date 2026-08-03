@@ -256,13 +256,15 @@ def build_fingerprint_with_pytree(
     classification only depends on ``type()``, never on tensor values.
 
     Note: skipping the traced registry dispatch also means we no longer
-    install guards on the pytree registry itself. That's fine here: this
-    fingerprint is built fresh from the live registry on every reuse-lookup
-    (register_pytree_node isn't traceable, so the registry can't change
-    mid-trace), and reuse is separately gated on treespec/tag equality. So a
-    registry change between compiles can only make a cached subgraph
-    ineligible for reuse (has_unknown / treespec mismatch), never silently
-    wrong.
+    install guards on the pytree registry itself, for the plain-function
+    flatten_fn case (the non-FunctionType fallback below still traces the
+    full tree_flatten and so still installs them). That's fine either way:
+    this fingerprint is built fresh from the live registry on every
+    reuse-lookup (register_pytree_node isn't traceable, so the registry
+    can't change mid-trace), and reuse is separately gated on treespec/tag
+    equality. So a registry change between compiles can only make a cached
+    subgraph ineligible for reuse (has_unknown / treespec mismatch), never
+    silently wrong.
     """
     from torch._dynamo.variables.builder import SourcelessBuilder
 
