@@ -1227,6 +1227,29 @@ def needs_upcast_to_float32(arg: Any) -> bool:
     )
 
 
+def _is_lossless_integer_cast(src_dtype: torch.dtype, dst_dtype: torch.dtype) -> bool:
+    if src_dtype == dst_dtype:
+        return not src_dtype.is_floating_point and not src_dtype.is_complex
+    try:
+        src_info = torch.iinfo(src_dtype)
+        dst_info = torch.iinfo(dst_dtype)
+    except TypeError:
+        return False
+    return dst_info.min <= src_info.min and src_info.max <= dst_info.max
+
+
+def _is_representable_integer(value: Any, dtype: torch.dtype) -> bool:
+    if not isinstance(value, int):
+        return False
+    if dtype == torch.bool:
+        return value in (0, 1)
+    try:
+        info = torch.iinfo(dtype)
+    except TypeError:
+        return False
+    return info.min <= value <= info.max
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -1238,12 +1261,18 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
+        self.implied_mask_vars: OrderedSet[str] = OrderedSet()
+        self.source_index: sympy.Expr | None = None
+        self.scalar_value: bool | int | None = None
         if dtype is None:
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
             raise AssertionError("TritonCSEVariable must have shape")
 
     def update_on_args(self, name, args, kwargs):
+        dtype = self.dtype
+        if dtype is None:
+            raise AssertionError("TritonCSEVariable must have dtype")
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -1257,6 +1286,47 @@ class TritonCSEVariable(CSEVariable):
                     )
                 ) is not None:
                     self.mask_vars.add(mask_name)
+
+        if name in ("index_expr", "value_expr") and dtype in (
+            torch.int32,
+            torch.int64,
+        ):
+            self.source_index = args[0]
+        elif name == "constant":
+            if _is_representable_integer(args[0], dtype):
+                self.scalar_value = args[0]
+        elif name == "to_dtype" and isinstance(args[0], TritonCSEVariable):
+            src_dtype = args[0].dtype
+            if src_dtype is not None and _is_lossless_integer_cast(src_dtype, dtype):
+                self.source_index = args[0].source_index
+                self.scalar_value = args[0].scalar_value
+        elif name == "lt":
+            lhs, rhs = args
+            if (
+                isinstance(lhs, TritonCSEVariable)
+                and isinstance(lhs.source_index, sympy.Symbol)
+                and isinstance(rhs, TritonCSEVariable)
+                and isinstance(rhs.scalar_value, int)
+            ):
+                entry = V.kernel.range_tree_nodes.get(lhs.source_index)
+                if (
+                    entry is not None
+                    and V.graph.sizevars.statically_known_equals(
+                        entry.divisor, sympy.S.One
+                    )
+                    and V.graph.sizevars.statically_known_equals(
+                        entry.length, entry.root.numel
+                    )
+                    and V.graph.sizevars.statically_known_leq(
+                        rhs.scalar_value, entry.root.numel
+                    )
+                    and entry.root.mask_name() in lhs.mask_vars
+                ):
+                    self.implied_mask_vars.add(entry.root.mask_name())
+        elif name == "logical_and":
+            for arg in args:
+                if isinstance(arg, TritonCSEVariable):
+                    self.implied_mask_vars.update(arg.implied_mask_vars)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2495,6 +2565,8 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
         var.mask_vars = indexing.mask_vars
+        if output_dtype in (torch.int32, torch.int64):
+            var.source_index = expr
         return var
 
     @classmethod
@@ -2511,6 +2583,10 @@ class TritonKernelOverrides(TritonOverrides):
             var = cls.index_expr(expr, dtype)
         finally:
             V.kernel._index_dtype = real_index_dtype
+        if real_index_dtype != dtype:
+            # value_expr honors an explicitly requested integer width. A
+            # narrower value can wrap even though the kernel's index does not.
+            var.source_index = None
         if real_index_dtype != dtype or var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -5262,13 +5338,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # tmp0 in the triton code is either a scalar, or single-element tensor
         # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
         # To avoid this, we broadcast to the expected shape first.
-        value = self._map_tuple_or_scalar(
-            lambda v: self.cse.generate(
+        def broadcast_to_reduction_shape(v: CSEVariable) -> CSEVariable:
+            if v.shape is not None and tuple(v.shape) == value_shape:
+                return v
+            return self.cse.generate(
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
                 shape=value_shape,
-            ),
+            )
+
+        value = self._map_tuple_or_scalar(
+            broadcast_to_reduction_shape,
             value,
         )
 
@@ -7652,12 +7733,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError(f"expected xtree prefix 'x', got {xtree.prefix!r}")
         return self._has_constant_mask(xtree)
 
-    def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
+    def filter_masks(self, mask_vars: OrderedSet[Any]) -> None:
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(tree.mask_name())
 
         mask_vars.discard("None")
+        for mask in list(mask_vars):
+            if isinstance(mask, TritonCSEVariable):
+                mask_vars.difference_update(mask.implied_mask_vars)
 
     @cache_on_self
     def get_reduction_prefixes(self) -> list[str]:
