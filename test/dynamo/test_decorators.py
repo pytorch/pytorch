@@ -36,6 +36,13 @@ def tensor_constant_result():
     return torch.tensor([4.0])
 
 
+def unregister_custom_class(cls):
+    name = torch._library.opaque_object.get_opaque_type_name(cls)
+    torch._library.opaque_object._OPAQUE_TYPES.pop(cls, None)
+    torch._library.opaque_object._OPAQUE_TYPES_BY_NAME.pop(name, None)
+    torch._C._unregister_opaque_type(name)
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -636,6 +643,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -932,6 +940,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1342,6 +1351,22 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 return polyfill(data, newline=newline)
 
         wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
+        def unregister_polyfill():
+            from torch._dynamo.trace_rules import (
+                _polyfilled_function_ids,
+                get_torch_obj_rule_map,
+            )
+            from torch._dynamo.variables import PolyfilledFunctionVariable
+            from torch._dynamo.variables.builder import VariableBuilder
+
+            for f in (operator.indexOf, wrapper):
+                VariableBuilder._id_dispatch().pop(id(f), None)
+                _polyfilled_function_ids.remove(id(f))
+                get_torch_obj_rule_map().pop(f, None)
+                PolyfilledFunctionVariable._get_polyfill_handlers().pop(f, None)
+
+        self.addCleanup(unregister_polyfill)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64

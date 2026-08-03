@@ -545,6 +545,7 @@ else:
         # if Dynamo calls random methods.
 
         exit_stack = contextlib.ExitStack()
+        self.addCleanup(exit_stack.close)
 
         def patch_fn_with_rng_burn(name):
             orig_fn = eval(name)
