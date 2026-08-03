@@ -3890,12 +3890,10 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # Probability targets chunk on the scalar reductions only; the chunked
-    # op has no gradient slot for the target, so a target requiring grad
-    # falls back to the reference path.
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
     chunkable_prob_target = (
         target_contains_probabilities
-        and reduction in {"mean", "sum"}
         and target.dtype == input.dtype
         and not (target.requires_grad and torch.is_grad_enabled())
     )
@@ -3911,9 +3909,8 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with reduction in {'mean','sum'},"
-            " dtype matching input, and requires_grad == False), out_features"
-            " == (). Got "
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"

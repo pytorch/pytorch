@@ -1975,16 +1975,16 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     target = make_target(num_classes, (*batch_dims, *of), torch.int64)
                     yield module_args, module_kwargs, (input, target)
 
-        # Chunked probability-target coverage (mean/sum; reduction='none'
-        # with a probability target falls back to the reference).
-        # Appended after all other samples so the RNG draw order -- and
-        # therefore the data the calibrated index-target ULP caps were
-        # measured on -- is unchanged.
+        # Chunked probability-target coverage (mean/sum/none). Appended
+        # after all other samples so the RNG draw order -- and therefore the
+        # data the calibrated index-target ULP caps were measured on -- is
+        # unchanged. "none" is last in the product so the mean/sum draws are
+        # also unchanged.
         for sizes in [(8, 5, 4), (None, 8, 4)]:
             num_batches, in_features, num_classes = sizes
             batch_dims = () if num_batches is None else (num_batches,)
             weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
-            for reduction, w in product(["mean", "sum"], weights):
+            for reduction, w in product(["mean", "sum", "none"], weights):
                 if acc_dtype is not None:
                     options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
                 elif num_batches is not None:
