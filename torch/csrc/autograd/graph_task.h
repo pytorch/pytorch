@@ -194,6 +194,12 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   uint64_t id_;
 
+  // Number of distinct devices seen while traversing the graph in
+  // compute_dependencies. Zero means dependencies were computed elsewhere
+  // (e.g. by the distributed engine), in which case no assumption is made.
+  // See Note [ Engine threading optimization when single device ]
+  size_t num_distinct_devices_{0};
+
   GraphTask(
       bool keep_graph,
       bool grad_mode,
