@@ -44,12 +44,6 @@ class TORCH_API ProcessGroupNCCLLazy
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
     getPrimary()->addEphemeralTimeout(timeout);
   }
-
-  bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<::c10d::Work>& work,
-      std::chrono::milliseconds timeout) {
-    return getPrimary()->verifyWorkTimeoutForTest(work, timeout);
-  }
 };
 
 } // namespace c10d::nccl2

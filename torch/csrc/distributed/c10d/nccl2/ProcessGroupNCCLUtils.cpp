@@ -471,13 +471,6 @@ void ProcessGroupNCCL::addEphemeralTimeout(
   ephemeral_timeout_active_ += timeout;
 }
 
-bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
-    const c10::intrusive_ptr<::c10d::Work>& work,
-    std::chrono::milliseconds timeout) {
-  auto ncclWork = c10::dynamic_intrusive_pointer_cast<WorkNCCL>(work);
-  return ncclWork && ncclWork->getTimeout() == timeout;
-}
-
 void ProcessGroupNCCL::enqueueWork(
     c10::intrusive_ptr<WorkNCCL> work,
     cudaStream_t stream) {

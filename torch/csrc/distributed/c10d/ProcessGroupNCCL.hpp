@@ -385,6 +385,10 @@ class TORCH_API ProcessGroupNCCL : public Backend, public NCCLCommProvider {
 
     uint64_t getSequencenumber() const override;
 
+    std::chrono::milliseconds getTimeout() const override {
+      return opTimeout_;
+    }
+
     const std::string& logPrefix() const;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -1030,14 +1034,6 @@ class TORCH_API ProcessGroupNCCL : public Backend, public NCCLCommProvider {
   // collectives issued after this call until the first such collective
   // completes on the GPU. Existing work retains its original timeout.
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
-
-  // This function is only intended for testing purposes because we don't
-  // want to expose the `WorkNCCL` via pybind. It verifies whether the
-  // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
-  // timeout.
-  bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work>& work,
-      const std::chrono::milliseconds& timeout);
 
   void setEnableNanCheck(bool enableNanCheck);
 

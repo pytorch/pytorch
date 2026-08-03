@@ -92,20 +92,17 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ephemeral_timeout(self) -> None:
-        backend = dist.get_backend_impl(device=self.device)
         dist.set_timeout(timedelta(seconds=3))
 
         existing_work = dist.all_reduce(
             torch.ones(4, device=self.device), async_op=True
         )
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
-        self.assertTrue(
-            backend._verify_work_timeout(existing_work, timedelta(seconds=3))
-        )
+        self.assertEqual(existing_work._get_timeout(), timedelta(seconds=3))
 
         tensor = torch.ones(4, device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
-        self.assertTrue(backend._verify_work_timeout(work, timedelta(seconds=13)))
+        self.assertEqual(work._get_timeout(), timedelta(seconds=13))
         existing_work.wait()
         work.wait()
         torch.cuda.synchronize(self.device)
@@ -113,7 +110,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             work = dist.all_reduce(tensor, async_op=True)
-            if backend._verify_work_timeout(work, timedelta(seconds=3)):
+            if work._get_timeout() == timedelta(seconds=3):
                 work.wait()
                 return
             work.wait()
@@ -152,6 +149,7 @@ class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
     @skip_if_lt_x_gpu(2)
     def test_shrink_group(self) -> None:
+        tensor = torch.ones(4, device=self.device)
         group = dist.new_group(device_id=self.device)
         dist.barrier(group=group)
         excluded = list(range(1, self.world_size))
@@ -162,7 +160,6 @@ class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
 
         shrunk = dist.shrink_group(excluded, group=group)
         self.assertEqual(shrunk.size(), 1)
-        tensor = torch.ones(4, device=self.device)
         dist.all_reduce(tensor, group=shrunk)
         self.assertEqual(tensor, torch.ones_like(tensor))
         dist.destroy_process_group(shrunk)
