@@ -455,6 +455,14 @@ selective_decompose: bool = False
 # then converting back to a regular tensor.
 enable_complex_wrapper: bool = False
 
+# Let a nested compile region's joint graph be traced by the consumer that first
+# needs it, instead of tracing it in the region's autograd backward and having
+# the proxy dispatch mode re-trace the result.
+invoke_subgraph_lazy_joint_tracing: bool = Config(
+    env_name_default="TORCH_INVOKE_SUBGRAPH_LAZY_JOINT_TRACING",
+    default=False,
+)
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
