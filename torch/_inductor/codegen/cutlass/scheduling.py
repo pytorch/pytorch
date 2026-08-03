@@ -341,11 +341,12 @@ size: {cutlass_template_buffer.get_size()}"
         try:
             from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
 
-            read_names, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 cutlass_template_buffer.get_name(),
                 existing_epilogue_nodes + list(node_to_fuse.get_nodes()),
                 OrderedSet(),
             )
+            read_names = epilogue.reads
 
         except NotImplementedError as e:
             not_implemented_op = str(e)
