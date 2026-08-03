@@ -3530,6 +3530,19 @@ class TestXpuAutocast(TestAutocast):
             result = torch.mm(mat0_fp32, mat1_fp32)
             self.assertEqual(result.dtype, torch.float16)
 
+    def test_autocast_is_enabled(self):
+        self.assertEqual(
+            torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
+        )
+        with torch.amp.autocast("xpu"):
+            self.assertEqual(
+                torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
+            )
+        with torch.amp.autocast("xpu", enabled=False):
+            self.assertEqual(
+                torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
+            )
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):

@@ -368,6 +368,13 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(grads[1][:2], make_tensor([4.0, 8.0]))
         self.assertEqual(found_inf.item(), 1.0)
 
+    def test_autocast_is_enabled(self):
+            self.assertEqual(torch.is_autocast_enabled(device="mps"), torch.is_autocast_enabled())
+            with torch.amp.autocast("mps"):
+                self.assertEqual(torch.is_autocast_enabled(device="mps"), torch.is_autocast_enabled())
+            with torch.amp.autocast("mps", enabled=False):
+                self.assertEqual(torch.is_autocast_enabled(device="mps"), torch.is_autocast_enabled())
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
