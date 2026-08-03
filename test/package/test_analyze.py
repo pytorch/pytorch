@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: package/deploy"]
 
+import sys
 import unittest
 
 import torch
@@ -27,6 +28,37 @@ class TestAnalyze(PackageTestCase):
 
         self.assertNotIn("yaml", used_modules)
         self.assertIn("test_trace_dep", used_modules)
+
+    def test_trace_dependencies_restores_prior_profiler(self):
+        def prior_profile(frame, event, arg):
+            pass
+
+        sys.setprofile(prior_profile)
+        try:
+            analyze.trace_dependencies(lambda x: x, [(1,)])
+            self.assertIs(sys.getprofile(), prior_profile)
+        finally:
+            sys.setprofile(None)
+
+    def test_trace_dependencies_restores_prior_profiler_on_exception(self):
+        def prior_profile(frame, event, arg):
+            pass
+
+        def raises(x):
+            raise ValueError("boom")
+
+        sys.setprofile(prior_profile)
+        try:
+            with self.assertRaises(ValueError):
+                analyze.trace_dependencies(raises, [(1,)])
+            self.assertIs(sys.getprofile(), prior_profile)
+        finally:
+            sys.setprofile(None)
+
+    def test_trace_dependencies_clears_profiler_when_none_installed(self):
+        self.assertIsNone(sys.getprofile())
+        analyze.trace_dependencies(lambda x: x, [(1,)])
+        self.assertIsNone(sys.getprofile())
 
 
 if __name__ == "__main__":
