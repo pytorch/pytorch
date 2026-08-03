@@ -48,9 +48,11 @@ c10::SmallVector<std::string> get_extra_args_typenames(const c10::SmallVector<at
 int can_vectorize_up_to(at::ScalarType type, char* pointer) {
   switch(type) {
 #define DEFINE_CASE(ctype, scalartype)                                   \
-    case ScalarType::scalartype : return memory::can_vectorize_up_to<ctype>(pointer);
+    case scalartype : return memory::can_vectorize_up_to<ctype>(pointer);
 
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_V2(
+      AT_WRAP(DEFINE_CASE),
+      AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX))
 #undef DEFINE_CASE
 
     default: TORCH_INTERNAL_ASSERT(false, "Unrecognized ScalarType: ", type);

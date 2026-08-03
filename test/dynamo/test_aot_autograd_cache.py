@@ -237,9 +237,13 @@ class CacheKeyEquivalenceMixin:
             captured_gt_key = captured_gt_debug_lines = None
             real_cache_key = autograd_cache.autograd_cache_key
 
-            def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+            def capturing_cache_key(
+                mod, ei, config, compiler_config_extra=None, act_input_paths=()
+            ):
                 nonlocal captured_gt_key, captured_gt_debug_lines
-                result = real_cache_key(mod, ei, config, compiler_config_extra)
+                result = real_cache_key(
+                    mod, ei, config, compiler_config_extra, act_input_paths
+                )
                 captured_gt_key, captured_gt_debug_lines = result
                 return result
 
@@ -333,7 +337,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(x, y):
             return x * 2 + y
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         a = torch.rand(25)
         b = torch.rand(25)
         compiled_fn(a, b)
@@ -379,7 +383,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         # Record artifacts
         with fresh_cache():
-            compiled_fn = torch.compile(fn, dynamic=dynamic)
+            compiled_fn = torch.compile(fn, dynamic=dynamic)  # noqa: UNSPECIFIED_BACKEND
 
             # A first call should miss in the cache.
             eager_result = fn(a, b)
@@ -506,6 +510,46 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_act_input_paths_cache_hit(self):
+        import torch.distributed._functional_collectives as funcol
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
+
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
+
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            wait_calls.clear()
+            self._clear_dynamo_and_codecache()
+
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertGreaterEqual(len(wait_calls), 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
@@ -582,6 +626,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -763,7 +808,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             return a, tmp
 
         with torch.autograd._force_original_view_tracking(True):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
 
         def run_and_check(miss, hit, bypass):
             self._clear_dynamo_and_codecache()
@@ -818,7 +863,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 torch._dynamo.graph_break()
                 return x.sin()
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, y, z):
             return AllowInGraphFunc.apply(x)
 
@@ -1262,7 +1307,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "inner_kernel",
             kernel_names,
-            f"inner_kernel should be detected, got: {kernel_names}",
+            lambda msg: f"{msg}\ninner_kernel should be detected, got: {kernel_names}",
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -1384,7 +1429,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "nested_kernel",
             kernel_names,
-            f"nested_kernel should be detected, got: {kernel_names}",
+            lambda msg: f"{msg}\nnested_kernel should be detected, got: {kernel_names}",
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -1440,7 +1485,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "factory_kernel",
             kernel_names,
-            f"factory_kernel should be detected, got: {kernel_names}",
+            lambda msg: f"{msg}\nfactory_kernel should be detected, got: {kernel_names}",
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -1508,7 +1553,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "cached_kernel",
             kernel_names,
-            f"cached_kernel should be detected, got: {kernel_names}",
+            lambda msg: f"{msg}\ncached_kernel should be detected, got: {kernel_names}",
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -1651,7 +1696,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             # Calls x.sum().backward() during forward execution of fn
             (x_grad,) = torch.autograd.grad(x.sum(), x)
@@ -1790,7 +1835,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             )
             return res
 
-        compiled_fn = torch.compile(fn, dynamic=True)
+        compiled_fn = torch.compile(fn, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         a_shape = (5, 6)
         b_shape = (7, 8)
@@ -1855,7 +1900,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(x, y):
             return (x + x, y + y)
 
-        compiled_fn = torch.compile(fn, dynamic=True)
+        compiled_fn = torch.compile(fn, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         # Iterate over different shapes, varying whether the total
         # size is below or above int32. For each combination, we expect
@@ -2013,7 +2058,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         """
         from torch._inductor.async_compile import CompiledTritonKernels
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def f(x, y):
             return x.sin() + y
 
@@ -2273,14 +2318,14 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         # Record artifacts
         with fresh_cache():
-            compiled_fn = torch.compile(fn, dynamic=dynamic)
+            compiled_fn = torch.compile(fn, dynamic=dynamic)  # noqa: UNSPECIFIED_BACKEND
 
             # A first call should miss in the cache.
             eager_result = fn(a, b)
             expected_grads = torch.autograd.grad(eager_result.sum(), inputs=(a, b))
             compiled_result = compiled_fn(a, b)
             with torch._dynamo.compiled_autograd._enable(
-                torch.compile(dynamic=dynamic)
+                torch.compile(dynamic=dynamic)  # noqa: UNSPECIFIED_BACKEND
             ):
                 actual_grads = torch.autograd.grad(compiled_result.sum(), inputs=(a, b))
             if hasattr(a, "_dynamo_propagated_dynamic_indices"):
@@ -2340,7 +2385,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 expected_grads = torch.autograd.grad(eager_result.sum(), inputs=(a, b))
                 compiled_result = compiled_fn(a, b)
                 with torch._dynamo.compiled_autograd._enable(
-                    torch.compile(dynamic=dynamic)
+                    torch.compile(dynamic=dynamic)  # noqa: UNSPECIFIED_BACKEND
                 ):
                     actual_grads = torch.autograd.grad(
                         compiled_result.sum(), inputs=(a, b)
@@ -2922,7 +2967,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_all_caches()
 
             # First compilation - expect cache miss.
-            compiled = torch.compile(target)
+            compiled = torch.compile(target)  # noqa: UNSPECIFIED_BACKEND
             result1 = compiled(*inputs)
 
             # Assert cache miss.
@@ -2942,7 +2987,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             torch._dynamo.reset()
 
             # Second compilation - expect cache hit.
-            compiled2 = torch.compile(target)
+            compiled2 = torch.compile(target)  # noqa: UNSPECIFIED_BACKEND
             result2 = compiled2(*inputs)
 
             # Assert cache hit.
@@ -2978,7 +3023,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         with inductor_config.patch("pre_grad_custom_pass", NoUuidPass()):
             self._clear_all_caches()
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             with self.assertRaisesRegex(
                 RuntimeError, "pre_grad_custom_pass.*NoUuidPass must implement uuid"
             ):
@@ -3014,7 +3059,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_all_caches()
 
             # First compilation — should warn.
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             with self.assertLogs(
                 "torch._inductor.codecache", level="WARNING"
             ) as log_cm:
@@ -3026,7 +3071,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
             # Second compilation — same pass class, should not warn again.
             torch._dynamo.reset()
-            compiled_fn2 = torch.compile(fn)
+            compiled_fn2 = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             with self.assertNoLogs("torch._inductor.codecache", level="WARNING"):
                 compiled_fn2(x, y)
 
@@ -3442,7 +3487,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         result = g(*args, **kwargs)
         return (result, fx_graph, example_inputs)
 
-    def gen_cache_key(self, f, config, inputs=None):
+    def gen_cache_key(self, f, config, inputs=None, act_input_paths=()):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
@@ -3452,7 +3497,13 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
             with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, None)
+                return autograd_cache_key(
+                    fx_g,
+                    example_inputs,
+                    config,
+                    None,
+                    act_input_paths=act_input_paths,
+                )
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -3518,6 +3569,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             config_with_backend, precompile_backend_id="backend"
         )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
+
+    def test_different_act_input_paths(self):
+        def fn(x):
+            return x.sin().cos()
+
+        config = self.default_config()
+        base = self.gen_cache_key(fn, config)
+        top_level_act = self.gen_cache_key(fn, config, act_input_paths=[(0, ())])
+        nested_act = self.gen_cache_key(
+            fn, config, act_input_paths=[(0, ("_local_tensor",))]
+        )
+
+        self.assertNotEqual(base, top_level_act)
+        self.assertNotEqual(top_level_act, nested_act)
 
     def test_different_graphs(self):
         def fn(x):
@@ -4500,9 +4565,13 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
 
         real_cache_key = autograd_cache.autograd_cache_key
 
-        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+        def capturing_cache_key(
+            mod, ei, config, compiler_config_extra=None, act_input_paths=()
+        ):
             nonlocal captured_key
-            result = real_cache_key(mod, ei, config, compiler_config_extra)
+            result = real_cache_key(
+                mod, ei, config, compiler_config_extra, act_input_paths
+            )
             captured_key = result[0]
             return result
 
@@ -4517,7 +4586,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                     side_effect=capturing_cache_key,
                 ),
             ):
-                torch.compile(fn, fullgraph=True)(*args)
+                torch.compile(fn, fullgraph=True)(*args)  # noqa: UNSPECIFIED_BACKEND
 
         self.assertIsNotNone(captured_key)
         return captured_key, captured_gm, captured_example_inputs
@@ -4762,9 +4831,13 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         real_cache_key_fn = autograd_cache.autograd_cache_key
         captured_key = None
 
-        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+        def capturing_cache_key(
+            mod, ei, config, compiler_config_extra=None, act_input_paths=()
+        ):
             nonlocal captured_key
-            captured_key, _ = real_cache_key_fn(mod, ei, config, compiler_config_extra)
+            captured_key, _ = real_cache_key_fn(
+                mod, ei, config, compiler_config_extra, act_input_paths
+            )
             return captured_key, _
 
         with outer_context:
