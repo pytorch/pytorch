@@ -1871,7 +1871,7 @@ _cleanup_libtorch_agnostic_runtime() {
     MATRIX_INSTALLED_IN_AMBIENT=0
 }
 
-# BC/FC matrix over build (B) / target (T) / runtime (R); expect success only when T <= min(B, R).
+# BC/FC matrix over build (B) / target (T) / runtime (R); expect success when T <= min(B, R).
 test_libtorch_agnostic_targetting() {
     echo "Testing libtorch_agnostic BC/FC across the build/target/runtime version matrix"
 
