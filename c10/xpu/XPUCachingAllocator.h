@@ -6,6 +6,11 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
+
 class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
@@ -83,6 +88,10 @@ C10_XPU_API void attachAllocatorTraceTracker(
     CachingDeviceAllocator::AllocatorTraceTracker tracker);
 
 C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
+
+C10_XPU_API ShareableHandle shareIpcHandle(void* ptr);
+
+C10_XPU_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
