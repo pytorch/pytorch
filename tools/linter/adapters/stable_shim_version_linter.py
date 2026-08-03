@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    ensure_diff_blob_local,
     get_current_version,
     LintMessage,
     LintSeverity,
@@ -79,6 +80,9 @@ def get_added_lines(filename: str) -> set[int]:
 
         # Get merge-base with origin/main to check all PR commits
         merge_base = merge_base_with_main()
+        # Prefetch the merge-base blob so the diff below stays fully local (CI
+        # uses a blobless partial clone; otherwise git lazily fetches mid-diff).
+        ensure_diff_blob_local(merge_base, filename)
         result = subprocess.run(
             ["git", "diff", f"{merge_base}..HEAD", filename],
             capture_output=True,

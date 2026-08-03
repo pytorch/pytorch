@@ -439,6 +439,7 @@ class BackendFeature(Enum):
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
+    MASKED_STORE = auto()
     SCAN = auto()
     SORT = auto()
     TUPLE_REDUCTION = auto()
@@ -1760,7 +1761,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -2349,7 +2350,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
@@ -3030,12 +3031,10 @@ class CSEProxy(DefaultHandler):
         mask: CSEVariable,
     ) -> None:
         self.kernel.store_buffer_names.add(name)
-        # Deliberately no _update_store_cache: `value` is only the contents of
-        # `name` where the mask held, so forwarding it to a later load in this
-        # kernel would hand back `value` for the masked-off lanes too. Invalidate
-        # instead so any such load reads memory and keeps the buffer alive.
-        self.kernel.cse.store_cache.pop(name, None)
-        self.kernel.cse.invalidated_stores.add(name)
+        # masked_store is only used for domain expansion. The false lanes are
+        # outside the logical output, so forwarding the computed value avoids an
+        # out-of-bounds read of the smaller destination in the expanded tail.
+        self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.masked_store(name, index, value, mask)
             self.kernel.num_store += 1

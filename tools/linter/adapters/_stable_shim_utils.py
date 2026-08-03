@@ -10,6 +10,7 @@ Consumed by:
 from __future__ import annotations
 
 import functools
+import os
 import re
 import subprocess
 import sys
@@ -461,6 +462,60 @@ def _run_git_network_cmd(
             time.sleep(2**attempt)
     raise RuntimeError(
         f"`{' '.join(cmd)}` failed after {attempts} attempts: {last_err}"
+    )
+
+
+def ensure_diff_blob_local(commit: str, filename: str) -> None:
+    """
+    Prefetch the blob for `filename` at `commit` so a subsequent
+    `git diff commit..HEAD -- filename` runs entirely from local objects.
+
+    CI checks out a blobless partial clone (git clone --filter=blob:none), so
+    fetching a commit brings down its trees but not file contents. Left alone,
+    `git diff` notices the merge-base blob is missing and triggers an on-demand
+    lazy fetch in the middle of the diff -- an uncontrolled network round-trip
+    that races the diff's short timeout under the network contention of
+    lintrunner running adapters concurrently.
+
+    Trees are present locally under blob:none, so we resolve the blob's OID
+    offline and fetch exactly that one object through the retrying network
+    helper. In a full (non-partial) clone the blob is already present and this
+    is a no-op with no network access. GIT_NO_LAZY_FETCH keeps the local
+    resolution and presence checks from themselves triggering a fetch.
+    """
+    no_lazy = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+
+    try:
+        rel = Path(filename).resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return  # path is outside the repo; nothing we can prefetch
+
+    rev = subprocess.run(
+        ["git", "rev-parse", f"{commit}:{rel}"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=no_lazy,
+    )
+    blob_oid = rev.stdout.strip()
+    if rev.returncode != 0 or not blob_oid:
+        # Path does not exist at `commit` (e.g. a newly added file), or the tree
+        # is unavailable (treeless clone). There is no merge-base blob to
+        # prefetch; the diff falls back to its own handling.
+        return
+
+    present = subprocess.run(
+        ["git", "cat-file", "-e", blob_oid],
+        capture_output=True,
+        timeout=5,
+        env=no_lazy,
+    )
+    if present.returncode == 0:
+        return
+
+    _run_git_network_cmd(
+        ["git", "fetch", "--no-write-fetch-head", "origin", blob_oid],
+        timeout=30,
     )
 
 

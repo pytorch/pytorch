@@ -2,7 +2,7 @@
 import contextlib
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -11,12 +11,16 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import CSEProxy, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-from torch._inductor.codegen.simd import IterationRangesRoot
+from torch._inductor.codegen.simd import _PointwiseRemapHandler, IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
+    _is_lossless_integer_cast,
+    _is_representable_integer,
     _materialize_trunc_to_float_expr,
+    FusedUserDefinedTritonKernel,
+    TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
@@ -31,6 +35,10 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -42,6 +50,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -59,6 +68,174 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    @parametrize(
+        "src_dtype,dst_dtype,expected",
+        [
+            (torch.int16, torch.int32, True),
+            (torch.uint8, torch.int16, True),
+            (torch.int32, torch.int16, False),
+            (torch.int16, torch.uint16, False),
+            (torch.uint16, torch.int16, False),
+            (torch.bool, torch.bool, True),
+            (torch.float32, torch.int64, False),
+        ],
+    )
+    def test_lossless_integer_cast(self, src_dtype, dst_dtype, expected):
+        self.assertEqual(_is_lossless_integer_cast(src_dtype, dst_dtype), expected)
+
+    @parametrize(
+        "value,dtype,expected",
+        [
+            (-1, torch.uint8, False),
+            (255, torch.uint8, True),
+            (256, torch.uint8, False),
+            (1, torch.bool, True),
+            (2, torch.bool, False),
+            (1, torch.float32, False),
+        ],
+    )
+    def test_representable_integer(self, value, dtype, expected):
+        self.assertEqual(_is_representable_integer(value, dtype), expected)
+
+    @parametrize(
+        "dtype,tracks_source",
+        [
+            (torch.uint8, False),
+            (torch.int32, True),
+            (torch.int64, True),
+            (torch.float32, False),
+        ],
+    )
+    def test_index_expr_source_tracking(self, dtype, tracks_source):
+        var = TritonCSEVariable("value", ValueRanges.unknown(), dtype, shape=())
+        source = sympy.Integer(1)
+
+        var.update_on_args("index_expr", (source,), {})
+
+        self.assertEqual(var.source_index, source if tracks_source else None)
+
+    @parametrize("dtype,tracks_source", [(torch.int32, False), (torch.int64, True)])
+    def test_value_expr_source_tracking(self, dtype, tracks_source):
+        source = sympy.Symbol("xindex")
+        var = TritonCSEVariable("value", ValueRanges.unknown(), dtype, shape=())
+        var.source_index = source
+        kernel = SimpleNamespace(
+            _index_dtype=torch.int64,
+            compute=Mock(),
+            cse=SimpleNamespace(generate=Mock(return_value=var)),
+        )
+
+        with (
+            V.set_kernel_handler(kernel),
+            patch.object(TritonKernelOverrides, "index_expr", return_value=var),
+        ):
+            result = TritonKernelOverrides.value_expr(source, dtype)
+
+        self.assertIs(result, var)
+        self.assertEqual(var.source_index, source if tracks_source else None)
+        self.assertEqual(kernel._index_dtype, torch.int64)
+
+    @parametrize("narrow_lhs", [True, False])
+    def test_unsafe_integer_metadata_does_not_imply_mask(self, narrow_lhs):
+        source = sympy.Symbol("xindex")
+        lhs = TritonCSEVariable("lhs", ValueRanges.unknown(), torch.int64, shape=())
+        lhs.source_index = source
+        rhs = TritonCSEVariable("rhs", ValueRanges.unknown(), torch.int64, shape=())
+
+        if narrow_lhs:
+            narrowed = TritonCSEVariable(
+                "narrowed", ValueRanges.unknown(), torch.uint8, shape=()
+            )
+            narrowed.update_on_args("to_dtype", (lhs,), {})
+            lhs = narrowed
+            rhs.update_on_args("constant", (100,), {})
+        else:
+            rhs = TritonCSEVariable("rhs", ValueRanges.unknown(), torch.uint8, shape=())
+            rhs.update_on_args("constant", (-1,), {})
+
+        result = TritonCSEVariable(
+            "result", ValueRanges.unknown(), torch.bool, shape=()
+        )
+        result.update_on_args("lt", (lhs, rhs), {})
+
+        self.assertEqual(len(result.implied_mask_vars), 0)
+
+    def test_integer_cast_metadata_propagation(self):
+        source_index = sympy.Symbol("xindex")
+        source = TritonCSEVariable(
+            "source", ValueRanges.unknown(), torch.int32, shape=()
+        )
+        source.source_index = source_index
+        source.scalar_value = 7
+
+        widened = TritonCSEVariable(
+            "widened", ValueRanges.unknown(), torch.int64, shape=()
+        )
+        widened.update_on_args("to_dtype", (source,), {})
+        narrowed = TritonCSEVariable(
+            "narrowed", ValueRanges.unknown(), torch.uint8, shape=()
+        )
+        narrowed.update_on_args("to_dtype", (source,), {})
+
+        self.assertEqual(widened.source_index, source_index)
+        self.assertEqual(widened.scalar_value, 7)
+        self.assertIsNone(narrowed.source_index)
+        self.assertIsNone(narrowed.scalar_value)
+
+    @parametrize("removed", [False, True])
+    def test_masked_store_updates_store_cache_without_destination_load(self, removed):
+        kernel = SimpleNamespace(
+            cse=SimpleNamespace(store_cache={}, invalidated_stores=set()),
+            current_node=None,
+            load=Mock(),
+            masked_store=Mock(),
+            must_keep_buffers=set(),
+            num_store=0,
+            record_op_trace=Mock(),
+            store_buffer_names=set(),
+        )
+        proxy = CSEProxy(kernel, Mock())
+        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
+        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
+
+        if removed:
+            self._graph.removed_buffers.add("buf0")
+        try:
+            proxy.masked_store("buf0", sympy.Integer(0), value, mask)
+        finally:
+            self._graph.removed_buffers.discard("buf0")
+
+        self.assertIs(proxy.load("buf0", sympy.Integer(0)), value)
+        kernel.load.assert_not_called()
+        if removed:
+            kernel.masked_store.assert_not_called()
+        else:
+            kernel.masked_store.assert_called_once_with(
+                "buf0", sympy.Integer(0), value, mask
+            )
+
+    def test_user_defined_triton_kernel_rejects_masked_store(self):
+        kernel = object.__new__(FusedUserDefinedTritonKernel)
+        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
+        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
+
+        with self.assertRaisesRegex(NotImplementedError, "user-defined Triton"):
+            kernel.masked_store("buf0", sympy.Integer(0), value, mask)
+
+    def test_pointwise_remap_handler_remaps_masked_store(self):
+        inner = Mock()
+        family = Mock()
+        remapped_index = sympy.Symbol("remapped_index")
+        family.remap_index.return_value = remapped_index
+        family.ensure_active.return_value = contextlib.nullcontext()
+        handler = _PointwiseRemapHandler(inner, Mock(), family=family)
+        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
+        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
+
+        handler.masked_store("buf0", sympy.Symbol("index"), value, mask)
+
+        inner.masked_store.assert_called_once_with("buf0", remapped_index, value, mask)
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
