@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -126,6 +127,8 @@ def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True)
 
 
 class TestAutogradFunctional(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
         if isinstance(base, torch.Tensor):
@@ -1725,6 +1728,8 @@ class TestAutogradFunctional(TestCase):
 
 
 class TestAutogradFunctionalDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @base_and_logging_tensor
     def test_construct_standard_basis_for_gpu(self, device, ctors):
