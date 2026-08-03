@@ -90,17 +90,20 @@ bool use_miopen(
   }
 
 #ifdef USE_ROCM
-  // MIOpen RNN produces incorrect outputs on gfx1201 for batch sizes >100.
+  // MIOpen RNN produces incorrect outputs on gfx1201 (RDNA4) for batch >100.
+  // Confirmed on PyTorch 2.12+ROCm 7.14; may be fixed in ROCm 10.0 dev builds
+  // (see issue #177834 comment by k-artem) but not in current release wheels.
   // See https://github.com/pytorch/pytorch/issues/177834
   if (detail::getCUDAHooks().isGPUArch({"gfx1201"})) {
     return false;
   }
 
-  // MIOpen RNN fails with miopenStatusBadParm ("Lengths must be > 0") for
-  // large batch sizes on multiple ROCm GPU architectures including gfx950.
-  // Fall back to the native implementation which produces correct results.
+  // MIOpen RNN fails with miopenStatusBadParm ("Lengths must be > 0") at
+  // batch 583+ on gfx950 (MI355X, MIOpen 3.5.1.70201). rocm-libraries #7300
+  // was expected to fix large-batch RNN but crash persists on ROCm 7.2.
+  // Threshold 582 preserves MIOpen for all working batch sizes on gfx950.
   // See https://github.com/pytorch/pytorch/issues/177834
-  constexpr int64_t miopen_rnn_max_batch = 512;
+  constexpr int64_t miopen_rnn_max_batch = 582;
   if (batch_size.has_value() && batch_size.value() > miopen_rnn_max_batch) {
     return false;
   }
