@@ -533,7 +533,15 @@ class DeviceTypeTestBase(TestCase):
         except Exception:
             # For CUDATestBase, XPUTestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
-            if hasattr(cls, "setUpClass"):
+            # only the device base's setUpClass: the full one would leak at import time
+            for klass in cls.__mro__[1:]:
+                if (
+                    issubclass(klass, DeviceTypeTestBase)
+                    and "setUpClass" in klass.__dict__
+                ):
+                    klass.setUpClass()
+                    break
+            else:
                 cls.setUpClass()
             return cls.get_primary_device()
 

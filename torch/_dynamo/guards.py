@@ -2708,7 +2708,11 @@ class GuardBuilder(GuardBuilderBase):
 
             return tuple(map(id, hooks))
 
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        # fn captures guard_hooks so the recorded ids cannot be reused by new objects
+        guard_hooks = get_hooks()
+        if not are_inline_hooks(guard_hooks):
+            guard_hooks = None
+        guard_hooks_ids = hooks_ids_fn(guard_hooks)
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
@@ -2716,7 +2720,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         def fn(x: object) -> bool:
-            return guard_hooks_ids == hooks_ids_fn(get_hooks())
+            hooks = get_hooks()
+            if guard_hooks is None:
+                return not are_inline_hooks(hooks)
+            return guard_hooks_ids == hooks_ids_fn(hooks)
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
