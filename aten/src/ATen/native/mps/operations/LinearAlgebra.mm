@@ -1653,6 +1653,9 @@ static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t 
 }
 
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
+  TORCH_CHECK(out.scalar_type() == kFloat || out.scalar_type() == kComplexFloat,
+              "linalg.cholesky: MPS supports float32 and complex64, but got ",
+              out.scalar_type());
   auto input_sizes = out.sizes();
 
   int64_t ndim = out.dim();
@@ -1663,14 +1666,16 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto device = MPSDevice::getInstance()->device();
   auto info_ = info.dim() >= 2 ? info.view({B}) : info;
   auto info_sizes = info.sizes();
-  if (has_mpp()) {
+  if (has_mpp() && !isComplexType(out.scalar_type())) {
     return cholesky_panel_impl(out, info_, N, B, upper);
   }
   info_.fill_(0);
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
-  auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
-  auto applySYRKPSO = lib.getPipelineStateForFunc(upper ? "applySYRKU" : "applySYRKL");
+  const auto dtypeStr = scalarToMetalTypeString(out);
+  auto factorDiagonalPSO =
+      lib.getPipelineStateForFunc(fmt::format("factorDiagonalBlock{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applyTRSMPSO = lib.getPipelineStateForFunc(fmt::format("applyTRSM{}_{}", upper ? 'U' : 'L', dtypeStr));
+  auto applySYRKPSO = lib.getPipelineStateForFunc(fmt::format("applySYRK{}_{}", upper ? 'U' : 'L', dtypeStr));
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;

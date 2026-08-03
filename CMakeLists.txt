@@ -9,8 +9,42 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
   message(FATAL_ERROR "In-source build are not supported")
 endif()
 
+# Cross-compilation is configured by CMAKE_SYSTEM_NAME / CMAKE_SYSTEM_PROCESSOR,
+# which must be set before project() so CMake enters cross-compile mode and
+# reports the target architecture. The general environment-variable forwarding
+# in cmake/EnvVarForwarding.cmake runs after project() and skips variables that
+# are already defined, so project() would otherwise set these to the host values
+# and the target values passed via the environment would be lost. Forward just
+# the toolchain-determining variables here, before project().
+foreach(_cross_var
+    CMAKE_SYSTEM_NAME
+    CMAKE_SYSTEM_PROCESSOR
+    CMAKE_C_COMPILER
+    CMAKE_CXX_COMPILER
+    CMAKE_SYSROOT
+    CMAKE_TOOLCHAIN_FILE)
+  if(DEFINED ENV{${_cross_var}} AND NOT DEFINED ${_cross_var})
+    set(${_cross_var} "$ENV{${_cross_var}}")
+  endif()
+endforeach()
+
 # ---[ Project and semantic versioning.
-project(Torch CXX C)
+# When built via scikit-build-core, these are set automatically.
+# Provide fallbacks for standalone cmake invocations.
+if(NOT DEFINED SKBUILD_PROJECT_NAME)
+  set(SKBUILD_PROJECT_NAME "torch")
+endif()
+if(NOT DEFINED SKBUILD_PROJECT_VERSION)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" SKBUILD_PROJECT_VERSION)
+  string(STRIP "${SKBUILD_PROJECT_VERSION}" SKBUILD_PROJECT_VERSION)
+  # version.txt may contain PEP 440 pre-release suffixes like "a0" that are
+  # not valid CMake version components. Strip everything after the last digit
+  # group so project(VERSION ...) still works.
+  string(REGEX MATCH "^[0-9]+\\.[0-9]+(\\.[0-9]+)?" SKBUILD_PROJECT_VERSION "${SKBUILD_PROJECT_VERSION}")
+endif()
+project(${SKBUILD_PROJECT_NAME}
+        VERSION ${SKBUILD_PROJECT_VERSION}
+        LANGUAGES CXX C)
 
 # When built via scikit-build-core, Python_EXECUTABLE is already set.
 # For standalone cmake invocations, find it via find_package.
@@ -184,7 +218,9 @@ set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)")
+  # Linux reports "aarch64", macOS "arm64", and native Windows on Arm "ARM64".
+  # CMake MATCHES is case-sensitive, so accept each spelling.
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)

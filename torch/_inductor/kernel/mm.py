@@ -393,11 +393,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
         counters["inductor"]["decompose_mm_pointwise"] += 1
-        # Clone both to force contiguous strides (#189401): unrolled sum
-        # reduction computes wrong indices for transposed views. Clone both
-        # rather than detecting the transposed side; scheduler fuses the copy.
-        mat1 = L.clone(mat1)
-        mat2 = L.clone(mat2)
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
         return L.sum_(L.mul(mat1, mat2), axis=1)
@@ -979,11 +974,33 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
-    # Swizzling is not yet wired into any Inductor template or extern choice
-    # here. Rather than failing compilation, defer swizzled scale layouts
-    # (e.g. blockwise MXFP8/NVFP4 on Blackwell) to the eager op so they still
-    # produce correct results.
-    if any(s != 0 for s in swizzle_a) or any(s != 0 for s in swizzle_b):
+
+    # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
+    # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
+    # RowWise, and DeepSeek BlockWise1x128/128x128). Everything else has no
+    # template or extern choice here, so defer to the eager _scaled_mm_v2 op:
+    #   - swizzled scale layouts (e.g. CUDA/Blackwell MXFP8/NVFP4)
+    #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
+    #     expresses MX/NVFP4, with NO_SWIZZLE)
+    #   - multi-level scales (two-level NVFP4)
+    #   - any non-fp32 block scale
+    # The eager op is called directly so it keeps its native v2 scale_b
+    # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+    if (
+        any(s != 0 for s in swizzle_a)
+        or any(s != 0 for s in swizzle_b)
+        or not supported_recipe
+        or not is_single_level_scale
+        or scale_a[0].dtype != torch.float32
+    ):
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
         fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
@@ -1019,20 +1036,6 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
-    if not (len(scale_a) >= 1 and len(scale_b) >= 1):
-        raise AssertionError("scale_a and scale_b must each have at least one entry")
-
-    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
-
-    def check_supported_recipe(recipe: list[int]) -> bool:
-        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
-        return all(ScalingType(r) not in disallowed for r in recipe)
-
-    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
-        recipe_b
-    )
-
-    # Only handle single-level scales (no MX/NV)
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
     input_nodes: list[Any]
@@ -1148,15 +1151,6 @@ def tuned_scaled_mm_v2(
             input_nodes,
             kernel_inputs=kernel_inputs,
         )
-
-    # Early return for MX variants
-    if (
-        scale_a[0].dtype != torch.float32
-        or (not supported_recipe)
-        or (not is_single_level_scale)
-    ):
-        node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
 
     if (
         is_nonzero
