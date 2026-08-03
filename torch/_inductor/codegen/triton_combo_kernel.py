@@ -893,6 +893,18 @@ class ComboKernel(Kernel):
             log.debug("uniform dispatch: skipped (< 2 sub-kernels)")
             return False
 
+        # Bail when cudagraphs is enabled. Uniform dispatch builds its slot
+        # pointer table on the host from buffer data_ptr()s and copies it to the
+        # GPU inside the wrapper. That is incompatible with cudagraph trees: the
+        # table must be a cudagraph-managed static input (framework-level work),
+        # otherwise the captured host->device copy is invalid on replay
+        # ("cudaErrorInvalidValue") and/or the table is rejected by
+        # check_memory_pool. Fall back to sequential dispatch, which is
+        # cudagraph-safe. See D114510783 stack for the WIP cudagraph-native table.
+        if config.triton.cudagraphs:
+            log.debug("uniform dispatch: skipped (cudagraphs enabled)")
+            return False
+
         # Bail on per-subkernel blocks
         if config.combo_kernel_per_subkernel_blocks:
             log.debug("uniform dispatch: skipped (per_subkernel_blocks)")
@@ -994,32 +1006,15 @@ class ComboKernel(Kernel):
         ref_buf_refs = buf_refs_per_kernel[0]
         for slot_idx in range(ref_count):
             slot_call_args = []
-            slot_dtypes: list[Any] = []
+            slot_dtype = None
             for refs in buf_refs_per_kernel:
                 inner_name = refs[slot_idx]
                 outer = inner_to_outer.get(inner_name)
                 if outer is None:
                     return False  # can't resolve buffer
                 slot_call_args.append(outer)
-                slot_dtypes.append(inner_to_dtype.get(inner_name))
-
-            # Fail-closed dtype check. The shared body loads this slot from the
-            # pointer table and casts it to ONE dtype (tl.pointer_type(dtype))
-            # taken from sub-kernel 0. If the sub-kernels' buffers for this slot
-            # do not all share a single known dtype, that single cast would
-            # reinterpret the other sub-kernels' memory and silently produce
-            # wrong results -- so bail to sequential dispatch instead. Making the
-            # verification stricter only falls back to a correct dispatch; it
-            # never regresses correctness.
-            distinct_dtypes = {d for d in slot_dtypes if d is not None}
-            if None in slot_dtypes or len(distinct_dtypes) != 1:
-                log.debug(
-                    "uniform dispatch build: FAILED - slot %d dtype mismatch/missing: %s",
-                    slot_idx,
-                    slot_dtypes,
-                )
-                return False
-            slot_dtype = next(iter(distinct_dtypes))
+                if slot_dtype is None:
+                    slot_dtype = inner_to_dtype.get(inner_name)
 
             slots.append({
                 "inner_name": ref_buf_refs[slot_idx],  # name used in the body
@@ -1873,18 +1868,6 @@ class ComboKernel(Kernel):
             code.writeline(
                 "kernel_idx = pid // num_blocks_per_kernel"
             )
-            # Fix (b): clamp kernel_idx into range. The launched grid can exceed
-            # num_blocks_per_kernel * num_kernels (e.g. when combo_grid_meta's
-            # min_blocks inflates it), which would otherwise make tail blocks
-            # index past the _slot_*_ptrs pointer tables -> illegal memory access.
-            # Clamping maps any excess block onto the last valid sub-kernel; since
-            # it recomputes an already-computed output element with the same
-            # inputs, the store is idempotent. In the common case (grid exact)
-            # kernel_idx is always < num_kernels, so this is a no-op.
-            num_uniform_kernels = len(self.sub_kernels)
-            code.writeline(
-                f"kernel_idx = tl.minimum(kernel_idx, {num_uniform_kernels - 1})"
-            )
             code.writeline(
                 "pid_offset = pid % num_blocks_per_kernel"
             )
@@ -2126,37 +2109,31 @@ class ComboKernel(Kernel):
         first_buf = slots[0]["call_args"][0]
         device_expr = f"{first_buf}.device"
 
-        # Emit pointer-table tensor allocations with caching.
-        # Simple integer-key cache: built on first call (warmup), reused on
-        # subsequent calls. Since input buffers don't change addresses within
-        # a single do_bench_cudagraph session, this is safe.
+        # Build the slot pointer tables. These MUST be rebuilt on every call:
+        # the combo pass reuses the same uniform kernel for multiple sub-kernel
+        # groups, each with different buffers, so a name-keyed global cache would
+        # make later groups reuse the FIRST group's buffer pointers and silently
+        # produce wrong results (observed on CMF LN+SiLU: 88/103 arcs wrong).
         slot_var_names: list[str] = []
-        cache_dict_name = f"_upc_{name}"
-        wrapper.writeline(
-            f"if '{cache_dict_name}' not in globals(): globals()['{cache_dict_name}'] = {{}}"
-        )
         for slot_idx, slot in enumerate(slots):
             var_name = f"_uniform_slot_{slot_idx}_ptrs"
             buf_names = slot["call_args"]
             n = len(buf_names)
             data_ptr_exprs = [f"{buf}.data_ptr()" for buf in buf_names]
+            # Stage addresses on a pinned CPU tensor (device="cpu" so it stays
+            # valid under an active CUDA device context), then async-copy to a
+            # fresh device tensor built for this specific call.
             wrapper.writeline(
-                f"if {slot_idx} not in globals()['{cache_dict_name}']:"
-            )
-            wrapper.writeline(
-                f"    _cpu = torch.tensor("
+                f"_cpu = torch.tensor("
                 f"[{', '.join(data_ptr_exprs)}], "
-                f"dtype=torch.int64).pin_memory()"
+                f'dtype=torch.int64, device="cpu").pin_memory()'
             )
             wrapper.writeline(
-                f"    globals()['{cache_dict_name}'][{slot_idx}] = torch.empty("
+                f"{var_name} = torch.empty("
                 f"{n}, dtype=torch.int64, device={device_expr})"
             )
             wrapper.writeline(
-                f"    globals()['{cache_dict_name}'][{slot_idx}].copy_(_cpu, non_blocking=True)"
-            )
-            wrapper.writeline(
-                f"{var_name} = globals()['{cache_dict_name}'][{slot_idx}]"
+                f"{var_name}.copy_(_cpu, non_blocking=True)"
             )
             slot_var_names.append(var_name)
 

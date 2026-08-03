@@ -544,48 +544,123 @@ class ComboKernelTests(TestCase):
         self.assertNotIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
 
     @requires_gpu_and_triton
-    def test_uniform_dispatch_mixed_dtype_is_correct(self):
-        # Regression guard for the uniform-dispatch slot-dtype bug.
+    def test_uniform_dispatch_pointer_table_pinned_under_device_context(self):
+        # Regression test for the uniform-dispatch pin_memory crash (the dominant
+        # fail_to_run bucket on the H100 dashboard, seen with cudagraphs).
         #
-        # Uniform dispatch loads each buffer from a pointer table and casts it to
-        # a SINGLE dtype (tl.pointer_type(dtype)) taken from the first sub-kernel.
-        # If the sub-kernels mapped to a slot differ in dtype, that one cast
-        # reinterprets the other sub-kernels' memory and silently produces wrong
-        # results. The verification must reject such groups (bail to sequential).
-        # Either way, the compiled result must match eager.
-        def fn(a, b):
-            return a * 2, b * 2
+        # The wrapper builds its slot pointer table with
+        #   _cpu = torch.tensor([...data_ptr()...], dtype=torch.int64,
+        #                        device="cpu").pin_memory()
+        # When the compiled kernel runs under an active CUDA device context -- as
+        # it does during cudagraphs capture (see torch/utils/_device.py) -- a
+        # torch.tensor(...) WITHOUT an explicit device is created on CUDA, and
+        # pin_memory() then raises:
+        #   RuntimeError: cannot pin 'torch.cuda.LongTensor' ...
+        # `with torch.device(GPU_TYPE)` reproduces that device context directly
+        # (without the unrelated cudagraph memory-pool machinery); device="cpu"
+        # keeps the staging tensor on CPU so it stays pinnable. Assert the
+        # uniform-eligible group runs under the context and matches eager.
+        if self.combo_kernel_per_subkernel_blocks:
+            # Uniform dispatch (hence the pointer-table pin_memory path) does not
+            # engage under per-subkernel blocks, so there is nothing to exercise.
+            return
 
-        # Identical ops and shape, but different buffer dtypes across sub-kernels.
-        a = torch.rand(2048, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.rand(2048, device=GPU_TYPE, dtype=torch.bfloat16)
+        def ln_silu(x):
+            mean = x.mean(dim=-1, keepdim=True)
+            var = x.var(dim=-1, keepdim=True, unbiased=False)
+            ln = (x - mean) * torch.rsqrt(var + 1e-5)
+            return ln * torch.sigmoid(ln)
+
+        def fn(a, b, c, d):
+            return ln_silu(a), ln_silu(b), ln_silu(c), ln_silu(d)
+
+        inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
         with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
-            out_eager = fn(a, b)
-            out_compiled = torch.compile(fn)(a, b)
+            out_eager = fn(*inps)
+            compiled = torch.compile(fn)
+            # Active CUDA device context: without device="cpu" in the wrapper, the
+            # pointer-table torch.tensor(...) lands on CUDA and pin_memory() fails.
+            with torch.device(GPU_TYPE):
+                out_compiled = compiled(*inps)
 
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
-    def test_uniform_dispatch_mixed_layout_is_correct(self):
-        # Correctness guard: sub-kernels that are the same op on the same logical
-        # shape but DIFFERENT memory layout (contiguous vs channels_last) must not
-        # be fused into one uniform body that indexes them identically. The op-trace
-        # equality check captures the (differing) index expressions, so uniform
-        # dispatch should bail to sequential; either way the result must match eager.
-        def fn(a, b):
-            return a + 1, b + 1
+    def test_uniform_dispatch_cudagraphs_falls_back_safely(self):
+        # Uniform dispatch is not cudagraph-safe: its host-built pointer table is
+        # not a cudagraph-managed static input, so under cudagraph trees the
+        # captured host->device copy is invalid on replay and/or the table is
+        # rejected by check_memory_pool. _detect_uniform_subkernels therefore
+        # bails when config.triton.cudagraphs is set, falling back to sequential
+        # combo dispatch (which is cudagraph-safe). This runs a uniform-eligible
+        # LN+SiLU group under cudagraphs (mode="reduce-overhead") across several
+        # iterations (warmup -> capture -> replay) and asserts it runs and matches
+        # eager -- i.e. the fallback is correct and does not crash/corrupt.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
 
-        a = torch.rand(2, 4, 8, 8, device=GPU_TYPE)
-        b = torch.rand(2, 4, 8, 8, device=GPU_TYPE).to(
-            memory_format=torch.channels_last
-        )
+        def ln_silu(x):
+            mean = x.mean(dim=-1, keepdim=True)
+            var = x.var(dim=-1, keepdim=True, unbiased=False)
+            ln = (x - mean) * torch.rsqrt(var + 1e-5)
+            return ln * torch.sigmoid(ln)
+
+        def fn(a, b, c, d):
+            return ln_silu(a), ln_silu(b), ln_silu(c), ln_silu(d)
+
+        torch.manual_seed(0)
+        inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
         with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
-            out_eager = fn(a, b)
-            out_compiled = torch.compile(fn)(a, b)
+            ref = [t.clone() for t in fn(*inps)]
+            compiled = torch.compile(fn, mode="reduce-overhead")
+            got = None
+            # warmup -> capture -> replay; clone before the next replay overwrites.
+            for _ in range(3):
+                out = compiled(*inps)
+                got = [t.clone() for t in out]
 
-        self.assertEqual(out_eager, out_compiled)
+        for r, g in zip(ref, got):
+            self.assertEqual(r, g)
+
+    @requires_gpu_and_triton
+    def test_uniform_dispatch_many_groups_correct(self):
+        # Regression for the pointer-table caching bug. When the combo pass reuses
+        # ONE uniform kernel across multiple sub-kernel GROUPS (large groups get
+        # split), a name-keyed pointer-table cache made every group after the
+        # first reuse the FIRST group's buffer pointers -> silently wrong results
+        # (seen on CMF LN+SiLU: 88/103 arcs wrong). Use many independent LN+SiLU
+        # arcs, each with its OWN weight/bias, to force more than one group.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
+
+        narcs = 24
+
+        def arc(x, w, b):
+            xf = x.float()
+            mean = xf.mean(-1, keepdim=True)
+            var = xf.var(-1, keepdim=True, unbiased=False)
+            ln = (xf - mean) * torch.rsqrt(var + 1e-5) * w + b
+            return x * torch.sigmoid(ln)
+
+        def fn(xs, ws, bs):
+            return [arc(xs[i], ws[i], bs[i]) for i in range(narcs)]
+
+        torch.manual_seed(0)
+        xs = [
+            torch.randn(512, 512, device=GPU_TYPE, dtype=torch.bfloat16)
+            for _ in range(narcs)
+        ]
+        ws = [torch.randn(512, device=GPU_TYPE) for _ in range(narcs)]
+        bs = [torch.randn(512, device=GPU_TYPE) for _ in range(narcs)]
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            ref = fn(xs, ws, bs)
+            got = torch.compile(fn)(xs, ws, bs)
+
+        for r, g in zip(ref, got):
+            self.assertEqual(r, g)
 
     @requires_gpu_and_triton
     def test_mutated_args(self):
