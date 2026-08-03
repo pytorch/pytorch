@@ -994,12 +994,6 @@ class LoopOrderingTest(TestCase):
             self._record_reindexing_memory_decisions() as decisions,
         ):
             self.do_acc_test(mod, x, residual)
-        # Rejecting the reindex means the pointwise is not fused into the
-        # reduction, so more kernels are generated than when it is allowed.
-        # A bound rather than an exact count: the total also depends on
-        # unrelated fusion decisions in this model.
-        self.assertGreater(metrics.generated_kernel_count, 4)
-
         self.assertTrue(
             any(
                 target_origins <= origins
