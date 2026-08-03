@@ -669,7 +669,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_gather_into_tensor(self):
+    def test_gather_single(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
@@ -688,7 +688,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             else:
                 gather_tensor = None
 
-            dist.gather_into_tensor(tensor, gather_tensor, dst=dst)
+            dist.gather_single(tensor, gather_tensor, dst=dst)
 
             if self.rank == dst:
                 expected = torch.arange(world_size * elems, device=device).float()
@@ -701,7 +701,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size, 2, 2, device=device) if self.rank == 0 else None
         )
-        dist.gather_into_tensor(tensor, gather_tensor, dst=0)
+        dist.gather_single(tensor, gather_tensor, dst=0)
         if self.rank == 0:
             expected = torch.stack(
                 [torch.ones(2, 2, device=device) * r for r in range(world_size)]
@@ -713,7 +713,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         gather_tensor = (
             torch.empty(world_size * elems, device=device) if self.rank == 0 else None
         )
-        work = dist.gather_into_tensor(tensor, gather_tensor, dst=0, async_op=True)
+        work = dist.gather_single(tensor, gather_tensor, dst=0, async_op=True)
         work.wait()
         if self.rank == 0:
             expected = torch.arange(world_size * elems, device=device).float()
@@ -726,10 +726,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             good_input = torch.arange(elems, device=device).float()
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_size = torch.empty(world_size * elems + 1, device=device)
-                dist.gather_into_tensor(good_input, bad_size, dst=0)
+                dist.gather_single(good_input, bad_size, dst=0)
             with self.assertRaises((ValueError, RuntimeError)):
                 bad_dtype = torch.empty(world_size * elems, device=device).double()
-                dist.gather_into_tensor(good_input, bad_dtype, dst=0)
+                dist.gather_single(good_input, bad_dtype, dst=0)
         dist.barrier()
 
         # NOTE: on NVIDIA (NCCL >= 2.28.3) this exercises the native ncclGather
@@ -4778,6 +4778,32 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.max_p2p_peers, new_max_p2p_peers)
         # Tests functionality when passing nccl config
         self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_comm_name(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "comm_name"):
+            raise SkipTest(
+                "comm_name binding absent (PyTorch might be built against NCCL < 2.27.3)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_comm_name = "test_comm"
+        pg_opts.config.comm_name = new_comm_name
+        self.assertEqual(pg_opts.config.comm_name, new_comm_name)
+        os.environ["NCCL_DEBUG"] = "INFO"
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
+            nccl_debug_file_content = nccl_debug_file.read()
+        comm_name = re.search(
+            rb"Comm config Comm name set to (.*)|$", nccl_debug_file_content
+        ).group(1)
+        self.assertEqual(pg_opts.config.comm_name, comm_name.decode())
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

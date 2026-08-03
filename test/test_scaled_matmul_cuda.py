@@ -253,6 +253,16 @@ def scaled_mm_wrap(
         )
         return out
 
+def _as_int_list(v):
+    # Mirror functional._enum_list_as_int_list: flatten scalar-or-list of enums
+    # into the int list the raw aten op expects.
+    if v is None:
+        return []
+    if not isinstance(v, list):
+        v = [v]
+    return [vi.value for vi in v]
+
+
 def scaled_grouped_mm_wrap(
     a,
     b,
@@ -268,6 +278,7 @@ def scaled_grouped_mm_wrap(
     offs=None,
     bias=None,
     wrap_v2=True,
+    out=None,
 ):
     if not wrap_v2:
         return torch._scaled_grouped_mm(
@@ -279,6 +290,25 @@ def scaled_grouped_mm_wrap(
             bias=bias,
             offs=offs,
             use_fast_accum=use_fast_accum)
+    elif out is not None:
+        # Exercise the structured `.out` overload directly: the Python functional
+        # frontend doesn't expose out=, so call the raw aten op with int recipes.
+        scale_a = scale_a if isinstance(scale_a, list) else [scale_a]
+        scale_b = scale_b if isinstance(scale_b, list) else [scale_b]
+        return torch.ops.aten._scaled_grouped_mm_v2(
+            a,
+            b,
+            scale_a,
+            _as_int_list(scale_recipe_a),
+            _as_int_list(swizzle_a),
+            scale_b,
+            _as_int_list(scale_recipe_b),
+            _as_int_list(swizzle_b),
+            offs=offs,
+            bias=bias,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
+            out=out)
     else:
         return scaled_grouped_mm(
             a,
@@ -694,11 +724,14 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                # SM 8.9 and 9 only support TN
+                # SM 10 and 11 support all permutations
+                # SM 12 support depends on CUDA version
                 major, minor = torch.cuda.get_device_capability(0)
-                if major in (10, 11):
+                cuda_version = _get_torch_cuda_version()
+                if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
                     layouts_supported = True
-                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
                     layouts_supported = x_cm
                 else:
                     layouts_supported = (x_cm, y_cm) == (True, False)
@@ -732,14 +765,55 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_float8_scale_result(self, device) -> None:
+        torch.manual_seed(0)
+        a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
+        scale = torch.ones((), device=device)
+        scale_result = torch.full((), 0.5, device=device)
 
+        actual = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=e4m3_type,
+        )
+        expected = (a.float() @ b.float()).mul(scale_result).to(e4m3_type)
+
+        self.assertEqual(actual, expected)
+
+        high_precision = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            scale_result=scale_result,
+            out_dtype=torch.bfloat16,
+        )
+        unscaled = torch._scaled_mm(
+            a,
+            b,
+            scale_a=scale,
+            scale_b=scale,
+            out_dtype=torch.bfloat16,
+        )
+        self.assertEqual(high_precision, unscaled)
+
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, device):
+    @parametrize("use_out", [False, True])
+    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:
@@ -782,12 +856,22 @@ class TestFP8Matmul(TestCase):
             if x_global_scales.numel() != G:
                 raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
+        # When requested, route through the structured `.out` overload so the
+        # correctness assertion below also covers the out= path.
+        if use_out:
+            kwargs["out"] = torch.empty(
+                (G, M, N), dtype=torch.bfloat16, device=device
+            )
+
         # Compute mxfp8 grouped mm output
         y_lp = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),
             **kwargs,
         )
+
+        if use_out:
+            self.assertEqual(y_lp.data_ptr(), kwargs["out"].data_ptr())
 
         # bf16 reference output
         y_bf16 = grouped_mm(
@@ -803,13 +887,15 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, device):
+    @parametrize("use_out", [False, True])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:
@@ -928,12 +1014,23 @@ class TestFP8Matmul(TestCase):
             if x_global_scales.numel() != G:
                 raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
+        # When requested, route through the structured `.out` overload so the
+        # correctness assertion below also covers the out= path. The 2d-3d case
+        # produces a 2D [total_M, N] output.
+        if use_out:
+            kwargs["out"] = torch.empty(
+                (total_M, N), dtype=torch.bfloat16, device=device
+            )
+
         # Compute low-precision grouped gemm.
         y_lp = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),
             **kwargs
         )
+
+        if use_out:
+            self.assertEqual(y_lp.data_ptr(), kwargs["out"].data_ptr())
 
         # Compute reference bf16 grouped gemm.
         # Note: Reference result should be on reconstructed, not original values.
@@ -1856,6 +1953,10 @@ class TestFP8Matmul(TestCase):
 
         cu_count = torch.cuda.get_device_properties().multi_processor_count
         carveout = 66 if torch.version.cuda else cu_count // 8
+
+        # Warm up so hipBLASLt's one-time init kernel does not appear in the profile trace below.
+        scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+        torch.cuda.synchronize()
 
         with tempfile.NamedTemporaryFile() as f:
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
