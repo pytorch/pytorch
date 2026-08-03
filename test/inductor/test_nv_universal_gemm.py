@@ -26,6 +26,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -102,6 +103,8 @@ def _nvgemm_config(**overrides):
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
@@ -771,6 +774,8 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_grouped_reduction_conversion_contract(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
@@ -938,6 +943,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_fp4_heuristic_configs(self):
         """Test that nvMatmulHeuristics returns configs for FP4 blockscaled GEMM."""
         heuristics = NVUniversalGemmHeuristics()
@@ -999,6 +1006,8 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 )
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @torch._dynamo.config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_symint_rejected(self):
@@ -1068,6 +1077,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     generated code for epilogue markers. Benchmarks are mocked to ensure
     deterministic fusion decisions independent of GPU noise.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     M, N, K = 512, 512, 512
 
