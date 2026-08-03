@@ -89,12 +89,62 @@ _tools_id_available: bool | None = None
 # can span threads (e.g. autograd).
 _annotations_enabled: bool = False
 
+# How the active capture discovers which nodes a ``mark_kernels`` scope contains:
+#
+# "edge_walk" -- snapshot the capture frontier on scope entry and walk the dependent
+#   edges added by scope exit. Needs nothing but the CUDA runtime, but only sees nodes
+#   reachable from the snapshotted frontier and rescans a nested scope's nodes once per
+#   enclosing scope.
+# "cupti" -- CUPTI names each node as it is created (see
+#   ``torch.cuda._graph_node_callbacks``), so the scope only has to publish which
+#   annotation is active; ``_active_scopes`` below is that ambient state.
+#
+# Set alongside _annotations_enabled by ``torch.cuda.graph``; only meaningful while
+# annotations are enabled.
+_annotation_backend: str = "edge_walk"
 
-def _set_annotations_enabled(enabled: bool) -> None:
-    """Set whether annotation recording is active. Used by ``torch.cuda.graph``
-    to scope annotations to a capture; not a public API."""
-    global _annotations_enabled
+# Annotations of the ``mark_kernels`` scopes currently open, outermost first. Only the
+# "cupti" backend reads this (at node-creation time); the edge walk derives the same
+# information from graph topology after the fact.
+_active_scopes: list[dict[str, Any]] = []
+
+
+def _set_annotations_enabled(enabled: bool, backend: str = "edge_walk") -> None:
+    """Set whether annotation recording is active, and how scopes discover their nodes.
+    Used by ``torch.cuda.graph`` to scope annotations to a capture; not a public API."""
+    global _annotations_enabled, _annotation_backend
     _annotations_enabled = enabled
+    _annotation_backend = backend
+    if not enabled:
+        # A capture that raised mid-scope would otherwise leak its scopes into the next one.
+        _active_scopes.clear()
+
+
+def current_annotation() -> dict[str, Any] | None:
+    """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None``
+    when none are.
+
+    Nested scopes merge key-by-key with the inner scope winning, matching what the edge
+    walk produces via ``resolve_pending_annotations``. Read by the CUPTI node-creation
+    handler; not a public API."""
+    if not _active_scopes:
+        return None
+    if len(_active_scopes) == 1:
+        return _active_scopes[0]
+    merged: dict[str, Any] = {}
+    for annotation in reversed(_active_scopes):
+        for key, value in annotation.items():
+            merged.setdefault(key, value)
+    return merged
+
+
+def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
+    """Attribute one graph node, keyed by its capture-side ``toolsId``.
+
+    The CUPTI backend's entry point into the same store the edge walk fills, so both
+    backends are remapped to exec-graph ids by ``remap_to_exec_graph`` identically. Not a
+    public API."""
+    _kernel_annotations[tools_id].append(annotation)
 
 
 def _probe_tools_id() -> bool:
@@ -393,6 +443,22 @@ def mark_kernels(annotation: str | dict[str, Any]):
 
     if isinstance(annotation, str):
         annotation = {"name": annotation}
+
+    if _annotation_backend == "cupti":
+        # Nodes are attributed as CUPTI reports their creation, so the scope only has to
+        # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
+        # per enclosing scope.
+        _active_scopes.append(annotation)
+        try:
+            yield
+        finally:
+            # Match by identity: a scope that raised must still pop, and popping by value
+            # could remove an equal annotation from an enclosing scope.
+            for i in range(len(_active_scopes) - 1, -1, -1):
+                if _active_scopes[i] is annotation:
+                    del _active_scopes[i]
+                    break
+        return
 
     scope = _begin_kernel_scope()
     if scope is None:

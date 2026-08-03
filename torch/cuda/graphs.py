@@ -899,6 +899,17 @@ class graph:
             the capture ends.  Annotations are **not** cleared on exit so that multiple
             graphs in the same workload can accumulate annotations.
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
+            Requires single-threaded autograd; wrap the capture in
+            ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
+        annotation_backend (str, optional): How ``mark_kernels`` scopes discover which nodes
+            they contain, when ``enable_annotations=True``. ``"auto"`` (default) uses CUPTI
+            node-creation callbacks if the CUPTI monitor already holds a subscription, and
+            otherwise falls back to walking the capture graph's dependent edges. ``"cupti"``
+            requires the CUPTI path and brings the monitor up if needed -- note that once a
+            CUPTI subscription is held, kineto's one-shot initialization fails permanently,
+            so a later :class:`torch.profiler.profile` records no GPU activity.
+            ``"edge_walk"`` forces the dependent-edge walk, which cannot see nodes that are
+            unreachable from the capture frontier of the stream current on scope entry.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -927,8 +938,14 @@ class graph:
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
+        annotation_backend: str = "auto",
         check_input_liveness: bool = False,
     ):
+        if annotation_backend not in ("auto", "cupti", "edge_walk"):
+            raise ValueError(
+                "annotation_backend must be 'auto', 'cupti' or 'edge_walk', got "
+                f"{annotation_backend!r}"
+            )
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -948,6 +965,7 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
+        self._annotation_backend = annotation_backend
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -966,11 +984,37 @@ class graph:
         # pyrefly: ignore [missing-attribute]
         torch._C._host_emptyCache()
 
-        # Scope annotation recording to this capture: stamp/mark_kernels gate on
-        # this flag, and __exit__ always clears it.
+        # Pick the annotation backend before capture_begin, so that failing to obtain CUPTI
+        # raises without a capture already underway.
+        from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import _set_annotations_enabled
 
-        _set_annotations_enabled(self._enable_annotations)
+        backend = "edge_walk"
+        if self._enable_annotations and self._annotation_backend != "edge_walk":
+            force = self._annotation_backend == "cupti"
+            # The CUPTI backend attributes each node to the mark_kernels scope open on the
+            # thread that created it, so multithreaded autograd would mis-attribute the nodes
+            # its engine worker threads create -- their scope state is not the capturing
+            # thread's. (capture_error_mode is NOT the gate: it scopes capture's safety
+            # checks, not which threads contribute nodes.) The edge walk reads no ambient
+            # scope, so it is unaffected and remains the fallback.
+            if torch._C._is_multithreading_enabled():
+                if force:
+                    raise RuntimeError(
+                        "annotation_backend='cupti' requires single-threaded autograd, so "
+                        "that graph nodes are created on the capturing thread and attributed "
+                        "to the right mark_kernels scope. Wrap the capture in "
+                        "torch.autograd.grad_mode.set_multithreading_enabled(False)."
+                    )
+            elif _graph_node_callbacks.register(force=force):
+                backend = "cupti"
+            elif force:
+                raise RuntimeError(
+                    "annotation_backend='cupti' could not register CUPTI node-creation "
+                    "callbacks. This needs the cupti-python package and a CUPTI monitor "
+                    "able to subscribe; pass annotation_backend='auto' to fall back to the "
+                    "dependent-edge walk instead."
+                )
 
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
@@ -985,13 +1029,29 @@ class graph:
             check_input_liveness=self.check_input_liveness,
         )
 
+        # Enabling the callback needs the capture live: it snapshots the top-level capture
+        # graph so body nodes can be filtered out. If that does not work out, settle on the
+        # edge walk before any mark_kernels scope runs rather than recording keys that would
+        # match nothing.
+        if backend == "cupti" and not _graph_node_callbacks.arm(self.capture_stream):
+            _graph_node_callbacks.disarm()
+            backend = "edge_walk"
+        # Scope annotation recording to this capture: stamp/mark_kernels gate on this flag,
+        # and __exit__ always clears it.
+        _set_annotations_enabled(self._enable_annotations, backend)
+
     def __exit__(self, *args: object) -> None:
+        from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import (
             _set_annotations_enabled,
             resolve_pending_annotations,
         )
 
         try:
+            # Stop recording before capture_end: the CUPTI backend has already attributed
+            # every node as it was created, and leaving the callback enabled would also pick
+            # up nodes created while instantiating.
+            _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
 
@@ -1001,7 +1061,10 @@ class graph:
             self.cuda_graph.capture_end()
             self.stream_ctx.__exit__(*args)
         finally:
-            # Annotation recording is capture-scoped; clear it unconditionally.
+            # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
+            # idempotent, so repeating it here just covers a capture that raised before the
+            # call above (it must not stay armed past this context either way).
+            _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
