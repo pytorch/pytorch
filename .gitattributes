@@ -1,0 +1,9 @@
+*.bat text eol=crlf
+.github/workflows/generated-*.yml linguist-generated=true
+.github/generated-* linguist-generated=true
+.github/scripts/gql_mocks.json linguist-generated=true
+third_party/LICENSES_BUNDLED.txt linguist-generated=true
+torch/_vendor/quack/** linguist-generated=true
+torch/csrc/utils/generated_serialization_types.h linguist-generated=true
+benchmarks/operator_benchmark/aarch64_expected_ci_operator_benchmark_eager_float32_cpu.csv linguist-generated=true
+benchmarks/operator_benchmark/x86_64_expected_ci_operator_benchmark_eager_float32_cpu.csv linguist-generated=true

@@ -1,0 +1,371 @@
+from collections.abc import Callable
+from typing import Any
+
+from sympy import Expr
+
+from torch._inductor.ir import (
+    ComputedBuffer,
+    InputBuffer,
+    is_contiguous_strides_for_shape,
+)
+from torch.utils._ordered_set import OrderedSet
+
+from ..utils import cutlass_arch, torch_dtype_to_cutlass_type, try_import_cutlass
+
+
+EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
+Buffer = ComputedBuffer | InputBuffer
+CutlassTupleType = Any  # cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
+CutlassVisitorType = Any  # cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
+CutlassArgType = (
+    Any  # Can be a CutlassTupleType, CutlassVisitorType, EmptyByte, or ctype.c_void_p
+)
+
+
+if try_import_cutlass():
+    import ast
+    import ctypes
+    import textwrap
+
+    from cutlass_cppgen.backend.c_types import (  # type: ignore[import-not-found]
+        EmptyByte,
+    )
+    from cutlass_cppgen.backend.epilogue import (  # type: ignore[import-not-found]
+        dtype2ctype,
+    )
+    from cutlass_cppgen.backend.evt import (  # type: ignore[import-not-found]
+        backend as evt_backend,
+        EpilogueFunctorVisitor,
+    )
+    from cutlass_cppgen.backend.evt.backend.emitter_base import (  # type: ignore[import-not-found]
+        FusionCallbacks,
+    )
+    from cutlass_cppgen.backend.evt.backend.sm100_emitter import (  # type: ignore[import-not-found]
+        Sm100CollectiveEpilogue,
+    )
+    from cutlass_cppgen.backend.evt.frontend import (  # type: ignore[import-not-found]
+        PythonASTFrontend,
+    )
+    from cutlass_cppgen.backend.evt.ir.tensor import (  # type: ignore[import-not-found]
+        Tensor as CutlassTensor,
+    )
+    from cutlass_library import (
+        DataType,
+        EpilogueScheduleType,
+        LayoutType,
+        TileDescription,
+    )
+
+    from torch._inductor.utils import IndentedBuffer
+
+    _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
+
+    class EVTArgRenames:
+        """Handles mapping buffer names to variable names in the cpp kernel signature and body"""
+
+        def __init__(self) -> None:
+            self.buf_renames: dict[str, str] = {}
+
+        def new_name(self, name: str) -> str:
+            if name in self.buf_renames:
+                return self.buf_renames[name]
+            else:
+                new_name = f"ptr_{len(self.buf_renames)}"
+                self.buf_renames[name] = new_name
+                return new_name
+
+        def get(self, name: str) -> str:
+            return self.buf_renames.get(name, name)
+
+    def create_example_tensors(
+        var_name_to_buffer_name: dict[str, str],
+        name_to_buffer: dict[str, Buffer],
+        size_hint_fn: Callable[[Expr | int], int],
+    ) -> dict[str, CutlassTensor]:
+        def cutlass_tensor_from_buffer(
+            buffer: Buffer,
+        ) -> CutlassTensor:
+            shape = buffer.get_layout().size
+            stride = buffer.get_layout().stride
+            shape = tuple(size_hint_fn(x) for x in shape)
+            stride = tuple(size_hint_fn(x) for x in stride)
+
+            is_row_major = is_contiguous_strides_for_shape(stride, shape)
+            is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
+
+            if not is_row_major and not is_column_major:
+                raise RuntimeError(
+                    f"Cannot create example tensor for {buffer.get_name()} with \
+non-contiguous layout, received stride: {stride} and shape: {shape}"
+                )
+
+            return CutlassTensor(
+                shape=shape,
+                layout_tag=(
+                    LayoutType.RowMajor if is_row_major else LayoutType.ColumnMajor
+                ),
+                element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
+            )
+
+        return {
+            key: cutlass_tensor_from_buffer(name_to_buffer[name])
+            for key, name in var_name_to_buffer_name.items()
+        }
+
+    def trace(
+        fn_src: str,
+        example_tensors: dict[str, CutlassTensor],
+        accum_type: DataType,
+        output_type: DataType,
+        tile_description: TileDescription,
+        epilogue_schedule: EpilogueScheduleType,
+        name_to_buffer: dict[str, Buffer],
+        size_hint_fn: Callable[[Expr | int], int],
+        kernel_schedule: Any | None = None,
+        device_type: str = "cuda",
+        **kwargs: dict[str, Any],
+    ) -> tuple[str, str, str, EVTArgRenames]:
+        arch = int(cutlass_arch(device_type))
+        if device_type == "cuda" and arch < 90:
+            raise AssertionError("For CUDA, only SM90+ is supported for EVT")
+        epilogue_functor = _trace(fn_src, example_tensors, arch, **kwargs)
+        visitor = EpilogueFunctorVisitor(arch, epilogue_functor)
+        fusion_callbacks = FusionCallbacks(visitor.graph, arch, emit_CD=False)
+        arch_prefix = "xe" if device_type == "xpu" else "sm"
+
+        if device_type == "xpu" or arch < 100:
+            try:
+                evt_emitter = getattr(evt_backend, f"{arch_prefix}{arch}_emitter")
+                CollectiveEpilogue = evt_emitter.CollectiveEpilogue
+            except AttributeError as e:
+                raise NotImplementedError(
+                    f"EVT backend is not supported on Arch {arch_prefix}{arch}."
+                ) from e
+
+            collective_epilogue = CollectiveEpilogue(
+                tile_description,
+                epilogue_schedule,
+                accum_type,
+                output_type,
+                fusion_callbacks,
+            )
+        else:
+            collective_epilogue = Sm100CollectiveEpilogue(
+                tile_description=tile_description,
+                kernel_schedule=kernel_schedule,
+                epilogue_schedule=epilogue_schedule,
+                element_accumulator=accum_type,
+                element_d=output_type,
+                fusion_callbacks=fusion_callbacks,
+            )
+        evt_name, evt_code = collective_epilogue.emit()
+        evt_args, arg_renames = _render_argument_type(
+            epilogue_functor, name_to_buffer, size_hint_fn
+        )
+        return evt_name, evt_args, evt_code, arg_renames
+
+    # Based off of
+    # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
+    # This is modified to enable directly passing the source code of the epilogue vs getting it from a bona-fide python function
+    # The reason for this is that inspect.getsource does not work with functions defined at runtime via exec/eval
+    def _trace(
+        fn_src: str,
+        example_tensors: dict[str, CutlassTensor],
+        cc: int,
+        **kwargs: Any,
+    ) -> EpilogueFunctor:
+        class EpilogueFunctor(PythonASTFrontend):
+            def __init__(self, cc: int, **kwargs: Any):
+                self.source = textwrap.dedent(fn_src)
+                super().__init__(cc, **kwargs)
+
+            def parse(
+                self,
+                example_inputs: dict[str, CutlassTensor],
+            ) -> None:
+                self.example_inputs = example_inputs
+                self.ast = ast.parse(self.source)
+                # pyrefly: ignore [missing-attribute]
+                self.visit(self.ast)
+
+        epilogue_functor = EpilogueFunctor(cc=cc, **kwargs)
+        epilogue_functor.trace(example_tensors)
+        return epilogue_functor
+
+    def _render_argument_type(
+        epilogue_functor: EpilogueFunctor,
+        name_to_buffer: dict[str, Buffer],
+        size_hint_fn: Callable[[Expr | int], int],
+    ) -> tuple[str, EVTArgRenames]:
+        epilogue_thread_type = epilogue_functor.epilogue_thread_type
+        arg_renames = EVTArgRenames()
+
+        # Fragile, but this is the only way to guarantee t is expected type because t is a local class
+        def is_nested_visitor_type(t: type) -> bool:
+            return (
+                ".".join([t.__module__, t.__qualname__])
+                == "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType"
+            )
+
+        buffer = IndentedBuffer()
+        with buffer.set_tabwidth(2):
+
+            def get_constant_value(name: str) -> float | int | None:
+                dag_ir = getattr(epilogue_functor, "dag_ir", None)
+                if dag_ir is not None:
+                    try:
+                        node_meta = dag_ir.get_node_meta(name)
+                    except Exception:
+                        node_meta = None
+                    if node_meta is not None:
+                        tensor_meta = getattr(node_meta, "tensor", None)
+                        if isinstance(tensor_meta, dict) and tensor_meta.get(
+                            "is_constant"
+                        ):
+                            return tensor_meta.get("tensor")
+
+                # Immediate constants are encoded as "imm_<value>_k<idx>" where
+                # the first underscore in <value> stands in for the decimal point
+                # (e.g. "imm_0_044715_k1" -> 0.044715). dag_ir meta is the primary
+                # source; this name parsing is a best-effort fallback.
+                if not name.startswith("imm_"):
+                    return None
+
+                value_part, _, _ = name[len("imm_") :].rpartition("_k")
+                if not value_part:
+                    return None
+                try:
+                    return float(value_part.replace("_", ".", 1))
+                except ValueError:
+                    return None
+
+            def render_argument_type(
+                name: str,
+                t: CutlassArgType,
+                constant_value: float | int | None = None,
+            ) -> None:
+                if constant_value is None and name not in name_to_buffer:
+                    # An imm_* node is an immediate constant whose value we
+                    # failed to recover (dag_ir meta missing AND name parsing
+                    # failed, e.g. an unsupported encoding). Emitting an empty
+                    # struct here would silently drop the constant and produce a
+                    # numerically wrong kernel, so fail loudly instead.
+                    if name.startswith("imm_"):
+                        raise RuntimeError(
+                            f"Could not recover the value of immediate constant "
+                            f"node {name!r} for the CUTLASS EVT epilogue. "
+                            f"Refusing to emit an empty argument that would "
+                            f"silently drop the constant."
+                        )
+                    # Other non-buffer nodes (e.g. autogen_identity_*/compute_*
+                    # placeholders) legitimately render as an empty struct,
+                    # matching CUTLASS reference EVT kernels.
+                    buffer.writeline(f"{{}}, /* {name} */")
+                    return
+                if issubclass(t, ctypes.c_byte):
+                    buffer.writeline(f"{{}}, /* {name} */")
+                else:
+                    fields = [
+                        (
+                            fname,
+                            _get_arg_from_node(
+                                ty,
+                                name_to_buffer.get(name),
+                                size_hint_fn,
+                                arg_renames,
+                                constant_value,
+                            ),
+                        )
+                        for fname, ty in t._fields_
+                    ]
+                    field_strs = [
+                        f"/* {fname} */ {str(field)}" for fname, field in fields
+                    ]
+                    buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
+
+            def render_thread_type(name: str, t: CutlassArgType) -> None:
+                if is_nested_visitor_type(t):
+                    buffer.writeline(f"{{ /* {name} */")
+                    with buffer.indent():
+                        for name, inner_t in t._fields_:
+                            render_thread_type(name, inner_t)
+                    buffer.writeline("},")
+                else:
+                    render_argument_type(name, t, get_constant_value(name))
+
+            # unroll the recursion once to address special case formatting
+            # namely, no ending comma and no indentation for the outermost thread type
+            buffer.writeline("{ /* thread */")
+            with buffer.indent(3):
+                if is_nested_visitor_type(epilogue_thread_type):
+                    with buffer.indent():
+                        for name, inner_t in epilogue_thread_type._fields_:
+                            render_thread_type(name, inner_t)
+                else:
+                    render_argument_type("thread", epilogue_thread_type)
+                buffer.writeline("}")
+
+        return buffer.getvalue(), arg_renames
+
+    def _get_arg_from_node(
+        arg_ty: type,
+        node: Buffer | None,
+        size_hint_fn: Callable[[Expr | int], int],
+        arg_renames: EVTArgRenames,
+        constant_value: float | int | None = None,
+    ) -> str:
+        from ..template import CUTLASSTemplate
+
+        # Today, arguments are either a pointer to the
+        # node's memory, a stride tuple, the datatype
+        # Once again, need to check for local class type for stride tuple
+        if (
+            str(arg_ty)
+            == "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>"
+        ):
+            if constant_value is not None:
+                raise NotImplementedError(
+                    "Immediate constants do not use tuple argument types"
+                )
+            DEFAULT_STRIDE_LEN = 3
+            if node is None:
+                raise AssertionError("node must not be None for tuple argument types")
+            if len(node.get_layout().stride) > DEFAULT_STRIDE_LEN:
+                raise AssertionError(
+                    f"expected stride length <= {DEFAULT_STRIDE_LEN}, "
+                    f"got {len(node.get_layout().stride)}"
+                )
+            stride = [size_hint_fn(x) for x in node.get_layout().stride]
+            for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
+                stride.append(0)
+
+            def render_stride(x: int) -> str:
+                # Handle EBO for 0 and 1
+                if x == 0:
+                    return "_0{}"
+                elif x == 1:
+                    return "_1{}"
+                else:
+                    return str(x)
+
+            return f"{{{', '.join([render_stride(x) for x in stride])}}}"
+
+        elif issubclass(arg_ty, ctypes.c_void_p):
+            if constant_value is not None:
+                return "nullptr"
+            if node is None:
+                raise AssertionError("node must not be None for pointer argument")
+            name = arg_renames.new_name(node.get_name())
+            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) ({name} + {name}_offset)"
+        elif (
+            arg_ty in _CUTLASS_C_DTYPES
+        ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
+            if constant_value is not None:
+                return str(constant_value)
+            if node is None:
+                raise AssertionError("node must not be None for dtype argument")
+            return f"{CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}(0)"
+        elif issubclass(arg_ty, EmptyByte):
+            return "{}"
+
+        raise NotImplementedError(f"Unsupported arg type: {arg_ty}")

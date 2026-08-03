@@ -1,0 +1,49 @@
+name: Run linters
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+        description: The runner to use
+      docker-image:
+        required: true
+        type: string
+        description: The Docker image to use
+      script:
+        required: true
+        type: string
+        description: The linter script to run
+
+jobs:
+  lint:
+    runs-on: ${{ inputs.runner }}
+    container:
+      image: ${{ inputs.docker-image }}
+    timeout-minutes: 120
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+
+      - name: Prepare lintrunner
+        shell: bash
+        run: |
+          set -eux
+          lintrunner init
+
+      - name: Run linter
+        shell: bash
+        env:
+          SCRIPT: ${{ inputs.script }}
+        run: |
+          {
+            echo "#!/usr/bin/env bash";
+            echo "set -eou pipefail";
+            echo "${SCRIPT}";
+          } > "${RUNNER_TEMP}/linter_script"
+
+          # Execute the linter script
+          bash "${RUNNER_TEMP}/linter_script"
