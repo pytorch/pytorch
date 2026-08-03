@@ -8,6 +8,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -69,6 +70,8 @@ class IndexLike:
 
 class TestSqConcat(torch._dynamo.test_case.TestCase):
     """Tests for sq_concat (+) and sq_inplace_concat (+=) operators for sequences."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -731,6 +734,8 @@ instantiate_parametrized_tests(TestSqConcat)
 class TestSqRepeat(torch._dynamo.test_case.TestCase):
     """Tests for sq_repeat (*) and sq_inplace_repeat (*=) on sequences."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -818,6 +823,8 @@ _SEQUENCE_TYPES = [
 
 class TestSqAssItem(torch._dynamo.test_case.TestCase):
     """All sequence __setitem__ tests in one class."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1356,6 +1363,8 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
     # range() and range subscript apply __index__ (PyNumber_Index) to their
     # arguments and slice members.
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_range_args_with_index(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn():
@@ -1404,6 +1413,8 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
     # range_iterator.__setstate__(k) sets the iterator index, clamped to
     # [0, len], mirroring CPython rangeiter_setstate.
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_setstate_resumes_from_index(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -1472,6 +1483,9 @@ class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
     # With assume_static_by_default=False a captured range object's
     # start/stop/step are wrapped as symbolic ints; range math must specialize
     # them instead of assuming a plain python constant.
+
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_range_index_symbolic_bounds(self):
         keys = range(10)
@@ -1507,6 +1521,9 @@ class TestRangeContains(torch._dynamo.test_case.TestCase):
     # range.__contains__ uses the arithmetic fast path only for exact int/bool
     # operands; everything else falls back to an __eq__ linear scan, matching
     # CPython range_contains / _PySequence_IterSearch.
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_int_members(self):
         class AlwaysEq:
             def __eq__(self, other):

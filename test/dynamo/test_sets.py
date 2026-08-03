@@ -10,7 +10,11 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    munge_exc,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -34,6 +38,8 @@ class BadCmp:
 
 
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -51,6 +57,8 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
 
 
 class CustomSetTests(_BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomSet(set):
         def add(self, item):
             return super().add(item + 1)
@@ -73,6 +81,8 @@ class CustomSetTests(_BaseSetTests):
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_isdisjoint_with_generator(self):
         n = 0
 
@@ -203,6 +213,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
 
 class TestSetGuards(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
@@ -797,6 +809,8 @@ class _SetBase(_FrozensetBase):
 
 
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = frozenset
 
     @make_dynamo_test
@@ -807,6 +821,8 @@ class FrozensetTests(_FrozensetBase, _BaseSetTests):
 
 
 class _SetKeyCoercionMixin:
+    hw_classification = HardwareClassification.GENERIC
+
     # set/frozenset allow an (unhashable) set key for remove/discard by
     # coercing it to a frozenset for the lookup, mirroring the set-key
     # fallback in CPython set_remove_impl / set_discard_impl.
@@ -828,6 +844,8 @@ class _SetKeyCoercionMixin:
 
 
 class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = set
 
     def test_in_frozenset(self):
@@ -835,6 +853,8 @@ class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
 
 
 class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomSet(set):
         pass
 
@@ -848,6 +868,8 @@ class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
 
 
 class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomFrozenset(frozenset):
         pass
 
@@ -869,6 +891,8 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
 
 
 class OrderedSetTests(_SetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     from torch.utils._ordered_set import OrderedSet
 
     thetype = OrderedSet
