@@ -2251,24 +2251,43 @@ class TestLibtorchAgnosticMetal(TestCase):
 
     @parametrize("scale,negate", [(0.5, False), (2.0, True)])
     def test_mps_set_arg_bytes(self, device, scale, negate):
-        import libtorch_agn_2_14
+        import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(1000, device=device, dtype=torch.float32)
         low, high = -0.25, 0.9
-        out = libtorch_agn_2_14.ops.my_mps_scale_negate_clamp(
+        out = libtorch_agnostic.ops.my_mps_scale_negate_clamp(
             x, scale, negate, low, high
         )
         expected = (x * scale * (-1.0 if negate else 1.0)).clamp(low, high)
         self.assertEqual(out, expected)
 
-    @parametrize("size,null_ptr", [(4, True), (0, False), (4097, False)])
-    def test_mps_set_arg_bytes_invalid(self, device, size, null_ptr):
-        import libtorch_agn_2_14
+    @parametrize(
+        "size,null_ptr,error",
+        [
+            (4, True, "Pointer is null"),
+            (0, False, r"size must be in \(0, 4096\]"),
+            (4096, False, None),
+            (4097, False, r"size must be in \(0, 4096\]"),
+        ],
+    )
+    def test_mps_set_arg_bytes_validation(self, device, size, null_ptr, error):
+        import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(8, device=device, dtype=torch.float32)
-        error_regex = "Pointer is null" if null_ptr else r"size must be in \(0, 4096\]"
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            libtorch_agn_2_14.ops.my_mps_set_arg_bytes_invalid(x, size, null_ptr)
+        if error is None:
+            libtorch_agnostic.ops.my_mps_set_arg_bytes_raw(x, size, null_ptr)
+        else:
+            with self.assertRaisesRegex(RuntimeError, error):
+                libtorch_agnostic.ops.my_mps_set_arg_bytes_raw(x, size, null_ptr)
+
+    def test_mps_set_arg_bytes_lifetime(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        x = torch.randn(1000, device=device, dtype=torch.float32)
+        # The op clobbers the bound values before dispatch, so x * 3 proves the
+        # shim copied them at call time.
+        out = libtorch_agnostic.ops.my_mps_set_arg_bytes_lifetime(x)
+        self.assertEqual(out, x * 3.0)
 
 
 instantiate_device_type_tests(

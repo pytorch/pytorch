@@ -55,9 +55,9 @@ def get_extension():
     # the other libtorch_agn extensions; the interop module must instead be an
     # importable Python module (its PyMethodDef helpers hold the GIL), so it is
     # built as a separate extension below.
-    op_sources = list(CSRC_DIR.glob("**/*.cpp"))
+    op_sources = list(CSRC_DIR.glob("*.cpp"))
     for prev_dir in PREV_CSRC_DIRS:
-        op_sources.extend(prev_dir.glob("**/*.cpp"))
+        op_sources.extend(prev_dir.glob("*.cpp"))
     op_sources = [s for s in op_sources if s.name != "pyobject_interop_module.cpp"]
 
     op_cxx = common_cxx + ["-DSTABLE_LIB_NAME=libtorch_agn_2_14"]
@@ -78,9 +78,10 @@ def get_extension():
             op_sources.extend(prev_dir.glob("**/*.cu"))
 
     if torch.backends.mps.is_available():
-        op_sources.extend(CSRC_DIR.glob("**/*.mm"))
+        op_cxx.append("-DUSE_MPS")
+        op_sources.extend(CSRC_DIR.glob("mps/*.cpp"))
         for prev_dir in PREV_CSRC_DIRS:
-            op_sources.extend(prev_dir.glob("**/*.mm"))
+            op_sources.extend(prev_dir.glob("mps/*.cpp"))
 
     return [
         op_extension(

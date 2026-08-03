@@ -91,37 +91,81 @@ Tensor my_mps_scale_negate_clamp(
   return output;
 }
 
-struct SetArgBytesInvalidArgs {
+struct SetArgBytesRawArgs {
   AtenTensorHandle input;
   const void* ptr;
   uint64_t size;
 };
 
-void set_arg_bytes_invalid_encode(
+void set_arg_bytes_raw_encode(
     AOTIMetalKernelFunctionHandle func,
     void* user_data) {
-  auto* args = static_cast<SetArgBytesInvalidArgs*>(user_data);
+  auto* args = static_cast<SetArgBytesRawArgs*>(user_data);
   TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
   TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_mps_set_arg_bytes(func, 2, args->ptr, args->size));
 }
 
-// STABLE_TORCH_ERROR_CODE_CHECK (not TORCH_ERROR_CODE_CHECK) here and in the
-// encode callback, so the shim's TORCH_CHECK message survives to Python for
-// assertRaisesRegex.
-Tensor my_mps_set_arg_bytes_invalid(Tensor input, int64_t size, bool null_ptr) {
+// Feeds (ptr, size) straight into the shim to probe its validation, both the
+// rejects and the inclusive 4096 boundary. STABLE_TORCH_ERROR_CODE_CHECK (not
+// TORCH_ERROR_CODE_CHECK) so the shim's TORCH_CHECK message survives to Python
+// for assertRaisesRegex.
+Tensor my_mps_set_arg_bytes_raw(Tensor input, int64_t size, bool null_ptr) {
   Tensor input_ = torch::stable::contiguous(input);
   AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
 
-  static const float dummy = 0.0f;
-  SetArgBytesInvalidArgs args{
+  // 4 KB backing so every size up to the setBytes limit reads in bounds.
+  static const char blob[4096] = {};
+  SetArgBytesRawArgs args{
       input_.get(),
-      null_ptr ? nullptr : &dummy,
+      null_ptr ? nullptr : blob,
       static_cast<uint64_t>(size)};
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_mps_run_command_block(func, &set_arg_bytes_invalid_encode, &args));
+      aoti_torch_mps_run_command_block(func, &set_arg_bytes_raw_encode, &args));
   return torch::stable::empty_like(input_);
+}
+
+struct LifetimeArgs {
+  AtenTensorHandle input;
+  AtenTensorHandle output;
+  uint64_t numel;
+};
+
+void scale_negate_clamp_lifetime_encode(
+    AOTIMetalKernelFunctionHandle func,
+    void* user_data) {
+  auto* args = static_cast<LifetimeArgs*>(user_data);
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 1, args->output));
+  float scale = 3.0f;
+  bool negate = false;
+  float bounds[2] = {-1e30f, 1e30f};
+  TORCH_ERROR_CODE_CHECK(
+      torch_mps_set_arg_bytes(func, 2, &scale, sizeof(float)));
+  TORCH_ERROR_CODE_CHECK(
+      torch_mps_set_arg_bytes(func, 3, &negate, sizeof(bool)));
+  TORCH_ERROR_CODE_CHECK(
+      torch_mps_set_arg_bytes(func, 4, bounds, sizeof(bounds)));
+  // The shim copies at call time, so clobbering the sources before dispatch
+  // must not change what the kernel sees.
+  scale = -7.0f;
+  negate = true;
+  bounds[0] = 0.0f;
+  bounds[1] = 0.0f;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(func, args->numel));
+}
+
+Tensor my_mps_set_arg_bytes_lifetime(Tensor input) {
+  Tensor input_ = torch::stable::contiguous(input);
+  Tensor output = torch::stable::empty_like(input_);
+  AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
+  LifetimeArgs args{
+      input_.get(), output.get(), static_cast<uint64_t>(input_.numel())};
+  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_run_command_block(
+      func, &scale_negate_clamp_lifetime_encode, &args));
+  return output;
 }
 
 } // namespace
@@ -129,10 +173,12 @@ Tensor my_mps_set_arg_bytes_invalid(Tensor input, int64_t size, bool null_ptr) {
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_mps_scale_negate_clamp(Tensor input, float scale, bool negate, float low, float high) -> Tensor");
-  m.def("my_mps_set_arg_bytes_invalid(Tensor input, int size, bool null_ptr) -> Tensor");
+  m.def("my_mps_set_arg_bytes_raw(Tensor input, int size, bool null_ptr) -> Tensor");
+  m.def("my_mps_set_arg_bytes_lifetime(Tensor input) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, MPS, m) {
   m.impl("my_mps_scale_negate_clamp", TORCH_BOX(&my_mps_scale_negate_clamp));
-  m.impl("my_mps_set_arg_bytes_invalid", TORCH_BOX(&my_mps_set_arg_bytes_invalid));
+  m.impl("my_mps_set_arg_bytes_raw", TORCH_BOX(&my_mps_set_arg_bytes_raw));
+  m.impl("my_mps_set_arg_bytes_lifetime", TORCH_BOX(&my_mps_set_arg_bytes_lifetime));
 }

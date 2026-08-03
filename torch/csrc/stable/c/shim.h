@@ -297,6 +297,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
 
+#ifdef USE_MPS
+
 // Binds size bytes at ptr to buffer index idx of a Metal kernel, for
 // arguments that are neither tensors nor int64_t scalars (the other set_arg
 // functions live in aoti_torch/c/shim_mps.h). Call while encoding, i.e. from
@@ -309,6 +311,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
     unsigned idx,
     const void* ptr,
     uint64_t size);
+
+#endif // USE_MPS
 
 // --- Python interop shims -------------------------------------------------
 // Unlike the rest of the stable ABI, these convert between a Python

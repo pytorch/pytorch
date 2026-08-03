@@ -29,11 +29,16 @@ def my_mps_scale_negate_clamp(t, scale, negate, low, high) -> torch.Tensor:
     )
 
 
-def my_mps_set_arg_bytes_invalid(t, size, null_ptr) -> torch.Tensor:
-    """Calls ``torch_mps_set_arg_bytes`` with invalid arguments (2.14+, MPS only)."""
-    return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_invalid.default(
+def my_mps_set_arg_bytes_raw(t, size, null_ptr) -> torch.Tensor:
+    """Feeds (ptr, size) straight into ``torch_mps_set_arg_bytes`` (2.14+, MPS only)."""
+    return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_raw.default(
         t, size, null_ptr
     )
+
+
+def my_mps_set_arg_bytes_lifetime(t) -> torch.Tensor:
+    """Clobbers scalar sources after binding to prove copy-at-call (2.14+, MPS only)."""
+    return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_lifetime.default(t)
 
 
 def __getattr__(name):
