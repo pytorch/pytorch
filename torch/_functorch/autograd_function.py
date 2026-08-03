@@ -821,6 +821,17 @@ class AutogradFunctionApply(HigherOrderOperator):
         dirty_idx_set = set(dirty_idx)
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
+        # Non-tensor forward outputs are dropped from the traced fwd graph. We
+        # re-insert them at their original positions so the autograd node has the
+        # same output arity as eager (grad_fn hooks then see the right number of
+        # grad_outputs). These positions get None grads in backward, which we
+        # strip before running the bwd graph (which only takes tensor grads).
+        non_tensor_output_indices = fwd_kwargs.get("non_tensor_output_indices", [])
+        non_tensor_output_values = fwd_kwargs.get("non_tensor_output_values", [])
+        non_tensor_output_map = dict(
+            zip(non_tensor_output_indices, non_tensor_output_values)
+        )
+        non_tensor_output_idx_set = set(non_tensor_output_indices)
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
@@ -831,6 +842,16 @@ class AutogradFunctionApply(HigherOrderOperator):
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
                 output, saved_values = torch.fx.Interpreter(fwd).run(*args)
+
+                if non_tensor_output_map:
+                    merged = []
+                    tensor_iter = iter(output)
+                    for i in range(len(output) + len(non_tensor_output_map)):
+                        if i in non_tensor_output_map:
+                            merged.append(non_tensor_output_map[i])
+                        else:
+                            merged.append(next(tensor_iter))
+                    output = tuple(merged)
 
                 # See Note [Activations with no version counter checks in eager]
                 # Mark tensors that came from ctx.save_for_backward with metadata.
@@ -871,9 +892,24 @@ class AutogradFunctionApply(HigherOrderOperator):
 
                 if saved_values is None:
                     raise AssertionError("saved_values must not be None")
+                if non_tensor_output_idx_set:
+                    grad = tuple(
+                        g
+                        for i, g in enumerate(grad)
+                        if i not in non_tensor_output_idx_set
+                    )
                 return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
 
-        return ApplyTemplate.apply(*fwd_args)
+        result = ApplyTemplate.apply(*fwd_args)
+        if non_tensor_output_idx_set:
+            # Return only the tensor outputs so the HOP result stays aligned with
+            # the traced fwd graph outputs; the non-tensor outputs are still part
+            # of the autograd node (correct arity) but are consumed via the
+            # original output structure Dynamo keeps tracing with.
+            result = tuple(
+                r for i, r in enumerate(result) if i not in non_tensor_output_idx_set
+            )
+        return result
 
 
 autograd_function_apply = AutogradFunctionApply()
