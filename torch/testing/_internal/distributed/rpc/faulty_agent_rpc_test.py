@@ -179,7 +179,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # a timeout. This can be supported by allowing future.wait() to
         # take in an optional timeout (https://github.com/pytorch/pytorch/issues/39280)
         if dst_rank != self.rank:
-            slow_rref = rpc.remote(dst_worker, func, args=args, timeout=2)
+            slow_rref = rpc.remote(dst_worker, func, args=args, timeout=3)
 
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 # to_here() should raise timeout error, since it does not know about the
