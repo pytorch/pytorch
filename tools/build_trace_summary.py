@@ -9,10 +9,11 @@ class Role(enum.Enum):
     CONFIGURE = 0
     GENERATE = 1
     CMAKEBUILD = 2
-    CUSTOM = 3
-    COMPILE = 4
-    LINK = 5
-    INSTALL = 6
+    CMAKEINSTALL = 3
+    CUSTOM = 4
+    COMPILE = 5
+    LINK = 6
+    INSTALL = 7
 
 
 def format_millis(millis):
