@@ -20,6 +20,16 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
+# Types for which Dynamo can fault if we call dataclasses.is_dataclass on them.
+_IS_DATACLASS_SKIP_TYPES: tuple[type, ...] = (
+    type,
+    torch.Tensor,
+    types.UnionType,
+    types.GenericAlias,
+)
+if HAS_NUMPY:
+    _IS_DATACLASS_SKIP_TYPES = (*_IS_DATACLASS_SKIP_TYPES, np.ndarray, np.generic)
+
 _HAS_DTENSOR = torch.distributed.is_available()
 
 
@@ -1257,14 +1267,10 @@ def originate_pairs(
     # field is the sole compare=True field. Only then recurse field-by-field so
     # tensors use the normal tensor comparison path.
     #
-    # Skip is_dataclass for types Dynamo mishandles (Tensor, UnionType, etc.).
+    # Skip is_dataclass for types Dynamo mishandles (Tensor, ndarray, UnionType, ...).
     elif (
-        not isinstance(
-            actual, (type, torch.Tensor, types.UnionType, types.GenericAlias)
-        )
-        and not isinstance(
-            expected, (type, torch.Tensor, types.UnionType, types.GenericAlias)
-        )
+        not isinstance(actual, _IS_DATACLASS_SKIP_TYPES)
+        and not isinstance(expected, _IS_DATACLASS_SKIP_TYPES)
         and dataclasses.is_dataclass(actual)
         and dataclasses.is_dataclass(expected)
         and type(actual) is type(expected)
