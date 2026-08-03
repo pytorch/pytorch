@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import cast, TYPE_CHECKING
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -391,12 +391,16 @@ def _single_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
-                torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                .square_()
+                .div_(grad.size(-1))
             )
             row_var.lerp_(row_mean, one_minus_beta2_t)
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_mean = (
-                torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                .square_()
+                .div_(grad.size(-2))
             )
             col_var.lerp_(col_mean, one_minus_beta2_t)
             var_estimate = row_var @ col_var
@@ -413,7 +417,7 @@ def _single_tensor_adafactor(
         update = var_estimate.clamp_(min=eps1 * eps1).rsqrt_()
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
-        param.add_(update, alpha=-alpha / denom)
+        param.add_(update, alpha=-alpha / denom)  # type: ignore[arg-type]
 
 
 def _group_tensors_by_device_dtype_and_is_multidim(
@@ -502,9 +506,6 @@ def _multi_tensor_adafactor(
             eps_dtype = dtype if dtype is not None else device_params[0].dtype
             eps1 = torch.finfo(eps_dtype).eps
 
-        if TYPE_CHECKING:
-            assert device_state_steps[0] is not None
-
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -545,7 +546,8 @@ def _multi_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_means = [
-                torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(row_means, row_means)
             torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
@@ -554,7 +556,8 @@ def _multi_tensor_adafactor(
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_means = [
-                torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(col_means, col_means)
             torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
@@ -595,7 +598,7 @@ def _multi_tensor_adafactor(
             -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
             for a, update in zip(alphas, updates, strict=True)
         ]
-        torch._foreach_mul_(updates, alphas)
+        torch._foreach_mul_(updates, alphas)  # type: ignore[arg-type]
         torch._foreach_add_(device_params, updates)
 
 

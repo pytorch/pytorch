@@ -777,6 +777,46 @@ class TestConvolutionNN(NNTestCase):
             torch.Size([2, 6, 1, 1]),
         )
 
+    def test_conv_transpose_meta_invalid_output_padding(self):
+        """Meta and eager both raise when output_padding >= stride and >= dilation.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178125
+        """
+        input_t = torch.randn(20, 16, 50)
+        weight_t = torch.randn(16, 33, 5)
+        error_re = "output padding must be smaller than either stride or dilation"
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(input_t, weight_t, stride=2, output_padding=2)
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(
+                input_t.to("meta"), weight_t.to("meta"), stride=2, output_padding=2
+            )
+
+    def test_conv_transpose_meta_invalid_bias_shape(self):
+        """Meta raises when bias size doesn't match out_channels for a grouped transposed conv.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178128
+        """
+        input_t = torch.randn(20, 16, 50, 10, 20)
+        weight_t = torch.randn(16, 33, 3, 3, 3)
+        # groups=2 means expected bias size is weight.shape[1] * groups = 66, not 33
+        wrong_bias = torch.randn(33)
+
+        with self.assertRaises(RuntimeError):
+            F.conv_transpose3d(input_t, weight_t, bias=wrong_bias, groups=2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "expected bias to be 1-dimensional with 66 elements"
+        ):
+            F.conv_transpose3d(
+                input_t.to("meta"),
+                weight_t.to("meta"),
+                bias=wrong_bias.to("meta"),
+                groups=2,
+            )
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = torch.randn(2, 3, 6, 6)
@@ -1181,6 +1221,25 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
+    @skipMPS
+    @expectedFailureXPU
+    def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
+        inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
+        weight = torch.full((2, 3, 2, 3, 2), 0.5, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "kernel_size.*must match weight spatial dimensions"
+        ):
+            torch.ops.aten.slow_conv_transpose3d(
+                inp,
+                weight,
+                [1, 1, 1],
+                torch.full((3,), 0.5, device=device),
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+            )
+
     def run_conv_double_back_test(
         self,
         kern,
@@ -4082,6 +4141,29 @@ class TestConvolutionNNCUDA(NNTestCase):
     _do_cuda_non_default_stream = True
 
     @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    def test_cudnn_sm120_engine_errata(self, device):
+        if torch.cuda.get_device_capability(device) != (12, 0):
+            self.skipTest("requires compute capability 12.0")
+        if cudnn.version() < 92300:
+            self.skipTest("requires cuDNN 9.23 or newer")
+
+        torch.manual_seed(0)
+        conv = nn.Conv2d(256, 18, kernel_size=1).to(device)
+        x = torch.randn(16, 256, 96, 96, device=device, requires_grad=True)
+
+        with cudnn.flags(enabled=True, benchmark=True):
+            with torch.amp.autocast("cuda"):
+                loss = conv(x).float().square().mean()
+            loss.backward()
+            torch.cuda.synchronize()
+
+        self.assertTrue(loss.isfinite())
+        self.assertTrue(x.grad.isfinite().all())
+        self.assertTrue(conv.weight.grad.isfinite().all())
+        self.assertTrue(conv.bias.grad.isfinite().all())
+
+    @skipCUDAIfNoCudnn
     def test_cudnn_non_contiguous(self, device):
         x = torch.randn(192, 16, 50, device=device)
         x = x.permute(0, 2, 1).contiguous().permute(0, 2, 1)
@@ -4091,6 +4173,7 @@ class TestConvolutionNNCUDA(NNTestCase):
         m(x)
 
     @skipCUDAIfNoCudnn
+    @tf32_on_and_off(0.015)
     def test_cudnn_not_mutate_stride(self, device):
         weight = torch.randn(64, 64, 1, 1, device=device)
         x = torch.randn(2, 64, 10, 10, device=device).to(
