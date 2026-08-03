@@ -3534,14 +3534,10 @@ class TestXpuAutocast(TestAutocast):
         is_enabled = torch.is_autocast_enabled("xpu")
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
         torch.set_autocast_enabled(not is_enabled)
-        self.assertEqual(
-            torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
-        )
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
         self.assertEqual(not is_enabled, torch.is_autocast_enabled())
         torch.set_autocast_enabled(is_enabled)
-        self.assertEqual(
-            torch.is_autocast_enabled(device="xpu"), torch.is_autocast_enabled()
-        )
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 
