@@ -1361,6 +1361,34 @@ class DequeVariable(BaseListVariable):
         *BaseListVariable._nonvar_fields,
     }
 
+    def _rotate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_rotate: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L927
+        # rotate(n=1, /) shifts n steps to the right (left if n < 0). n is
+        # resolved through nb_index. A deque of length <= 1 is a no-op. A
+        # non-mutable deque declines (returns None) so dispatch falls through
+        # to the object protocol, matching the old is_mutable() guard.
+        if not self.is_mutable():
+            return None
+        # deque.rotate is METH_FASTCALL, so the flags derived from ml_flags
+        # reject kwargs but cannot bound the positional count; deque_rotate
+        # does that itself with _PyArg_CheckPositional.
+        check_positional(tx, "rotate", len(args), 0, 1)
+        n_vt = args[0] if args else ConstantVariable.create(1)
+        n = n_vt.nb_index_impl(tx).as_python_constant()
+        length = len(self.items)
+        if length > 1:
+            tx.output.side_effects.mutation(self)
+            k = n % length
+            if k != 0:
+                self.items[:] = self.items[-k:] + self.items[:-k]
+            self.state += 1
+        return ConstantVariable.create(None)
+
     def richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1780,6 +1808,7 @@ class DequeVariable(BaseListVariable):
         "pop": Method(pop),
         "popleft": Method(popleft),
         "clear": Method(clear),
+        "rotate": Method(_rotate),
         "reverse": Method(BaseListVariable.list_reverse),
         "remove": Method(BaseListVariable.list_remove),
         "copy": Method(copy),

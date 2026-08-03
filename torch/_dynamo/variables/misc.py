@@ -511,6 +511,27 @@ class TracebackVariable(VariableTracker):
     def python_type(self) -> type[types.TracebackType]:
         return types.TracebackType
 
+    def call_setattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ) -> VariableTracker:
+        name = name_var.as_python_constant()
+        if name == "tb_next":
+            if not self.is_valid_traceback(val):
+                raise_observed_exception(TypeError, tx)
+            if not isinstance(val, (TracebackVariable, ConstantVariable)):
+                raise AssertionError(
+                    f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
+                )
+            if self.has_reference_cycle(val) or (
+                istype(val, TracebackVariable) and val.has_reference_cycle(self)
+            ):
+                raise_observed_exception(ValueError, tx)
+            self.tb_next = val
+        return variables.ConstantVariable.create(None)
+
     def _get_tb_next(self, tx: "InstructionTranslatorBase"):
         return self.tb_next
 
@@ -552,6 +573,17 @@ class TracebackVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ExceptionVariable(VariableTracker):
