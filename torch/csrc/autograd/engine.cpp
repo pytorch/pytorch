@@ -1259,7 +1259,8 @@ void Engine::evaluate_function(
           next.function.get());
 
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, next.function->device());
+        auto queue =
+            ready_queue(cpu_ready_queue, *graph_task, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -1276,7 +1277,8 @@ void Engine::evaluate_function(
           next.function->stream(),
           next.function.get());
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, next.function->device());
+        auto queue =
+            ready_queue(cpu_ready_queue, *graph_task, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
@@ -1306,6 +1308,11 @@ auto Engine::compute_dependencies(
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
 
+  // See Note [ Engine threading optimization when single device ]
+  // NB: When the user passes inputs=, only a subgraph is executed, so this can
+  // overcount. Recomputing it in init_to_execute would be more accurate.
+  std::unordered_set<at::Device> distinct_devices;
+
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies_;
@@ -1318,6 +1325,7 @@ auto Engine::compute_dependencies(
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
     }
+    distinct_devices.insert(fn->device());
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -1334,6 +1342,8 @@ auto Engine::compute_dependencies(
     // leaf_streams.
     task.stash_current_streams();
   }
+
+  task.num_distinct_devices_ = distinct_devices.size();
 }
 
 auto Engine::execute(
@@ -1468,7 +1478,8 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  auto queue = ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
+  auto queue = ready_queue(
+      graph_task->cpu_ready_queue_, *graph_task, graph_root->device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -1593,10 +1604,23 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 // across all graph tasks
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
+    const GraphTask& graph_task,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
   bool multithreading_disabled =
       !c10::AutogradState::get_tls_state().get_multithreading_enabled();
-  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
+  // Note [ Engine threading optimization when single device ]
+  //
+  // When the whole graph lives on a single device, the calling thread can drive
+  // the entire backward itself instead of handing every node off to that
+  // device's worker thread. Avoiding the handoff avoids the cache misses, TLB
+  // misses, and context switches it costs.
+  //
+  // num_distinct_devices_ is only populated by compute_dependencies, so it is
+  // zero for graph tasks built elsewhere (e.g. the distributed engine) and we
+  // fall back to the usual per-device queues.
+  bool single_device = graph_task.num_distinct_devices_ == 1;
+  if (multithreading_disabled || single_device ||
+      should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;

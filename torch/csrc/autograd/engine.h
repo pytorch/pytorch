@@ -227,6 +227,7 @@ struct TORCH_API Engine {
 
   std::shared_ptr<ReadyQueue> ready_queue(
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
+      const GraphTask& graph_task,
       at::Device device);
   std::shared_ptr<ReadyQueue> ready_queue_by_index(
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
