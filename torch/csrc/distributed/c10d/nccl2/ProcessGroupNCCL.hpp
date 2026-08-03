@@ -34,6 +34,7 @@
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
@@ -46,6 +47,13 @@ namespace c10d::nccl2 {
 // Hint key names for NCCL backend configuration
 constexpr std::string_view kHintMaxEventPoolSize = "max_event_pool_size";
 constexpr size_t kDefaultMaxEventPoolSize = 1000;
+
+// ncclConfig_t::netName is a strdup'ed const char* (see the NCCLConfig pybind
+// setter) and ncclConfig_t tracks no ownership, so plainly copying the struct
+// would leave two owners sharing one allocation -- which double frees on the
+// NCCL versions that free the caller's netName when the communicator is
+// destroyed. Copy the string as well so each config owns its own.
+TORCH_API ncclConfig_t cloneNcclConfig(const ncclConfig_t& config);
 
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
@@ -87,22 +95,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
-  // c10d Backend options for this backend (a c10d::Backend::Options subclass,
-  // like ProcessGroupNCCL::Options); surfaced to Python via the Options pybind.
-  struct TORCH_API Options : ::c10d::Backend::Options {
-    bool abort_process_on_timeout_or_error{true};
-    bool is_high_priority_stream{false};
-    std::unordered_map<std::string, std::string> hints;
-
-    explicit Options(bool is_high_priority_stream = false)
-        : ::c10d::Backend::Options(std::string(kBackendName)),
-          is_high_priority_stream(is_high_priority_stream) {}
-
-    static c10::intrusive_ptr<Options> create(
-        bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(is_high_priority_stream);
-    }
-  };
+  using Options = ::c10d::ProcessGroupNCCL::Options;
 
   // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
   // the first collective (or via eagerConnectSingleDevice / bound_device_id),
@@ -164,6 +157,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   c10::intrusive_ptr<::c10d::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
+      const ::c10d::GatherOptions& opts = ::c10d::GatherOptions()) override;
+  c10::intrusive_ptr<::c10d::Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
       const ::c10d::GatherOptions& opts = ::c10d::GatherOptions()) override;
   c10::intrusive_ptr<::c10d::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
@@ -229,6 +226,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
   }
+  void enableCollectivesTiming() override;
   void shutdown() override;
   void abort() override;
   ::c10d::ErrorType getError() override;
@@ -295,13 +293,22 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
+  bool collectivesTimingEnabled() const {
+    return timing_enabled_.load();
+  }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent();
-  void returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event);
+  // Events are pooled per timing mode: an event created with timing disabled
+  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
+  // describe the work the event is taken for / returned from.
+  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
+      bool timing_enabled);
+  void returnEvent(
+      std::unique_ptr<at::cuda::CUDAEvent> event,
+      bool timing_enabled);
   void abortNcclComm();
   void revokeNcclComm();
 
@@ -529,6 +536,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
+  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
+  // pool never holds events whose timing mode disagrees with it.
+  std::atomic<bool> timing_enabled_{false};
 
   WorkNCCLQueue workq_;
 
@@ -538,6 +548,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
+  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
