@@ -3737,6 +3737,29 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @common_utils.parametrize(
+        "dtype", [torch.int8, torch.int16, torch.int32, torch.int64]
+    )
+    def test_bitshift_signed(self, dtype):
+        class RightShiftModel(torch.nn.Module):
+            def forward(self, input):
+                return input >> 1, input >> 3
+
+        input = torch.tensor([-128, -7, -4, -1, 0, 1, 3, 127], dtype=dtype)
+        self.run_test(RightShiftModel(), input)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize(
+        "dtype", [torch.int8, torch.int16, torch.int32, torch.int64]
+    )
+    def test_bitwise_right_shift_signed(self, dtype):
+        class BitwiseRightShiftModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.bitwise_right_shift(input, 2)
+
+        input = torch.tensor([-128, -7, -4, -1, 0, 1, 3, 127], dtype=dtype)
+        self.run_test(BitwiseRightShiftModel(), input)
+
     @skipIfUnsupportedMinOpsetVersion(18)
     def test_bitwise_and(self):
         class BitwiseAndModel(torch.nn.Module):
@@ -10824,7 +10847,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         if torch.all(torch.eq(x, torch.from_numpy(ort_outs[0]))):
             raise AssertionError("Outputs should not match input after dropout")
 
-        script_model = torch.jit.script(model)
         output = model(x)
         model_onnx = io.BytesIO()
         torch.onnx.export(
@@ -10884,7 +10906,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
-        script_model = torch.jit.script(model)
         y = model(input)
         output = y.cpu().numpy()
         model_onnx = io.BytesIO()
