@@ -94,10 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     check_mixed_data_type(X, gamma, beta);
   }
 
-  auto memory_format{
-      (X.device().is_cpu() || X.device().is_privateuseone())
-          ? X.suggest_memory_format()
-          : at::MemoryFormat::Contiguous};
+  auto memory_format{X.suggest_memory_format()};
   auto stat_options{X.options()
                         .memory_format(at::MemoryFormat::Contiguous)
                         .dtype(param_scalar_type(X, mixed_type))};
@@ -152,9 +149,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     check_mixed_data_type(X, mean, rstd);
   }
 
-  auto memory_format = (X.device().is_cpu() || X.device().is_privateuseone())
-      ? X.suggest_memory_format()
-      : at::MemoryFormat::Contiguous;
+  auto memory_format = X.suggest_memory_format();
   auto dparam_options{(gamma.defined() ? gamma.options() : X.options())
                           .memory_format(MemoryFormat::Contiguous)};
 
@@ -247,10 +242,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
 
   check_group_norm_inputs(input, weight, bias, C, HxW, group);
 
-  auto memory_format{
-      (input.device().is_cpu() || input.device().is_privateuseone())
-          ? input.suggest_memory_format()
-          : at::MemoryFormat::Contiguous};
+  auto memory_format{input.suggest_memory_format()};
   auto stat_options{
       input.options().memory_format(at::MemoryFormat::Contiguous)};
 
@@ -263,7 +255,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
         at::empty({N, group}, stat_options));
   }
 
-  auto input_reshaped = input.view({N, group, C / group * HxW});
+  auto input_reshaped = input.reshape({N, group, C / group * HxW});
   auto [var, mean] = at::var_mean(input_reshaped, {2}, c10::Scalar(0), true);
   auto rsqrt = var.add(eps).rsqrt();
   auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input.sizes());
@@ -277,6 +269,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     out = out.add(bias_opt->view(weight_bias_shape));
   }
 
+  out = out.contiguous(memory_format);
   mean = mean.squeeze(-1);
   rsqrt = rsqrt.squeeze(-1);
   return std::make_tuple(std::move(out), std::move(mean), std::move(rsqrt));

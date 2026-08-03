@@ -3431,12 +3431,7 @@ def native_group_norm(
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
-    # Match contiguous behavior of eager implementation.  Only necessary for ref tests.
-    mem_fmt = (
-        torch.contiguous_format
-        if input.device.type not in ("cpu", torch._C._get_privateuse1_backend_name())
-        else utils.suggest_memory_format(input)
-    )
+    mem_fmt = utils.suggest_memory_format(input)
     input = input.contiguous(memory_format=mem_fmt)
     weight = weight.contiguous() if weight is not None else None
     bias = bias.contiguous() if bias is not None else None
@@ -3483,6 +3478,7 @@ def native_group_norm(
             out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    out = out.contiguous(memory_format=mem_fmt)
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
