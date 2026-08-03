@@ -7569,6 +7569,7 @@ class Scheduler:
             not nodes
             or not config.triton.coalesce_tiling_analysis
             or config.triton.prefer_nd_tiling
+            or any(node.is_foreach() for node in nodes)
         ):
             return None
 
@@ -7657,6 +7658,9 @@ class Scheduler:
         # Keep this consistent with shared_data_after_reordering_loop(): CPU
         # reindexing is not validated yet.
         if node1.is_cpu() or node2.is_cpu():
+            return False
+
+        if node1.is_foreach() or node2.is_foreach():
             return False
 
         if node1.is_reduction() and not node2.is_reduction():
