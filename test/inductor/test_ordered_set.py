@@ -12,7 +12,10 @@ import weakref
 
 from test import support
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -53,6 +56,9 @@ class HashCountingInt(int):
 
 class TestJointOps(TestCase):
     # Tests common to both OrderedSet and frozenset
+
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = OrderedSet
     basetype = OrderedSet
 
@@ -740,6 +746,8 @@ empty_set = OrderedSet()
 
 
 class TestBasicOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skip("Different repr")
     def test_repr(self):
         if self.repr is not None:
@@ -983,6 +991,8 @@ def gooditer():
 class TestExceptionPropagation(TestCase):
     """SF 628246:  Set constructor should not trap iterator TypeErrors"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_instanceWithException(self):
         self.assertRaises(TypeError, OrderedSet, baditer())
 
@@ -1010,6 +1020,8 @@ class TestExceptionPropagation(TestCase):
 
 
 class TestSetOfSets(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         inner = frozenset([1])
         outer = OrderedSet([inner])
@@ -1025,6 +1037,8 @@ class TestSetOfSets(TestCase):
 
 
 class TestBinaryOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((2, 4, 6))
@@ -1101,6 +1115,8 @@ class TestBinaryOps(TestCase):
 
 
 class TestUpdateOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.OrderedSet = OrderedSet((2, 4, 6))
@@ -1190,6 +1206,8 @@ class TestUpdateOps(TestCase):
 
 
 class TestMutate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.values = ["a", "b", "c"]
@@ -1267,6 +1285,8 @@ class TestMutate(TestCase):
 
 
 class TestSubsets(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     case2method = {
         "<=": "issubset",
         ">=": "issuperset",
@@ -1361,6 +1381,8 @@ class TestSubsetNonOverlap(TestSubsets, TestCase):
 
 
 class TestOnlySetsInBinaryOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_eq_ne(self):
         # Unlike the others, this is testing that == and != *are* allowed.
         self.assertEqual(self.other == self.OrderedSet, False)
@@ -1551,6 +1573,8 @@ del TestOnlySetsInBinaryOps
 
 
 class TestCopying:
+    hw_classification = HardwareClassification.GENERIC
+
     def test_copy(self):
         dup = self.OrderedSet.copy()
         dup_list = sorted(dup, key=repr)
@@ -1620,6 +1644,8 @@ del TestCopying
 
 
 class TestIdentities(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.a = OrderedSet("abracadabra")
@@ -1773,6 +1799,8 @@ def L(seqn):
 
 
 class TestVariousIteratorArgs(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         for cons in (OrderedSet, frozenset):
             for s in ("123", "", range(1000), ("do", 1.2), range(2000, 2200, 5)):
@@ -1876,6 +1904,8 @@ class bad_dict_clear:
 
 
 class TestWeirdBugs(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_8420_set_merge(self):
         # This used to segfault
         global be_bad, set2, dict2
@@ -1980,6 +2010,8 @@ def faces(G):
 
 
 class TestGraphs(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cube(self):
         g = cube(3)  # vert --> {v1, v2, v3}
         vertices1 = OrderedSet(g)
