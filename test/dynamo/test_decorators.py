@@ -1598,6 +1598,40 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(fn(torch.ones(4), sizes), torch.ones(4) * sum(sizes))
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_assume_constant_result_specialize_args_container_dynamic_scalars(self):
+        # A scalar nested in a list/dict argument is promoted to a symbolic
+        # scalar by automatic dynamic once its value changes across calls. The
+        # specialize walk must recurse into the container and specialize that
+        # leaf via evaluate_expr, instead of graph breaking on the whole
+        # container's as_python_constant. fullgraph=True turns any graph break
+        # into a hard error, so this guards against that regression.
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select_list(sizes):
+            return float(sum(sizes))
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select_dict(cfg):
+            return float(cfg["a"] + cfg["b"])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x, sizes, cfg):
+            return x * select_list(sizes) + x * select_dict(cfg)
+
+        x = torch.ones(4)
+        calls = [
+            ([1, 2, 3], {"a": 1, "b": 2}),
+            ([1, 2, 3], {"a": 1, "b": 2}),
+            ([1, 2, 4], {"a": 1, "b": 5}),
+            ([1, 2, 4], {"a": 1, "b": 5}),
+            ([1, 2], {"a": 9, "b": 5}),
+        ]
+        for sizes, cfg in calls:
+            expected = x * float(sum(sizes)) + x * float(cfg["a"] + cfg["b"])
+            self.assertEqual(fn(x, sizes, cfg), expected)
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_assume_constant_result_specialize_args_set_and_enum(self):
         import enum
 

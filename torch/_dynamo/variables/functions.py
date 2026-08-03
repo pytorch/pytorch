@@ -1981,7 +1981,11 @@ def invoke_and_store_as_constant(
                 ],
             )
 
-    def convert_specialized(x: VariableTracker) -> Any:
+    def convert_specialized(x: VariableTracker, source: Source | None = None) -> Any:
+        # `source` is threaded when recursing into a container whose leaves are
+        # not all python constants; at the top level it is the argument's source.
+        if source is None:
+            source = x.source
         if x.is_tensor():
             unimplemented(
                 gb_type="assume_constant_result specialize_args tensor argument",
@@ -2001,9 +2005,10 @@ def invoke_and_store_as_constant(
             # A symbolic scalar (e.g. an int made dynamic by automatic dynamic
             # shapes) has no single Python value to bake; evaluate_expr()
             # specializes it to the traced value and installs a shape-env
-            # guard, so a different value recompiles and re-invokes fn.
+            # guard, so a different value recompiles and re-invokes fn. This is
+            # also how a container's nested scalar is handled once automatic
+            # dynamic promotes it, via the structural walk below.
             return x.evaluate_expr(tx.output)
-        source = x.source
         if source is None:
             try:
                 return x.as_python_constant()
@@ -2019,30 +2024,59 @@ def invoke_and_store_as_constant(
                         "Ensure all arguments can be converted to constants",
                     ],
                 )
-        else:
-            if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
-                _mutated_constant_arg(name, source.name)
-            if isinstance(x, UserDefinedObjectVariable):
-                value = x.value
-            else:
-                try:
-                    value = x.as_python_constant()
-                except AsPythonConstantNotImplementedError:
-                    unimplemented(
-                        gb_type="assume_constant_result specialize_args argument conversion failed",
-                        context=f"function {name}, variable type {type(x).__name__}",
-                        explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
-                        f"constant for function {name} marked with "
-                        f"torch._dynamo.assume_constant_result(specialize_args=True).",
-                        hints=[
-                            "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
-                            "Ensure all arguments can be converted to constants",
-                        ],
-                    )
+        if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
+            _mutated_constant_arg(name, source.name)
+        if isinstance(x, UserDefinedObjectVariable):
+            value = x.value
             _install_constant_arg_guards(
                 source, value, name, set(), tx.output.side_effects
             )
             return value
+        # Fast path: a fully-constant argument (covers wholly-literal containers,
+        # enums, and constant classes) bakes as one value with whole-value guards.
+        try:
+            value = x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            pass
+        else:
+            _install_constant_arg_guards(
+                source, value, name, set(), tx.output.side_effects
+            )
+            return value
+        # A container whose structure is guardable but whose leaves are not all
+        # python constants (e.g. a nested int promoted to a dynamic SymInt by
+        # automatic dynamic on recompile): walk the tracker and specialize the
+        # dynamic leaves rather than graph-breaking on as_python_constant.
+        if isinstance(x, (variables.ListVariable, variables.TupleVariable)):
+            install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return x.python_type()(
+                convert_specialized(item, GetItemSource(source, i))
+                for i, item in enumerate(x.items)
+            )
+        if isinstance(x, variables.ConstDictVariable) and all(
+            key.vt.is_python_constant()
+            and ConstantVariable.is_literal(key.vt.as_python_constant())
+            for key in x.items
+        ):
+            install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            result = {}
+            for key, val in x.items.items():
+                py_key = key.vt.as_python_constant()
+                result[py_key] = convert_specialized(
+                    val, DictGetItemSource(source, py_key)
+                )
+            return result
+        unimplemented(
+            gb_type="assume_constant_result specialize_args argument conversion failed",
+            context=f"function {name}, variable type {type(x).__name__}",
+            explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
+            f"constant for function {name} marked with "
+            f"torch._dynamo.assume_constant_result(specialize_args=True).",
+            hints=[
+                "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
+                "Ensure all arguments can be converted to constants",
+            ],
+        )
 
     def convert(x: VariableTracker) -> Any:
         if specialize_args:
