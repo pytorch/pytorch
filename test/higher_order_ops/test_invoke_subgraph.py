@@ -16,6 +16,7 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -26,11 +27,16 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     PatternMatcherPass,
     register_graph_pattern,
+)
+from torch._subclasses.functional_tensor import (
+    FunctionalTensorMode,
+    PythonFunctionalizeAPI,
 )
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -48,6 +54,19 @@ nested_compile_region = torch.compiler.nested_compile_region
 
 if HAS_GPU:
     import triton
+
+
+def _aot_eager_with_runtime_epilogue():
+    """Create a recording AOT eager backend with a runtime mutation epilogue."""
+    fw_graphs = []
+
+    def fw_compiler(gm, _):
+        fw_graphs.append(gm)
+        return gm.forward
+
+    return aot_autograd(
+        fw_compiler=fw_compiler, keep_inference_input_mutations=False
+    ), fw_graphs
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -1526,6 +1545,126 @@ class <lambda>(torch.nn.Module):
                 ignore_empty_lines=True,
             )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_alias_annotated_custom_op_runtime_epilogue(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale_into(Tensor x, Tensor! out, float scale) -> ()")
+
+            def scale_into(x, out, scale):
+                out.copy_(x * scale)
+
+            lib.impl("scale_into", scale_into, "CompositeExplicitAutograd")
+
+            @nested_compile_region
+            def gn(x, y, z):
+                out = torch.empty_like(y)
+                torch.ops.mylib.scale_into(y, out, 2.0)
+                x.add_(out)
+                z.sub_(y)
+                return torch.mul(x, z)
+
+            def fn(x, y, z):
+                return gn(x, y, z)
+
+            backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(8, requires_grad=False)
+            x_clone = x.clone()
+            y = torch.randn(8, requires_grad=False)
+            y_clone = y.clone()
+            z = torch.randn(8, requires_grad=False)
+            z_clone = z.clone()
+
+            self.assertEqual(opt_fn(x, y, z), fn(x_clone, y_clone, z_clone))
+            self.assertEqual(x_clone, x)
+            self.assertEqual(y_clone, y)
+            self.assertEqual(z_clone, z)
+            self.assertExpectedInline(
+                normalize_gm(fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'functionalized_subgraph_0', arg1_1, arg0_1, arg2_1);  repeated_subgraph0 = arg1_1 = arg0_1 = arg2_1 = None
+        getitem: "f32[8]" = invoke_subgraph[0]
+        getitem_1: "f32[8]" = invoke_subgraph[1]
+        getitem_2: "f32[8]" = invoke_subgraph[2];  invoke_subgraph = None
+        return (getitem_1, getitem_2, getitem)
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
+            empty_like: "f32[8]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False)
+            auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.scale_into.default, x = arg0_1, scale = 2.0, _out_base_index = 0, _all_bases = [empty_like]);  empty_like = None
+            getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
+            sub: "f32[8]" = torch.ops.aten.sub.Tensor(arg2_1, arg0_1);  arg2_1 = arg0_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(add, sub)
+            return (mul, add, sub)""",
+                ignore_empty_lines=True,
+            )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._functorch.config.patch(unlift_effect_tokens=True)
+    def test_input_mutation_with_effect_runtime_epilogue(self):
+        @nested_compile_region
+        def gn(x, y):
+            torch.ops.aten._print.default("effect")
+            x.add_(y)
+            return x * y
+
+        def fn(x, y):
+            return gn(x, y)
+
+        backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+        x = torch.randn(8)
+        x_clone = x.clone()
+        y = torch.randn(8)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+        expected = fn(x_clone, y)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, x_clone)
+        graph = normalize_gm(fw_graphs[0].print_readable(print_output=False))
+        self.assertIn("'functionalized_subgraph_0'", graph)
+        self.assertIn("torch.ops.higher_order.with_effects", graph)
+        self.assertNotIn("torch.ops.aten.copy_.default", graph)
+        self.assertNotIn(
+            "auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph", graph
+        )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_repeated_input_mutation_view_runtime_epilogue(self):
+        @nested_compile_region
+        def gn(x):
+            x.add_(2)
+            return x.sin()
+
+        def fn(base):
+            return gn(base[1:5]) + gn(base[1:5])
+
+        backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+        base = torch.randn(8)
+        base_clone = base.clone()
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(base)
+        expected = fn(base_clone)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(base, base_clone)
+        graph = normalize_gm(fw_graphs[0].print_readable(print_output=False))
+        invoke_subgraph_nodes = fw_graphs[0].graph.find_nodes(
+            op="call_function", target=torch._higher_order_ops.invoke_subgraph
+        )
+        self.assertEqual(len(invoke_subgraph_nodes), 2)
+        self.assertEqual(
+            invoke_subgraph_nodes[0].args[0].target,
+            invoke_subgraph_nodes[1].args[0].target,
+        )
+        self.assertEqual(graph.count("'functionalized_subgraph_0'"), 2)
+        self.assertIn("torch.ops.aten.slice_scatter.default", graph)
+        self.assertNotIn("torch.ops.aten.copy_.default", graph)
+        self.assertNotIn(
+            "auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph", graph
+        )
+
     def test_input_mutation_boxed_subgraph(self):
         class Mod(torch.nn.Module):
             def forward(self, x, y):
@@ -1545,6 +1684,15 @@ class <lambda>(torch.nn.Module):
 
         self.assertEqual(FunctionalCallableWithEpilogue(gm)([x, y]), ref)
         self.assertEqual(x_clone, x)
+
+        x = torch.randn(8, requires_grad=False)
+        x_clone = x.clone()
+        ctx = PythonFunctionalizeAPI(FunctionalTensorMode(_keep_input_mutations=False))
+        functionalized = FunctionalizeCtxWrapper(ctx, gm, mutated_input_indices=(0,))
+        out, updated_x = functionalized([x, y])
+        self.assertEqual(x, x_clone)
+        self.assertEqual(updated_x, x_clone + y)
+        self.assertEqual(out, updated_x * y)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
