@@ -439,6 +439,7 @@ class BackendFeature(Enum):
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
+    MASKED_STORE = auto()
     SCAN = auto()
     SORT = auto()
     TUPLE_REDUCTION = auto()
@@ -735,6 +736,7 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "load",
         "store",
+        "masked_store",
         "store_reduction",
     ):
         buf_name = args[1]
@@ -1049,6 +1051,12 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    """
+    Base for backend op handlers that emit source strings. Subclasses override
+    individual ops; anything left unimplemented falls back to the decompositions
+    in OpDecompositions/BasicMathOpsMixin.
+    """
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1138,6 +1146,17 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: OpVarT,
+        mask: OpVarT,
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: masked_store should be handled by CSEProxy"
         )
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
@@ -2348,6 +2367,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         raise NotImplementedError
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
@@ -2994,6 +3022,23 @@ class CSEProxy(DefaultHandler):
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        self.kernel.store_buffer_names.add(name)
+        # masked_store is only used for domain expansion. The false lanes are
+        # outside the logical output, so forwarding the computed value avoids an
+        # out-of-bounds read of the smaller destination in the expanded tail.
+        self._update_store_cache(name, value)
+        if name not in V.graph.removed_buffers:
+            self.kernel.masked_store(name, index, value, mask)
+            self.kernel.num_store += 1
+        self.kernel.record_op_trace("masked_store", (name, index, value, mask), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
