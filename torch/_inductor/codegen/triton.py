@@ -6221,6 +6221,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         permute_dims: Sequence[int],
         part_names: Sequence[str],
     ) -> None:
+        """Split ``value`` into lanes that are *strided blocks*, not neighbours.
+
+        ``tl.split`` only ever splits the **trailing** axis, and only into two.
+        Both sub-parent layouts therefore reduce to "get my lane axis last":
+
+        - interleaved lanes are already adjacent, so a plain reshape to
+          ``[..., extent // factor, factor]`` suffices -- see
+          ``emit_split_via_reshape``.
+        - contiguous lanes are ``factor`` consecutive *blocks*, so the lane axis
+          reshapes out in front (``[..., factor, extent // factor]``) and has to
+          be permuted to the end before it can be split.
+
+        That permute is the only codegen difference between the two layouts.
+        ``_emit_recursive_split`` then peels one axis at a time, so a factor of
+        4 costs two levels of ``tl.split``.
+        """
         dtype = value.dtype
         assert dtype is not None  # noqa: S101
         reshaped = self._bitcast_reshape_expr(value, reshape_shape, dtype)

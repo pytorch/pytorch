@@ -820,27 +820,35 @@ class NestedReduction:
         full_numel: sympy.Expr,
         parent_rnumel: int,
     ) -> tuple[int, int] | None:
+        """Derive ``(factor, output_lanes)`` from the consumer's size alone.
+
+        A consumer reads ``factor`` lanes of the parent tile and writes
+        ``output_lanes`` values per lane group, so by definition
+
+            node_numel * factor == output_lanes * full_numel
+
+        which means ``factor / output_lanes`` *is* ``full_numel / node_numel``.
+        Reducing that ratio to lowest terms yields both, with no rate list: a
+        pair packer reduces to ``2/1``, chunked gating to ``4/1``, and a packer
+        whose element widths do not divide -- six bits into eight, four values
+        filling three bytes -- to ``4/3``.
+
+        The constraints that matter are structural, not a catalogue of known
+        formats: the split tree is binary so ``factor`` must be a power of two,
+        and the tile has to hold a whole lane group. ``output_lanes < factor``
+        follows from the consumer being smaller than the parent.
+        """
         if V.graph.sizevars.statically_known_equals(node_numel, 0):
             return None
-        factor_expr = V.graph.sizevars.simplify(FloorDiv(full_numel, node_numel))
-        if isinstance(factor_expr, (int, sympy.Integer)):
-            factor = int(factor_expr)
-            if (
-                2 <= factor <= min(cls.MAX_SUB_PARENT_FACTOR, parent_rnumel)
-                and is_power_of_2(factor)
-                and V.graph.sizevars.statically_known_equals(
-                    factor * node_numel, full_numel
-                )
-            ):
-                return factor, 1
-
-        if parent_rnumel >= 4:
-            group_numel = FloorDiv(full_numel, 4)
-            if V.graph.sizevars.statically_known_equals(
-                4 * group_numel, full_numel
-            ) and V.graph.sizevars.statically_known_equals(3 * group_numel, node_numel):
-                return 4, 3
-        return None
+        ratio = V.graph.sizevars.simplify(full_numel / node_numel)
+        if not isinstance(ratio, (sympy.Integer, sympy.Rational)):
+            return None
+        factor, output_lanes = int(ratio.p), int(ratio.q)
+        if not (2 <= factor <= min(cls.MAX_SUB_PARENT_FACTOR, parent_rnumel)):
+            return None
+        if not is_power_of_2(factor):
+            return None
+        return factor, output_lanes
 
     @staticmethod
     def _sub_parent_epilogue_internal_reads_match(
@@ -1254,15 +1262,34 @@ class NestedReduction:
         )
 
     @staticmethod
+    def sub_parent_contiguous_lane(
+        index: sympy.Expr,
+        sub_parent_factor: int,
+        parent_extent: sympy.Expr,
+    ) -> sympy.Expr:
+        """Which contiguous lane an index addresses, from its constant term.
+
+        Shared with codegen (``_resolve_remapped_value``) so the lane the
+        planner validates and the lane codegen selects cannot drift. With
+        contiguous lanes the child variable has stride 1 and would pollute a
+        modulus taken over the whole index, so the lane comes from the constant
+        term alone -- unlike the interleaved case, where every other term is a
+        multiple of the factor and cancels.
+        """
+        child_extent = FloorDiv(parent_extent, sub_parent_factor)
+        offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
+        return V.graph.sizevars.simplify(
+            FloorDiv(sympy.Mod(offset, parent_extent), child_extent)
+        )
+
+    @staticmethod
     def _contiguous_sub_parent_epilogue_emitted_lane(
         dep: MemoryDep,
         sub_parent_factor: int,
         parent_rnumel: int,
     ) -> sympy.Expr:
-        child_extent = FloorDiv(parent_rnumel, sub_parent_factor)
-        offset = sympy_subs(dep.index, dict.fromkeys(dep.index.free_symbols, 0))
-        return V.graph.sizevars.simplify(
-            FloorDiv(sympy.Mod(offset, parent_rnumel), child_extent)
+        return NestedReduction.sub_parent_contiguous_lane(
+            dep.index, sub_parent_factor, parent_rnumel
         )
 
     @classmethod
@@ -9297,8 +9324,17 @@ class Scheduler:
                     index_equivalent_dep_names is not None
                     and write_name in index_equivalent_dep_names
                 ):
-                    remaining.clear()
-                    continue
+                    # The nested relation proves the *indices* line up, so drop
+                    # the MemoryDep reads of this buffer without re-checking
+                    # them. It says nothing about a StarDep (indirect indexing,
+                    # which the sub-parent planner explicitly lets past on a
+                    # fused buffer name) or a WeakDep (mutation ordering), so
+                    # those still have to be satisfied the normal way.
+                    for rd in list(remaining):
+                        if isinstance(rd, MemoryDep):
+                            remaining.remove(rd)
+                    if not remaining:
+                        continue
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
                         rd.rename(self.mutation_renames), cd

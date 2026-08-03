@@ -1512,7 +1512,7 @@ class _IterationSpace:
 @dataclasses.dataclass(frozen=True)
 class _ContiguousSubParentRemappedValue:
     parts: tuple[CSEVariable, ...]
-    child_extent: sympy.Expr
+    parent_extent: sympy.Expr
 
 
 RemappedRangeValue = (
@@ -1536,24 +1536,29 @@ def _resolve_remapped_value(
     name: str,
     kernel: SIMDKernel[Any],
 ) -> CSEVariable:
+    """Pick the lane of a split parent tile that ``index`` is asking for.
+
+    A remapped value is the ``factor`` lanes a parent tile was split into. The
+    read that reaches here has already been proved by the planner to address
+    exactly one of them, so this only has to recover *which* -- and the two
+    layouts encode that differently:
+
+    - interleaved: the lane is ``index % factor``; every other term in the
+      index is a multiple of ``factor``, so it cancels.
+    - contiguous: the child variable has stride 1 and would pollute that
+      modulus, so the lane comes from the constant term alone.
+
+    A lane that does not resolve to a constant means the planner admitted a
+    read it should have rejected, hence the assertions rather than a fallback.
+    """
     if isinstance(value, _ContiguousSubParentRemappedValue):
         factor = len(value.parts)
-        # The lane is the constant chunk offset; fall back to symbolic
-        # simplification for equivalent forms that keep the offset in the index.
-        offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
-        for candidate, simplify in (
-            (offset, V.graph.sizevars.simplify),
-            (index, kernel.simplify_indexing),
-        ):
-            lane = simplify(
-                FloorDiv(
-                    sympy.Mod(candidate, factor * value.child_extent),
-                    value.child_extent,
-                )
-            )
-            part = _select_lane(value.parts, lane)
-            if part is not None:
-                return part
+        lane = scheduler.NestedReduction.sub_parent_contiguous_lane(
+            index, factor, value.parent_extent
+        )
+        part = _select_lane(value.parts, lane)
+        if part is not None:
+            return part
         raise AssertionError(
             "sub-parent planner invariant violated: contiguous load "
             f"for {name!r} has non-constant lane for index {index}"
@@ -2079,7 +2084,7 @@ class _GroupedReductionLayout:
             )
             family.remapped_values[name] = _ContiguousSubParentRemappedValue(
                 parts,
-                FloorDiv(self.local_reduction_size, factor),
+                self.local_reduction_size,
             )
         else:
             assert source_layout is source_layout_kind.INTERLEAVED  # noqa: S101
@@ -2739,9 +2744,34 @@ class SIMDScheduling(BaseScheduling):
             or not torch._inductor.config.triton.nested_reduction
         ):
             return None
+        if not self._sub_parent_tiling_is_2d(nodes, numel, rnumel):
+            return None
         return scheduler.NestedReduction.sub_parent_epilogue_plan(
             nodes, numel, rnumel, check_leaves=check_leaves
         )
+
+    def _sub_parent_tiling_is_2d(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> bool:
+        """Whether the parent reduction tiles into exactly one x and one r tree.
+
+        Sub-parent codegen derives its range tree from the parent's R axis and
+        cannot express a y/z tiling. Tiling is otherwise chosen *after* the
+        fusion is committed, so decide it here: a 3D tiling would otherwise
+        surface as an assertion during codegen rather than a declined fusion.
+
+        This calls the same helper with the same arguments codegen will use
+        (``coalesce_analysis=None`` on this path, see ``codegen_node``) rather
+        than reasoning about which config combinations can widen the tiling.
+        """
+        reduction_nodes = [node for node in nodes if node.is_reduction()]
+        if not reduction_nodes:
+            return False
+        tiling, _ = self.get_tiling_and_scores(reduction_nodes, numel, rnumel, None)
+        return len(tiling) == 2
 
     def _find_sub_parent_epilogue_plan(
         self,
@@ -3719,12 +3749,14 @@ class SIMDScheduling(BaseScheduling):
         # epilogue nodes run in a derived range, so generic feature mapping cannot
         # model them against the parent (numel, rnumel) domain.
         kernel_features = SIMDKernelFeatures(parent_schedule, numel, rnumel, None)
-        tiling, tiling_score = self.get_tiling_and_scores(
-            parent_schedule,
-            numel,
-            rnumel,
-            None,
-        )
+        # Force the 2D tiling rather than re-running the heuristic. The lanes
+        # are derived from the parent's R axis and cannot be expressed under a
+        # y/z tiling, and _sub_parent_tiling_is_2d already declined the fusion
+        # for any parent whose heuristic wanted more. Deciding it once here
+        # means the fusion-time answer and the codegen-time answer cannot
+        # disagree, instead of agreeing by construction of their inputs.
+        tiling = self.create_tiling([numel], [rnumel])
+        tiling_score = None
         kernel_kwargs = {
             "features": kernel_features,
             "tiling_scores": tiling_score,
@@ -3737,16 +3769,13 @@ class SIMDScheduling(BaseScheduling):
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = sub_parent_epilogue_plan.sub_parent_factor
         parent_rnumel = sub_parent_epilogue_plan.parent_rnumel
-        if not V.graph.sizevars.statically_known_equals(numel, 1) and not any(
-            layout is scheduler.NestedReduction.SubParentSourceLayout.CONTIGUOUS
-            for layout in sub_parent_source_layouts.values()
-        ):
-            # Keep enough rows per program to amortize the parent-tile load and
-            # epilogue split for the standalone packing pattern. The floor is
-            # applied with max() to an autotuned XBLOCK, which must divide
-            # TRITON_MAX_BLOCK["X"], so it has to be a power of two itself.
-            x_hint = V.graph.sizevars.optimization_hint(numel, fallback=128)
-            kernel.min_xblock = next_power_of_2(min(x_hint, 128))
+        # Only min_rblock is a legality constraint: the lanes are derived from
+        # the parent's R axis, so the tile has to hold a whole lane group --
+        # the entire parent row when persistent, and at least one group of
+        # sub_parent_factor when looped, so a group cannot straddle a loop
+        # iteration. There is deliberately no min_xblock here; how many rows a
+        # program should process to amortize the parent-tile load is a
+        # throughput question for the autotuner, not a correctness one.
         kernel.min_rblock = (
             parent_rnumel if kernel.persistent_reduction else sub_parent_factor
         )
@@ -3842,6 +3871,21 @@ class SIMDScheduling(BaseScheduling):
                 if not self.scheduler:
                     raise AssertionError("expected self.scheduler to be set")
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
+            if not has_sub_parent_epilogue:
+                # A group holding a sub-parent-shaped member must have a plan:
+                # fusion is what put the member there, so losing the plan by
+                # codegen means a fusion was admitted that should not have
+                # been. Coalescing analysis cannot model a fraction of the
+                # parent tile, so say that here rather than letting it fail
+                # inside get_pw_red_splits.
+                _, (numel, rnumel) = node.group
+                if any(
+                    self._is_sub_parent_shaped(n, numel, rnumel) for n in nodes
+                ):
+                    raise AssertionError(
+                        "sub-parent-shaped node in a group with no plan; "
+                        "a fusion was admitted that should have been rejected"
+                    )
             coalesce_analysis = (
                 None if has_sub_parent_epilogue else node.get_coalesce_analysis()
             )

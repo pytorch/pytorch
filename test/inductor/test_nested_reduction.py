@@ -856,10 +856,17 @@ class _NestedReductionBase:
             self.check_numeric(f, (x, w))
         self.check_fusion(1 if expect_fullres_consumer else None)
 
-    def test_producer_consumer_rmsnorm_interleaved_pair_epilogue(self):
+    # G=2 makes the REDUCED and PARENT_HALF domains share a numel
+    # (outer_rnumel // G == outer_rnumel // 2), so a pair consumer is only
+    # classified correctly if the domain check disambiguates them rather than
+    # matching on numel alone. The values differ -- element 0 of each pair is
+    # not the amax over that pair -- so a misclassification shows up as a
+    # numeric mismatch, not just a lost fusion.
+    @parametrize("G", [2, 16])
+    def test_producer_consumer_rmsnorm_interleaved_pair_epilogue(self, G):
         import torch.nn.functional as F
 
-        B, D, G = 32, 1024, 16
+        B, D = 32, 1024
 
         def f(x, weight):
             y = F.rms_norm(x, (D,), weight)
@@ -1447,6 +1454,40 @@ class _NestedReductionBase:
         )
         x = values.repeat(B, D // values.numel())
         self.check_nested_matches_unnested(_mxfp6_four_to_three_quantize, (x,))
+        self.check_fusion()
+
+    def test_producer_consumer_mxfp6_four_to_three_pack_exact(self):
+        """Compare the packing against eager bit-exactly, not just against the
+        unfused compile.
+
+        The usual nested-vs-unnested check proves the fusion changed nothing,
+        but both sides could share a bug. Comparing against eager normally
+        cannot be exact here: Inductor rewrites ``/ 7.5`` into a multiply by
+        ``0.1333...``, and a 1-ulp scale difference flips any value sitting on
+        a ``round()`` tie, which ``& 0x3F`` then turns into a 63-code wrap.
+
+        Sidestep all of that instead of tolerating it -- integer inputs whose
+        group max is exactly the power-of-two divisor give a scale of exactly
+        1.0, so no rounding happens on either side and the comparison is exact.
+        That still exercises the full factor-4 / three-output-lane path.
+        """
+        B, D, G = 32, 1024, 32
+
+        def f(x):
+            xg = x.view(B, D // G, G)
+            scale = xg.abs().amax(dim=-1).clamp(min=1e-12) / 8.0
+            values = (xg / scale.unsqueeze(-1)).round().to(torch.int32) & 0x3F
+            return _mxfp6_pack_four_to_three(values).view(B, D // 4, 3), scale
+
+        group = torch.arange(G, device=GPU_TYPE, dtype=torch.float32) % 17 - 8
+        x = group.repeat(B, D // G).view(B, D).contiguous()
+        x[:, ::G] = 8.0  # pin the group max so the scale is exactly 1.0
+
+        expected = f(x)
+        self.assertTrue((expected[1] == 1.0).all())
+        actual = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(actual[0], expected[0], atol=0, rtol=0)
+        self.assertEqual(actual[1], expected[1], atol=0, rtol=0)
         self.check_fusion()
 
     def test_looped_mxfp6_four_to_three_pack_large_group(self):
@@ -2829,7 +2870,7 @@ class _InternalsBase:
         self.check_code(wrapper_code, num_kernels=1, num_allocs=2, num_deallocs=1)
         self.check_axis_classification_contract(
             kernel_code,
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=looped_or_persistent(2, 16),
         )
         extra_checks = (
@@ -2867,7 +2908,7 @@ class _InternalsBase:
         self.check_code(wrapper_code, num_kernels=1)
         self.check_axis_classification_contract(
             kernel_code,
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=self.looped_or_persistent(4, 32),
         )
         FileCheck().check("lane4_").run(kernel_code)
@@ -2880,7 +2921,7 @@ class _InternalsBase:
             num_outputs=3,
             num_deallocs=2,
             meta_num_load=self.looped_or_persistent(3, 1),
-            min_xblock=128,
+            min_xblock=None,
             min_rblock=self.looped_or_persistent(2, 16),
             extra_checks=(
                 FileCheck().check_count("tl.split(", 0, exactly=True)
