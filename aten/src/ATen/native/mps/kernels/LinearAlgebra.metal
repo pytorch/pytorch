@@ -256,48 +256,36 @@ kernel void naive_addbmm(
   }
 }
 
-template <bool col_major>
-inline device float& get_ref(device float* A, uint row, uint col, uint N);
-
-template <>
-inline device float& get_ref<true>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
-  return A[row * N + col];
-}
-
-template <>
-inline device float& get_ref<false>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
+template <bool col_major, typename T>
+inline device T& get_ref(device T* A, uint row, uint col, uint N) {
+  if (col_major) {
+    return A[row * N + col];
+  }
   return A[row + col * N];
 }
 
+template <typename T>
 inline int factor_tile32_warp(
-    threadgroup float (&tile)[32][33],
-    threadgroup float (&col)[32],
+    threadgroup T (&tile)[32][33],
+    threadgroup T (&col)[32],
     uint n,
     uint lane) {
-  float row[32];
+  T row[32];
   for (uint c = 0; c < 32; c++) {
     row[c] = tile[lane][c];
   }
   int ret = 0;
   for (uint kk = 0; kk < n; kk++) {
-    float dsq = simd_broadcast(row[kk], ushort(kk));
+    float dsq = simd_broadcast(c10::metal::cast_to<float>(row[kk]), ushort(kk));
     if (!(dsq > 0.0f)) {
       ret = int(kk) + 1;
       break;
     }
     float rs = rsqrt(dsq);
-    float l = (lane == kk) ? dsq * rs : row[kk] * rs;
+    T l = (lane == kk) ? c10::metal::cast_to<T>(dsq * rs) : row[kk] * rs;
     col[lane] = l;
     simdgroup_barrier(mem_flags::mem_threadgroup);
-    float ccol[32];
+    T ccol[32];
 #pragma unroll
     for (uint i = 0; i < 32; i++) {
       ccol[i] = col[i];
@@ -308,7 +296,7 @@ inline int factor_tile32_warp(
 #pragma unroll
         for (uint i = 0; i < 32; i++) {
           if (i > kk) {
-            row[i] = fma(-l, ccol[i], row[i]);
+            row[i] = c10::metal::fma(-l, c10::metal::conj(ccol[i]), row[i]);
           }
         }
       }
@@ -319,7 +307,8 @@ inline int factor_tile32_warp(
     for (uint c = 0; c < 32; c++) {
       tile[lane][c] = row[c];
     }
-    col[lane] = 1.0f / row[lane];
+    col[lane] =
+        c10::metal::cast_to<T>(1.0f / c10::metal::cast_to<float>(row[lane]));
   }
   return ret;
 }
@@ -351,9 +340,9 @@ inline void trsm_row32(
   }
 }
 
-template <bool upper>
+template <bool upper, typename T>
 kernel void factorDiagonalBlock(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     device int* info [[buffer(1)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
@@ -371,8 +360,8 @@ kernel void factorDiagonalBlock(
   const uint row0 = k * NB;
   const uint col0 = k * NB;
 
-  threadgroup float tile[32][33];
-  threadgroup float col[32];
+  threadgroup T tile[32][33];
+  threadgroup T col[32];
   threadgroup float scratch[1];
   const uint tileSize = actSize * actSize;
 
@@ -409,31 +398,55 @@ kernel void factorDiagonalBlock(
   }
 }
 
-template [[host_name("factorDiagonalBlockU")]]
-kernel void factorDiagonalBlock<true>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+#define INSTANTIATE_FACTOR_DIAGONAL_BLOCK(SUFF, UPPER, DTYPE)    \
+  template [[host_name("factorDiagonalBlock" #SUFF "_" #DTYPE)]] \
+  kernel void factorDiagonalBlock<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                            \
+      device int* info [[buffer(1)]],                            \
+      constant uint& N [[buffer(2)]],                            \
+      constant uint& NB [[buffer(3)]],                           \
+      constant uint& k [[buffer(4)]],                            \
+      uint3 tid [[thread_position_in_threadgroup]],              \
+      uint3 bid [[threadgroup_position_in_grid]],                \
+      uint3 tpg [[threads_per_threadgroup]]);
 
-template [[host_name("factorDiagonalBlockL")]]
-kernel void factorDiagonalBlock<false>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(U, true, float)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(L, false, float)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(U, true, float2)
+INSTANTIATE_FACTOR_DIAGONAL_BLOCK(L, false, float2)
 
-template <bool upper>
+inline float trsm_dot(
+    threadgroup const float* x,
+    threadgroup const float* y,
+    uint n) {
+  float4 sum4 = float4(0.0);
+  uint p = 0;
+  for (; p + 4 <= n; p += 4) {
+    float4 x4 = float4(x[p], x[p + 1], x[p + 2], x[p + 3]);
+    float4 y4 = float4(y[p], y[p + 1], y[p + 2], y[p + 3]);
+    sum4 = fma(x4, y4, sum4);
+  }
+  float sum = sum4.x + sum4.y + sum4.z + sum4.w;
+  for (; p < n; p++) {
+    sum = fma(x[p], y[p], sum);
+  }
+  return sum;
+}
+
+inline float2 trsm_dot(
+    threadgroup const float2* x,
+    threadgroup const float2* y,
+    uint n) {
+  float2 sum = float2(0.0);
+  for (uint p = 0; p < n; p++) {
+    sum = c10::metal::fma(x[p], c10::metal::conj(y[p]), sum);
+  }
+  return sum;
+}
+
+template <bool upper, typename T>
 kernel void applyTRSM(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -461,8 +474,8 @@ kernel void applyTRSM(
     return;
   }
 
-  threadgroup float diag[32 * 32];
-  threadgroup float target[32 * 32];
+  threadgroup T diag[32 * 32];
+  threadgroup T target[32 * 32];
 
   for (uint i = linear_tid; i < actSize_k * actSize_k; i += group_size) {
     uint r = i / actSize_k;
@@ -479,34 +492,13 @@ kernel void applyTRSM(
 // forward substitution with loop unrolling and vectorization
 #pragma unroll 4
   for (uint col = 0; col < actSize_k; col++) {
-    float diag_val = diag[col * actSize_k + col];
+    float diag_val = c10::metal::cast_to<float>(diag[col * actSize_k + col]);
     diag_val = (fabs(diag_val) < 1e-6f) ? copysign(1e-6f, diag_val) : diag_val;
 
     // multiple rows per thread
     for (uint row = linear_tid; row < actSize_j; row += group_size) {
-      float sum = target[row * actSize_k + col];
-      // vectorized accumulation
-      float4 sum4 = float4(0.0);
-      uint p = 0;
-      for (; p + 4 <= col; p += 4) {
-        float4 target4 = float4(
-            target[row * actSize_k + p],
-            target[row * actSize_k + p + 1],
-            target[row * actSize_k + p + 2],
-            target[row * actSize_k + p + 3]);
-        float4 diag4 = float4(
-            diag[col * actSize_k + p],
-            diag[col * actSize_k + p + 1],
-            diag[col * actSize_k + p + 2],
-            diag[col * actSize_k + p + 3]);
-        sum4 = fma(target4, -diag4, sum4);
-      }
-      sum += sum4.x + sum4.y + sum4.z + sum4.w;
-
-      // remaining elements
-      for (; p < col; p++) {
-        sum = fma(target[row * actSize_k + p], -diag[col * actSize_k + p], sum);
-      }
+      T sum = target[row * actSize_k + col] -
+          trsm_dot(target + row * actSize_k, diag + col * actSize_k, col);
       target[row * actSize_k + col] = sum / diag_val;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -520,29 +512,113 @@ kernel void applyTRSM(
   }
 }
 
-template [[host_name("applyTRSMU")]]
-kernel void applyTRSM<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+#define INSTANTIATE_APPLY_TRSM(SUFF, UPPER, DTYPE)     \
+  template [[host_name("applyTRSM" #SUFF "_" #DTYPE)]] \
+  kernel void applyTRSM<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                  \
+      constant uint & N [[buffer(2)]],                 \
+      constant uint & NB [[buffer(3)]],                \
+      constant uint & k [[buffer(4)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint3 tpg [[threads_per_threadgroup]]);
 
-template [[host_name("applyTRSML")]]
-kernel void applyTRSM<false>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
+INSTANTIATE_APPLY_TRSM(U, true, float)
+INSTANTIATE_APPLY_TRSM(L, false, float)
+INSTANTIATE_APPLY_TRSM(U, true, float2)
+INSTANTIATE_APPLY_TRSM(L, false, float2)
 
 template <bool upper>
+inline void syrk_simdgroup_tile(
+    device float* A,
+    uint batch_offset,
+    uint N,
+    uint NB,
+    uint k,
+    uint row0,
+    uint col0,
+    uint actSize_h,
+    uint actSize_j,
+    uint actSize_k,
+    bool diag_tile,
+    uint warp_id,
+    uint simdGroupsPerThreadgroup) {
+  simdgroup_matrix<float, 8, 8> negative_identity =
+      simdgroup_matrix<float, 8, 8>(-1.0);
+  simdgroup_matrix<float, 8, 8> Prod;
+  simdgroup_matrix<float, 8, 8> Afrag;
+  simdgroup_matrix<float, 8, 8> Bfrag;
+
+  uint numSbX = actSize_h / 8; // How many 8-wide blocks
+  uint numSbY = actSize_j / 8; // How many 8-tall blocks
+  uint totalSubBlocks = numSbX * numSbY;
+
+  for (uint sb = warp_id; sb < totalSubBlocks; sb += simdGroupsPerThreadgroup) {
+    uint sb_y = (sb / numSbX) * 8;
+    uint sb_x = (sb % numSbX) * 8;
+
+    // Skip elements that are below diagonal if j == h
+    if (diag_tile && sb_y < sb_x) {
+      continue;
+    }
+
+    // Same logic to load/store Cfrag, Afrag, Bfrag...
+    simdgroup_matrix<float, 8, 8> Cfrag;
+    simdgroup_load(
+        Cfrag,
+        &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
+        N,
+        0,
+        !upper);
+
+    for (uint kk = 0; kk < actSize_k; kk += 8) {
+      simdgroup_load(
+          Afrag,
+          &get_ref<upper>(A + batch_offset, row0 + sb_y, k * NB + kk, N),
+          N,
+          0,
+          !upper);
+      simdgroup_load(
+          Bfrag,
+          &get_ref<upper>(A + batch_offset, col0 + sb_x, k * NB + kk, N),
+          N,
+          /* matrix_origin = */ 0,
+          /* transpose = */ upper);
+
+      simdgroup_multiply(Prod, Afrag, Bfrag);
+      simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
+    }
+
+    simdgroup_store(
+        Cfrag,
+        &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
+        N,
+        0,
+        !upper);
+  }
+}
+
+// never called; satisfies the complex instantiation (no if constexpr in
+// Metal 3)
+template <bool upper>
+inline void syrk_simdgroup_tile(
+    device float2*,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    uint,
+    bool,
+    uint,
+    uint) {}
+
+template <bool upper, typename T>
 kernel void applySYRK(
-    device float* A [[buffer(0)]],
+    device T* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -578,72 +654,32 @@ kernel void applySYRK(
 
   // Check if dimensions are multiples of 8
   // so we can use simdoup matrices
-  bool use_simdgroup =
+  const bool use_simdgroup = !c10::metal::is_complex_v<T> &&
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
-    simdgroup_matrix<float, 8, 8> negative_identity =
-        simdgroup_matrix<float, 8, 8>(-1.0);
-    simdgroup_matrix<float, 8, 8> Prod;
-    simdgroup_matrix<float, 8, 8> Afrag;
-    simdgroup_matrix<float, 8, 8> Bfrag;
-
-    uint numSbX = actSize_h / 8; // How many 8-wide blocks
-    uint numSbY = actSize_j / 8; // How many 8-tall blocks
-    uint totalSubBlocks = numSbX * numSbY;
-
-    for (uint sb = warp_id; sb < totalSubBlocks;
-         sb += simdGroupsPerThreadgroup) {
-      uint sb_y = (sb / numSbX) * 8;
-      uint sb_x = (sb % numSbX) * 8;
-
-      // Skip elements that are below diagonal if j == h
-      if (j == h && sb_y < sb_x) {
-        continue;
-      }
-
-      // Same logic to load/store Cfrag, Afrag, Bfrag...
-      simdgroup_matrix<float, 8, 8> Cfrag;
-      simdgroup_load(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
-
-      for (uint kk = 0; kk < actSize_k; kk += 8) {
-        simdgroup_load(
-            Afrag,
-            &get_ref<upper>(A + batch_offset, row0 + sb_y, k * NB + kk, N),
-            N,
-            0,
-            !upper);
-        simdgroup_load(
-            Bfrag,
-            &get_ref<upper>(A + batch_offset, col0 + sb_x, k * NB + kk, N),
-            N,
-            /* matrix_origin = */ 0,
-            /* transpose = */ upper);
-
-        simdgroup_multiply(Prod, Afrag, Bfrag);
-        simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
-      }
-
-      simdgroup_store(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
-    }
+    syrk_simdgroup_tile<upper>(
+        A,
+        batch_offset,
+        N,
+        NB,
+        k,
+        row0,
+        col0,
+        actSize_h,
+        actSize_j,
+        actSize_k,
+        j == h,
+        warp_id,
+        simdGroupsPerThreadgroup);
   } else {
     // Fallback for non-multiple-of-8 dimensions
-    threadgroup float sum_accumulator[32 * 32];
+    threadgroup T sum_accumulator[32 * 32];
     for (uint y = ty; y < actSize_j; y += tpg.y) {
       for (uint x = tx; x < actSize_h; x += tpg.x) {
         // since we use this for accumulator, better to set it to 0.0
         // to avoid random values
-        sum_accumulator[y * tpg.x + x] = 0.0f;
+        sum_accumulator[y * tpg.x + x] = T(0);
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -653,13 +689,11 @@ kernel void applySYRK(
           continue;
         }
 
-        float sum = 0.0f;
+        T sum = T(0);
         for (uint i = 0; i < actSize_k; i++) {
-          float a_val =
-              get_ref<upper>(A + batch_offset, row0 + y, k * NB + i, N);
-          float b_val =
-              get_ref<upper>(A + batch_offset, col0 + x, k * NB + i, N);
-          sum = fma(a_val, b_val, sum);
+          T a_val = get_ref<upper>(A + batch_offset, row0 + y, k * NB + i, N);
+          T b_val = get_ref<upper>(A + batch_offset, col0 + x, k * NB + i, N);
+          sum = c10::metal::fma(a_val, c10::metal::conj(b_val), sum);
         }
         sum_accumulator[y * tpg.x + x] += sum;
       }
@@ -674,27 +708,22 @@ kernel void applySYRK(
   }
 }
 
-template [[host_name("applySYRKU")]]
-kernel void applySYRK<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
+#define INSTANTIATE_APPLY_SYRK(SUFF, UPPER, DTYPE)     \
+  template [[host_name("applySYRK" #SUFF "_" #DTYPE)]] \
+  kernel void applySYRK<UPPER, DTYPE>(                 \
+      device DTYPE * A [[buffer(0)]],                  \
+      constant uint & N [[buffer(2)]],                 \
+      constant uint & NB [[buffer(3)]],                \
+      constant uint & k [[buffer(4)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],    \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint3 tpg [[threads_per_threadgroup]],           \
+      uint sgitg [[simdgroup_index_in_threadgroup]]);
 
-template [[host_name("applySYRKL")]]
-kernel void applySYRK<false>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
+INSTANTIATE_APPLY_SYRK(U, true, float)
+INSTANTIATE_APPLY_SYRK(L, false, float)
+INSTANTIATE_APPLY_SYRK(U, true, float2)
+INSTANTIATE_APPLY_SYRK(L, false, float2)
 
 template <bool upper>
 kernel void factorDiagonalPanel(
