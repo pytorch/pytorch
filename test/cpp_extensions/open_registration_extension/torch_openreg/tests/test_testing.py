@@ -307,6 +307,11 @@ class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
     executed_count = 0
+    setup_count = 0
+
+    def setUp(self):
+        super().setUp()
+        type(self).setup_count += 1
 
     @classmethod
     def tearDownClass(cls):
@@ -316,6 +321,11 @@ class TestCapabilityGating(TestCase):
                 f"Capability gating failed! "
                 f"Expected {expected_runs} tests to run, "
                 f"but {cls.executed_count} tests executed."
+            )
+        if cls.setup_count != expected_runs:
+            raise AssertionError(
+                f"Capability preflight failed! Expected setUp to run "
+                f"{expected_runs} time, but it ran {cls.setup_count} times."
             )
         super().tearDownClass()
 

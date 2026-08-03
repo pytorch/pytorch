@@ -339,22 +339,48 @@ def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
     read this attribute to set the number of ranks to spawn. If there are fewer
-    than `n` CUDA devices available, the test should be skipped by the harness.
+    than `n` devices of the instantiated device type, the test is skipped.
 
     Usage:
-        @require_world_size(3)
+        @requires_world_size(3)
         def test_something(self):
             ...
     """
 
     def decorator(func):
-        func._required_world_size = n
-        available = torch.cuda.device_count()
-        return unittest.skipUnless(
-            available >= n, f"requires {n} GPUs, found {available}"
-        )(func)
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            _check_required_world_size(self)
+            return func(self, *args, **kwargs)
+
+        wrapper._required_world_size = n
+        return wrapper
 
     return decorator
+
+
+def _check_required_world_size(obj: Any) -> None:
+    test_name = getattr(obj, "_testMethodName", None)
+    if test_name is None:
+        return
+    required = getattr(getattr(obj, test_name), "_required_world_size", None)
+    if required is None:
+        return
+
+    device_type = getattr(type(obj), "device_type", None)
+    if not isinstance(device_type, str) or device_type == "generic_device_type":
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        device_type = accelerator.type if accelerator is not None else "cpu"
+    elif device_type == "privateuse1":
+        device_type = torch._C._get_privateuse1_backend_name()
+    if device_type == "cpu":
+        return
+
+    available = torch.get_device_module(device_type).device_count()
+    if available < required:
+        raise unittest.SkipTest(
+            f"requires {required} {device_type} devices, found {available}"
+        )
 
 
 def get_required_world_size(obj: Any, default: int) -> int:
