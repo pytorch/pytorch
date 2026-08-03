@@ -2094,6 +2094,19 @@ class FakeTensorMode(TorchDispatchMode):
         # _BypassDispatchCache if necessary.
         _validate_symbolic_output_for_caching(state, output)
 
+        # A SymInt that is one of the inputs is cacheable: the entry records
+        # which input it came from, so a hit hands back the caller's own SymInt
+        # (see _get_output_info_for_cache_entry). This matters for HOPs -- a
+        # partitioned forward returns the symints it saves for the backward, and
+        # they would otherwise make the whole output tuple uncacheable.
+        # A derived symbol would have to be rebuilt as a fresh SymNode, which
+        # callers relying on SymNode identity would not recognize, so leave that
+        # case uncached.
+        if isinstance(output, torch.SymInt):
+            if state.sym_node_lookup.get(id(output.node)) is None:
+                raise _BypassDispatchCache("symint output not passed through")
+            return
+
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
         if not isinstance(output, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -2127,8 +2140,19 @@ class FakeTensorMode(TorchDispatchMode):
         output: FakeTensor,
     ) -> _DispatchCacheEntryOutputInfo:
         if isinstance(output, (int, torch.SymInt, type(None))):
+            constant_value = output
+            if isinstance(output, torch.SymInt):
+                # Record where the symbol came from rather than the SymInt
+                # itself, so a hit hands back the current call's SymNode instead
+                # of the one belonging to the call that populated the entry.
+                constant_value = _SymIntOutputStub(
+                    output, state.sym_node_lookup.get(id(output.node))
+                )
             return _DispatchCacheEntryOutputInfo(
-                inplace_idx=None, metadata=None, view_idx=None, constant_value=output
+                inplace_idx=None,
+                metadata=None,
+                view_idx=None,
+                constant_value=constant_value,
             )
 
         # If this is an in-place op, the entry records which input arg is aliased.
@@ -2318,6 +2342,12 @@ class FakeTensorMode(TorchDispatchMode):
                 raise AssertionError(
                     "entry.constant_value must not be SingletonConstant"
                 )
+            if isinstance(entry.constant_value, _SymIntOutputStub):
+                if state.shape_env is None:
+                    raise AssertionError(
+                        "state.shape_env must not be None for _SymIntOutputStub"
+                    )
+                return entry.constant_value.extract(key, state.shape_env)
             return entry.constant_value
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
