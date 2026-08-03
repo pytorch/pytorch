@@ -979,6 +979,7 @@ class TestAutograd(TestCase):
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
+    @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
     def test_custom_function_setup_context_releases_return_value(self):
         # setup_context's return value is discarded, so the caller owns the
         # reference and must release it. Returning a throwaway object is what
@@ -1008,12 +1009,7 @@ class TestAutograd(TestCase):
         MyFunc.apply(torch.randn(3, requires_grad=True))
 
         gc.collect()
-        # Dynamo never reaches the C++ apply path: it inlines setup_context and
-        # parks the return value in a generated local of the frame still running
-        # here, so the object cannot have died yet. Run the rest under dynamo
-        # anyway to check that returning a non-None value traces without error.
-        if not TEST_WITH_TORCHDYNAMO:
-            self.assertIsNone(sentinel_ref())
+        self.assertIsNone(sentinel_ref())
 
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
