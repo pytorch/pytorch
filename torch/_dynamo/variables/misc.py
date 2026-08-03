@@ -76,7 +76,14 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    GetSet,
+    getset_read,
+    Member,
+    NO_SUCH_SUBOBJ,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -2841,12 +2848,11 @@ class ContextVarVariable(VariableTracker):
         tx.output.side_effects.mark_contextvar_token_used(token)
         return ConstantVariable.create(None)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name == "name":
-            return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+    tp_getset = {
+        "name": GetSet(
+            getter=lambda self, tx: ConstantVariable.create(self.cv_obj.name)
+        ),
+    }
 
 
 class ContextVarTokenVariable(VariableTracker):
@@ -2873,20 +2879,21 @@ class ContextVarTokenVariable(VariableTracker):
     def python_type(self) -> type:
         return contextvars.Token
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name == "var":
-            return self.contextvar
-        if name == "old_value":
-            if self.contextvar.source is not None:
-                tx.output.current_tracer.traced_sources.add(self.contextvar.source)
-            if self.old_value is None:
-                raise AssertionError("ContextVar token missing old_value")
-            if self.old_value.source is not None:
-                tx.output.current_tracer.traced_sources.add(self.old_value.source)
-            return self.old_value
-        return super().getattro_impl(tx, name)
+    tp_members = {
+        "var": Member(getter=getset_read(lambda self: self.contextvar)),
+    }
+    tp_getset = {
+        "old_value": GetSet(getter=lambda self, tx: self._get_old_value(tx)),
+    }
+
+    def _get_old_value(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        if self.contextvar.source is not None:
+            tx.output.current_tracer.traced_sources.add(self.contextvar.source)
+        if self.old_value is None:
+            raise AssertionError("ContextVar token missing old_value")
+        if self.old_value.source is not None:
+            tx.output.current_tracer.traced_sources.add(self.old_value.source)
+        return self.old_value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.source is not None and not self.from_tracing_set:
