@@ -6208,30 +6208,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
+        permute_dims: Sequence[int] | None = None,
     ) -> None:
-        dtype = value.dtype
-        assert dtype is not None  # noqa: S101
-        reshaped = self._bitcast_reshape_expr(value, reshape_shape, dtype)
-        self._emit_recursive_split(reshaped, part_names, reshape_shape, dtype)
-
-    def emit_split_via_reshape_permute(
-        self,
-        value: CSEVariable,
-        reshape_shape: Sequence[sympy.Expr | int | str],
-        permute_dims: Sequence[int],
-        part_names: Sequence[str],
-    ) -> None:
-        """Split ``value`` into lanes that are *strided blocks*, not neighbours.
+        """Split ``value`` into the lanes named by ``part_names``.
 
         ``tl.split`` only ever splits the **trailing** axis, and only into two.
         Both sub-parent layouts therefore reduce to "get my lane axis last":
 
         - interleaved lanes are already adjacent, so a plain reshape to
-          ``[..., extent // factor, factor]`` suffices -- see
-          ``emit_split_via_reshape``.
+          ``[..., extent // factor, factor]`` suffices and ``permute_dims`` is
+          left as ``None``.
         - contiguous lanes are ``factor`` consecutive *blocks*, so the lane axis
-          reshapes out in front (``[..., factor, extent // factor]``) and has to
-          be permuted to the end before it can be split.
+          reshapes out in front (``[..., factor, extent // factor]``) and
+          ``permute_dims`` moves it to the end before it can be split.
 
         That permute is the only codegen difference between the two layouts.
         ``_emit_recursive_split`` then peels one axis at a time, so a factor of
@@ -6239,10 +6228,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         dtype = value.dtype
         assert dtype is not None  # noqa: S101
-        reshaped = self._bitcast_reshape_expr(value, reshape_shape, dtype)
-        permuted = f"tl.permute({reshaped}, ({', '.join(map(str, permute_dims))}))"
-        permuted_shape = tuple(reshape_shape[i] for i in permute_dims)
-        self._emit_recursive_split(permuted, part_names, permuted_shape, dtype)
+        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        split_shape: Sequence[sympy.Expr | int | str] = reshape_shape
+        if permute_dims is not None:
+            expr = f"tl.permute({expr}, ({', '.join(map(str, permute_dims))}))"
+            split_shape = tuple(reshape_shape[i] for i in permute_dims)
+        self._emit_recursive_split(expr, part_names, split_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,
