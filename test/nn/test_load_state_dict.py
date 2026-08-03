@@ -440,7 +440,14 @@ class TestLoadStateDict(NNTestCase):
         with torch.device("meta"):
             m = torch.nn.Linear(3, 5)
         state_dict = m.state_dict()
-        state_dict["weight"] = torch.empty_like(state_dict["weight"], device="cpu")
+        runtime_device = (
+            torch.device("xpu")
+            if hasattr(torch, "xpu") and torch.xpu.is_available()
+            else torch.device("cpu")
+        )
+        state_dict["weight"] = torch.empty_like(
+            state_dict["weight"], device=runtime_device
+        )
         with self.assertWarnsRegex(
             UserWarning,
             "for weight: copying from a non-meta parameter in the checkpoint to a meta",

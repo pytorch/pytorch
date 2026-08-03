@@ -6,6 +6,7 @@ import unittest.mock as mock
 import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -157,10 +158,10 @@ class TestPruningNN(NNTestCase):
                         * getattr(m, name + "_mask").to(dtype=original_tensor.dtype),
                     )
 
-    def test_identity_pruning(self):
+    def test_identity_pruning(self, device):
         r"""Test that a mask of 1s does not change forward or backward."""
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
+        input_ = torch.ones(1, 5, device=device)
+        m = nn.Linear(5, 2).to(device)
         y_prepruning = m(input_)  # output prior to pruning
 
         # compute grad pre-pruning and check it's equal to all ones
@@ -229,9 +230,9 @@ class TestPruningNN(NNTestCase):
         y2 = m(input_)
         self.assertEqual(y1, y2)
 
-    def test_random_pruning(self):
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
+    def test_random_pruning(self, device):
+        input_ = torch.ones(1, 5, device=device)
+        m = nn.Linear(5, 2).to(device)
 
         # define custom mask to assign with mock
         mask = torch.ones_like(m.weight)
@@ -281,12 +282,12 @@ class TestPruningNN(NNTestCase):
         self.assertEqual(yhat[0, 0], m.weight_orig[0, 3] + m.bias[0])
         self.assertEqual(yhat[0, 1], m.weight_orig[1, 0] + m.bias[1])
 
-    def test_remove_pruning_forward(self):
+    def test_remove_pruning_forward(self, device):
         r"""Remove pruning and check forward is unchanged from previous
         pruned state.
         """
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
+        input_ = torch.ones(1, 5, device=device)
+        m = nn.Linear(5, 2).to(device)
 
         # define custom mask to assign with mock
         mask = torch.ones_like(m.weight)
@@ -930,8 +931,8 @@ class TestPruningNN(NNTestCase):
                 "'weight_ih_l0_orig' should not be in l.named_parameters()"
             )
 
-
 instantiate_parametrized_tests(TestPruningNN)
+instantiate_device_type_tests(TestPruningNN, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

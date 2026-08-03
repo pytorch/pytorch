@@ -13,6 +13,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1257,25 +1258,28 @@ class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def _test_hooks(self, backward_register_fn):
-        module = nn.Sigmoid()
-        input = torch.ones(5, 5, requires_grad=True)
+    def _test_hooks(self, backward_register_fn, device):
+        module = nn.Sigmoid().to(device)
+        input = torch.ones(5, 5, requires_grad=True, device=device)
 
         counter = {"forwards": 0, "backwards": 0}
 
-        def fw_hook(inc, h_module, input, output):
-            self.assertIsInstance(input, tuple)
+        def fw_hook(inc, h_module, hook_input, output):
+            self.assertIsInstance(hook_input, tuple)
             self.assertTrue(isinstance(output, torch.Tensor))
             self.assertTrue(h_module is module)
-            self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
+            self.assertEqual(hook_input[0], torch.ones(5, 5, device=device))
+            self.assertEqual(
+                output,
+                torch.empty(5, 5, device=device).fill_(1 / (1 + 1 / math.e)),
+            )
             counter["forwards"] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):
             self.assertIsInstance(grad_input, tuple)
             self.assertIsInstance(grad_output, tuple)
             self.assertTrue(h_module is module)
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            self.assertEqual(grad_output[0], torch.ones(5, 5, device=device) * 2)
             counter["backwards"] += inc
 
         # backward_pre_hook expects callback with only `module` and `grad_output`
@@ -1283,7 +1287,7 @@ class TestModuleHookNN(NNTestCase):
         def bw_pre_hook(inc, h_module, grad_output):
             self.assertIsInstance(grad_output, tuple)
             self.assertTrue(h_module is module)
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            self.assertEqual(grad_output[0], torch.ones(5, 5, device=device) * 2)
             counter["backwards"] += inc
 
         test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
@@ -1306,11 +1310,11 @@ class TestModuleHookNN(NNTestCase):
         self.assertEqual(counter["forwards"], 3)
         self.assertEqual(counter["backwards"], 0)
 
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        output.backward(torch.ones(5, 5, device=device) * 2, retain_graph=True)
         self.assertEqual(counter["forwards"], 3)
         self.assertEqual(counter["backwards"], 1)
 
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        output.backward(torch.ones(5, 5, device=device) * 2, retain_graph=True)
         self.assertEqual(counter["forwards"], 3)
         self.assertEqual(counter["backwards"], 2)
 
@@ -1324,32 +1328,32 @@ class TestModuleHookNN(NNTestCase):
             lambda *args: bw_hook_fn(2, *args)
         )
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        module(input).backward(torch.ones(5, 5, device=device) * 2)
         self.assertEqual(counter["forwards"], 9)
         self.assertEqual(counter["backwards"], 5)
 
         test2_bwd.remove()
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        module(input).backward(torch.ones(5, 5, device=device) * 2)
         self.assertEqual(counter["forwards"], 12)
         self.assertEqual(counter["backwards"], 6)
 
         test2_fwd.remove()
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        module(input).backward(torch.ones(5, 5, device=device) * 2)
         self.assertEqual(counter["forwards"], 13)
         self.assertEqual(counter["backwards"], 7)
 
         test_fwd.remove()
         test_bwd.remove()
 
-    def test_hooks(self):
-        self._test_hooks("register_backward_hook")
-        self._test_hooks("register_full_backward_hook")
-        self._test_hooks("register_full_backward_pre_hook")
+    def test_hooks(self, device):
+        self._test_hooks("register_backward_hook", device)
+        self._test_hooks("register_full_backward_hook", device)
+        self._test_hooks("register_full_backward_pre_hook", device)
 
-    def test_hook_cpp(self):
-        bn = nn.BatchNorm1d(5)
+    def test_hook_cpp(self, device):
+        bn = nn.BatchNorm1d(5).to(device)
 
         def hook(module, grad_inputs, grad_outputs):
             self.assertEqual(len(grad_inputs), 1)
@@ -1357,7 +1361,7 @@ class TestModuleHookNN(NNTestCase):
             self.assertEqual(module, bn)
 
         bn.register_full_backward_hook(hook)
-        output = bn(torch.randn(5, 5, requires_grad=True))
+        output = bn(torch.randn(5, 5, requires_grad=True, device=device))
         output.sum().backward()
 
     def test_backward_hooks_interaction(self):
@@ -1681,9 +1685,9 @@ class TestModuleHookNN(NNTestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
-    def test_hook_forward_preforward_writable(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
+    def test_hook_forward_preforward_writable(self, device):
+        module = nn.Sigmoid().to(device)
+        input = torch.randn(5, 5, requires_grad=True, device=device)
         sig_x = torch.nn.functional.sigmoid(input)
 
         def forward_pre_hook(m, input):
@@ -1697,7 +1701,7 @@ class TestModuleHookNN(NNTestCase):
         output = module(input)
         expected_res = -torch.nn.functional.sigmoid(torch.nn.functional.relu(input))
         self.assertEqual(output, expected_res)
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        output.backward(torch.ones(5, 5, device=device) * 2, retain_graph=True)
         mask = input > 0
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
@@ -1759,9 +1763,9 @@ class TestModuleHookNN(NNTestCase):
             finally:
                 handle.remove()
 
-
 instantiate_parametrized_tests(TestModuleHooks)
 instantiate_parametrized_tests(TestStateDictHooks)
+instantiate_device_type_tests(TestModuleHookNN, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

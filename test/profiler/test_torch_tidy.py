@@ -578,6 +578,7 @@ class TestTorchTidyProfiler(TestCase):
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
         y = torch.ones(4, 1, requires_grad=True)
+        expected_device = x.device
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + y
@@ -601,7 +602,7 @@ class TestTorchTidyProfiler(TestCase):
         )
         self.assertEqual(
             getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
+            [expected_device, expected_device, None],
         )
         self.assertEqual(
             getattr_inputs("dtype", None), [torch.float32, torch.float32, None]
@@ -618,6 +619,7 @@ class TestTorchTidyProfiler(TestCase):
         i = [[0, 1, 1], [2, 0, 2]]
         v = [3, 4, 5]
         s = torch.sparse_coo_tensor(i, v, (2, 3))
+        expected_device = s.device
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = s + s
@@ -640,7 +642,7 @@ class TestTorchTidyProfiler(TestCase):
         )
         self.assertEqual(
             getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
+            [expected_device, expected_device, None],
         )
 
     @unittest.skipIf(
@@ -648,6 +650,8 @@ class TestTorchTidyProfiler(TestCase):
     )
     def test_mkldnn_tensors(self):
         x = torch.ones(4, 3).to_mkldnn()
+        # MKLDNN tensors are CPU-only; keep this test tied to CPU behavior.
+        self.assertEqual(x.device, torch.device("cpu"))
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + x
@@ -670,7 +674,7 @@ class TestTorchTidyProfiler(TestCase):
         )
         self.assertEqual(
             getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
+            [x.device, x.device, None],
         )
 
     def test_scalar_ins(self):
@@ -859,6 +863,7 @@ class TestTorchTidyProfiler(TestCase):
         gc.collect()
         with profile(profile_memory=True) as p:
             x = torch.empty((3, 4))
+        expected_device = x.device
 
         nodes = p.profiler.kineto_results.experimental_event_tree()
         node = find_node_with_name(nodes, "[memory]")
@@ -868,7 +873,7 @@ class TestTorchTidyProfiler(TestCase):
         ptr = node.extra_fields.ptr
         self.assertGreater(ptr, 0)
         self.assertEqual(node.extra_fields.alloc_size, alloc_size)
-        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
+        self.assertEqual(node.extra_fields.device, expected_device)
         total_allocated = node.extra_fields.total_allocated
 
         # total_reserved is only for CUDACachingAllocator
@@ -884,7 +889,7 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertEqual(node.extra_fields.ptr, ptr)
         self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
-        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
+        self.assertEqual(node.extra_fields.device, expected_device)
         self.assertEqual(
             node.extra_fields.total_allocated, total_allocated - alloc_size
         )
