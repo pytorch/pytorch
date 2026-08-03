@@ -178,6 +178,7 @@ def build_rmsnorm_module(
                 vec = _load_vec(copy_atom, vec_width, elem_dtype, in_div, idx)
                 in_local.append(vec)
                 x = vec.to(fx.Float32)
+                # Keep rstd aligned with ATen's scalar lane accumulation for backward.
                 for elem_i in range_constexpr(vec_width):
                     x_elem = x[elem_i]
                     thread_sumsq = thread_sumsq + x_elem * x_elem
@@ -241,6 +242,7 @@ def build_rmsnorm_module(
                 in_local.append(vec)
                 x = vec.to(fx.Float32)
                 vec_sumsq = c_zero_f
+                # Keep rstd aligned with ATen's scalar lane accumulation for backward.
                 for elem_i in range_constexpr(vec_width):
                     x_elem = x[elem_i]
                     vec_sumsq = vec_sumsq + x_elem * x_elem

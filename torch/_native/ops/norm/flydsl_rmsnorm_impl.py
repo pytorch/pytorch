@@ -45,12 +45,7 @@ def _normalized_shape_1d(normalized_shape) -> int | None:
 
 @functools.cache
 def _is_supported_arch(device_index: int) -> bool:
-    try:
-        props = torch.cuda.get_device_properties(device_index)
-        arch = str(props.gcnArchName).split(":", 1)[0]
-    except Exception:
-        return False
-    return arch in _SUPPORTED_ARCHES
+    return fu._resolve_rocm_arch(device_index) in _SUPPORTED_ARCHES
 
 
 def _common_supported(
@@ -62,8 +57,6 @@ def _common_supported(
     if not _HIP_AVAILABLE or input.device.type != "cuda":
         return False
     device_index = input.device.index
-    if device_index is None:
-        device_index = torch.cuda.current_device()
     if not _is_supported_arch(device_index):
         return False
     if input.dtype not in _SUPPORTED_DTYPES:

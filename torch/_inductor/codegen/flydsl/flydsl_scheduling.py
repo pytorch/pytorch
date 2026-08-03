@@ -129,7 +129,7 @@ class FlyDSLScheduling(BaseScheduling):
 
     def _build_precompile_metadata(self, kernel, ftb):
         """Extract concrete tensor metadata for FlyDSL subprocess precompilation."""
-        if not hasattr(kernel, "_template_input_args"):
+        if not kernel._template_input_args:
             return None
 
         precompile_shapes = {}

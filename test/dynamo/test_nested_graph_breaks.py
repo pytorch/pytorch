@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.utils._pytree as python_pytree
 
 
 try:
@@ -790,8 +791,10 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # make sure inner3's code options are compatible with the instructions below
         global y
 
-        def y():
-            pass
+        # y must cause a graph break on STORE_ATTR. A torch-internal class
+        # (UDCV with __module__ starting with "torch.") declines mutation.
+        class y:
+            __module__ = "torch._dynamo._test_marker"
 
         def inner3(x):
             x.attr = 1000
@@ -1835,6 +1838,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # separate frame and produce 6 isolated single-op graphs.
         self.assertEqual(len(backend.graphs), 4)
 
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_cxx_pytree_treespec_leaf_namespace(self):
         import torch.utils._cxx_pytree as cxx_pytree
 

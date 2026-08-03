@@ -1,10 +1,16 @@
 # Owner(s): ["module: inductor"]
 import os
+from types import SimpleNamespace
 from unittest import mock
 
+import torch
+from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import FlyDSLScheduling
-from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.codegen.flydsl.flydsl_template import (
+    _ordered_unique_input_names,
+    FlyDSLTemplate,
+)
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._native.flydsl_utils import _resolve_rocm_arch
@@ -28,6 +34,20 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("import flydsl.compiler as flyc", imports)
         self.assertIn("import flydsl.expr as fx", imports)
         self.assertIsInstance(imports, str)
+
+    def test_runtime_available_checks_runtime_dependencies(self):
+        flydsl_utils.runtime_available.cache_clear()
+        self.addCleanup(flydsl_utils.runtime_available.cache_clear)
+        with (
+            mock.patch.object(torch.version, "hip", "test"),
+            mock.patch.object(flydsl_utils._cuda, "is_built", return_value=True),
+            mock.patch.object(
+                flydsl_utils,
+                "_flydsl_runtime_unavailable_reason",
+                return_value=None,
+            ),
+        ):
+            self.assertTrue(flydsl_utils.runtime_available())
 
     def test_gen_defines(self):
         kernel = FlyDSLTemplateKernel(
@@ -63,11 +83,12 @@ class TestFlyDSLTemplate(TestCase):
         )
 
         result = kernel.render(template, TILE_M=128)
+        code = result.finalize_all()
 
         self.assertIsInstance(result, PartialRender)
-        self.assertTrue(result._code.lstrip().startswith("import torch"))
-        self.assertIn("import flydsl.compiler as flyc", result._code)
-        self.assertIn("@flyc.kernel", result._code)
+        self.assertTrue(code.lstrip().startswith("import torch"))
+        self.assertIn("import flydsl.compiler as flyc", code)
+        self.assertIn("@flyc.kernel", code)
 
     def test_template_env_contains_hooks(self):
         captured_env = {}
@@ -111,6 +132,17 @@ class TestFlyDSLTemplate(TestCase):
         finally:
             FlyDSLTemplate.all_templates.pop(template_name, None)
 
+    def test_shared_input_buffer_names_are_deduplicated(self):
+        shared_name = "shared"
+        input_nodes = [mock.Mock(), mock.Mock()]
+        for input_node in input_nodes:
+            input_node.get_name.return_value = shared_name
+
+        self.assertEqual(
+            _ordered_unique_input_names(input_nodes),
+            (shared_name,),
+        )
+
     def test_scheduling_disables_fusion(self):
         scheduling = FlyDSLScheduling(scheduler=None)
         node1 = mock.Mock()
@@ -139,7 +171,6 @@ class TestFlyDSLTemplate(TestCase):
             os.environ,
             {
                 "FLYDSL_GPU_ARCH": "gfx950:sramecc+:xnack-",
-                "ARCH": "gfx942",
             },
         ):
             self.assertEqual(
@@ -152,7 +183,6 @@ class TestFlyDSLTemplate(TestCase):
             os.environ,
             {
                 "FLYDSL_GPU_ARCH": "",
-                "ARCH": "",
                 "HSA_OVERRIDE_GFX_VERSION": "9.0.10",
             },
         ):
@@ -174,19 +204,34 @@ class TestFlyDSLTemplate(TestCase):
                 "gfx950:sramecc+",
             )
 
-    def test_scheduling_ignores_generic_arch(self):
+    def test_scheduling_returns_none_without_arch_or_device(self):
         with (
             mock.patch.dict(
                 os.environ,
                 {
                     "FLYDSL_GPU_ARCH": "",
                     "HSA_OVERRIDE_GFX_VERSION": "",
-                    "ARCH": "x86_64",
                 },
             ),
             mock.patch("torch.cuda.is_available", return_value=False),
         ):
             self.assertIsNone(FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0))
+
+    def test_precompile_metadata_requires_template_inputs(self):
+        scheduling = FlyDSLScheduling.__new__(FlyDSLScheduling)
+        kernel = SimpleNamespace(_template_input_args=[])
+        layout = SimpleNamespace(
+            size=[1],
+            stride=[1],
+            dtype=torch.float32,
+            device=torch.device("cpu"),
+        )
+
+        self.assertIsNone(
+            scheduling._build_precompile_metadata(
+                kernel, SimpleNamespace(layout=layout)
+            )
+        )
 
 
 if __name__ == "__main__":

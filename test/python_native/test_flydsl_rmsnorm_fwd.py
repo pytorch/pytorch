@@ -1,7 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -33,22 +32,20 @@ def _flydsl_rmsnorm_registered() -> bool:
 
 
 class TestFlyDSLRMSNormArch(TestCase):
-    def test_arch_gate_allows_only_gfx950(self):
+    @parametrize("arch,expected", (("gfx950:sramecc+", True), ("gfx942", False)))
+    def test_arch_gate_allows_only_gfx950(self, arch, expected):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
         arch_is_supported = flydsl_rmsnorm_impl._is_supported_arch
-        try:
-            for arch, expected in (("gfx950:sramecc+", True), ("gfx942", False)):
-                with self.subTest(arch=arch):
-                    arch_is_supported.cache_clear()
-                    with patch.object(
-                        torch.cuda,
-                        "get_device_properties",
-                        return_value=SimpleNamespace(gcnArchName=arch),
-                    ):
-                        self.assertEqual(arch_is_supported(0), expected)
-        finally:
-            arch_is_supported.cache_clear()
+        # Another test may already have cached the real device's answer.
+        arch_is_supported.cache_clear()
+        self.addCleanup(arch_is_supported.cache_clear)
+        with patch.object(
+            flydsl_rmsnorm_impl.fu,
+            "_resolve_rocm_arch",
+            return_value=arch.split(":", 1)[0],
+        ):
+            self.assertEqual(arch_is_supported(0), expected)
 
 
 @unittest.skipUnless(TEST_CUDA and torch.version.hip is not None, "ROCm required")
@@ -310,6 +307,7 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
 
+instantiate_parametrized_tests(TestFlyDSLRMSNormArch)
 instantiate_parametrized_tests(TestFlyDSLRMSNorm)
 
 
