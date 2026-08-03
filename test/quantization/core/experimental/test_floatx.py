@@ -457,6 +457,31 @@ class TestFloat4Dtype(TestCase):
         ref = pack_uint4(_f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS))
         self.assertEqual(out.view(torch.uint8), ref, atol=0, rtol=0)
 
+    def test_float4_e2m1fn_x2_cast_inf_nan(self, device):
+        # fp4 has no inf/NaN encoding; per the OCP MX spec inf/overflow saturate
+        # to the max magnitude (sign preserved) and NaN (implementation-defined)
+        # is clamped the same way, so every NaN payload maps deterministically.
+        inf = float("inf")
+        nan = float("nan")
+        x = torch.tensor(
+            [[inf, -inf, nan, -nan, 1e30, -1e30, 6.0, -6.0]],
+            device=device,
+        )
+        out = x.to(torch.float4_e2m1fn_x2).to(torch.float32)
+        expected = torch.tensor(
+            [[6.0, -6.0, 6.0, -6.0, 6.0, -6.0, 6.0, -6.0]],
+            device=device,
+        )
+        self.assertEqual(out, expected, atol=0, rtol=0)
+
+        # NaN with an arbitrary payload must also saturate, not slip through
+        payloaded = torch.tensor([0x7FABCDEF], dtype=torch.int32, device=device).view(
+            torch.float32
+        )
+        x2 = torch.cat([payloaded, payloaded]).reshape(1, 2)
+        out2 = x2.to(torch.float4_e2m1fn_x2).to(torch.float32)
+        self.assertEqual(out2, torch.full((1, 2), 6.0, device=device), atol=0, rtol=0)
+
     def test_float4_e2m1fn_x2_cast_non_differentiable(self, device):
         x = torch.randn(2, 4, device=device, requires_grad=True)
         out = x.to(torch.float4_e2m1fn_x2)
