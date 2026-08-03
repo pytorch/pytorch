@@ -92,7 +92,7 @@ def build_constraint(constraint_fn, args, device="cpu"):
     )
 
 class TestConstraints(TestCase):
-
+    hw_classification = HardwareClassification.ACCELERATOR
     @parametrize("constraint_fn, result, value", EXAMPLES)
     def test_constraint(self, device, constraint_fn, result, value):
         t = torch.tensor(value, dtype=torch.double, device=device)

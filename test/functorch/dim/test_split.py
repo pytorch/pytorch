@@ -6,7 +6,7 @@ from functorch.dim import Dim, dims, Tensor
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
-    TestCase,
+    TestCase, HardwareClassification,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests
@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
 
 
 class TestSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Comprehensive tests for first-class dimension split operations."""
 
     def setUp(self):
@@ -323,20 +324,6 @@ class TestSplit(TestCase):
             self.assertEqual(part.order(x, split_dims[i], z).shape, (10, 5, 20))
             self.assertEqual(split_dims[i].size, 5)
 
-    def test_device_handling(self, device):
-        """Test split behavior with different devices."""
-        # Test on CPU
-        cpu_tensor = torch.randn(3, 12, 5, device=device)
-        x, y, z = dims(3)
-        t = cpu_tensor[x, y, z]
-
-        d1, d2 = Dim("d1", 4), Dim("d2", 8)
-        result = t.split([d1, d2], dim=y)
-
-        for i, part in enumerate(result):
-            ordered = part.order(x, d1 if i == 0 else d2, z)
-            self.assertEqual(ordered.device, torch.device(device))
-
     def test_split_preserves_dtype(self, device):
         """Test that split preserves tensor dtype."""
         for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
@@ -451,7 +438,38 @@ class TestSplit(TestCase):
             self.assertTrue(isinstance(part, torch.Tensor))
             self.assertFalse(hasattr(part, "dims"))  # Should be regular tensor
 
+class TestSplitDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    def test_device_handling(self, device):
+        """Test split behavior with different devices."""
+        if torch.cuda.is_available():
+            # Test on CUDA
+            cuda_tensor = torch.randn(3, 12, 5, device="cuda")
+            x, y, z = dims(3)
+            t = cuda_tensor[x, y, z]
+
+            d1, d2 = Dim("d1", 4), Dim("d2", 8)
+            result = t.split([d1, d2], dim=y)
+
+            for i, part in enumerate(result):
+                ordered = part.order(x, d1 if i == 0 else d2, z)
+                self.assertEqual(ordered.device.type, "cuda")
+                self.assertEqual(ordered.shape[0], 3)
+                self.assertEqual(ordered.shape[2], 5)
+        # Test on CPU
+        cpu_tensor = torch.randn(3, 12, 5, device=device)
+        x, y, z = dims(3)
+        t = cpu_tensor[x, y, z]
+
+        d1, d2 = Dim("d1", 4), Dim("d2", 8)
+        result = t.split([d1, d2], dim=y)
+
+        for i, part in enumerate(result):
+            ordered = part.order(x, d1 if i == 0 else d2, z)
+            self.assertEqual(ordered.device, torch.device(device))
+
 instantiate_device_type_tests(TestSplit, globals())
+instantiate_device_type_tests(TestSplitDevice, globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -1561,8 +1561,8 @@ def generate_doc_test(doc_test):
     setattr(TestFFTDocExamples, 'test_' + doc_test.name, skipCPUIfNoFFT(test))
 
 class TestCUFFT(TestCase):
+    hw_classification = HardwareClassification.CUDA
     @deviceCountAtLeast(1)
-    @onlyCUDA
     @dtypes(torch.double)
     def test_cufft_plan_cache(self, devices, dtype):
         @contextmanager
@@ -1672,7 +1672,6 @@ class TestCUFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
             torch.istft(x.to(device), n_fft=100, window=window)
 
-    @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
         t = make_tensor(13, 13, device=device, dtype=dtype)
