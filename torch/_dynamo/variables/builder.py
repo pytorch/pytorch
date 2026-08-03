@@ -1920,25 +1920,16 @@ class VariableBuilder:
                 raise AssertionError("ContextVar token requires a source")
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
-            contextvar_var = VariableTracker.build(
-                self.tx,
-                value.var,
-                source=AttrSource(self.source, "var"),
+            contextvar_var: ContextVarVariable = LazyVariableTracker.create(  # type: ignore[assignment]
+                value.var, AttrSource(self.source, "var"), tx=self.tx
             )
-            if not isinstance(contextvar_var, ContextVarVariable):
-                raise AssertionError(
-                    f"Expected ContextVarVariable, got {type(contextvar_var)}"
-                )
-
             old_state_kind = (
                 _ContextVarStateKind.UNSET
                 if value.old_value is contextvars.Token.MISSING
                 else _ContextVarStateKind.EXPLICIT
             )
-            old_value = VariableTracker.build(
-                self.tx,
-                value.old_value,
-                source=AttrSource(self.source, "old_value"),
+            old_value = LazyVariableTracker.create(
+                value.old_value, AttrSource(self.source, "old_value"), tx=self.tx
             )
             return ContextVarTokenVariable(
                 contextvar=contextvar_var,

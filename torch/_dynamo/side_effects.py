@@ -1591,18 +1591,6 @@ class SideEffects:
         if not self.contextvar_mutations:
             return
 
-        side_effect_messages: list[str] = []
-        logged_vars: set[VariableTracker] = set()
-
-        def _maybe_log_side_effect(var: VariableTracker) -> None:
-            if (
-                config.side_effect_replay_policy != "silent"
-                and log_side_effects
-                and var not in logged_vars
-            ):
-                side_effect_messages.append(self._format_side_effect_message(var))
-                logged_vars.add(var)
-
         for mutation in self.contextvar_mutations:
             if mutation.contextvar.source is None:
                 raise AssertionError("ContextVar replay requires a source")
@@ -1617,17 +1605,16 @@ class SideEffects:
                 cg(mutation.value)
                 cg.extend_output(create_call_method(1))
                 cg.add_cache(mutation.token)
-            else:
+            elif mutation.method_name == "reset":
                 if mutation.token is None:
                     raise AssertionError("ContextVar.reset replay requires a token")
                 cg(mutation.token)
                 cg.extend_output(create_call_method(1))
                 cg.append_output(create_instruction("POP_TOP"))
-
-            _maybe_log_side_effect(mutation.contextvar)
-
-        if log_side_effects and side_effect_messages:
-            self._emit_side_effect_messages(side_effect_messages)
+            else:
+                raise AssertionError(
+                    f"Unknown ContextVar mutation: {mutation.method_name}"
+                )
 
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
@@ -1646,8 +1633,6 @@ class SideEffects:
             if not config.replay_side_effects and not isinstance(
                 var.source, TempLocalSource
             ):
-                continue
-            if isinstance(var, variables.ContextVarVariable):
                 continue
 
             ctx = SideEffectReplayContext(
@@ -2215,6 +2200,15 @@ def _codegen_random_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
     ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="contextvar_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.ContextVarVariable),
+    priority=5,
+)
+def _codegen_contextvar_mutation(ctx: SideEffectReplayContext) -> None:
+    ctx.log(ctx.var)
 
 
 @contextlib.contextmanager
