@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
@@ -16,6 +16,10 @@ from .flydsl_kernel import FlyDSLTemplateKernel
 
 
 log = getArtifactLogger(__name__, "output_code")
+
+
+def _ordered_unique_input_names(input_nodes: Iterable[IRNode]) -> tuple[str, ...]:
+    return tuple(unique(node.get_name() for node in input_nodes))
 
 
 class FlyDSLTemplate(KernelTemplate):
@@ -51,7 +55,7 @@ class FlyDSLTemplate(KernelTemplate):
             log.debug("FlyDSL template choice generation failed: %s", e)
             return e
         except Exception as e:
-            log.warning("FlyDSL template choice generation error: %s", e, exc_info=True)
+            log.debug("FlyDSL template choice generation error: %s", e, exc_info=True)
             return NotImplementedError(f"FlyDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
@@ -77,7 +81,7 @@ class FlyDSLTemplate(KernelTemplate):
             log.debug("Generated FlyDSL Code:\n%s", code)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = tuple(x.get_name() for x in input_nodes)
+            expected_input_args = _ordered_unique_input_names(input_nodes)
             if input_call_args[: len(expected_input_args)] != expected_input_args:
                 raise RuntimeError(
                     "FlyDSL template input registration order changed. "
