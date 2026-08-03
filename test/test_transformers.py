@@ -4159,6 +4159,23 @@ class TestSDPACudaOnly(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_single_query_tail_mask(self, device):
+        seq_len, num_heads, head_dim = 289, 16, 512
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, seq_len, num_heads, head_dim).transpose(1, 2)
+        key = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        mask = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool).tril()[None, None]
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+
+        self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_save_on_cpu_unaligned_bias_stride(self, device):
         dtype = torch.float16
