@@ -241,7 +241,7 @@ def codegen_flex_attention_amx_helpers(kernel_name: str) -> str:
     reinterpreted to 16-bit at the call sites (both BFloat16 and Half are 2-byte),
     matching what ``pack_vnni2`` and ``_tile_dpbf16ps`` consume.
     """
-    from ..common import KernelTemplate
+    from .common import KernelTemplate
 
     return KernelTemplate._template_from_string(FLEX_ATTENTION_AMX_HELPERS).render(
         dict(kernel_name=kernel_name, amx_t="uint16_t")
