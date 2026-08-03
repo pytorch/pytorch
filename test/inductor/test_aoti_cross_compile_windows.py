@@ -14,6 +14,7 @@ import torch._inductor.config
 from torch._environment import is_fbcode
 from torch._inductor.cpp_builder import _ensure_mingw_cudart_import_lib
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -230,6 +231,8 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
     will auto-generate compile/load test methods.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _define_simple(self):
         """Define the Simple model and its test configuration."""
 
@@ -323,6 +326,8 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
 
 class TestEnsureMingwCudartImportLib(TestCase):
     """Unit tests for _ensure_mingw_cudart_import_lib."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
