@@ -457,10 +457,11 @@ template <
     uint TG_Y = OUTER_TG_HEIGHT,
     uint NCHAINS = SUM_NCHAINS,
     LoadMode MODE = LOAD_IDENTITY>
+[[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
 kernel void sum_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    // [dim_size, inner_size, out_stride, num_segs]
+    // [dim_size, inner_size, unused, num_segs]
     constant uint4& sizes [[buffer(2)]],
     constant float& divisor [[buffer(3)]], // >0 divides accumulator before cast
     // [dim_stride, inner_stride, outer_stride, unused]
@@ -470,7 +471,6 @@ kernel void sum_reduction_outer(
   using TA = ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
-  const uint out_stride = sizes.z;
   const uint num_segs = max(sizes.w, 1u);
   const uint dim_stride = strides.x;
   const uint inner_stride = strides.y;
@@ -524,9 +524,8 @@ kernel void sum_reduction_outer(
     if (divisor > 0) {
       final_val /= static_cast<TA>(divisor);
     }
-    const uint out_idx = (num_segs > 1)
-        ? (tg_pos.y * inner_size + col)
-        : (tg_pos.z * inner_size + col * out_stride);
+    const uint out_idx =
+        (num_segs > 1 ? tg_pos.y : tg_pos.z) * inner_size + col;
     output[out_idx] = static_cast<TO>(final_val);
   }
 }
@@ -537,6 +536,7 @@ template <
     uint TG_SIZE = NARROW_TG_SIZE,
     uint NCHAINS = SUM_NCHAINS,
     LoadMode MODE = LOAD_IDENTITY>
+[[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void sum_reduction_narrow(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -600,6 +600,7 @@ template <
     uint TG_SIZE = NARROW_TG_SIZE,
     uint NCHAINS = SUM_NCHAINS,
     LoadMode MODE = LOAD_IDENTITY>
+[[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void sum_reduction_narrow_strided(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -1470,7 +1471,7 @@ template <
 kernel void value_reduction_outer(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
-    // [dim_size, inner_size, out_stride, num_segs]
+    // [dim_size, inner_size, unused, num_segs]
     constant uint4& sizes [[buffer(2)]],
     // [dim_stride, inner_stride, outer_stride, unused]
     constant uint4& strides [[buffer(3)]],
@@ -1480,7 +1481,6 @@ kernel void value_reduction_outer(
   using Op = OpFn<TA>;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
-  const uint out_stride = sizes.z;
   const uint num_segs = max(sizes.w, 1u);
   const uint dim_stride = strides.x;
   const uint inner_stride = strides.y;
@@ -1538,9 +1538,8 @@ kernel void value_reduction_outer(
   }
 
   if (tid_tg.y == 0) {
-    const uint out_idx = (num_segs > 1)
-        ? (tg_pos.y * inner_size + col)
-        : (tg_pos.z * inner_size + col * out_stride);
+    const uint out_idx =
+        (num_segs > 1 ? tg_pos.y : tg_pos.z) * inner_size + col;
     output[out_idx] = shmem[0][tid_tg.x];
   }
 }
@@ -1552,6 +1551,7 @@ template <
     typename TO,
     uint TG_SIZE = NARROW_TG_SIZE,
     uint NCHAINS = SUM_NCHAINS>
+[[max_total_threads_per_threadgroup(TG_SIZE)]]
 kernel void value_reduction_narrow(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],

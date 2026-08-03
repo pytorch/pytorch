@@ -1182,9 +1182,12 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         const auto inner_size =
             safe_downcast<uint32_t, int64_t>(input_orig.numel() / (static_cast<int64_t>(outer_size) * dim_size));
         const auto dim_stride = safe_downcast<uint32_t, int64_t>(input_orig.stride(reduced_dim));
-        const auto inner_stride = safe_downcast<uint32_t, int64_t>(input_orig.stride(nd - 1));
+        // A size-1 extent never contributes to indexing but can carry a
+        // stride past uint32 (canUse32BitIndexMath weighs it as
+        // (size - 1) * stride == 0); bind 0 instead of overflowing the cast.
+        const auto inner_stride = inner_size == 1 ? 0u : safe_downcast<uint32_t, int64_t>(input_orig.stride(nd - 1));
         const auto outer_stride =
-            safe_downcast<uint32_t, int64_t>(reduced_dim > 0 ? input_orig.stride(reduced_dim - 1) : 0);
+            outer_size == 1 ? 0u : safe_downcast<uint32_t, int64_t>(input_orig.stride(reduced_dim - 1));
         const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
         // Only the sum family has narrow_strided kernels; value ops fall
         // through to the strided outer / small-dim layout below. Tensors
@@ -1267,16 +1270,17 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           return;
         }
         if (outer_size == 1 && natural_tgs < OUTER_SPLIT_MIN_TGS && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE) {
-          const auto G =
+          const auto num_segs =
               std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
-          auto partials = at::empty({(int64_t)G, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
+          auto partials =
+              at::empty({(int64_t)num_segs, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
               encode_outer_strided(input_orig,
                                    partials,
                                    dim_size,
                                    inner_size,
-                                   G,
+                                   num_segs,
                                    1,
                                    false,
                                    opts.prefix,
@@ -1288,7 +1292,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                                    outer_stride);
               encode_outer(partials,
                            output,
-                           G,
+                           num_segs,
                            inner_size,
                            1,
                            1,
@@ -1428,21 +1432,22 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         return;
       }
       // Tall skinny case (few columns, long reduced dim): too few
-      // threadgroups to fill the GPU, so split the reduced dim into G
-      // segments and fold the [G, inner_size] partials in a second pass.
+      // threadgroups to fill the GPU, so split the reduced dim into segments
+      // and fold the [num_segs, inner_size] partials in a second pass.
       if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
         const auto seg_cap =
             std::min(dim_size / OUTER_SPLIT_MIN_SEG_LEN, std::max(2u, OUTER_SPLIT_MAX_TGS / natural_tgs));
-        const auto G = largest_divisor_leq(dim_size, seg_cap);
-        if (G >= 2) {
-          auto partials = at::empty({(int64_t)G, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
+        const auto num_segs = largest_divisor_leq(dim_size, seg_cap);
+        if (num_segs >= 2) {
+          auto partials =
+              at::empty({(int64_t)num_segs, (int64_t)inner_size}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
               encode_outer(input_orig,
                            partials,
                            dim_size,
                            inner_size,
-                           G,
+                           num_segs,
                            1,
                            opts.prefix,
                            opts.input_kernel_dtype,
@@ -1450,7 +1455,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
                            p1_div);
               encode_outer(partials,
                            output,
-                           G,
+                           num_segs,
                            inner_size,
                            1,
                            1,
