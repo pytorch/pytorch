@@ -62,11 +62,9 @@ elseif(USE_CUDA)
 endif()
 
 # --- Symlink-replacement copies ---
-# Copy files that were previously handled via symlinks in setup.py.
-install(FILES
-  "${PROJECT_SOURCE_DIR}/torch/_utils_internal.py"
-  DESTINATION "${SKBUILD_PLATLIB_DIR}/tools/shared"
-)
+# torch/_utils_internal.py and tools/shared/_utils_internal.py exist as two
+# regular-file copies in the source tree; only the torch/ one ships in the
+# wheel.
 install(FILES
   "${PROJECT_SOURCE_DIR}/third_party/valgrind-headers/callgrind.h"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torch/utils/benchmark/utils/valgrind_wrapper"
