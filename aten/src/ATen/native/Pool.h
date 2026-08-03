@@ -5,6 +5,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/irange.h>
 
+#include <limits>
 #include <utility>
 
 #pragma once
@@ -139,6 +140,15 @@ pool2d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
 
+  // The pooling kernels walk each window with an int32 counter that starts inside the input
+  // and advances by dilation, so inputSize - 1 + dilation has to stay representable.
+  constexpr int64_t max_dilated_index = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(inputHeight - 1 + dilationH <= max_dilated_index &&
+              inputWidth - 1 + dilationW <= max_dilated_index,
+              "dilation should be smaller than or equal to INT_MAX - input size, but got ",
+              "dilationH: ", dilationH, " dilationW: ", dilationW,
+              " inputHeight: ", inputHeight, " inputWidth: ", inputWidth);
+
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
     // Expect tensor in NHWC format and allow 0-dim only for N.
@@ -249,6 +259,15 @@ pool3d_shape_check(
   TORCH_CHECK(dilationT > 0 && dilationW > 0 && dilationH > 0,
               "dilation should be greater than zero, but got ",
               "dilationT: ", dilationT, " dilationH: ", dilationH, " dilationW: ", dilationW);
+
+  // See the matching check in pool2d_shape_check.
+  constexpr int64_t max_dilated_index = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(itime - 1 + dilationT <= max_dilated_index &&
+              iheight - 1 + dilationH <= max_dilated_index &&
+              iwidth - 1 + dilationW <= max_dilated_index,
+              "dilation should be smaller than or equal to INT_MAX - input size, but got ",
+              "dilationT: ", dilationT, " dilationH: ", dilationH, " dilationW: ", dilationW,
+              " itime: ", itime, " iheight: ", iheight, " iwidth: ", iwidth);
 
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
