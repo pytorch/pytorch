@@ -1345,7 +1345,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "tensor is not contiguous"):
             self._test_gather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
-
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(

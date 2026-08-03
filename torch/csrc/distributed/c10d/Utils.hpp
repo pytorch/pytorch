@@ -451,13 +451,12 @@ inline void assertDense(
 inline void assertContiguous(
     const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
-    for (const auto& tensor : tensors) {
-      if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-        fn("tensor is not contiguous");
+  for (const auto& tensor : tensors) {
+    if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+      fn("tensor is not contiguous");
     }
   }
 }
-
 
 inline void assertCPU(
     const std::function<void(const std::string&)>& fn,
