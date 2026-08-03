@@ -68,18 +68,45 @@ namespace at::native {
 namespace {
 
 // Check if pytorch is compiled with MIOpen.
-bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
-                                (detail::getCUDAHooks().compiledWithMIOpen()) &&
-                                (input.is_cuda()) &&
-                                (at::globalContext().userEnabledCuDNN());
-    // MIOpen functions returns miopenStatusBadParm on empty
-    // tensors. Maybe some functions actually support empty tensors, but
-    // native kernels shouldn't be much slower because the output is also
-    // likely empty.
-    if (input.sym_numel() == 0) return false;
+bool use_miopen(
+    const at::Tensor& input,
+    const double dropout_state,
+    std::optional<int64_t> batch_size = std::nullopt) {
+  bool is_miopen_acceptable =
+      ((input.scalar_type() == at::kFloat) ||
+       (input.scalar_type() == at::kHalf)) &&
+      (detail::getCUDAHooks().compiledWithMIOpen()) && (input.is_cuda()) &&
+      (at::globalContext().userEnabledCuDNN());
+  // MIOpen functions returns miopenStatusBadParm on empty
+  // tensors. Maybe some functions actually support empty tensors, but
+  // native kernels shouldn't be much slower because the output is also
+  // likely empty.
+  if (input.sym_numel() == 0) {
+    return false;
+  }
 
-    return is_miopen_acceptable;
+  if (!is_miopen_acceptable) {
+    return false;
+  }
+
+#ifdef USE_ROCM
+  // MIOpen RNN produces incorrect outputs on gfx1201 for batch sizes >100.
+  // See https://github.com/pytorch/pytorch/issues/177834
+  if (detail::getCUDAHooks().isGPUArch({"gfx1201"})) {
+    return false;
+  }
+
+  // MIOpen RNN fails with miopenStatusBadParm ("Lengths must be > 0") for
+  // large batch sizes on multiple ROCm GPU architectures including gfx950.
+  // Fall back to the native implementation which produces correct results.
+  // See https://github.com/pytorch/pytorch/issues/177834
+  constexpr int64_t miopen_rnn_max_batch = 512;
+  if (batch_size.has_value() && batch_size.value() > miopen_rnn_max_batch) {
+    return false;
+  }
+#endif
+
+  return true;
 }
 
 bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
@@ -1253,7 +1280,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
           batch_first);                                                     \
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
-    if (use_miopen(_input, dropout_p)) {                                    \
+    if (use_miopen(_input, dropout_p, batch_first ? _input.sym_size(0) : _input.sym_size(1))) {                                    \
       Tensor output, hy;                                                    \
       NAME##_miopen_stub(                                                   \
           _input.device().type(),                                           \
@@ -1315,7 +1342,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
           bidirectional);                                                   \
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
-    if (use_miopen(data, dropout_p)) {                                      \
+    if (use_miopen(data, dropout_p, batch_sizes.numel() > 0 ? batch_sizes[0].item<int64_t>() : std::nullopt)) {                                      \
       Tensor output, hy;                                                    \
       NAME##_packed_miopen_stub(                                            \
           data.device().type(),                                             \
@@ -1485,7 +1512,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 #endif
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
-  if (use_miopen(_input, dropout_p)) {
+  if (use_miopen(_input, dropout_p, batch_first ? _input.sym_size(0) : _input.sym_size(1))) {
     if (!has_projections) {
       Tensor output, hy, cy;
       lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -1538,7 +1565,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
-  if (use_miopen(data, dropout_p)) {
+  if (use_miopen(data, dropout_p, batch_sizes.numel() > 0 ? batch_sizes[0].item<int64_t>() : std::nullopt)) {
     if (!has_projections) {
       Tensor output, hy, cy;
       lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
