@@ -19,6 +19,7 @@
 #include <c10/util/StringUtil.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
+#include <ATen/native/cuda/ScaledBlas.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
@@ -68,9 +69,7 @@ using scaled_blas::convert_int_to_enum;
 
 namespace at::native {
 
-namespace{
-
-bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+bool _scaled_mm_allowed_device(bool sm90_only, bool sm100_only) {
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
@@ -78,6 +77,7 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
         "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
+        // ROCm 6.5 was renamed to ROCm 7.0 before public release.
         "gfx950",
 #endif
 #if ROCM_VERSION >= 71400
@@ -95,6 +95,8 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
     }
 #endif
 }
+
+namespace {
 
 #ifdef USE_ROCM
 bool _scaled_mm_is_fnuz() {
@@ -497,7 +499,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           Tensor& out) {
   // Check sizes
   bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK(
+      allowed_device,
+      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, ROCm gfx942, ROCm 6.3+ gfx1200/gfx1201, ROCm 7.0+ gfx950, or ROCm 7.14+ gfx1250");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -554,11 +558,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
     TORCH_CHECK(ROCM_VERSION >= 70000, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
   }
+  // ROCm 6.5 was renamed to ROCm 7.0 before public release.
   if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 7.0 and above");
   }
   if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 7.0 and above");
   }
 #endif
   if (bias) {
@@ -1335,8 +1340,9 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
           bool use_fast_accum,
           const Tensor& out) {
   bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
-      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      allowed_device,
+      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, ROCm gfx942, ROCm 6.3+ gfx1200/gfx1201, ROCm 7.0+ gfx950, or ROCm 7.14+ gfx1250");
 
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
@@ -1386,13 +1392,14 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
     TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 70000,
         "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
   }
+  // ROCm 6.5 was renamed to ROCm 7.0 before public release.
   if (mat_a.scalar_type() == ScalarType::Float8_e5m2 || mat_b.scalar_type() == ScalarType::Float8_e5m2) {
     TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
-        "Float8_e5m2 is only supported for ROCm 6.5 and above");
+        "Float8_e5m2 is only supported for ROCm 7.0 and above");
   }
   if (mat_a.scalar_type() == ScalarType::Float8_e4m3fn || mat_b.scalar_type() == ScalarType::Float8_e4m3fn) {
     TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
-        "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+        "Float8_e4m3fn is only supported for ROCm 7.0 and above");
   }
 #endif
   if (bias.has_value()) {
