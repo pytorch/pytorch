@@ -1334,9 +1334,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
 
   // TODO: we need to get rid of globalRanksInGroup eventually.
+  auto allRanks = groupRanks();
   std::vector<uint64_t> globalRanksInGroup;
   for (auto rank : ranks) {
-    globalRanksInGroup.emplace_back(groupRanks()[rank]);
+    globalRanksInGroup.emplace_back(allRanks[rank]);
   }
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
