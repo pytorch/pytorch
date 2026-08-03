@@ -1151,15 +1151,34 @@ class NestedReduction:
         )
 
     @staticmethod
+    def sub_parent_contiguous_lane(
+        index: sympy.Expr,
+        sub_parent_factor: int,
+        parent_extent: sympy.Expr,
+    ) -> sympy.Expr:
+        """Which contiguous lane an index addresses, from its constant term.
+
+        Shared with codegen (``_resolve_remapped_value``) so the lane the
+        planner validates and the lane codegen selects cannot drift. With
+        contiguous lanes the child variable has stride 1 and would pollute a
+        modulus taken over the whole index, so the lane comes from the constant
+        term alone -- unlike the interleaved case, where every other term is a
+        multiple of the factor and cancels.
+        """
+        child_extent = FloorDiv(parent_extent, sub_parent_factor)
+        offset = sympy_subs(index, dict.fromkeys(index.free_symbols, 0))
+        return V.graph.sizevars.simplify(
+            FloorDiv(sympy.Mod(offset, parent_extent), child_extent)
+        )
+
+    @staticmethod
     def _contiguous_sub_parent_epilogue_emitted_lane(
         dep: MemoryDep,
         sub_parent_factor: int,
         parent_rnumel: int,
     ) -> sympy.Expr:
-        child_extent = FloorDiv(parent_rnumel, sub_parent_factor)
-        offset = sympy_subs(dep.index, dict.fromkeys(dep.index.free_symbols, 0))
-        return V.graph.sizevars.simplify(
-            FloorDiv(sympy.Mod(offset, parent_rnumel), child_extent)
+        return NestedReduction.sub_parent_contiguous_lane(
+            dep.index, sub_parent_factor, parent_rnumel
         )
 
     @classmethod
