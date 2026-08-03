@@ -981,10 +981,6 @@ class TestAutograd(TestCase):
 
     @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
     def test_custom_function_setup_context_releases_return_value(self):
-        # setup_context's return value is discarded, so the caller owns the
-        # reference and must release it. Returning a throwaway object is what
-        # makes a leak observable: the documented None return is a singleton
-        # that is never freed.
         class Sentinel:
             pass
 
@@ -1008,7 +1004,6 @@ class TestAutograd(TestCase):
 
         MyFunc.apply(torch.randn(3, requires_grad=True))
 
-        gc.collect()
         self.assertIsNone(sentinel_ref())
 
     def test_multiple_insert_removal_caching(self):
