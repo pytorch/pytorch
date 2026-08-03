@@ -692,123 +692,123 @@ FLEX_ATTENTION_TEMPLATE = r"""
         }
 
 {%- endif %}
-      if (amx_this_block) {
-        // Overlap path: scores + mods for this block are done; defer its online
-        // softmax and P@V to the next block's QK GEMM (interleaved above). Just
-        // record it as pending and flip to the other score buffer.
-        amx_pend = true;
-        amx_pend_n = n;
-        amx_pend_n_idx = n_idx;
-        amx_pend_kvSplitSize = cur_kvSplitSize;
-        amx_pend_ekvSplitSize = cur_ekvSplitSize;
-        amx_pend_buf = qk_data;
-        amx_buf_sel ^= 1;
-      } else {
-        // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          // apply scaling factor and max per row in fusion
-          {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
-              qk_data + row * cur_kvSplitSize,
-              static_cast<accum_t>(1),
-              cur_kvSplitSize,
-              qk_data + row * cur_kvSplitSize,
-              tmp_max);
-          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
-            // to avoid `nan = exp2f(-inf - (-inf))`
-            {{kernel.kernel_name}}_fill_stub(
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              static_cast<scalar_t>(0), cur_kvSplitSize);
-          } else {
-            tmp_sum = tmp_max;
-            // qk <- exp(qk - max) and sum per row
-            {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
-              qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              tmp_sum);
-            // exp_tmp <- exp(max[row] - max)
-            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-            // sum[row] <- sum + exp_tmp * sum[row]
-            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-            // max[row] <- max
-            qk_max_data[row] = tmp_max;
-            // dst <- dst * exp_tmp
-            if (n_idx > 0) {
-              at::vec::map<accum_t>(
-              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-              dst_data + row * headSize_v,
-              dst_data + row * headSize_v,
-              headSize_v);
+        if (amx_this_block) {
+          // Overlap path: scores + mods for this block are done; defer its online
+          // softmax and P@V to the next block's QK GEMM (interleaved above). Just
+          // record it as pending and flip to the other score buffer.
+          amx_pend = true;
+          amx_pend_n = n;
+          amx_pend_n_idx = n_idx;
+          amx_pend_kvSplitSize = cur_kvSplitSize;
+          amx_pend_ekvSplitSize = cur_ekvSplitSize;
+          amx_pend_buf = qk_data;
+          amx_buf_sel ^= 1;
+        } else {
+          // Update coefficients with Softmax
+          accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
+          for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+            // apply scaling factor and max per row in fusion
+            {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
+                qk_data + row * cur_kvSplitSize,
+                static_cast<accum_t>(1),
+                cur_kvSplitSize,
+                qk_data + row * cur_kvSplitSize,
+                tmp_max);
+            tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
+            if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
+              // to avoid `nan = exp2f(-inf - (-inf))`
+              {{kernel.kernel_name}}_fill_stub(
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
+                static_cast<scalar_t>(0), cur_kvSplitSize);
+            } else {
+              tmp_sum = tmp_max;
+              // qk <- exp(qk - max) and sum per row
+              {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
+                qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
+                tmp_sum);
+              // exp_tmp <- exp(max[row] - max)
+              exp_tmp = std::exp(qk_max_data[row] - tmp_max);
+              // sum[row] <- sum + exp_tmp * sum[row]
+              qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
+              // max[row] <- max
+              qk_max_data[row] = tmp_max;
+              // dst <- dst * exp_tmp
+              if (n_idx > 0) {
+                at::vec::map<accum_t>(
+                [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+                dst_data + row * headSize_v,
+                dst_data + row * headSize_v,
+                headSize_v);
+              }
+            }
+            if (need_pack && cur_kvSplitSize % 2 != 0) {
+              // Pad: [qSplitSize, cur_kvSplitSize] -> [qSplitSize, cur_kvSplitSize + 1]
+              *(qk_reduced_data + row * (1 + cur_kvSplitSize) + cur_kvSplitSize) = scalar_t(0);
             }
           }
-          if (need_pack && cur_kvSplitSize % 2 != 0) {
-            // Pad: [qSplitSize, cur_kvSplitSize] -> [qSplitSize, cur_kvSplitSize + 1]
-            *(qk_reduced_data + row * (1 + cur_kvSplitSize) + cur_kvSplitSize) = scalar_t(0);
-          }
-        }
-        // Calculate Softmax(q @ k.T) @ v (non-AMX paths; the AMX path defers P@V)
-        if (!need_pack) {
-          auto v_addr =
-              v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-          // Fallback Half brgemm is slower than micro gemm
-          if (!std::is_same_v<scalar_t, at::Half>) {
-            at::native::cpublas::brgemm(
+          // Calculate Softmax(q @ k.T) @ v (non-AMX paths; the AMX path defers P@V)
+          if (!need_pack) {
+            auto v_addr =
+                v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+            // Fallback Half brgemm is slower than micro gemm
+            if (!std::is_same_v<scalar_t, at::Half>) {
+              at::native::cpublas::brgemm(
+                    cur_qSplitSize,
+                    headSize_v,
+                    cur_ekvSplitSize,
+                    cur_ekvSplitSize,
+                    vStrideN,
+                    headSize_v,
+                    n_idx > 0,
+                    {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                    v_addr,
+                    dst_data,
+                    need_pack);
+            } else {
+              if (n_idx > 0) {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                  v_addr,
+                  dst_data,
                   cur_qSplitSize,
                   headSize_v,
                   cur_ekvSplitSize,
                   cur_ekvSplitSize,
                   vStrideN,
-                  headSize_v,
-                  n_idx > 0,
+                  headSize_v);
+              } else {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
                   {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
                   v_addr,
                   dst_data,
-                  need_pack);
-          } else {
-            if (n_idx > 0) {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
-            } else {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
+                  cur_qSplitSize,
+                  headSize_v,
+                  cur_ekvSplitSize,
+                  cur_ekvSplitSize,
+                  vStrideN,
+                  headSize_v);
+              }
             }
+          } else {
+            int64_t psize = n / kvSplitSize * ekvSplitSize;
+            at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                headSize_v,
+                cur_ekvSplitSize,
+                cur_ekvSplitSize,
+                headSize_v,
+                headSize_v,
+                n_idx > 0,
+                qk_reduced_data,
+                value_reorder_ptr +
+                    i_kv * num_head_k * kv_padding_size * headSize_v +
+                    j_kv * kv_padding_size * headSize_v + psize * headSize_v,
+                dst_data,
+                need_pack);
           }
-        } else {
-          int64_t psize = n / kvSplitSize * ekvSplitSize;
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              headSize_v,
-              cur_ekvSplitSize,
-              cur_ekvSplitSize,
-              headSize_v,
-              headSize_v,
-              n_idx > 0,
-              qk_reduced_data,
-              value_reorder_ptr +
-                  i_kv * num_head_k * kv_padding_size * headSize_v +
-                  j_kv * kv_padding_size * headSize_v + psize * headSize_v,
-              dst_data,
-              need_pack);
-        }
-      }  // end else (non-AMX softmax + P@V)
-      }
+        }  // end else (non-AMX softmax + P@V)
+      }  // end for n_idx (KV blocks)
 
       // Drain the last pending AMX block: its softmax + P@V were deferred waiting
       // for a next-block QK to interleave with, but it is the final block.
@@ -1626,9 +1626,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
     def codegen_amx_helpers(self, kernel_name: str):
         # AMX/AVX-512 interleaving GEMM helpers
-        from .cpu_intrinsics.cpp_flex_attention_amx import (
-            codegen_flex_attention_amx_helpers,
-        )
+        from .cpp_flex_attention_amx import codegen_flex_attention_amx_helpers
 
         return codegen_flex_attention_amx_helpers(kernel_name)
 
