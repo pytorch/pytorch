@@ -377,6 +377,109 @@ class BackendEntryPointTest(TestCase):
 instantiate_parametrized_tests(BackendEntryPointTest)
 
 
+class DefaultBackendTypeTest(TestCase):
+    """Cover ``_get_default_backend_type_for_backend_config``.
+
+    A multi-backend group registers one backend per device, but ``ProcessGroup``
+    holds a single default ``BackendType``. If that default names a type no
+    device registered, ``ProcessGroup::getDefaultBackend()`` raises "Could not
+    find the default backend type N" on the first ``pg.rank()``.
+    """
+
+    @staticmethod
+    def _registrable_backend_types(backend_config):
+        """The BackendTypes ``_new_process_group_helper`` would register."""
+        return {
+            dist.Backend.backend_type_map.get(
+                str(backend), dist.ProcessGroup.BackendType.CUSTOM
+            )
+            for backend in backend_config.device_backend_map.values()
+        }
+
+    @parametrize(
+        "backend_str",
+        [
+            "cpu:gloo",
+            "cpu:gloo,cuda:nccl",
+            "cpu:gloo,xpu:xccl",
+            "cuda:nccl",
+            "xpu:xccl",
+            "cuda:ucc",
+            "cpu:gloo,cuda:ucc",
+        ],
+    )
+    @parametrize("accelerator", [None, "cuda", "xpu"])
+    def test_default_backend_type_is_always_registrable(self, backend_str, accelerator):
+        """The default type must never name a backend that no device registers,
+        regardless of which accelerator the host reports."""
+        acc_device = torch.device(accelerator) if accelerator else None
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator", return_value=acc_device
+        ):
+            backend_config = dist.BackendConfig(backend_str)
+            self.assertIn(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                self._registrable_backend_types(backend_config),
+                f"default backend type is not registered for {backend_str!r} "
+                f"with accelerator {accelerator!r}",
+            )
+
+    @parametrize(
+        "backend_str, accelerator, expected_type",
+        [
+            # A mixed host+accelerator group defaults to the accelerator
+            # backend so ProcessGroup::barrier() stays on the accelerator.
+            ("cpu:gloo,xpu:xccl", "xpu", "XCCL"),
+            ("cpu:gloo,cuda:nccl", "cuda", "NCCL"),
+            # Accelerator-only groups must not fall back to a gloo backend that
+            # was never registered.
+            ("xpu:xccl", "xpu", "XCCL"),
+            ("cuda:ucc", "cuda", "UCC"),
+            # No device for the reported accelerator: any non-host device still
+            # outranks cpu.
+            ("cpu:gloo,xpu:xccl", "cuda", "XCCL"),
+            ("cpu:gloo,xpu:xccl", None, "XCCL"),
+            # Host-only groups are unambiguous.
+            ("cpu:gloo", "cuda", "GLOO"),
+        ],
+    )
+    def test_default_backend_type_prefers_accelerator_backend(
+        self, backend_str, accelerator, expected_type
+    ):
+        acc_device = torch.device(accelerator) if accelerator else None
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator", return_value=acc_device
+        ):
+            backend_config = dist.BackendConfig(backend_str)
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                getattr(dist.ProcessGroup.BackendType, expected_type),
+            )
+
+    def test_default_backend_type_honors_bound_device_id(self):
+        """An explicit ``device_id=`` outranks the reported accelerator."""
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator",
+            return_value=torch.device("cuda"),
+        ):
+            backend_config = dist.BackendConfig("cpu:gloo,xpu:xccl,cuda:nccl")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(
+                    backend_config, torch.device("xpu:0")
+                ),
+                dist.ProcessGroup.BackendType.XCCL,
+            )
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(
+                    backend_config, torch.device("cpu")
+                ),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+
+
+instantiate_parametrized_tests(DefaultBackendTypeTest)
+
+
 class Net(nn.Module):
     def __init__(self) -> None:
         super().__init__()
