@@ -3294,6 +3294,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
+        # Both this map and body are kernel-lifetime state. Keeping them together
+        # lets derived iteration families safely deduplicate prologue constants.
+        self._named_constants: dict[str, str] = {}
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
@@ -7815,6 +7818,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         rindex = self._flatten_reduction_indices(rn_inds)
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
+    def _codegen_named_constant(
+        self, sym: sympy.Symbol, expr: sympy.Expr, constexpr: bool
+    ) -> None:
+        """Emit a loop-invariant named constant into the kernel prologue."""
+        name = str(sym)
+        annotation = ": tl.constexpr" if constexpr else ""
+        line = f"{name}{annotation} = {self.index_to_str(expr)}"
+        existing = self._named_constants.get(name)
+        if existing is not None:
+            if existing != line:
+                raise AssertionError(
+                    f"conflicting definitions for named constant {sym}"
+                )
+            return
+        self._named_constants[name] = line
+        self.body.writeline(line)
+
     def iteration_ranges_codegen_header(
         self,
         entry: IterationRangesRoot,
@@ -7829,9 +7849,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 raise AssertionError(
                     "derived reduction roots do not support cooperative reductions"
                 )
+            # Derived indices may be loop-local, but their shape constants are not.
             for sym, expr, constexpr in entry.named_constants():
-                annotation = ": tl.constexpr" if constexpr else ""
-                code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")
+                self._codegen_named_constant(sym, expr, constexpr)
             code.writeline(
                 f"{entry.name} = {self.index_to_str(entry.block_offset())} + "
                 f"{self.iteration_ranges_ranges_code(entry)}"
