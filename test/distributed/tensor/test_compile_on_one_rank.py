@@ -16,8 +16,7 @@ from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     run_tests,
-    TEST_CUDA,
-    TEST_PRIVATEUSE1,
+    TEST_ACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -36,10 +35,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-TEST_CUDA_OR_PRIVATEUSE1 = TEST_CUDA or TEST_PRIVATEUSE1
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else None
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -274,9 +270,7 @@ def _current_device_nodes(gm):
     return [n for n in gm.graph.nodes if n.op == "call_function" and n.target is target]
 
 
-@unittest.skipUnless(
-    TEST_CUDA_OR_PRIVATEUSE1, "requires CUDA or PrivateUse1 accelerator"
-)
+@unittest.skipUnless(TEST_ACCELERATOR, "requires an accelerator")
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
