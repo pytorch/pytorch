@@ -30,6 +30,7 @@ from ...utils import has_free_symbols
 from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
     FlexGemmGroupedMainOutputTransform,
@@ -537,7 +538,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ):
         raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
     if main_transform is not None and epilogue_args:
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, physical_output_size
     )

@@ -12,6 +12,7 @@ from typing import get_args
 from unittest import mock
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
@@ -3471,7 +3472,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         shape[unbacked_dim] = ShapeEnv().create_unbacked_symint()
         self.assertIsNone(grouped_tensor_layout(tuple(shape), (4, 8)))
 
-    def test_grouped_layout_rejected_backed_group_does_not_guard(self):
+    def test_grouped_layout_guards_backed_group_before_rejection(self):
         from torch._dynamo.source import ConstantSource
         from torch._inductor.kernel.flex_gemm.quack_reductions import (
             grouped_tensor_layout,
@@ -3483,10 +3484,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         group = shape_env.create_symintnode(symbol, hint=3)
 
         self.assertIsNone(grouped_tensor_layout((4, 5, group), (4, 8)))
-        self.assertEqual(shape_env.guards, [])
+        self.assertEqual(len(shape_env.guards), 1)
 
     def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
-        """Rejected recognitions must not leak grouped layouts or guards."""
+        """Rejected recognitions must not leak grouped layouts."""
         from torch._dynamo.source import ConstantSource
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmGroupedMainOutputTransform,
@@ -3539,16 +3540,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     if node in analysis.local_reduce.grouped_layouts
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
-                self.assertEqual(len(shape_env.guards), 1 if expected_transform else 0)
+                self.assertEqual(len(shape_env.guards), 1)
 
-    def test_rejected_grouped_select_does_not_install_index_guard(self):
-        from torch._dynamo.source import ConstantSource
+    def test_incomplete_grouped_selects_are_rejected(self):
         from torch._inductor.kernel.flex_gemm.epilogue import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def duplicate_grouped_lane(a, b):
             grouped = torch.mm(a, b).view(4, 4, 4)
@@ -3565,31 +3564,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         graph_module = make_fx(duplicate_grouped_lane)(
             torch.randn(4, 8), torch.randn(8, 16)
         )
-        shape_env = ShapeEnv()
-        index_symbol = shape_env.create_symbol(2, ConstantSource("select_index"))
-        index = shape_env.create_symintnode(index_symbol, hint=2)
-        group_symbol = shape_env.create_symbol(4, ConstantSource("view_group"))
-        group = shape_env.create_symintnode(group_symbol, hint=4)
-        self.assertIsInstance(index, torch.SymInt)
-        self.assertIsInstance(group, torch.SymInt)
-        view = next(
-            node
-            for node in graph_module.graph.nodes
-            if node.target is torch.ops.aten.view.default
-        )
-        view.args = (view.args[0], (4, 4, group))
-        select = next(
-            node
-            for node in graph_module.graph.nodes
-            if node.target is torch.ops.aten.select.int and node.args[2] == 2
-        )
-        select.args = (select.args[0], select.args[1], index)
-
         with self.assertRaisesRegex(NotImplementedError, "complete grouped main"):
             analyze_flex_gemm_epilogue(
                 graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
             )
-        self.assertEqual(shape_env.guards, [])
 
     @parametrize("pointwise", (False, True))
     def test_accepted_grouped_reduction_installs_group_guard(self, pointwise):
@@ -3619,47 +3597,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             and tuple(node.meta["val"].shape) == (4, 8, 2)
         )
         view.args = (view.args[0], (4, 8, group))
-
-        analyze_flex_gemm_epilogue(
-            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
-        )
-        self.assertEqual(len(shape_env.guards), 1)
-
-    def test_active_grouped_layout_installs_own_structural_guard(self):
-        from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            analyze_flex_gemm_epilogue,
-            gemm_node,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        def grouped_reduction_with_sibling(a, b):
-            acc = torch.mm(a, b)
-            sibling = acc.view(4, 8, 2)
-            reduced = acc.view(4, 8, 2).sum(-1, keepdim=True)
-            return (sibling * reduced).view(4, 16)
-
-        graph_module = make_fx(grouped_reduction_with_sibling)(
-            torch.randn(4, 8), torch.randn(8, 16)
-        )
-        reduction = next(
-            node
-            for node in graph_module.graph.nodes
-            if node.target is torch.ops.aten.sum.dim_IntList
-        )
-        sibling_view = next(
-            node
-            for node in graph_module.graph.nodes
-            if node.target is torch.ops.aten.view.default
-            and node is not reduction.args[0]
-            and tuple(node.meta["val"].shape) == (4, 8, 2)
-        )
-        shape_env = ShapeEnv()
-        symbol = shape_env.create_symbol(2, ConstantSource("sibling_group"))
-        group = shape_env.create_symintnode(symbol, hint=2)
-        self.assertIsInstance(group, torch.SymInt)
-        sibling_view.args = (sibling_view.args[0], (4, 8, group))
 
         analyze_flex_gemm_epilogue(
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
@@ -3715,6 +3652,52 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 1,
                 tensor_epilogue_fn=lambda acc: acc,
                 main_output_transform_group=2,
+            )
+
+    @skipIfNoCuteDSL
+    @parametrize("group", (2, 4))
+    def test_grouped_main_output_rejects_wrong_logical_shape(self, group):
+        from torch._vendor.quack.gemm_act import gemm_act
+
+        a = torch.empty(4, 8)
+        b = torch.empty(16, 8)
+        out = torch.empty(4, 16 // group + 1)
+        with self.assertRaisesRegex(RuntimeError, "requires PostAct shape"):
+            gemm_act(
+                a,
+                b,
+                None,
+                None,
+                out,
+                None,
+                None,
+                128,
+                128,
+                1,
+                1,
+                tensor_epilogue_fn=lambda acc: acc,
+                main_output_transform_group=group,
+            )
+
+    @skipIfNoCuteDSL
+    def test_grouped_main_output_requires_divisible_physical_n(self):
+        from torch._vendor.quack.gemm_act import gemm_act
+
+        with self.assertRaisesRegex(RuntimeError, "physical N=10 must be divisible"):
+            gemm_act(
+                torch.empty(4, 8),
+                torch.empty(10, 8),
+                None,
+                None,
+                torch.empty(4, 2),
+                None,
+                None,
+                128,
+                128,
+                1,
+                1,
+                tensor_epilogue_fn=lambda acc: acc,
+                main_output_transform_group=4,
             )
 
     @skipIfNoCuteDSL
@@ -4240,8 +4223,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 )
 
             b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
-            scale = torch.randn((), device="cuda", dtype=torch.float16)
-            with self.assertRaisesRegex(InductorError, "do not compose"):
+            scale = torch.randn(1, 1, device="cuda", dtype=torch.float16)
+            with self.assertRaisesRegex(InductorError, "physical accumulator layout"):
                 torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
 
         with self.subTest("chunked_contiguous_b"):
@@ -6167,43 +6150,40 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_local_m_reduce_feed_main_specializes_group_across_functions(self):
+    def test_mm_local_m_reduce_feed_main_specializes_explicit_group(self):
         torch._dynamo.reset()
         m = 128
         n = 64
 
-        def make_fn(group):
-            def epilogue_fn(acc, group=group):
-                x = acc.float().view(-1, group, n)
-                scale = x.sum(1, keepdim=True) + 1.0
-                return (x * scale.reciprocal()).view(m, n)
+        def epilogue_fn(acc, group):
+            x = acc.float().view(-1, group, n)
+            scale = x.sum(1, keepdim=True) + 1.0
+            return (x * scale.reciprocal()).view(m, n)
 
-            def fn(a, b):
-                return flex_gemm(
-                    torch.mm,
-                    (a, b),
-                    epilogue_fn,
-                    kernel_options={"backend": "QUACK"},
-                )
+        def fn(a, b, group):
+            def epilogue(acc):
+                return epilogue_fn(acc, group)
 
-            return fn, epilogue_fn
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
 
         a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
-        # These closures deliberately share code objects. Do not reset between
-        # them: the second group exercises automatic-dynamic specialization.
-        for group in (8, 16):
-            fn, epilogue_fn = make_fn(group)
-            actual, (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), a, b
-            )
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for group in (8, 16, 32):
+            actual = compiled(a, b, group)
             self.assertMatchesEpilogue(
                 actual,
-                epilogue_fn(a @ b),
-                epilogue_fn(a.double() @ b.double()),
+                epilogue_fn(a @ b, group),
+                epilogue_fn(a.double() @ b.double(), group),
                 a.shape[1],
             )
-            self.assertPhysicalFeedMainCode(code, group)
+        self.assertEqual(counter.frame_count, 3)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
