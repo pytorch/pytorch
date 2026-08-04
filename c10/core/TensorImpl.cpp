@@ -224,9 +224,12 @@ void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
   // normalize device index for indexed device types (not CPU or meta)
   if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU &&
       fake_device.type() != c10::DeviceType::Meta) {
-    const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
-    if (guard_impl) {
-      fake_device = guard_impl->getDevice();
+    // skip if fakemode already exists
+    if (c10::impl::FakeTensorModeTLS::get_state() == nullptr) {
+      const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
+      if (guard_impl) {
+        fake_device = guard_impl->getDevice();
+      }
     }
     if (fake_device.index() == -1) {
       fake_device = c10::Device(fake_device.type(), 0);
@@ -490,6 +493,10 @@ int64_t TensorImpl::storage_offset_custom() const {
     return (*c10::impl::getGlobalPyInterpreter())
         ->sym_storage_offset(this)
         .guard_int(__FILE__, __LINE__);
+  }
+  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    // same reasoning as sizes_custom() above
+    return symbolic_shape_meta().storage_offset_.guard_int(__FILE__, __LINE__);
   }
   return storage_offset_default();
 }
@@ -963,6 +970,7 @@ void TensorImpl::set_sizes_and_strides(
 
   refresh_numel();
   refresh_contiguous();
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
@@ -992,6 +1000,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
@@ -1038,6 +1047,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  sym_shape_meta.refresh_materialized();
   // hard code some known true settings, for unbacked case
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
