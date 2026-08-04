@@ -41,6 +41,7 @@ from torch._subclasses.functional_tensor import (
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -71,6 +72,8 @@ def _aot_eager_with_runtime_epilogue():
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)
@@ -239,6 +242,8 @@ class TestInvokeSubgraph(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def count_unique_get_attr_nodes(self, gm, args, expected):
         subgraph_attr_names = set()
         for node in gm.graph.nodes:
@@ -3161,6 +3166,8 @@ class <lambda>(torch.nn.Module):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompileDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_gpu
     def test_return_none(self):
         from torch.nn import functional as F
@@ -3442,6 +3449,8 @@ class GraphModule(torch.nn.Module):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompileCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
     def test_sdpa(self):
@@ -3510,6 +3519,8 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -4334,6 +4345,8 @@ class GraphModule(torch.nn.Module):
     params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_simple_func(self):
         @nested_compile_region
@@ -4581,6 +4594,8 @@ class GraphModule(torch.nn.Module):
 
 
 class NegativeTesting(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_graph_break(self):
         @nested_compile_region
         def gn(x):
@@ -4601,6 +4616,8 @@ class NegativeTesting(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         """Compile fn and verify the backend receives no invoke_subgraph HOPs."""
         backend = EagerAndRecordGraphs()
@@ -4673,6 +4690,8 @@ class TestInlineInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineSingleUseInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         backend = EagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
@@ -4824,6 +4843,8 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -5084,6 +5105,8 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
 class TestInvokeSubgraphTrainStepCapture(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(
         trace_autograd_ops=True,
         inline_single_use_invoke_subgraph=False,
