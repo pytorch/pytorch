@@ -561,7 +561,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         g_ys is recovered by flipping, scanning left-to-right, and flipping back:
             leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
-            result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
+            result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
             g_ys = result_rev[1].flip([0])[:-1]
 
         References: https://justintchiu.com/blog/pscan_diff/
@@ -602,8 +602,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
 
             This motivates a right-to-left associative scan over bwys and gl_ys.
-            We call generic_associative_scan directly (bypassing dynamo and torch.compile)
-            with the flat operator g_ys_combine_fn_flat above.
+            We call the raw associative_scan_op HOP with the flat operator
+            g_ys_combine_fn_flat above, so the backward scan is Triton-lowerable under
+            compiled autograd; in eager it dispatches to generic_associative_scan.
 
             5.1) Append the initial values to gl_ys and bwys
 
@@ -617,7 +618,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             5.2) Flip, scan left-to-right, flip back, and drop the last (padding) element
 
                 leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
-                result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
+                result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
                 g_ys = result_rev[1].flip([0])[:-1]
 
         6.) Scale with the instantaneous input gradients bwxs
@@ -774,11 +775,18 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
                 return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
 
-            # 5.2) Flip, scan left-to-right via generic_associative_scan (bypassing dynamo/compile),
-            # flip back, and drop the last (padding) element to get g_ys.
-            result_rev = generic_associative_scan(
+            # 5.2) Flip, scan left-to-right, flip back, and drop the last (padding)
+            # element to get g_ys. We call the raw associative_scan_op HOP (not
+            # generic_associative_scan) so this scan is Triton-lowerable under compiled
+            # autograd, mirroring the forward. In eager the backward runs with grad
+            # disabled, so the HOP dispatches CompositeExplicitAutograd ->
+            # generic_associative_scan, unchanged from before. g_ys_combine_fn_flat is
+            # pointwise with no additional_inputs, matching the forward's pointwise mode
+            # (the only mode that reaches this custom autograd path).
+            result_rev = associative_scan_op(
                 g_ys_combine_fn_flat,
                 [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])],
+                (),
             )
             g_ys = result_rev[1].flip([0])[:-1]
 
