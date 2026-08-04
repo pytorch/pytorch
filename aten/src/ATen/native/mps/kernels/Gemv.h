@@ -2,9 +2,6 @@
 // simdgroups split K), gemv_t2d (gemv_t with a 2D lane layout and 16-byte
 // loads) and gemv_nt (one simdgroup per output row), each instantiated over
 // the MB_GEMV_* config matrix for float/half/bfloat.
-//
-// Included from LinearAlgebra.metal - no top-level includes / `using` here so
-// the includer controls them.
 #pragma once
 
 template <typename DT, int VEC, bool XC, typename IDX>
