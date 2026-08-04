@@ -209,9 +209,7 @@ class MPSBasicTests(TestCase):
         def fn(x):
             return torch.eye(x.shape[-1], dtype=x.dtype, device=x.device)
 
-        x = torch.zeros(10, 256, device=self.device)
-        compiled = torch.compile(fn)
-        self.assertEqual(compiled(x), fn(x))
+        self.common(fn, (torch.zeros(10, 256),))
 
     def test_reduced_max(self):
         # inductor test do not validate that max of say 16K half elements can be computed
