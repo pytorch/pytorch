@@ -471,6 +471,9 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
     .add_const_input(input)
     .add_const_input(target)
     .add_const_input(grad_output)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
