@@ -1,14 +1,11 @@
 # Owner(s): ["module: dsl-native-ops"]
 import threading
 
-from torch._native.flydsl.cache import flydsl_jit_cache, jit_cache
+from torch._native.flydsl.cache import flydsl_jit_cache
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFlyDSLCache(TestCase):
-    def test_jit_cache_alias(self):
-        self.assertIs(jit_cache, flydsl_jit_cache)
-
     def test_compile_args_are_excluded_from_cache_key(self):
         calls = []
 
@@ -76,9 +73,14 @@ class TestFlyDSLCache(TestCase):
         first = threading.Thread(target=lambda: results.append(compile_fn("key")))
         second = threading.Thread(target=lambda: results.append(compile_fn("key")))
         first.start()
-        self.assertTrue(started.wait(timeout=1))
+        self.assertTrue(started.wait(timeout=5))
         second.start()
         try:
+            # `calls == 1` alone would also hold if the second thread simply had
+            # not been scheduled yet, so require it to still be blocked -- that
+            # is the property the per-key lock exists for.
+            second.join(timeout=0.5)
+            self.assertTrue(second.is_alive())
             self.assertEqual(calls, 1)
         finally:
             release.set()
@@ -106,16 +108,50 @@ class TestFlyDSLCache(TestCase):
             target=lambda: results.setdefault("second", compile_fn("second"))
         )
         first.start()
-        self.assertTrue(started["first"].wait(timeout=1))
+        self.assertTrue(started["first"].wait(timeout=5))
         second.start()
         try:
-            self.assertTrue(started["second"].wait(timeout=1))
+            self.assertTrue(started["second"].wait(timeout=5))
         finally:
             release.set()
             first.join()
             second.join()
 
         self.assertEqual(results, {"first": "first", "second": "second"})
+
+    def test_cache_clear_during_compile_leaves_cache_empty(self):
+        started = threading.Event()
+        release = threading.Event()
+        result = []
+
+        @flydsl_jit_cache
+        def compile_fn(key):
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+            return "compiled"
+
+        worker = threading.Thread(target=lambda: result.append(compile_fn("key")))
+        worker.start()
+        self.assertTrue(started.wait(timeout=5))
+        compile_fn.cache_clear()
+        release.set()
+        worker.join()
+
+        # The in-flight caller still gets its result, but a clear means cleared:
+        # the entry it was about to store belongs to a discarded generation.
+        self.assertEqual(result, ["compiled"])
+        info = compile_fn.cache_info()
+        self.assertEqual((info.hits, info.misses, info.currsize), (0, 0, 0))
+
+    def test_cache_clear_drops_key_locks(self):
+        @flydsl_jit_cache
+        def compile_fn(key):
+            return key
+
+        compile_fn("key")
+        self.assertEqual(len(compile_fn._key_locks), 1)
+        compile_fn.cache_clear()
+        self.assertEqual(len(compile_fn._key_locks), 0)
 
 
 if __name__ == "__main__":

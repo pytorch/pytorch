@@ -212,14 +212,13 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(compile_fn.cache_info().misses, 0)
 
     def test_flydsl_cache_attrs_forwarded(self):
-        from torch._native.flydsl.cache import jit_cache
+        from torch._native.flydsl.cache import flydsl_jit_cache
 
-        @jit_cache
+        @flydsl_jit_cache
         def compile_fn(key):
             return key
 
         instrumented = instrument_flydsl_compile("aten::rms_norm")(compile_fn)
-        self.assertIs(instrumented.cache, compile_fn.cache)
         self.assertEqual(instrumented("key"), "key")
         self.assertEqual(instrumented.cache_info().currsize, 1)
         instrumented.cache_clear()
