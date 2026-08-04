@@ -7697,9 +7697,22 @@ class Scheduler:
         ):
             return False
 
+        broadcast_orders = self._pointwise_reduction_broadcast_orders(
+            reduction_node, snodes, red_numel, red_rnumel
+        )
+        # Check reordered ranges without mutating the loops measured below.
+        candidate_ranges = (
+            [
+                (tuple(sn._sizes[0][i] for i in order), sn._sizes[1])
+                for sn, order in zip(snodes, broadcast_orders, strict=True)
+            ]
+            if broadcast_orders is not None
+            else [sn.get_ranges() for sn in snodes]
+        )
+
         if not all(
-            SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
-            for sn in snodes
+            SIMDKernel.is_compatible((red_numel, red_rnumel), ranges)
+            for ranges in candidate_ranges
         ):
             return False
 
@@ -7720,6 +7733,10 @@ class Scheduler:
         # failed reindex attempt returns -1 and the caller may keep evaluating
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
+
+        if broadcast_orders is not None:
+            for sn, order in zip(snodes, broadcast_orders, strict=True):
+                sn.apply_new_loop_order(order)
 
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
@@ -7762,6 +7779,61 @@ class Scheduler:
                 refresh_group_node_dependencies(pw_node)
 
         return True
+
+    def _pointwise_reduction_broadcast_orders(
+        self,
+        reduction_node: BaseSchedulerNode,
+        snodes: Sequence[SchedulerNode],
+        red_numel: sympy.Expr,
+        red_rnumel: sympy.Expr,
+    ) -> list[tuple[int, ...]] | None:
+        """Stably group reduction-output dimensions before broadcast dimensions."""
+        reduction_outputs = reduction_node.get_buffer_names()
+        orders: list[tuple[int, ...]] = []
+        for sn in snodes:
+            iter_sizes, reduce_sizes = sn._sizes
+            num_iter_dims = len(iter_sizes)
+            if sn._body is None or reduce_sizes or num_iter_dims <= 2:
+                return None
+
+            reads = [
+                dep
+                for dep in sn.read_writes.reads
+                if isinstance(dep, MemoryDep) and dep.name in reduction_outputs
+            ]
+            if len(reads) != 1:
+                return None
+
+            dep = reads[0]
+            dep_vars = dep.var_names
+            # Normalization can merge variables, invalidating positional mapping.
+            if len(dep_vars) > num_iter_dims or not all(
+                V.graph.sizevars.statically_known_equals(size, iter_sizes[i])
+                for i, size in enumerate(dep.size)
+            ):
+                return None
+            indexed = tuple(
+                i for i, var in enumerate(dep_vars) if var in dep.index.free_symbols
+            )
+            broadcast = tuple(i for i in range(num_iter_dims) if i not in indexed)
+            if not indexed or not broadcast:
+                return None
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(iter_sizes[i] for i in indexed), red_numel
+            ) or not V.graph.sizevars.statically_known_equals(
+                sympy_product(iter_sizes[i] for i in broadcast), red_rnumel
+            ):
+                return None
+            order = indexed + broadcast
+            if order == tuple(range(num_iter_dims)):
+                return None
+            orders.append(order)
+
+        reordered_sizes = OrderedSet(
+            tuple(sn._sizes[0][i] for i in order)
+            for sn, order in zip(snodes, orders, strict=True)
+        )
+        return orders if len(reordered_sizes) == 1 else None
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
