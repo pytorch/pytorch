@@ -1510,7 +1510,7 @@ bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const C_Dtype* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<Dtype>> beta_opt) {
+    at::opmath_type<Dtype> beta) {
   TORCH_INTERNAL_ASSERT(
       !(bias && c_ptr),
       "gemm_and_bias: bias and a distinct C operand are mutually exclusive");
@@ -1528,8 +1528,8 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  // bias is added in epilogue unless nullptr
-  opmath_t beta_val = beta_opt.has_value() ? *beta_opt : (bias ? 0 : 1);
+  // bias is added in the epilogue, which accumulates with beta == 0
+  opmath_t beta_val = bias ? opmath_t(0) : beta;
 
   const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
   const cudaDataType_t abType = type_info.ab_type;
@@ -1682,16 +1682,9 @@ bool gemm_and_bias(
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
     if (c_ptr) {
-      // Falling back here is expected and benign: the caller copies C into D
-      // and retries, so warn at most once instead of once per call.
-      TORCH_WARN_ONCE(
-        "gemm_and_bias with distinct C and D error: ",
-        at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
-        " when calling cublasLtMatmul with m ", m, " n ", n, " k ", k,
-        " mat1_ld ", mat1_ld, " mat2_ld ", mat2_ld, " c_ld ", c_ld,
-        " result_ld ", result_ld, " abType ", abType, " cType ", cType,
-        " computeType ", computeType, " scaleType ", scaleType,
-        ". Will attempt to recover by copying C into D before the GEMM.");
+      // Not worth warning about: the caller just copies C into D and runs the
+      // ordinary GEMM, which is what happened before this path existed. The
+      // result is unchanged and there is nothing for the user to act on.
       return false;
     }
     TORCH_WARN(
@@ -1744,7 +1737,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const double* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<double>> beta_opt);
+    at::opmath_type<double> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1763,7 +1756,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<float>> beta_opt);
+    at::opmath_type<float> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1782,7 +1775,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const at::Half* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<at::Half>> beta_opt);
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1801,7 +1794,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<at::Half>> beta_opt);
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1820,7 +1813,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const at::BFloat16* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<at::BFloat16>> beta_opt);
+    at::opmath_type<at::BFloat16> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1839,7 +1832,7 @@ template bool gemm_and_bias(
     GEMMAndBiasActivationEpilogue activation,
     const float* c_ptr,
     int64_t c_ld,
-    std::optional<at::opmath_type<at::BFloat16>> beta_opt);
+    at::opmath_type<at::BFloat16> beta);
 
 using at::blas::ScalingType;
 
