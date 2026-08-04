@@ -9,7 +9,11 @@ from torch._inductor import config
 from torch._inductor.fx_passes.low_contention_collectives import (
     replace_collectives_with_low_contention,
 )
-from torch.testing._internal.common_utils import HardwareClassification, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not dist.is_available(), "requires distributed")
