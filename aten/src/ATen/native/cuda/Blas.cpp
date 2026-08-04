@@ -229,12 +229,13 @@ static bool isInputCompliesAddmmCudaLt(
   );
 }
 
+#ifndef USE_ROCM
 // A 2D tensor can be handed to cuBLASLt as long as it is row-major, possibly
 // with padding between rows, which the leading dimension expresses.
 static bool isRowMajorWithValidLeadingDim(const Tensor& t) {
-  return t.dim() == 2 && t.stride(1) == 1 && t.stride(0) >= t.sizes()[1] &&
-      (t.sizes()[0] <= 1 || t.stride(0) >= 1);
+  return t.dim() == 2 && t.stride(1) == 1 && t.stride(0) >= t.sizes()[1];
 }
+#endif
 
 static bool canUseAddmmCudaLtWithDistinctCAndD(
     Tensor& result,
@@ -458,9 +459,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
-  // Same disable state, but without the input-conditioned part folded in below,
-  // since the distinct-C/D path applies its own input checks.
-  const bool disable_addmm_cuda_lt_for_new_path = disable_addmm_cuda_lt;
+  // Everything above is a property of the build/device rather than the inputs.
+  // The distinct-C/D path applies its own input checks, so it keys off this.
+  const bool disable_addmm_cuda_lt_for_device = disable_addmm_cuda_lt;
   // Condition on the input
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
 
@@ -484,10 +485,16 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       const bool distinct_c_and_d_candidate =
           result.numel() != 0 && activation == Activation::None &&
           canUseAddmmCudaLtWithDistinctCAndD(
-              result, self, mat1, mat2, disable_addmm_cuda_lt_for_new_path);
+              result, self, mat1, mat2, disable_addmm_cuda_lt_for_device);
       if (distinct_c_and_d_candidate) {
         cublasCommonArgs args(mat1, mat2, result);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
+        // Returning early below skips the `result.copy_(*args.result)`
+        // writeback, which is only correct because the guard keeps `result`
+        // row-major and non-conj, so prepare_matrix_for_cublas() borrows it
+        // instead of handing back an owned copy.
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !args.result->is_conj() && args.result->is_same(result) &&
+            args.result_ld == result.stride(0));
         bool distinct_c_and_d_lt_success = false;
         AT_DISPATCH_FLOATING_TYPES_AND2(
           at::ScalarType::Half,
