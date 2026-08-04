@@ -115,11 +115,11 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             torch.ones(4, device=self.device), async_op=True
         )
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
-        self.assertEqual(existing_work._get_timeout(), timedelta(seconds=3))
+        self.assertEqual(existing_work.timeout, timedelta(seconds=3))
 
         tensor = torch.ones(4, device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
-        self.assertEqual(work._get_timeout(), timedelta(seconds=13))
+        self.assertEqual(work.timeout, timedelta(seconds=13))
         existing_work.wait()
         work.wait()
         torch.cuda.synchronize(self.device)
@@ -127,7 +127,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             work = dist.all_reduce(tensor, async_op=True)
-            if work._get_timeout() == timedelta(seconds=3):
+            if work.timeout == timedelta(seconds=3):
                 work.wait()
                 return
             work.wait()
