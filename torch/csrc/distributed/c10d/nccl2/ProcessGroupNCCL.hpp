@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -278,6 +279,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   c10::intrusive_ptr<::c10d::Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
+
+  // MemPool registration (::c10d::ProcessGroupNCCL::registerMemPool parity).
+  // Unlike the stock backend, plain ncclCommRegister of every private-pool
+  // segment already happens unconditionally through NCCLCachingAllocatorHook,
+  // so this only has to cover the segments the hook could not reach and -- for
+  // symm -- perform the collective NCCL_WIN_COLL_SYMMETRIC upgrade that the
+  // hook must not do from an allocator thread. Collective when symm is set:
+  // every rank must call it with the same pool contents, in the same order.
+  void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
+  void deregisterMemPool(at::cuda::MemPool* pool);
 
   // Caching-allocator segment registration (called by
   // NCCLCachingAllocatorHook, potentially from allocator threads).
@@ -603,9 +614,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     size_t len{0};
   };
   std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
-  // Guards memoryRegistrationHandles_: register/deregister_address run on
-  // allocator threads while window ops look segments up on the main thread.
+  // Guards memoryRegistrationHandles_ and registeredMemPools_:
+  // register/deregister_address run on allocator threads while window ops look
+  // segments up on the main thread.
   std::mutex memory_registration_mutex_;
+  // MemPools passed to registerMemPool, so deregisterMemPool can reject a pool
+  // that was never registered (stock does the same via its global
+  // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
+  // own window handle, so teardown does not need to be told which mode to use.
+  std::set<c10::cuda::MempoolId_t> registeredMemPools_;
+  // Caller must hold memory_registration_mutex_ and have checked that `addr`
+  // is not already registered.
+  void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
   // base, folded in here).
