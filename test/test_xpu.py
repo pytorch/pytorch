@@ -3835,74 +3835,60 @@ class TestMemPool(TestCase):
         pool_use = torch.xpu.MemPool(use_on_oom=True)
 
         _1mb = 1 * 1024 * 1024 // 4  # for int data type
-        init_fraction = torch.xpu.get_per_process_memory_fraction()
-        _, all_memory = torch.xpu.memory.mem_get_info()
-        pre_reserved = torch.xpu.memory_reserved()
-        total_allowed = 80 * 1024 * 1024 + pre_reserved
-        fraction_allowed = total_allowed / all_memory
-        torch.xpu.memory.set_per_process_memory_fraction(fraction_allowed)
+        orig_fraction = torch.xpu.get_per_process_memory_fraction()
 
-        # remaining free mem: 80 mb
-        # pool_use [] 0 mb
-        # pool_do_not_use [] 0 mb
-        # default pool [] 0 mb
+        # pool_use [a] 40 mb
+        # pool_do_not_use [b] 40 mb
         with torch.xpu.use_mem_pool(pool_do_not_use):
             a = torch.randn(40 * _1mb, device="xpu")
         with torch.xpu.use_mem_pool(pool_use):
             b = torch.randn(40 * _1mb, device="xpu")
         a_dataptr = a.data_ptr()
         b_dataptr = b.data_ptr()
-        # remaining free mem: 0 mb
-        # pool_do_not_use [aaaa] 40 mb
-        # pool_use [bbbb] 40 mb
-        # default pool [] 0 mb
+
+        torch.xpu.memory.set_per_process_memory_fraction(1e-9)
         with self.assertRaises(torch.OutOfMemoryError):
             # out of memory
             c = torch.randn(40 * _1mb, device="xpu")
 
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
         del a, b
-        # remaining free mem: 0 mb
-        # pool_do_not_use [____] 40 mb
-        # pool_use [____] 40 mb
-        # default pool [] 0 mb
 
+        # pool_do_not_use [] 40 mb
+        # pool_use [c] 40 mb
         # c should not oom and instead can use pool_use as fallback
         c = torch.randn(30 * _1mb, device="xpu")
         c_dataptr = c.data_ptr()
-        # remaining free mem: 0 mb
-        # pool_do_not_use [____] 40 mb
-        # pool_use [ccc_] 40 mb
-        # default pool [] 0 mb
+
         with self.assertRaises(torch.OutOfMemoryError):
             # out of memory since can't use pool_do_not_use
             d = torch.randn(30 * _1mb, device="xpu")
 
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
         del c
-        # remaining free mem: 0 mb
-        # pool_do_not_use [____] 40 mb
-        # pool_use [____] 40 mb
-        # default pool [] 0 mb
 
         # expect that we used same memory address for both a and c
         self.assertEqual(b_dataptr, c_dataptr)
 
-        # make sure we can still use pool_use as intended after c is deleted
+        # pool_do_not_use [] 40 mb
+        # pool_use [e] 40 mb
         with torch.xpu.use_mem_pool(pool_use):
+            # make sure we can still use pool_use as intended after c is deleted
             e = torch.randn(20 * _1mb, device="xpu")
-        # remaining free mem: 0 mb
-        # pool_do_not_use [____] 40 mb
-        # pool_use [ee__] 40 mb
-        # default pool [] 0 mb
 
         e_dataptr = e.data_ptr()
-        del e
-
         self.assertEqual(e_dataptr, c_dataptr)
+
+        # pool_do_not_use [] 40 mb
+        # pool_use [] 40 mb
+        del e
 
         # pool's destructor calls emptyCache()
         del pool_use, pool_do_not_use
 
-        torch.xpu.memory.set_per_process_memory_fraction(init_fraction)
+        torch.xpu.memory.set_per_process_memory_fraction(orig_fraction)
 
 
 instantiate_parametrized_tests(TestXpu)
