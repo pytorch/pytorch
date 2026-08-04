@@ -28,6 +28,7 @@ _IS_DATACLASS_SKIP_TYPES: tuple[type, ...] = (
     types.GenericAlias,
 )
 if HAS_NUMPY:
+    # pyrefly: ignore [missing-attribute]
     _IS_DATACLASS_SKIP_TYPES = (*_IS_DATACLASS_SKIP_TYPES, np.ndarray, np.generic)
 
 _HAS_DTENSOR = torch.distributed.is_available()
