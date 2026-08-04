@@ -507,7 +507,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   RedOpRAII getNcclReduceOp(
       const ::c10d::ReduceOp& op,
       ncclComm_t comm,
-      const ncclDataType_t dataType);
+      const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
