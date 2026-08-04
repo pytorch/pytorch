@@ -1032,6 +1032,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(output_0, output_1, rtol=1e-2, atol=1e-2)
         self.assertEqual(output_0.stride(), output_1.stride())
 
+        # The fused reducer is only selected under graph capture, so the eager
+        # call above does not cover it. output_1 already sized the symmetric
+        # memory workspace, which cannot grow during capture.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            output_2 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=0, group_name=group.group_name
+            )
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_2.stride())
+
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
