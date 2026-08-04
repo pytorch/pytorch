@@ -15,6 +15,7 @@ from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -41,10 +42,13 @@ if TEST_HPU:
 elif TEST_XPU:
     list_device = "xpu"
 else:
-    list_device = "cuda"
+    _acc = torch.accelerator.current_accelerator(check_available=True)
+    list_device = _acc.type if _acc is not None else "cuda"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "device_list",
         [
@@ -203,7 +207,6 @@ class TestUtils(TestCase):
         )
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestUtils, globals(), except_for="cpu", allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
