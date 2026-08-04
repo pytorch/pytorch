@@ -172,9 +172,7 @@ constexpr uint64_t kGuardLastSuccessActualMaxUnstablePasses = 8;
 thread_local bool* active_guard_actual_partial_supported = nullptr;
 thread_local size_t active_guard_actual_partial_list_items = 0;
 
-static bool source_ends_with(
-    const std::string& source,
-    const char* suffix) {
+static bool source_ends_with(const std::string& source, const char* suffix) {
   const size_t suffix_len = std::strlen(suffix);
   return source.size() >= suffix_len &&
       source.compare(source.size() - suffix_len, suffix_len, suffix) == 0;
@@ -575,7 +573,6 @@ PyObject* TensorGuards_check(
   }
 
   Py_RETURN_TRUE;
-
 }
 
 PyObject* TensorGuards_check_verbose(
@@ -889,7 +886,6 @@ PyObject* GlobalStateGuard_reason(
     PyObject* args,
     PyObject* kwargs) {
   return PyUnicode_FromString(self->reason().c_str());
-
 }
 
 PyObject* GlobalStateGuard_dump(
@@ -1013,8 +1009,7 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
 static bool tensor_layout_does_not_support_stride(const at::Tensor& tensor) {
   return tensor.layout() == c10::kSparseCsr ||
       tensor.layout() == c10::kSparseCsc ||
-      tensor.layout() == c10::kSparseBsc ||
-      tensor.layout() == c10::kSparseBsr;
+      tensor.layout() == c10::kSparseBsc || tensor.layout() == c10::kSparseBsr;
 }
 
 static bool tensor_strides_match_guard_check(
@@ -1750,7 +1745,6 @@ static bool guard_subtree_special_token_matches_current(
 
 static bool guard_subtree_token_is_aliasing_guard(
     GuardSubtreeProbeTokenKind kind) {
-
   return kind == GuardSubtreeProbeTokenKind::NoTensorAliasing ||
       kind == GuardSubtreeProbeTokenKind::ObjectAliasing;
 }
@@ -2107,7 +2101,7 @@ static bool guard_subtree_aliasing_token_matches_current(
   // receipt tokens would be tautological; the live runtime check here is that
   // the recorded alias operand is still the same object/type. Actual-partial
   // plan construction applies an additional conservative reachability gate
-    // before these tokens are admitted.
+  // before these tokens are admitted.
   return token.object != nullptr && token.type != nullptr &&
       Py_TYPE(token.object) == token.type;
 }
@@ -2495,9 +2489,7 @@ static bool guard_subtree_memo_tokens_match(
   return true;
 }
 
-static bool source_starts_with(
-    const std::string& source,
-    const char* prefix) {
+static bool source_starts_with(const std::string& source, const char* prefix) {
   const size_t prefix_len = std::strlen(prefix);
   return source.size() >= prefix_len &&
       source.compare(0, prefix_len, prefix) == 0;
@@ -2509,12 +2501,10 @@ static bool is_self_local_source_path(const std::string& source) {
     return false;
   }
   return source.size() == std::strlen(kSelf) ||
-      source[std::strlen(kSelf)] == '.' ||
-      source[std::strlen(kSelf)] == '[';
+      source[std::strlen(kSelf)] == '.' || source[std::strlen(kSelf)] == '[';
 }
 
 static bool is_local_source_path(const std::string& source) {
-
   return source_starts_with(source, "L[");
 }
 
@@ -2713,8 +2703,8 @@ static bool guard_last_success_actual_partial_tokens_match(
 
 thread_local std::vector<GuardSubtreeEntryToken>*
     active_guard_subtree_memo_recorder = nullptr;
-thread_local std::vector<std::string>*
-    active_guard_subtree_memo_debug_paths = nullptr;
+thread_local std::vector<std::string>* active_guard_subtree_memo_debug_paths =
+    nullptr;
 thread_local bool active_guard_subtree_memo_relax_global_dicts = false;
 thread_local std::vector<GuardActualPartialAccessorRecord>*
     active_guard_actual_partial_accessor_records = nullptr;
@@ -2903,8 +2893,7 @@ struct GuardSubtreeMemoRecorderScope {
     active_guard_actual_partial_accessor_records = previous_accessor_records;
     active_guard_actual_partial_supported = previous_actual_partial_supported;
     active_guard_actual_partial_list_items = previous_actual_partial_list_items;
-    active_guard_subtree_memo_relax_global_dicts =
-        previous_relax_global_dicts;
+    active_guard_subtree_memo_relax_global_dicts = previous_relax_global_dicts;
   }
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
@@ -2988,7 +2977,6 @@ static bool check_size_stride(
     std::stringstream msg;
     msg << "wrong number of dimensions" << ndim;
     if (op_name) {
-
       msg << " for op: " << op_name;
     }
     PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
@@ -3116,7 +3104,6 @@ static PyObject* assert_size_stride_grouped(PyObject* dummy, PyObject* args) {
   }
 
   Py_RETURN_TRUE;
-
 }
 
 static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
@@ -3421,7 +3408,6 @@ struct StaticMeta {
 
   static int64_t size(const Tensor& t, int64_t i) {
     return t.size(i);
-
   }
 
   static int64_t stride(const Tensor& t, int64_t i) {
@@ -3725,7 +3711,6 @@ class GuardDebugInfo {
         num_guards_executed(num_guards_executed),
         user_stack(std::move(user_stack)) {}
 
-
   // This constructor is used when guard succeeds.
   GuardDebugInfo(bool result, int num_guards_executed)
       : result(result),
@@ -3770,7 +3755,6 @@ class GuardDebugInfo {
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
-
 
 // Global registry used by the *recursive-dict-tag* optimisation.
 //
@@ -3923,7 +3907,6 @@ class LeafGuard {
  */
 class LAMBDA_GUARD : public LeafGuard {
  public:
-
   LAMBDA_GUARD(
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
@@ -3981,7 +3964,6 @@ class LAMBDA_GUARD : public LeafGuard {
 
 class TYPE_MATCH : public LeafGuard {
  public:
-
   // type_id = id(type(obj))
   TYPE_MATCH(
       RootGuardManager* root_guard_manager,
@@ -4057,7 +4039,6 @@ class FAKE_SCRIPT_TYPE_MATCH : public LeafGuard {
 
 class ID_MATCH : public LeafGuard {
  public:
-
   // obj_id = id(obj)
   ID_MATCH(
       RootGuardManager* root_guard_manager,
@@ -4262,7 +4243,6 @@ class EQUALS_MATCH : public LeafGuard {
 
 class RANGE_ITERATOR_MATCH : public LeafGuard {
  public:
-
   RANGE_ITERATOR_MATCH(
       RootGuardManager* root_guard_manager,
       py::object start,
@@ -4314,7 +4294,6 @@ class RANGE_ITERATOR_MATCH : public LeafGuard {
 
 class TUPLE_ITERATOR_LEN : public LeafGuard {
  public:
-
   TUPLE_ITERATOR_LEN(
       RootGuardManager* root_guard_manager,
       py::object length,
@@ -4349,7 +4328,6 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
 
 class LENGTH_CHECK : public LeafGuard {
  public:
-
   LENGTH_CHECK(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -4384,7 +4362,6 @@ class LENGTH_CHECK : public LeafGuard {
 
 class DICT_LENGTH : public LeafGuard {
  public:
-
   DICT_LENGTH(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -4431,7 +4408,6 @@ class NOT_NONE : public LeafGuard {
 
 class MAPPING_KEYS_MATCH : public LeafGuard {
  public:
-
   MAPPING_KEYS_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -4464,7 +4440,6 @@ class MAPPING_KEYS_MATCH : public LeafGuard {
 
 class DEFAULT_DEVICE : public LeafGuard {
  public:
-
   DEFAULT_DEVICE(
       RootGuardManager* root_guard_manager,
       py::object verbose_code_parts,
@@ -4525,7 +4500,6 @@ class DEFAULT_DEVICE : public LeafGuard {
       FrameLocalsMapping* value,
       std::vector<GuardSubtreeEntryToken>* tokens) override {
     return append_subtree_memo_token_template(value, tokens);
-
   }
 
  private:
@@ -4551,7 +4525,6 @@ class DEFAULT_DEVICE : public LeafGuard {
 
 class GLOBAL_STATE : public LeafGuard {
  public:
-
   GLOBAL_STATE(
       RootGuardManager* root_guard_manager,
       py::object verbose_code_parts,
@@ -4645,7 +4618,6 @@ class GLOBAL_STATE : public LeafGuard {
 // HASATTR guard.
 class NO_HASATTR : public LeafGuard {
  public:
-
   NO_HASATTR(
       RootGuardManager* root_guard_manager,
       py::object attr_name,
@@ -4672,7 +4644,6 @@ class NO_HASATTR : public LeafGuard {
 // being faster.
 class DICT_CONTAINS : public LeafGuard {
  public:
-
   DICT_CONTAINS(
       RootGuardManager* root_guard_manager,
       bool contains,
@@ -4850,7 +4821,6 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
  */
 class RelationalGuard : public LeafGuard {
  public:
-
   RelationalGuard(
       RootGuardManager* root_guard_manager,
       py::object verbose_code_parts,
@@ -4885,7 +4855,6 @@ class RelationalGuard : public LeafGuard {
  */
 class OBJECT_ALIASING : public RelationalGuard {
  public:
-
   OBJECT_ALIASING(
       RootGuardManager* root_guard_manager,
       py::object verbose_code_parts,
@@ -4971,7 +4940,6 @@ class OBJECT_ALIASING : public RelationalGuard {
  */
 class NO_TENSOR_ALIASING : public RelationalGuard {
  public:
-
   NO_TENSOR_ALIASING(
       RootGuardManager* root_guard_manager,
       const py::list& tensor_names,
@@ -5075,7 +5043,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
  */
 class STORAGE_OVERLAPPING : public RelationalGuard {
  public:
-
   STORAGE_OVERLAPPING(
       RootGuardManager* root_guard_manager,
       bool overlapping,
@@ -5112,7 +5079,6 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
  */
 class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
  public:
-
   SYMBOLIC_SHAPE_GUARD(
       RootGuardManager* root_guard_manager,
       py::int_ nargs_int,
@@ -5562,7 +5528,6 @@ class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
 
 class DICT_VERSION : public LeafGuard {
  public:
-
   DICT_VERSION(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -5781,7 +5746,6 @@ class GuardAccessor {
   // A string that can be eval'd on f_locals or f_globals to access the variable
   // value. Only used for debugging.
   std::string _source;
-
 };
 
 /**
@@ -5893,7 +5857,6 @@ class GuardManager {
  public:
   // relational guard helpers
   void set_has_object_aliasing_guard() {
-
     _has_object_aliasing_guard = true;
   }
 
@@ -5969,7 +5932,6 @@ class GuardManager {
       std::vector<RecordedTensorMetadata>&& tensor_metadata) {
     _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
-
 
   void disable_recursive_dict_tag_optimization() {
     dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
@@ -6644,7 +6606,6 @@ class GuardManager {
       if (_is_dict) {
         new_tag = get_dict_version_unchecked(value);
         matches_dict_tag = (new_tag == _dict_tag);
-
       }
     }
 
@@ -7084,7 +7045,6 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
-
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -7326,7 +7286,6 @@ class DictGuardManager : public GuardManager {
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
 
-
   GuardManager* get_key_manager(
       py::object key_index,
       std::string source,
@@ -7409,7 +7368,6 @@ class DictGuardManager : public GuardManager {
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
         if (key_manager && !key_manager->check_nopybind(key)) {
-
           return false;
         }
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
@@ -7626,7 +7584,6 @@ class DictGuardManager : public GuardManager {
           cloned_mgr->_key_value_managers[index].second =
               std::unique_ptr<GuardManager>(cloned_value_manager);
         }
-
       }
     }
     return cloned_mgr;
@@ -7796,7 +7753,6 @@ const LocalState& get_local_state(RootGuardManager* root) {
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
  public:
-
   TORCH_FUNCTION_MODE_STACK(
       RootGuardManager* root_guard_manager,
       const py::list& initial_stack,
@@ -7895,7 +7851,6 @@ static bool torch_function_mode_stack_guard_matches(const void* guard) {
 
 class DISPATCH_KEY_SET_MATCH : public LeafGuard {
  public:
-
   DISPATCH_KEY_SET_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -7927,7 +7882,6 @@ class DISPATCH_KEY_SET_MATCH : public LeafGuard {
 
 class TENSOR_MATCH : public LeafGuard {
  public:
-
   TENSOR_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
@@ -8033,8 +7987,7 @@ class TENSOR_MATCH : public LeafGuard {
             value, *_tensor_check, _root_guard_manager->_local_state, &token)) {
       return false;
     }
-    append_guard_subtree_memo_token(
-        tokens, std::move(token), _tensor_name);
+    append_guard_subtree_memo_token(tokens, std::move(token), _tensor_name);
     return true;
   }
 
@@ -8048,7 +8001,6 @@ class TENSOR_MATCH : public LeafGuard {
  */
 class GetAttrGuardAccessor : public GuardAccessor {
  public:
-
   GetAttrGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -8147,7 +8099,6 @@ class GetAttrGuardAccessor : public GuardAccessor {
  */
 class GenericGetAttrGuardAccessor : public GuardAccessor {
  public:
-
   GenericGetAttrGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -8610,7 +8561,6 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-
   DictGetItemGuardAccessor(
       GuardManager* guard_manager,
       DictGetItemGuardAccessor* from)
@@ -8920,7 +8870,6 @@ std::string to_string(TensorProperty prop) {
 template <TensorProperty _prop>
 class TensorPropertyGuardAccessor : public GuardAccessor {
  public:
-
   TensorPropertyGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -9049,7 +8998,6 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
  */
 class IndexedGuardAccessor : public GuardAccessor {
  public:
-
   IndexedGuardAccessor(
       RootGuardManager* root,
       py::int_ index,
@@ -9112,7 +9060,6 @@ class IndexedGuardAccessor : public GuardAccessor {
  */
 class GradGuardAccessor : public GuardAccessor {
  public:
-
   GradGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -9183,7 +9130,6 @@ class GradGuardAccessor : public GuardAccessor {
  */
 class FuncDefaultsGuardAccessor : public GuardAccessor {
  public:
-
   FuncDefaultsGuardAccessor(
       RootGuardManager* root,
       py::object name,
@@ -9251,7 +9197,6 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
       const py::function& clone_filter_fn) override {
     return clone_common<FuncDefaultsGuardAccessor>(
         cloned_root, clone_filter_fn);
-
   }
 };
 
@@ -9260,7 +9205,6 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
  */
 class FuncKwDefaultsGuardAccessor : public GuardAccessor {
  public:
-
   FuncKwDefaultsGuardAccessor(
       RootGuardManager* root,
       py::object name,
@@ -9338,7 +9282,6 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
  */
 class GlobalsGuardAccessor : public GuardAccessor {
  public:
-
   GlobalsGuardAccessor(
       RootGuardManager* root,
       py::dict globals_dict,
@@ -9580,7 +9523,6 @@ class TypeMROGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-
   TypeMROGuardAccessor(GuardManager* guard_manager, TypeMROGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -9600,7 +9542,6 @@ class TypeMROGuardAccessor : public GuardAccessor {
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
  public:
-
   TupleIteratorGetItemAccessor(
       RootGuardManager* root,
       py::object index,
@@ -9680,7 +9621,6 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
  */
 class GlobalWeakRefGuardAccessor : public GuardAccessor {
  public:
-
   GlobalWeakRefGuardAccessor(
       RootGuardManager* root,
       py::object global_name,
@@ -9792,7 +9732,6 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
  */
 class WeakRefCallGuardAccessor : public GuardAccessor {
  public:
-
   WeakRefCallGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -10052,7 +9991,6 @@ class ClosureGuardAccessor : public GuardAccessor {
  */
 class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
  public:
-
   CallFunctionNoArgsGuardAccessor(
       RootGuardManager* root,
       py::str name,
@@ -10114,7 +10052,6 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
     return false;
   }
 
-
  public: // cloning functions
   CallFunctionNoArgsGuardAccessor(
       GuardManager* guard_manager,
@@ -10139,7 +10076,6 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
  */
 class PythonLambdaGuardAccessor : public GuardAccessor {
  public:
-
   PythonLambdaGuardAccessor(
       RootGuardManager* root,
       py::function accessor_fn,
@@ -10196,7 +10132,6 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
       GuardManager* guard_manager,
       PythonLambdaGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
-
     from->clone_visitor(this);
   }
 
@@ -10452,8 +10387,6 @@ bool root_guard_manager_has_no_guards(void* root) {
   }
   return ((RootGuardManager*)root)->has_no_guards();
 }
-
-
 
 void* create_guard_last_success_receipt() {
 #ifdef Py_GIL_DISABLED

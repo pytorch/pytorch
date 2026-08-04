@@ -34,8 +34,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
-  torch::dynamo::destroy_guard_last_success_receipt(
-      this->last_success_receipt);
+  torch::dynamo::destroy_guard_last_success_receipt(this->last_success_receipt);
   // prevent guard_manager from use-after-free when invalidating
   this->guard_manager.attr("cache_entry") = py::none();
   this->guard_manager.attr("extra_state") = py::none();
@@ -44,8 +43,7 @@ C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 void CacheEntry::invalidate(py::object deleted_guard_manager) {
-  torch::dynamo::reset_guard_last_success_receipt(
-      this->last_success_receipt);
+  torch::dynamo::reset_guard_last_success_receipt(this->last_success_receipt);
   // Keep the current pointer alive but make the fields as if no-op
   this->guard_manager.attr("cache_entry") = py::none();
   this->guard_manager.attr("extra_state") = py::none();
