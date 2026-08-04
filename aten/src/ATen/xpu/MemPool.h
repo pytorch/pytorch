@@ -3,7 +3,6 @@
 #include <c10/core/Allocator.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
-
 namespace at::xpu {
 
     // Keep BC only

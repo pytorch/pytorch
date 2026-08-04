@@ -1,6 +1,5 @@
 #include <ATen/xpu/MemPool.h>
 
-
 namespace at::xpu {
 
 // uid_ is incremented when a user creates a MemPool,
