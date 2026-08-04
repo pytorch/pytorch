@@ -5307,14 +5307,15 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         ):
             torch._C._current_graph_task_execution_order()
 
-        # Errors when context manager not enabled
+        # Errors when multithreading is enabled
         t = torch.tensor(1.0, requires_grad=True).clone().sin().exp()
         all_hooks.append(t.register_hook(hook))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "expects the current backward to be executed with multithreading disabled",
-        ):
-            t.backward()
+        with torch.autograd.set_multithreading_enabled(True):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expects the current backward to be executed with multithreading disabled",
+            ):
+                t.backward()
 
         # Avoid leaking memory
         for h in all_hooks:
@@ -13698,9 +13699,11 @@ class TestAutogradDeviceType(TestCase):
         t6 = ReentrantFunc.apply(t3)
         t7 = t6 * t6
 
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
+        # Parent graph will error out first, while child graph will continue
+        # executing. This interleaving requires multithreaded autograd.
+        with torch.autograd.set_multithreading_enabled(True):
+            with self.assertRaisesRegex(Exception, "Simulate error"):
+                torch.autograd.backward([t5.sum(), t7.sum()])
 
         # No grads should be accumulated since child graph will stop execution
         # after parent receives error.
@@ -16086,25 +16089,29 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn2, [inp_c, inp_r], check_forward_ad=True)
 
     def test_set_multithreading_enabled_as_context_manager_and_function(self):
-        # Test as a context manager
-        with torch.autograd.set_multithreading_enabled(False):
-            self.assertFalse(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        with torch.autograd.set_multithreading_enabled(True):
-            self.assertTrue(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.set_multithreading_enabled(True)
-            self.assertTrue(torch.autograd.is_multithreading_enabled())
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
-
-        torch.autograd.set_multithreading_enabled(False)
+        # Multithreaded backward is disabled by default
         self.assertFalse(torch.autograd.is_multithreading_enabled())
 
-        torch.autograd.set_multithreading_enabled(True)
-        self.assertTrue(torch.autograd.is_multithreading_enabled())
+        # Test as a context manager
+        with torch.autograd.set_multithreading_enabled(True):
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
+
+        with torch.autograd.set_multithreading_enabled(False):
+            self.assertFalse(torch.autograd.is_multithreading_enabled())
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
+
+        with torch.autograd.set_multithreading_enabled(True):
+            torch.autograd.set_multithreading_enabled(False)
+            self.assertFalse(torch.autograd.is_multithreading_enabled())
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
+
+        try:
+            torch.autograd.set_multithreading_enabled(True)
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        finally:
+            torch.autograd.set_multithreading_enabled(False)
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_custom_function_propagates_errors_from_device_thread(self):

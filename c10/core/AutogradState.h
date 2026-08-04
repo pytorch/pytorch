@@ -83,7 +83,7 @@ struct C10_API AutogradState {
   bool grad_mode_ : 1 = true;
   bool inference_mode_ : 1 = false;
   bool fw_grad_mode_ : 1 = true;
-  bool multithreading_enabled_ : 1 = true;
+  bool multithreading_enabled_ : 1 = false;
   bool view_replay_enabled_ : 1 = false;
   bool grad_layout_enforcement_enabled_ : 1 = true;
 };
