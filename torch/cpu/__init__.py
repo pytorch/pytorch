@@ -28,8 +28,23 @@ __all__ = [
     "Stream",
     "StreamContext",
     "Event",
+    "empty_cache",
     "get_capabilities",
 ]
+
+
+def empty_cache() -> None:
+    r"""Release unused cached memory held by the built-in CPU allocator.
+
+    This function asks mimalloc to release unused memory owned by the calling
+    thread. It does not release memory occupied by live tensors or cached pages
+    owned by other active threads. The operation can be expensive.
+
+    PyTorch enables mimalloc by default on Windows and non-Apple AArch64 builds.
+    This function is a no-op when PyTorch was built without mimalloc or when a
+    custom CPU allocator is active.
+    """
+    torch._C._cpu._empty_cache()
 
 
 @lru_cache(None)
