@@ -510,7 +510,10 @@ def build_reuse_condition(
                 raise AssertionError(
                     f"expected constant-like VT for CONSTANT tag, got {type(vt).__name__}"
                 )
-            input_checks.append((InputTag.CONSTANT, vt.value))
+            # Type is part of the key: `Mode.ADD == 1` and `True == 1` compare
+            # equal, but an isinstance() check inside the region traces
+            # differently for each, so value equality alone is not enough.
+            input_checks.append((InputTag.CONSTANT, (type(vt.value), vt.value)))
         elif tag == InputTag.OBJECT:
             input_checks.append((InputTag.OBJECT, None))
         else:
@@ -659,7 +662,19 @@ def is_reusable(
                 raise AssertionError(
                     f"expected constant-like VT for CONSTANT tag, got {type(cur_vt).__name__}"
                 )
-            if cur_vt.value != cached_val:
+            cached_type, cached_value = cast(tuple[type, Any], cached_val)
+            if type(cur_vt.value) is not cached_type:
+                # Not deferred to the source check below: a value guard cannot
+                # catch a type change that alters the trace (isinstance, etc).
+                hc_log.debug(
+                    "subgraph_reuse: reuse failed -- input %d constant type "
+                    "mismatch: cached '%s' vs current '%s'",
+                    i,
+                    cached_type,
+                    type(cur_vt.value),
+                )
+                return False
+            if cur_vt.value != cached_value:
                 # If both the cached and current arg have sources, source
                 # replacement in stamp_out will resolve the correct value.
                 cached_src = (
