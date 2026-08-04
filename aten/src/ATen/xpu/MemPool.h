@@ -5,7 +5,7 @@
 
 namespace at::xpu {
 
-    // Keep BC only
+// Keep BC only
 using c10::CaptureId_t;
 using c10::MempoolId_t;
 
