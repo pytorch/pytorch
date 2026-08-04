@@ -561,6 +561,12 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
       isP2P_(isP2P),
       timingEnabled_(enableTiming),
       distDebugLevel_(distDebugLevel) {
+  if (pgDesc_.empty() || pgDesc_ == "undefined") {
+    logPrefix_ = c10::str("[PG GUID ", pgUID_, " Rank ", rank_, "] ");
+  } else {
+    logPrefix_ =
+        c10::str("[PG GUID ", pgUID_, "(", pgDesc_, ") Rank ", rank_, "] ");
+  }
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -610,7 +616,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       timingEnabled_(w.timingEnabled_),
       trace_id_(w.trace_id_),
       trace_reset_epoch_(w.trace_reset_epoch_),
-      distDebugLevel_(w.distDebugLevel_) {
+      distDebugLevel_(w.distDebugLevel_),
+      logPrefix_(w.logPrefix_) {
   exception_ = w.exception_;
 }
 
@@ -655,8 +662,7 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
 }
 
 const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -5367,6 +5373,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
     const AllToAllOptions& opts) {
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
+  c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
+  c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
@@ -5404,9 +5412,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         opts.asyncOp,
         "nccl:all_to_all");
   } else {
-    c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
-    c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
-
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
             static_cast<int64_t>(seqCollective_) + 1,
@@ -5720,12 +5725,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       "nccl:gather");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_into_tensor: " + msg);
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather_single: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -5751,7 +5756,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
       inputTensor, // inputTensors
       outputTensor, // outputTensors
       opts.rootRank, // root rank
-      "gather_into_tensor", // collective name
+      "gather_single", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * this->getSize(), // outNelems
       inputTensor.scalar_type(), // dType
@@ -5807,7 +5812,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_into_tensor(
       },
       OpType::GATHER,
       opts.asyncOp,
-      "nccl:gather_into_tensor");
+      "nccl:gather_single");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
