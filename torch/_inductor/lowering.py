@@ -5197,8 +5197,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if not (isinstance(self, TensorBox)):
         raise AssertionError("expected: isinstance(self, TensorBox)")
-    if "int" not in str(index.get_dtype()):
-        raise AssertionError('expected: "int" in str(index.get_dtype())')
 
     ndim = len(self.get_size())
     if ndim == 0:
@@ -5212,6 +5210,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if index.get_numel() == 0:
         return self
+
+    if "int" not in str(index.get_dtype()):
+        raise AssertionError('expected: "int" in str(index.get_dtype())')
 
     dim = _validate_dim(self, dim)
 
@@ -9404,6 +9405,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state that inductor cannot
+    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
+    # must outlive the op and never be reused for another buffer. We pin the
+    # inputs of every ORDERED op intentionally rather than only those that can
+    # actually retain them: some (aten::_print, aten::_linalg_check_errors) don't,
+    # so this slightly over-pins. There is no reliable "retains inputs" signal to
+    # scope this to: retention happens inside the op's implementation, so it is
+    # not exposed by the schema (even queue_push, which stashes its input, reports
+    # alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect (effects can be
+    # registered manually on any op, so it is neither necessary nor precise).
+    # Under-pinning would silently miscompile by recycling a buffer the op still
+    # holds, so the bounded over-pinning is the intended tradeoff for correctness.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9433,7 +9453,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
