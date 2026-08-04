@@ -619,41 +619,27 @@ __host__ __device__ inline void c10_rocm_kernel_assert(
             ": Device-side assertion `" #cond "' failed.\n") \
             .data);                                          \
   }
-#define CUDA_KERNEL_ASSERT_MSG(cond, msg)              \
-  if C10_UNLIKELY (!(cond)) {                          \
-    c10_rocm_kernel_assert(                            \
-        msg,                                           \
-        __FILE__,                                      \
-        static_cast<unsigned int>(__LINE__),           \
-        c10_rocm_assert_concat(                        \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ", \
-            __func__,                                  \
-            ": Device-side assertion failed.\n")       \
-            .data);                                    \
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
+  if (C10_UNLIKELY(!(cond))) {                                         \
+    __assert_fail(                                                     \
+        msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                         \
-  if C10_UNLIKELY (!(cond)) {                                             \
-    printf(                                                             \
-        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(             \
-            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "   \
-            "Assertion failed: `" #cond "`: " msg "\n",                 \
-        __func__,                                                       \
-        blockIdx.x,                                                     \
-        blockIdx.y,                                                     \
-        blockIdx.z,                                                     \
-        threadIdx.x,                                                    \
-        threadIdx.y,                                                    \
-        threadIdx.z,                                                    \
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                        \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    printf(                                                            \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
+            "Assertion failed: `" #cond "`: " msg "\n",                \
+        __func__,                                                      \
+        blockIdx.x,                                                    \
+        blockIdx.y,                                                    \
+        blockIdx.z,                                                    \
+        threadIdx.x,                                                   \
+        threadIdx.y,                                                   \
+        threadIdx.z,                                                   \
         ##__VA_ARGS__); \
-    c10_rocm_kernel_assert(                                               \
-        #cond,                                                            \
-        __FILE__,                                                         \
-        static_cast<unsigned int>(__LINE__),                              \
-        c10_rocm_assert_concat(                                           \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",                    \
-            __func__,                                                     \
-            ": Device-side assertion `" #cond "' failed.\n")              \
-            .data);                                                       \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
