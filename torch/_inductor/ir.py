@@ -6168,6 +6168,12 @@ class TritonTemplateBuffer(TemplateBuffer):
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
         res = super().get_free_symbol_uses(unbacked_only)
+        if isinstance(self.layout, NonOwningLayout) and self.should_allocate():
+            # Same as in ExternKernel: we allocate the buffer we alias into
+            # (e.g. a cat destination), so its size symbols must be in scope
+            # before this kernel runs. MultiTemplateBuffer inherits this, which
+            # is what covers the max_autotune path.
+            res |= self.layout.get_free_symbol_uses(unbacked_only)
         subgraph_outs = self.subgraph_outs if self.subgraph_outs else []
         subgraph_inps = self.subgraph_inps if self.subgraph_inps else []
 

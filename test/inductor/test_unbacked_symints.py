@@ -1388,12 +1388,16 @@ class TestUnbackedSymints(InductorTestCase):
         {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
     )
     @parametrize("dynamic", [False, True, None])
-    def test_cat_extern_kernel_inputs_unbacked_size(self, device, dynamic):
+    @parametrize("max_autotune", [False, True])
+    def test_cat_extern_kernel_inputs_unbacked_size(
+        self, device, dynamic, max_autotune
+    ):
         # The mm outputs are written straight into the cat destination, whose
         # size depends on every slice length, so all of them have to be in
         # scope before the first mm allocates the destination. Lower both
         # pointwise cat thresholds to force ConcatKernel path instead of
-        # pointwise_cat.
+        # pointwise_cat. max_autotune sends the mms through a template buffer
+        # instead of the extern kernel, which needs the same dependency.
         def fn(x, ends, w):
             outputs = []
             start = 0
@@ -1412,7 +1416,10 @@ class TestUnbackedSymints(InductorTestCase):
             make_tensor(32, 32, dtype=torch.float32, device=device, requires_grad=True),
         )
 
-        actual = torch.compile(fn, fullgraph=True, dynamic=dynamic)(*example_inputs)
+        with inductor_config.patch(
+            {"max_autotune": max_autotune, "max_autotune_gemm_backends": "TRITON"}
+        ):
+            actual = torch.compile(fn, fullgraph=True, dynamic=dynamic)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
