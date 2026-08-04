@@ -286,6 +286,40 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
+/**
+ * The beginning of all shims added in 2.14.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+// Returns whether the tensor has an associated storage. Returns false for
+// undefined tensors and for tensors without storage (e.g. sparse tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
+
+// --- Python interop shims -------------------------------------------------
+// Unlike the rest of the stable ABI, these convert between a Python
+// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
+// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// libtorch_python via a vtable it registers with libtorch, so an extension
+// still links only libtorch; if libtorch_python is not loaded at runtime the
+// call errors. The GIL must be held.
+
+// Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
+// underlying TensorImpl with the input.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
+    void* py_obj,
+    AtenTensorHandle* ret); // returns new reference
+
+// Wrap an AtenTensorHandle as a Python torch.Tensor. If py_type is non-null, it
+// is used as the result's exact PyTypeObject* (e.g. torch.nn.Parameter); null
+// means the default torch.Tensor type.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
+    AtenTensorHandle ath,
+    void* py_type,
+    void** ret); // returns new reference
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

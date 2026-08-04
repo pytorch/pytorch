@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -81,6 +82,8 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
+  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
+  std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 
 // returns the pointers freed in the pool
@@ -120,6 +123,24 @@ struct StreamSegmentSize {
   cudaStream_t stream;
   bool is_small_pool;
   size_t total_size;
+};
+
+// Registers one CUDA stream capture and its place in the capture hierarchy.
+// Conditional child captures share their parent's private mempool but have
+// distinct capture IDs and primary capture streams.
+struct CaptureRegistration {
+  MempoolId_t mempool_id;
+  CaptureId_t capture_id{0};
+  cudaStream_t primary_capture_stream{};
+  std::optional<CaptureId_t> parent_capture_id;
+};
+
+// State returned after allocator capture bookkeeping has ended. Expected
+// validation errors are reported only after CUDAGraph has restored its
+// registry and pool-routing state.
+struct CaptureEndResult {
+  MempoolId_t mempool_id;
+  size_t invalid_capture_free_count{0};
 };
 
 class CUDAAllocator : public DeviceAllocator {
@@ -232,9 +253,36 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  virtual void setUserMetadata(const std::string& metadata) {}
+  // Whether this backend records the string set via setUserMetadata onto
+  // memory-history trace entries. When false, setUserMetadata is a no-op and
+  // getUserMetadata always returns "".
+  virtual bool supportsUserMetadata() {
+    return false;
+  }
+  virtual void setUserMetadata(const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support user metadata; the value set via "
+        "torch.cuda.memory._set_memory_metadata is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
+  }
   virtual std::string getUserMetadata() {
     return "";
+  }
+  // Post-facto annotation: records an "annotate" trace entry for a live
+  // allocation identified by its base data pointer. Unlike setUserMetadata,
+  // this does not affect metadata recorded at allocation time; annotations
+  // accumulate as separate trace events keyed by address.
+  virtual void annotateMemory(
+      const void* /*ptr*/,
+      const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support memory annotations; the value passed to "
+        "torch.cuda.memory._annotate_memory is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
@@ -413,6 +461,19 @@ inline void markCaptureEnd(c10::DeviceIndex device) {
   get()->markCaptureEnd(device);
 }
 
+// Capture-registration hooks used by CUDAGraph. These are non-virtual so the
+// existing CUDAAllocator vtable contract remains unchanged. Custom allocators
+// receive the legacy notification; the native allocator additionally records
+// the capture hierarchy and stream roles.
+C10_CUDA_API void markCaptureBegin(
+    c10::DeviceIndex device,
+    const CaptureRegistration& registration);
+C10_CUDA_API CaptureEndResult
+markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id);
+C10_CUDA_API void finalizeCaptureEnd(
+    c10::DeviceIndex device,
+    const CaptureEndResult& result);
+
 inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
@@ -523,12 +584,20 @@ inline void enablePeerAccess(
   get()->enablePeerAccess(dev, dev_to_access);
 }
 
+inline bool supportsUserMetadata() {
+  return get()->supportsUserMetadata();
+}
+
 inline void setUserMetadata(const std::string& metadata) {
   get()->setUserMetadata(metadata);
 }
 
 inline std::string getUserMetadata() {
   return get()->getUserMetadata();
+}
+
+inline void annotateMemory(const void* ptr, const std::string& metadata) {
+  get()->annotateMemory(ptr, metadata);
 }
 
 } // namespace c10::cuda::CUDACachingAllocator

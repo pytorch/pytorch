@@ -230,7 +230,7 @@ static std::vector<T> storeAllGather(
   for (size_t r = 0; r < worldSize; ++r) {
     std::ostringstream oss;
     oss << prefix << '-' << r;
-    peerKeys.push_back(oss.str());
+    peerKeys.push_back(std::move(oss).str());
   }
 
   {
