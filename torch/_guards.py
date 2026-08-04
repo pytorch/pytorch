@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from torch._dynamo.guards import GuardCheckSpec
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import (
-        BackendFwMetadata,
         ViewAndMutationMeta,
     )
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
@@ -1083,7 +1082,6 @@ class TracingContext:
     will return None.
     """
 
-    @staticmethod
     @property
     def backend_fw_metadata(self) -> BackendFwMetadata | None:
         """
@@ -1094,6 +1092,7 @@ class TracingContext:
         """
         if self.fw_metadata is None:
             return None
+        from torch._functorch._aot_autograd.schemas import BackendFwMetadata
         return BackendFwMetadata(self.fw_metadata)
     def try_get() -> TracingContext | None:
         return getattr(_TLS, "tracing_context", None)
