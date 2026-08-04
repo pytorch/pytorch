@@ -761,6 +761,8 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 

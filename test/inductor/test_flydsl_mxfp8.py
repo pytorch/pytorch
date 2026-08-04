@@ -89,28 +89,36 @@ class TestFlyDSLMXFP8Metadata(TestCase):
         )
 
         with mock.patch.object(mm, "use_flydsl_mxfp8_template", return_value=True):
-            self.assertEqual(
-                mm.get_flydsl_mxfp8_template_kwargs(
-                    layout, a, b, scale_a[0], scale_b[0]
-                ),
-                {
-                    "GEMM_M": 64,
-                    "GEMM_N": 96,
-                    "GEMM_K": 256,
-                    "OUT_DTYPE": "bfloat16",
-                },
+            configs = mm.get_flydsl_mxfp8_template_kwargs(
+                layout, a, b, scale_a[0], scale_b[0]
             )
+            # Autotuning is off by default, so the selector returns exactly one
+            # config -- the tile it picks must divide 64x96x256 exactly, since
+            # the kernel has no boundary predication.
+            self.assertEqual(len(configs), 1)
+            for gemm_config in configs:
+                self.assertEqual(gemm_config["GEMM_M"], 64)
+                self.assertEqual(gemm_config["GEMM_N"], 96)
+                self.assertEqual(gemm_config["GEMM_K"], 256)
+                self.assertEqual(gemm_config["OUT_DTYPE"], "bfloat16")
+                self.assertEqual(64 % gemm_config["TILE_M"], 0)
+                self.assertEqual(96 % gemm_config["TILE_N"], 0)
+                self.assertEqual(256 % gemm_config["TILE_K"], 0)
 
             bad_b = _FakeNode((256, 96), (96, 1), torch.float8_e4m3fn)
-            self.assertIsNone(
+            self.assertEqual(
                 mm.get_flydsl_mxfp8_template_kwargs(
                     layout, a, bad_b, scale_a[0], scale_b[0]
-                )
+                ),
+                [],
             )
 
             bad_scale = _FakeNode((64, 8), (8, 1), torch.float8_e8m0fnu, offset=1)
-            self.assertIsNone(
-                mm.get_flydsl_mxfp8_template_kwargs(layout, a, b, bad_scale, scale_b[0])
+            self.assertEqual(
+                mm.get_flydsl_mxfp8_template_kwargs(
+                    layout, a, b, bad_scale, scale_b[0]
+                ),
+                [],
             )
 
             bad_device_scale = _FakeNode(
@@ -119,10 +127,11 @@ class TestFlyDSLMXFP8Metadata(TestCase):
                 torch.float8_e8m0fnu,
                 device=torch.device("cpu"),
             )
-            self.assertIsNone(
+            self.assertEqual(
                 mm.get_flydsl_mxfp8_template_kwargs(
                     layout, a, b, bad_device_scale, scale_b[0]
-                )
+                ),
+                [],
             )
 
             with mock.patch.object(
@@ -130,10 +139,11 @@ class TestFlyDSLMXFP8Metadata(TestCase):
                 "is_unaligned",
                 side_effect=lambda node: node is a,
             ):
-                self.assertIsNone(
+                self.assertEqual(
                     mm.get_flydsl_mxfp8_template_kwargs(
                         layout, a, b, scale_a[0], scale_b[0]
-                    )
+                    ),
+                    [],
                 )
 
     def test_runtime_cache_reuses_specialization(self):
@@ -233,6 +243,122 @@ class TestFlyDSLMXFP8Device(TestCase):
         self.assertIn("make_mxfp8_scaled_mm_gfx950", code)
         self.assertIn("mat2.transpose(0, 1)", code)
         self.assertNotIn("extern_kernels._scaled_mm_v2(", code)
+
+    # One entry per tiling feature the parameterized kernel exposes, so a
+    # regression in LDS staging, register blocking or the staged pipeline shows
+    # up as a numerical failure on the specific config that broke.
+    @parametrize(
+        "shape,tile",
+        [
+            # (m, n, k), (TILE_M, TILE_N, TILE_K, STAGES, M_WARPS, N_WARPS, GROUP_M)
+            ((64, 96, 256), (16, 16, 128, 2, 1, 1, 0)),  # minimal, 1 wave
+            ((64, 64, 512), (64, 64, 128, 2, 1, 1, 0)),  # 4x4 register blocking
+            ((128, 128, 512), (64, 64, 128, 2, 2, 2, 0)),  # 2x2 waves over LDS
+            ((128, 128, 512), (64, 64, 256, 2, 2, 2, 0)),  # two MFMA steps / tile
+            ((128, 128, 1024), (64, 64, 128, 4, 2, 2, 0)),  # 4-stage pipeline
+            ((256, 256, 512), (128, 128, 128, 2, 2, 4, 0)),  # asymmetric waves
+            ((256, 256, 512), (128, 128, 128, 2, 2, 2, 4)),  # GROUP_M swizzle
+        ],
+    )
+    def test_mxfp8_tile_configs_match_reference(self, device, shape, tile):
+        if torch.version.hip is None:
+            self.skipTest("requires ROCm")
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        if arch != "gfx950":
+            self.skipTest("requires gfx950")
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        import flydsl.compiler as flyc
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            make_mxfp8_scaled_mm_gfx950,
+        )
+
+        m, n, k = shape
+        block_m, block_n, block_k, stages, m_waves, n_waves, group_m = tile
+        a, b, scale_a, scale_b = self._make_inputs(m, n, k, device)
+        out = torch.zeros(m, n, device=device, dtype=torch.bfloat16)
+        scale_a_u8 = scale_a.view(torch.uint8)
+        scale_b_u8 = scale_b.view(torch.uint8)
+
+        launcher = make_mxfp8_scaled_mm_gfx950(
+            m=m,
+            n=n,
+            k=k,
+            out_dtype="bfloat16",
+            block_m=block_m,
+            block_n=block_n,
+            block_k=block_k,
+            stages=stages,
+            m_waves=m_waves,
+            n_waves=n_waves,
+            group_m=group_m,
+        )
+        runtime_args = (a, b, scale_a_u8, scale_b_u8, out, 0)
+        compiled = flyc.compile(
+            launcher,
+            *[
+                flyc.from_torch_tensor(t).mark_layout_dynamic()
+                for t in (a, b, scale_a_u8, scale_b_u8, out)
+            ],
+            0,
+        )
+        compiled(*runtime_args)
+        torch.cuda.synchronize()
+
+        a_dequant = a.float() * scale_a.float().repeat_interleave(32, 1)
+        b_dequant = b.float() * scale_b.float().repeat_interleave(32, 1)
+        reference = (a_dequant @ b_dequant.t()).to(torch.bfloat16)
+        self.assertEqual(out, reference, rtol=2e-2, atol=5e-1)
+
+    def test_scaled_mm_v2_flydsl_autotunes_multiple_configs(self, device):
+        if torch.version.hip is None:
+            self.skipTest("requires ROCm")
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        if arch != "gfx950":
+            self.skipTest("requires gfx950")
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        m, n, k = 128, 128, 512
+        a, b, scale_a, scale_b = self._make_inputs(m, n, k, device)
+
+        def fn(a, b, scale_a, scale_b):
+            return F.scaled_mm(
+                a,
+                b.t(),
+                scale_a,
+                ScalingType.BlockWise1x32,
+                scale_b,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.NO_SWIZZLE,
+                swizzle_b=SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
+
+        expected = fn(a, b, scale_a, scale_b)
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="FLYDSL",
+            flydsl_enable_autotuning=True,
+        ):
+            # More than one tile divides this shape, so autotuning has a real
+            # choice to make here.
+            candidates = flydsl_heuristics.get_mxfp8_gemm_configs_for_shape(
+                m, n, k, "bfloat16"
+            )
+            self.assertGreater(len(candidates), 1)
+
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            actual, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b)
+
+        self.assertEqual(actual, expected, rtol=2e-2, atol=5e-1)
+        self.assertIn("async_compile.flydsl", code)
 
 
 instantiate_device_type_tests(TestFlyDSLMXFP8Device, globals(), only_for="cuda")

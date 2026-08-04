@@ -4,7 +4,12 @@ import importlib
 from typing import Any
 
 
-__all__ = ["make_mxfp8_scaled_mm_gfx950"]
+__all__ = [
+    "MXFP8GemmParams",
+    "make_mxfp8_param_and_validate",
+    "make_mxfp8_scaled_mm_gfx950",
+    "mxfp8_gemm_derived",
+]
 
 
 def __getattr__(name: str) -> Any:

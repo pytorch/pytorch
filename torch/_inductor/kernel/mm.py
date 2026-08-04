@@ -988,20 +988,22 @@ def get_flydsl_mxfp8_template_kwargs(
     mat_b: Any,
     scale_a: Any,
     scale_b: Any,
-) -> dict[str, Any] | None:
-    """Return one correctness-first gfx950 MXFP8 template configuration."""
+) -> list[dict[str, Any]]:
+    """Return shape-compatible gfx950 MXFP8 template configurations."""
+    from ..heuristics.template.flydsl import get_mxfp8_gemm_configs_for_shape
+
     if not use_flydsl_mxfp8_template(layout):
-        return None
+        return []
 
     nodes = (mat_a, mat_b, scale_a, scale_b)
     if any(node.get_device() != layout.device for node in nodes):
-        return None
+        return []
 
     if is_unaligned(mat_a) or is_unaligned(mat_b):
-        return None
+        return []
 
     if any(len(node.get_size()) != 2 for node in nodes):
-        return None
+        return []
 
     static_ints = PythonWrapperCodegen.statically_known_list_of_ints_or_none
     a_shape = static_ints(mat_a.get_size())
@@ -1013,7 +1015,7 @@ def get_flydsl_mxfp8_template_kwargs(
         shape is None
         for shape in (a_shape, b_shape, scale_a_shape, scale_b_shape, out_shape)
     ):
-        return None
+        return []
 
     m, k = a_shape
     b_k, n = b_shape
@@ -1029,7 +1031,7 @@ def get_flydsl_mxfp8_template_kwargs(
         or scale_b_shape != [n, k // 32]
         or out_shape != [m, n]
     ):
-        return None
+        return []
 
     a_stride = static_ints(mat_a.get_stride())
     b_stride = static_ints(mat_b.get_stride())
@@ -1043,7 +1045,7 @@ def get_flydsl_mxfp8_template_kwargs(
         or scale_b_stride != [k // 32, 1]
         or out_stride != [n, 1]
     ):
-        return None
+        return []
 
     static_int = PythonWrapperCodegen.statically_known_int_or_none
     offsets = [
@@ -1054,7 +1056,7 @@ def get_flydsl_mxfp8_template_kwargs(
         layout.offset,
     ]
     if any(static_int(offset) != 0 for offset in offsets):
-        return None
+        return []
 
     if (
         mat_a.get_dtype() != torch.float8_e4m3fn
@@ -1063,14 +1065,21 @@ def get_flydsl_mxfp8_template_kwargs(
         or scale_b.get_dtype() != torch.float8_e8m0fnu
         or layout.dtype not in (torch.bfloat16, torch.float16)
     ):
-        return None
+        return []
 
-    return {
-        "GEMM_M": m,
-        "GEMM_N": n,
-        "GEMM_K": k,
-        "OUT_DTYPE": "bfloat16" if layout.dtype == torch.bfloat16 else "float16",
-    }
+    out_dtype_name = "bfloat16" if layout.dtype == torch.bfloat16 else "float16"
+    # Config generation validates tile construction without a concrete shape;
+    # the selector drops the ones this shape cannot use before autotuning.
+    return [
+        {
+            **gemm_config,
+            "GEMM_M": m,
+            "GEMM_N": n,
+            "GEMM_K": k,
+            "OUT_DTYPE": out_dtype_name,
+        }
+        for gemm_config in get_mxfp8_gemm_configs_for_shape(m, n, k, out_dtype_name)
+    ]
 
 
 # Inductor has no template or extern choice that understands swizzled scale
@@ -1137,7 +1146,7 @@ def tuned_scaled_mm_v2(
             mat2_idx=1,
             out_dtype=out_dtype,
         )
-        mxfp8_kwargs = get_flydsl_mxfp8_template_kwargs(
+        mxfp8_configs = get_flydsl_mxfp8_template_kwargs(
             mxfp8_layout,
             mxfp8_a,
             mxfp8_b,
@@ -1145,7 +1154,7 @@ def tuned_scaled_mm_v2(
             mxfp8_scale_b,
         )
         mxfp8_choices: list[ChoiceCaller] = []
-        if mxfp8_kwargs is not None:
+        for mxfp8_kwargs in mxfp8_configs:
             flydsl_mxfp8_scaled_mm_template.maybe_append_choice(
                 mxfp8_choices,
                 input_nodes=list(mxfp8_kernel_inputs.nodes()),

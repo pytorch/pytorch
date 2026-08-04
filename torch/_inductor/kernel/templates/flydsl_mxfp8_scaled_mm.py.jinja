@@ -14,12 +14,31 @@ from torch._inductor.runtime.flydsl_cache import (
 {{gen_defines()}}
 
 
-_mxfp8_param = MXFP8GemmParams(GEMM_M, GEMM_N, GEMM_K, OUT_DTYPE)
+_mxfp8_param = MXFP8GemmParams(
+    m=GEMM_M,
+    n=GEMM_N,
+    k=GEMM_K,
+    out_dtype=OUT_DTYPE,
+    block_m=TILE_M,
+    block_n=TILE_N,
+    block_k=TILE_K,
+    stages=STAGES,
+    m_waves=BLOCK_M_WARPS,
+    n_waves=BLOCK_N_WARPS,
+    group_m=GROUP_M,
+)
 _mxfp8_launcher = make_mxfp8_scaled_mm_gfx950(
     m=GEMM_M,
     n=GEMM_N,
     k=GEMM_K,
     out_dtype=OUT_DTYPE,
+    block_m=TILE_M,
+    block_n=TILE_N,
+    block_k=TILE_K,
+    stages=STAGES,
+    m_waves=BLOCK_M_WARPS,
+    n_waves=BLOCK_N_WARPS,
+    group_m=GROUP_M,
 )
 _mxfp8_executor = None
 _mxfp8_init_lock = threading.Lock()
