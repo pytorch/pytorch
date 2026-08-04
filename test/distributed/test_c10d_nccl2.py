@@ -300,6 +300,96 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
             self.assertEqual(chunk, torch.full_like(chunk, rank))
 
 
+class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
+    """register_mem_pool / deregister_mem_pool: the NCCL user-buffer path that
+    Megatron's nccl_allocator drives (megatron/core/nccl_allocator.py)."""
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    def _backend(self):
+        # nccl2 bootstraps its communicator on the first collective, and
+        # register_mem_pool needs it up (as it does on the stock backend, whose
+        # test eagerly inits via init_process_group(device_id=...) instead).
+        dist.all_reduce(torch.zeros(1, device=self.device))
+        torch.cuda.synchronize()
+        return dist.get_backend_impl(device=self.device)
+
+    @property
+    def _all_reduced(self) -> float:
+        return float(sum(range(self.world_size)))
+
+    def _pool_tensor(self, pool, numel: int = 1024 * 1024) -> torch.Tensor:
+        with torch.cuda.use_mem_pool(pool):
+            return torch.full((numel,), float(self.rank), device=self.device)
+
+    def _check_all_reduce_over_pool(self, symm: bool) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+        tensor = self._pool_tensor(pool)
+        backend.register_mem_pool(pool, symm=symm)
+        try:
+            dist.all_reduce(tensor)
+            torch.cuda.synchronize()
+            self.assertEqual(tensor, torch.full_like(tensor, self._all_reduced))
+        finally:
+            backend.deregister_mem_pool(pool)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool(self) -> None:
+        self._check_all_reduce_over_pool(symm=False)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_symmetric(self) -> None:
+        self._check_all_reduce_over_pool(symm=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_round_trip(self) -> None:
+        # Megatron re-enters its allocator context once per bucket: deregister,
+        # grow the pool, register again. Neither leg may trip over a segment
+        # the caching-allocator hook already registered, and the second
+        # register has to pick up segments the hook never saw (reused ones).
+        backend = self._backend()
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+        first = self._pool_tensor(pool)
+        backend.register_mem_pool(pool, symm=True)
+        backend.deregister_mem_pool(pool)
+        second = self._pool_tensor(pool)
+        backend.register_mem_pool(pool, symm=True)
+        try:
+            for tensor in (first, second):
+                dist.all_reduce(tensor)
+            torch.cuda.synchronize()
+            for tensor in (first, second):
+                self.assertEqual(tensor, torch.full_like(tensor, self._all_reduced))
+        finally:
+            backend.deregister_mem_pool(pool)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_deregister_unregistered_mem_pool_raises(self) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+        with self.assertRaisesRegex(RuntimeError, "not previously registered"):
+            backend.deregister_mem_pool(pool)
+
+
 class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     @classmethod
     def backend_str(cls) -> str:
