@@ -10248,10 +10248,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(torch.compile(fn)(x), exp)
 
     def test_associative_scan_op_in_vmap_eager(self):
-        # vmap over the raw associative_scan_op HOP (eager, no torch.compile).
-        # combine_mode="generic"/"pointwise" in the public API bypass or compile
-        # the HOP, so this is the path that exercises associative_scan_batch_rule
-        # directly and is convenient to set a breakpoint in.
         x = torch.randn(3, 4, 2)
 
         # The raw HOP receives the flattened operator: 2 * num_leaves args
