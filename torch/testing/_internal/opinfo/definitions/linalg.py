@@ -1137,19 +1137,23 @@ def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kw
     # No zero-size dims here: they trip generic coverage suites (e.g. vmap can't
     # batch over a size-0 dim). Empty/degenerate shapes are covered separately by
     # the dedicated test_polar_empty test in test_linalg.py.
-    # Full-rank well-conditioned samples: the decomposition is differentiable
-    # only for full column rank A, and near-singular samples amplify float32
-    # round-off in the backward past test tolerances.
-    make_arg = partial(
-        make_fullrank_matrices_with_distinct_singular_values,
-        dtype=dtype,
-        device=device,
-        requires_grad=requires_grad,
-    )
+    # Gradient tests need full-rank, well-conditioned samples because the
+    # decomposition is differentiable only for full column rank A, and
+    # near-singular samples amplify float32 round-off past test tolerances.
+    if requires_grad:
+        make_arg = partial(
+            make_fullrank_matrices_with_distinct_singular_values,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+    else:
+        make_arg = partial(make_tensor, dtype=dtype, device=device, low=-2, high=2)
     batches = [(), (2,), (1, 1)]
     sizes = [(5, 5), (5, 3), (2, 2)]
     for batch, (m, n) in product(batches, sizes):
-        yield SampleInput(make_arg(*(batch + (m, n))))
+        shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape) if requires_grad else make_arg(shape))
 
 
 def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
