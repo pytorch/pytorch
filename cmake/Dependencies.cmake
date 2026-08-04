@@ -1118,8 +1118,8 @@ if(USE_ROCM)
     endif()
 
     # ---[ Kernel asserts
-    # Kernel asserts is disabled for ROCm by default.
-    # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
+    # Kernel asserts is enabled for ROCm by default.
+    # It can be turned off by setting USE_ROCM_KERNEL_ASSERT=0 in the environment.
     if(USE_ROCM_KERNEL_ASSERT)
       message(STATUS "Enabling Kernel Assert for ROCm")
     else()
