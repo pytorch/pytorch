@@ -18,27 +18,27 @@ _NAMESPACE = "libtorch_agn_2_14"
 
 
 def my_has_storage(t) -> bool:
-    """Stable ``Tensor::has_storage()`` (requires build time 2.14+)."""
+    """Stable ``Tensor::has_storage()`` (build time 2.14+, runtime 2.14+)."""
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
 def my_bitwise_and(self, other):
-    """Stable ``bitwise_and.Tensor`` (requires build time 2.14+)."""
+    """Stable ``bitwise_and.Tensor`` (build time 2.14+, runtime 2.10+)."""
     return torch.ops.libtorch_agn_2_14.my_bitwise_and.default(self, other)
 
 
 def my_bitwise_or(self, other):
-    """Stable ``bitwise_or.Tensor`` (requires build time 2.14+)."""
+    """Stable ``bitwise_or.Tensor`` (build time 2.14+, runtime 2.10+)."""
     return torch.ops.libtorch_agn_2_14.my_bitwise_or.default(self, other)
 
 
 def my_bitwise_left_shift(self, other):
-    """Stable ``bitwise_left_shift.Tensor`` (requires build time 2.14+)."""
+    """Stable ``bitwise_left_shift.Tensor`` (build time 2.14+, runtime 2.10+)."""
     return torch.ops.libtorch_agn_2_14.my_bitwise_left_shift.default(self, other)
 
 
 def my_bitwise_right_shift(self, other):
-    """Stable ``bitwise_right_shift.Tensor`` (requires build time 2.14+)."""
+    """Stable ``bitwise_right_shift.Tensor`` (build time 2.14+, runtime 2.10+)."""
     return torch.ops.libtorch_agn_2_14.my_bitwise_right_shift.default(self, other)
 
 
