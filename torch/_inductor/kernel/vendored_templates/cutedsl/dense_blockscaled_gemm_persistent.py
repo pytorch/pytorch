@@ -510,6 +510,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         if cutlass.const_expr(local_reduce_tensor is not None):
             local_reduce_tensor = add_batch_mode(local_reduce_tensor)
 
+        has_local_reduce = cutlass.const_expr(
+            local_reduce_tensor is not None or local_reduce_feeds_main
+        )
+        if cutlass.const_expr(has_local_reduce):
+            assert local_reduce_group > 1
+            assert local_reduce_axis in (0, 1)
+        if cutlass.const_expr(local_reduce_feed_tensor is not None):
+            assert local_reduce_feeds_main
+
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
         self.local_reduce_input_coefficient = 1.0
@@ -520,6 +529,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_denominator_scale = 1.0
         self.local_reduce_denominator_bias = 0.0
         reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
+        assert reduction_expression.has_valid_parameters, (
+            f"invalid parameters for local reduction {reduction_expression.kind}"
+        )
         local_reduce_type = reduction_expression.kind
         if cutlass.const_expr(local_reduce_type == "mean_linear"):
             input_coefficient, result_coefficient, bias = (
