@@ -2468,17 +2468,33 @@ def chromium_event_timed(
             chromium_event_log._reset_to_state(*reset_state)
 
 
+# (id(scope), name) -> the token of whichever hook currently owns that
+# binding. A value comparison isn't enough here: CompilePackage.install() can
+# re-materialize a name like __builtins_dict__ with the *same* object a
+# pre-reset hook already installed, so an identity-of-value check would still
+# let the stale hook delete it. A token makes ownership explicit instead.
+_cleanup_owners: dict[tuple[int, str], object] = {}
+
+
 @dataclasses.dataclass
 class CleanupHook:
     """Remove a global variable when hook is called"""
 
     scope: dict[str, Any]
     name: str
+    token: object = dataclasses.field(compare=False, repr=False)
 
     def __call__(self, *args: Any) -> None:
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
+        # Hooks fire when the owning code object is collected, which can happen
+        # after something else has taken over this name -- CompilePackage.install()
+        # reinstalls precompiled state under names a pre-reset compile still
+        # owns. Only clean up while nothing has claimed the name out from under us.
+        key = (id(self.scope), self.name)
+        if _cleanup_owners.pop(key, None) is not self.token:
+            return
         # During interpreter shutdown the scope's module __dict__ may already
         # have been cleared, so the name can be gone. Use pop to avoid a
         # KeyError surfacing as an "Exception ignored in weakref callback".
@@ -2490,7 +2506,16 @@ class CleanupHook:
             raise AssertionError(f"Name {name!r} already exists in scope")
         CleanupManager.count += 1
         scope[name] = val
-        return CleanupHook(scope, name)
+        token = object()
+        _cleanup_owners[(id(scope), name)] = token
+        return CleanupHook(scope, name, token)
+
+    @staticmethod
+    def disown(scope: dict[str, Any], name: str) -> None:
+        """Invalidate whichever hook currently owns (scope, name), so that if
+        its code object outlives this call, firing later is a no-op instead of
+        deleting a binding something else has since taken over."""
+        _cleanup_owners.pop((id(scope), name), None)
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -2979,10 +3004,11 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
+    from .variables.lazy import ComputedLazyConstantVariable
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized():
+        if not arg.is_realized() and not isinstance(arg, ComputedLazyConstantVariable):
             # Find if the arg would be realized as SymNodeVariable later on. If yes,
             # realize it and specialize. Else return the arg.
 
@@ -4031,6 +4057,32 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> bool:
+    """True if ``target`` is a custom op whose ``register_fake`` ran earlier in
+    this trace -- i.e. its ``_abstract_fn`` has a pending (not-yet-applied)
+    attribute mutation. Distinguishes an op defined+register_fake'd inside the
+    compiled function (recoverable via graph break) from a genuinely
+    unregistered op (should hard-error with actionable guidance).
+
+    Only detects the ``CustomOpDef.register_fake`` method form (a tracked
+    pending ``_abstract_fn`` store on ``tx.output.side_effects``); other forms
+    (e.g. an op with no ``CustomOpDef``, or a definition inside a HOP body whose
+    mutation lives in a subtracer) fall through to the hard error, preserving
+    pre-existing behavior."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    from torch._library.custom_ops import _maybe_get_opdef
+
+    opdef = _maybe_get_opdef(target)
+    if opdef is None:
+        return False
+    side_effects = tx.output.side_effects
+    vt = side_effects.id_to_variable.get(id(opdef))
+    if vt is None:
+        return False
+    return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4245,6 +4297,32 @@ def _get_fake_value_impl(
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
+        elif "no fake impl registered" in str(cause) and _custom_op_fake_impl_pending(
+            tx, node.target
+        ):
+            # A custom op was defined and register_fake'd inside the compiled
+            # function, then called. Under nested graph breaks Dynamo traces
+            # into the inlined op definition, so register_fake's mutation of
+            # _abstract_fn is recorded as a pending side effect rather than run
+            # eagerly; it is not yet applied to the real op when the op is called
+            # here, so its fake kernel raises "no fake impl registered". (Without
+            # nested graph breaks the definition graph-breaks and the op is fully
+            # registered before the call, so this path is not hit.) Graph break:
+            # the definition (and register_fake) run eagerly and the op call
+            # itself falls back to eager -- it is not captured into the resumed
+            # graph. Unlike the generic RuntimeError below this is recoverable,
+            # so do NOT wrap it as a hard TorchRuntimeError.
+            # NB: gated on a pending _abstract_fn mutation so a genuinely
+            # unregistered op still hard-errors below with actionable guidance.
+            unimplemented(
+                gb_type="Custom op missing fake impl during tracing",
+                context=f"{node.target}",
+                explanation="A custom operator was defined and register_fake'd "
+                "inside the compiled function, then called before the "
+                "register_fake side effect was applied.",
+                hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
