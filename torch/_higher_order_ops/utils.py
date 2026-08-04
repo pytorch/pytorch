@@ -16,7 +16,11 @@ from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -306,7 +310,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -320,13 +324,13 @@ def _set_compilation_env():
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch.fx._symbolic_trace._set_is_fx_tracing(False)
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
@@ -335,8 +339,8 @@ def _set_compilation_env():
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
+        if is_fake_tensor(inp):
+            fake_mode_det = maybe_get_fake_mode(inp)
             break
 
     fake_mode: AbstractContextManager = nullcontext()
@@ -456,7 +460,7 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
@@ -466,14 +470,14 @@ def _collect_fake_inputs(inputs):
                             unwrapped_input = getattr(val, attr_name)
                             if not isinstance(unwrapped_input, torch.Tensor):
                                 continue
-                            if not isinstance(unwrapped_input, FakeTensor):
+                            if not is_fake_tensor(unwrapped_input):
                                 raise AssertionError(
                                     f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
                                 )
                             inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor, got {type(val)}"
                             )
@@ -948,8 +952,15 @@ def get_dummy_aot_autograd_config():
     )
 
 
-# Slices off the first element of a given dimension
+# Slices off the first element of a given dimension. Used to build a
+# representative single slice for subgraph tracing of control-flow ops.
+# When `dim` has size 0 (e.g. a zero-length scan) there is no real slice to
+# take, so return an uninitialized tensor with `dim` removed.
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    if t.shape[dim] == 0:
+        shape = list(t.shape)
+        del shape[dim]
+        return t.new_zeros(shape)
     return torch.select_copy(t, dim, 0)
 
 
@@ -1202,34 +1213,51 @@ class SubgraphCallableWrapper:
 
 
 class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
-    """
-    Wraps a subgraph with functionalization context for the AOT Dispatcher
-    metadata collection pass.
+    """Functionalizes a subgraph and optionally returns selected input updates.
+
+    Each update is a new tensor; the original input is not mutated.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
-    def __init__(self, ctx, subgraph):
+    def __init__(self, ctx, subgraph, mutated_input_indices=()):
         super().__init__(subgraph, subgraph)
         self.ctx = ctx
+        self.mutated_input_indices = mutated_input_indices
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        def append_mutated_inputs(fn):
+            if not self.mutated_input_indices:
+                return fn
+
+            def wrapped(*args, **kwargs):
+                inputs = args[0] if self._boxed_call else args
+                # Snapshot before a boxed GraphModule clears its input list.
+                mutated_inputs = tuple(inputs[i] for i in self.mutated_input_indices)
+                # Dynamo normalizes invoke_subgraph outputs to tuples.
+                return (*fn(*args, **kwargs), *mutated_inputs)
+
+            return wrapped
+
         if isinstance(self.subgraph, torch.fx.GraphModule):
             if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                functionalized = self.ctx.functionalize(
+                    append_mutated_inputs(self.subgraph)
+                )
                 if len(args) == 1 and isinstance(args[0], list):
-                    return self.ctx.functionalize(self.subgraph)(args[0])
-                return self.ctx.functionalize(self.subgraph)(list(args))
+                    return functionalized(args[0])
+                return functionalized(list(args))
             else:
                 # Running graph with interpreter is needed for propagating the stack_trace
                 with fx_traceback.preserve_node_meta():
                     return self.ctx.functionalize(
-                        torch.fx.Interpreter(self.subgraph).run
+                        append_mutated_inputs(torch.fx.Interpreter(self.subgraph).run)
                     )(*args, **kwargs)
-        functionalized = self.ctx.functionalize(self.subgraph)
+        functionalized = self.ctx.functionalize(append_mutated_inputs(self.subgraph))
         if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])

@@ -630,14 +630,18 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
+def arith_promoted(op, a, b):
+    args = (a, b)
     if any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args):
         raise AssertionError("Promotion of vector types is not supported")
 
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
+    dtype = get_promote_dtype(args)
+    cpp_type = DTYPE_TO_CPP[dtype] if dtype is not None else f"decltype({a})"
+    if dtype in (torch.int32, torch.int64):
+        # signed overflow is UB in C++; int8/int16 promote to int and cannot overflow
+        cast = f"static_cast<std::make_unsigned_t<{cpp_type}>>"
+        return f"{cpp_type}({cast}({a}) {op} {cast}({b}))"
+    return f"{cpp_type}({a} {op} {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -645,15 +649,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return arith_promoted("+", a, b)
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return arith_promoted("-", a, b)
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return arith_promoted("*", a, b)
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1012,6 +1016,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"std::max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1330,9 +1339,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
@@ -1715,6 +1722,10 @@ class CppVecOverrides(CppOverrides):
             return f"{a_cast} | {b_cast}"
         else:
             return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def fmaximum(a, b):
+        return f"decltype({a})::blendv({a}, {b}, {a} < {b})"
 
     @staticmethod
     def square(a):
@@ -5128,20 +5139,22 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
-    def _get_indexing_ranges_exprs(self, node):
+    def _get_indexing_ranges_exprs(self, node) -> ir.ExtraIndexingConstraints:
         if isinstance(node, FusedSchedulerNode):
             if len(node.snodes) <= 0:
                 raise AssertionError(node.snodes)
             var_ranges = None
             indexing_exprs = OrderedSet[Any]()
             for snode in node.snodes:
-                v, exprs = self._get_indexing_ranges_exprs(snode)
+                constraints = self._get_indexing_ranges_exprs(snode)
                 if var_ranges is None:
-                    var_ranges = v
-                if var_ranges != v:
-                    raise AssertionError((var_ranges, v, node.snodes))
-                indexing_exprs.update(exprs)
-            return var_ranges, list(indexing_exprs)
+                    var_ranges = constraints.ranges
+                if var_ranges != constraints.ranges:
+                    raise AssertionError((var_ranges, constraints.ranges, node.snodes))
+                indexing_exprs.update(constraints.exprs)
+            if var_ranges is None:
+                raise AssertionError("expected at least one snode to set var_ranges")
+            return ir.ExtraIndexingConstraints(var_ranges, list(indexing_exprs))
 
         if not isinstance(node, SchedulerNode):
             raise AssertionError("expected isinstance(node, SchedulerNode)")
@@ -5149,7 +5162,9 @@ class CppScheduling(BaseScheduling):
         if not isinstance(comp_buffer, ir.ComputedBuffer):
             raise AssertionError("expected isinstance(comp_buffer, ir.ComputedBuffer)")
         _, body, _ = comp_buffer.get_default_sizes_body()
-        return body.var_ranges, list(body.indexing_exprs.values())
+        return ir.ExtraIndexingConstraints(
+            body.var_ranges, list(body.indexing_exprs.values())
+        )
 
     def _snapshot_node_loop_states(self, node):
         if isinstance(node, SchedulerNode):
@@ -5598,7 +5613,7 @@ class CppScheduling(BaseScheduling):
 
         if extra_indexing_ranges is None:
             raise AssertionError("extra_indexing_ranges is None")
-        extra_indexing_constraints = (
+        extra_indexing_constraints = ir.ExtraIndexingConstraints(
             extra_indexing_ranges,
             list(extra_indexing_exprs),
         )
