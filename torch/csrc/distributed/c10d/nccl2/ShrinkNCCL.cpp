@@ -23,8 +23,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::Options> cloneOptions(
   options->group_name = source->group_name;
   options->group_desc = source->group_desc;
   options->global_ranks_in_group = source->global_ranks_in_group;
-  options->use_pg_for_symm_mem_rendezvous =
-      source->use_pg_for_symm_mem_rendezvous;
   options->enable_reconfigure = source->enable_reconfigure;
   return options;
 }

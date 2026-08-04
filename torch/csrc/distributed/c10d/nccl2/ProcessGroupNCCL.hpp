@@ -34,7 +34,6 @@
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/NCCLCommProvider.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -92,8 +91,7 @@ class NCCLException : public std::exception {
     }                                                                      \
   } while (0)
 
-class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
-                                   public ::c10d::NCCLCommProvider {
+class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
@@ -307,7 +305,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend,
     return name_;
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
-  int64_t getCommPtr() override;
+  int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
     return timing_enabled_.load();
   }

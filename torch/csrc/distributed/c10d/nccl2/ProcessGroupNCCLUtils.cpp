@@ -77,6 +77,7 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
     case at::ScalarType::Bool:
     case at::ScalarType::Float8_e4m3fnuz:
     case at::ScalarType::Float8_e5m2fnuz:
+    case at::ScalarType::Float4_e2m1fn_x2:
       return ncclUint8;
     default:
       throw std::runtime_error("Unsupported tensor data type for NCCL");
@@ -97,8 +98,7 @@ void createPreMulSum(
   void* scalar = is_tensor ? tensor.data_ptr() : &scalar_factor;
 
   TORCH_INTERNAL_ASSERT(
-      is_tensor ? dataType == getNcclDataTypeInternal(tensor)
-                : dataType != ncclBfloat16,
+      !is_tensor || dataType == getNcclDataTypeInternal(tensor),
       "PreMulSum factor type must match input data type");
   NCCL_CHECK(
       nccl_api,
@@ -200,6 +200,9 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
+  TORCH_CHECK(
+      tensor.scalar_type() != at::ScalarType::Float4_e2m1fn_x2,
+      "Unsupported Float4 type for NCCL reduction");
   if (tensor.scalar_type() == at::kBool) {
     if (op == ::c10d::ReduceOp::SUM) {
       return ncclMax;
