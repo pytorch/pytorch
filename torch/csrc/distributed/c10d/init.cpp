@@ -4487,7 +4487,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   The process group collective sequence number of the
                   corresponding collective communication.
             )")
-          .def("_get_timeout", &::c10d::Work::getTimeout)
+          .def_property_readonly("timeout", &::c10d::Work::getTimeout)
           .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {

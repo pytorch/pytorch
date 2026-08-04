@@ -18,6 +18,22 @@
 
 namespace c10d::nccl2 {
 
+namespace detail {
+
+inline int getRootIndex(int rank, int numRanks, int numRoots) {
+  const int remainder = numRanks % numRoots;
+  const int ranksPerRoot = numRanks / numRoots;
+  const int largerRootsLimit = remainder * (ranksPerRoot + 1);
+  if (rank < largerRootsLimit) {
+    return rank % (ranksPerRoot + 1) ? -1 : rank / (ranksPerRoot + 1);
+  }
+  return (rank - largerRootsLimit) % ranksPerRoot
+      ? -1
+      : ((rank - largerRootsLimit) / ranksPerRoot) + remainder;
+}
+
+} // namespace detail
+
 class NCCLBootstrap {
  public:
   NCCLBootstrap(
