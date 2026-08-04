@@ -21,9 +21,9 @@ class TestSplit(TestCase):
         super().setUp()
         self.batch, self.height, self.width = dims(3)
 
-    def test_dim_object_split_all_bound(self, device):
+    def test_dim_object_split_all_bound(self):
         """Test split with all Dim objects bound to specific sizes."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -45,9 +45,9 @@ class TestSplit(TestCase):
         self.assertEqual(d2.size, 4)
         self.assertEqual(d3.size, 5)
 
-    def test_dim_object_split_unbound(self, device):
+    def test_dim_object_split_unbound(self):
         """Test split with unbound Dim objects."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -74,9 +74,9 @@ class TestSplit(TestCase):
         self.assertEqual(d2.size, 4)
         self.assertEqual(d3.size, 4)
 
-    def test_dim_object_split_mixed_bound_unbound(self, device):
+    def test_dim_object_split_mixed_bound_unbound(self):
         """Test split with mix of bound and unbound Dim objects."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -94,9 +94,9 @@ class TestSplit(TestCase):
         # Verify unbound dimension was bound to remaining size
         self.assertEqual(d2.size, 7)
 
-    def test_dim_object_split_multiple_unbound(self, device):
+    def test_dim_object_split_multiple_unbound(self):
         """Test split with multiple unbound Dim objects."""
-        tensor = torch.randn(3, 15, 5, device=device)
+        tensor = torch.randn(3, 15, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -116,9 +116,9 @@ class TestSplit(TestCase):
         self.assertEqual(d2.size, 6)
         self.assertEqual(d3.size, 6)
 
-    def test_dim_object_split_uneven_remainder(self, device):
+    def test_dim_object_split_uneven_remainder(self):
         """Test split with unbound dimensions that don't divide evenly."""
-        tensor = torch.randn(3, 14, 5, device=device)  # 14 doesn't divide evenly by 3
+        tensor = torch.randn(3, 14, 5)  # 14 doesn't divide evenly by 3
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -135,9 +135,9 @@ class TestSplit(TestCase):
         self.assertEqual(d2.size, 6)
         self.assertEqual(d3.size, 5)
 
-    def test_split_with_dim_object_parameter(self, device):
+    def test_split_with_dim_object_parameter(self):
         """Test split when dim parameter is a Dim object."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -149,9 +149,9 @@ class TestSplit(TestCase):
         result = t.split([d1, d2, d3], dim=y)
         self.assertEqual(len(result), 3)
 
-    def test_error_mixed_types(self, device):
+    def test_error_mixed_types(self):
         """Test error when mixing integers and Dim objects in split sizes."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -164,9 +164,9 @@ class TestSplit(TestCase):
         with self.assertRaises(TypeError):
             t.split([3, d1, 5], dim=y)
 
-    def test_error_dim_parameter_with_int_sizes(self, device):
+    def test_error_dim_parameter_with_int_sizes(self):
         """Test error when dim parameter is Dim but sizes are integers."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -183,9 +183,9 @@ class TestSplit(TestCase):
         ):
             t.split([3, 4, 5], dim=y)
 
-    def test_error_size_mismatch(self, device):
+    def test_error_size_mismatch(self):
         """Test error when bound sizes don't match tensor dimension."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -197,9 +197,9 @@ class TestSplit(TestCase):
         with self.assertRaises(TypeError):
             t.split([d1, d2, d3], dim=y)
 
-    def test_error_bound_sizes_exceed_tensor(self, device):
+    def test_error_bound_sizes_exceed_tensor(self):
         """Test error when bound sizes exceed tensor dimension."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -211,9 +211,9 @@ class TestSplit(TestCase):
         with self.assertRaises(TypeError):
             t.split([d1, d2, d3], dim=y)
 
-    def test_error_nonexistent_dimension(self, device):
+    def test_error_nonexistent_dimension(self):
         """Test error when splitting on non-existent dimension."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -222,9 +222,9 @@ class TestSplit(TestCase):
         with self.assertRaises(TypeError):
             t.split([Dim("d1"), Dim("d2")], dim=w)
 
-    def test_split_different_dims(self, device):
+    def test_split_different_dims(self):
         """Test splitting along different dimensions."""
-        tensor = torch.randn(6, 8, 10, device=device)
+        tensor = torch.randn(6, 8, 10)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -242,9 +242,9 @@ class TestSplit(TestCase):
         self.assertEqual(result2[0].order(x, y, c).shape, (6, 8, 3))
         self.assertEqual(result2[1].order(x, y, d).shape, (6, 8, 7))
 
-    def test_split_single_dim_object(self, device):
+    def test_split_single_dim_object(self):
         """Test split with single Dim object that matches tensor dimension size."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -260,9 +260,9 @@ class TestSplit(TestCase):
         TEST_WITH_TORCHDYNAMO,
         "TorchDynamo doesn't preserve side effects during tracing",
     )
-    def test_dimension_binding_consistency(self, device):
+    def test_dimension_binding_consistency(self):
         """Test that split properly binds dimensions and they remain consistent."""
-        tensor = torch.randn(3, 15, 5, device=device)
+        tensor = torch.randn(3, 15, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -282,14 +282,14 @@ class TestSplit(TestCase):
         original_sizes = (d1.size, d2.size, d3.size)
 
         # Try to use bound dimension again - should maintain same size
-        another_tensor = torch.randn(original_sizes[0], 4, device=device)
+        another_tensor = torch.randn(original_sizes[0], 4)
         a = Dim("a")
         t2 = another_tensor[d1, a]  # d1 should still be bound to same size
         self.assertEqual(t2.order(d1, a).shape, (original_sizes[0], 4))
 
-    def test_split_result_tensor_types(self, device):
+    def test_split_result_tensor_types(self):
         """Test that split results are proper first-class dimension tensors."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -308,9 +308,9 @@ class TestSplit(TestCase):
                 dims_in_result = part.dims
                 self.assertTrue(len(dims_in_result) > 0)
 
-    def test_large_tensor_split(self, device):
+    def test_large_tensor_split(self):
         """Test split on larger tensors to verify performance and correctness."""
-        tensor = torch.randn(10, 100, 20, device=device)
+        tensor = torch.randn(10, 100, 20)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -324,13 +324,13 @@ class TestSplit(TestCase):
             self.assertEqual(part.order(x, split_dims[i], z).shape, (10, 5, 20))
             self.assertEqual(split_dims[i].size, 5)
 
-    def test_split_preserves_dtype(self, device):
+    def test_split_preserves_dtype(self):
         """Test that split preserves tensor dtype."""
         for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
             if dtype in [torch.int32, torch.int64]:
-                tensor = torch.randint(0, 10, (3, 12, 5), dtype=dtype, device=device)
+                tensor = torch.randint(0, 10, (3, 12, 5), dtype=dtype)
             else:
-                tensor = torch.randn(3, 12, 5, dtype=dtype, device=device)
+                tensor = torch.randn(3, 12, 5, dtype=dtype)
             x, y, z = dims(3)
             t = tensor[x, y, z]
 
@@ -341,9 +341,9 @@ class TestSplit(TestCase):
                 ordered = part.order(x, d1 if i == 0 else d2, z)
                 self.assertEqual(ordered.dtype, dtype)
 
-    def test_split_with_requires_grad(self, device):
+    def test_split_with_requires_grad(self):
         """Test split with tensors that require gradients."""
-        tensor = torch.randn(3, 12, 5, requires_grad=True, device=device)
+        tensor = torch.randn(3, 12, 5, requires_grad=True)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -356,9 +356,9 @@ class TestSplit(TestCase):
                 part.order(x, d1 if part is result[0] else d2, z).requires_grad
             )
 
-    def test_edge_case_single_element_splits(self, device):
+    def test_edge_case_single_element_splits(self):
         """Test splitting into single-element chunks."""
-        tensor = torch.randn(3, 5, 4, device=device)
+        tensor = torch.randn(3, 5, 4)
         x, y, z = dims(3)
         t = tensor[x, y, z]
 
@@ -374,12 +374,12 @@ class TestSplit(TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "TorchDynamo has issues with torch._tensor.split"
     )
-    def test_split_function_directly(self, device):
+    def test_split_function_directly(self):
         """Test that the standalone split function works correctly."""
         from functorch.dim import split
 
         # Test on regular tensor
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
         result = split(tensor, 4, dim=1)
         self.assertEqual(len(result), 3)  # 12 / 4 = 3
         for part in result:
@@ -400,13 +400,13 @@ class TestSplit(TestCase):
         TEST_WITH_TORCHDYNAMO,
         "TorchDynamo can't parse dims() without arguments from bytecode",
     )
-    def test_split_on_plain_tensor_with_fcd_args(self, device):
+    def test_split_on_plain_tensor_with_fcd_args(self):
         """Test that split() works on plain tensors when FCD arguments are provided."""
         # Test the exact example from the user message
         x, y = dims()
 
         # Split a plain tensor with FCD dimensions as split sizes
-        result = torch.randn(8, device=device).split([x, y], dim=0)
+        result = torch.randn(8).split([x, y], dim=0)
         self.assertEqual(len(result), 2)
 
         # Both parts should be FCD tensors
@@ -422,13 +422,13 @@ class TestSplit(TestCase):
 
         # Test with repeated dimensions
         x2 = Dim("x2")
-        result2 = torch.randn(8, device=device).split([x2, x2], dim=0)
+        result2 = torch.randn(8).split([x2, x2], dim=0)
         self.assertEqual(len(result2), 2)
         self.assertEqual(x2.size, 4)  # Both chunks should be size 4
 
-    def test_plain_tensor_regular_split_still_works(self, device):
+    def test_plain_tensor_regular_split_still_works(self):
         """Test that regular split on plain tensors still works without FCD args."""
-        tensor = torch.randn(3, 12, 5, device=device)
+        tensor = torch.randn(3, 12, 5)
 
         # Regular split without any FCD arguments should work normally
         result = tensor.split(4, dim=1)
@@ -440,7 +440,7 @@ class TestSplit(TestCase):
 
 class TestSplitDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-    def test_device_handling(self, device):
+    def test_device_handling(self):
         """Test split behavior with different devices."""
         if torch.cuda.is_available():
             # Test on CUDA
@@ -456,8 +456,9 @@ class TestSplitDevice(TestCase):
                 self.assertEqual(ordered.device.type, "cuda")
                 self.assertEqual(ordered.shape[0], 3)
                 self.assertEqual(ordered.shape[2], 5)
+
         # Test on CPU
-        cpu_tensor = torch.randn(3, 12, 5, device=device)
+        cpu_tensor = torch.randn(3, 12, 5)
         x, y, z = dims(3)
         t = cpu_tensor[x, y, z]
 
@@ -466,7 +467,7 @@ class TestSplitDevice(TestCase):
 
         for i, part in enumerate(result):
             ordered = part.order(x, d1 if i == 0 else d2, z)
-            self.assertEqual(ordered.device, torch.device(device))
+            self.assertEqual(ordered.device, torch.device("cpu"))
 
 instantiate_device_type_tests(TestSplit, globals())
 instantiate_device_type_tests(TestSplitDevice, globals())
