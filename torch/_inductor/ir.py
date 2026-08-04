@@ -380,6 +380,30 @@ def get_stride_order(
     return out
 
 
+def _empty_non_strided(
+    size: Sequence[int | torch.SymInt],
+    dtype: torch.dtype,
+    torch_layout: torch.layout,
+    device: torch.device | None,
+) -> torch.Tensor:
+    if torch_layout == torch.sparse_coo:
+        return torch.empty(size, dtype=dtype, layout=torch_layout, device=device)
+    # empty() rejects blocked sparse layouts; build a zero-nnz tensor by hand
+    batch = list(size[:-2])
+    row_compressed = torch_layout in (torch.sparse_csr, torch.sparse_bsr)
+    compressed_dim = size[-2] if row_compressed else size[-1]
+    index_kwargs = {"dtype": torch.int64, "device": device}
+    compressed_indices = torch.zeros(*batch, compressed_dim + 1, **index_kwargs)
+    plain_indices = torch.zeros(*batch, 0, **index_kwargs)
+    blocked = torch_layout in (torch.sparse_bsr, torch.sparse_bsc)
+    values_size = [*batch, 0, 1, 1] if blocked else [*batch, 0]
+    values = torch.zeros(values_size, dtype=dtype, device=device)
+    with torch.sparse.check_sparse_tensor_invariants(False):
+        return torch.sparse_compressed_tensor(
+            compressed_indices, plain_indices, values, size, layout=torch_layout
+        )
+
+
 @overload
 def ir_node_to_tensor(x: None, replace_symbols_with_hints: bool = False) -> None: ...
 
@@ -409,7 +433,16 @@ def ir_node_to_tensor(
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]
+        layout = x.get_layout()
+        if isinstance(layout, NonStridedLayout):
+            with V.graph.sizevars.shape_env.suppress_guards():
+                return _empty_non_strided(
+                    convert_shape_to_symint(size),
+                    x.get_dtype(),
+                    layout.torch_layout,
+                    x.get_device(),
+                )
+        stride = [shape_fn(s) for s in layout.stride]
     else:
         stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
@@ -4755,6 +4788,26 @@ class FixedLayout(Layout):
         return _fixed_indexer(self.size, self.stride, self.offset)
 
 
+class NonStridedLayout(FixedLayout):
+    """Layout for fallback-kernel outputs without strides (e.g. sparse tensors)"""
+
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: Sequence[_IntLike],
+        torch_layout: torch.layout,
+        is_pinned: bool = False,
+    ) -> None:
+        super().__init__(
+            device, dtype, size, [Integer(0)] * len(size), is_pinned=is_pinned
+        )
+        self.torch_layout = torch_layout
+
+    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
+        raise NotImplementedError(f"cannot index into {self.torch_layout} tensor")
+
+
 class FlexibleLayout(Layout):
     """
     A Tensor layout that we are allowed to change
@@ -8005,6 +8058,8 @@ class ExternKernel(InputsKernel):
             return
         if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
+        if isinstance(self.get_output_spec(), NonStridedLayout):
+            return
         op_name = self.get_op_name()
         name = self.get_name()
         if V.graph.cpp_wrapper:
@@ -8020,6 +8075,8 @@ class ExternKernel(InputsKernel):
         wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
+        if isinstance(self.get_output_spec(), NonStridedLayout):
+            return
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
@@ -9891,6 +9948,14 @@ class FallbackKernel(ExternKernelAlloc):
         except RuntimeError:
             # dispatch not implemented
             pass
+        if output.layout != torch.strided:
+            return NonStridedLayout(
+                output.device,
+                output.dtype,
+                convert_shape_to_inductor(output.size()),
+                output.layout,
+                is_pinned=is_pinned,
+            )
         return FixedLayout(
             output.device,
             output.dtype,

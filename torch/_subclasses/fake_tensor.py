@@ -2972,9 +2972,10 @@ class FakeTensorMode(TorchDispatchMode):
                     t.real_tensor = real_t
                     for s, real_s in zip(t.size(), real_t.size()):
                         go(s, real_s)  # type: ignore[arg-type]
-                    for s, real_s in zip(t.stride(), real_t.stride()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
+                    if t.layout == torch.strided:
+                        for s, real_s in zip(t.stride(), real_t.stride()):
+                            go(s, real_s)  # type: ignore[arg-type]
+                        go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         if self.shape_env is None:

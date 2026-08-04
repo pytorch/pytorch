@@ -1911,6 +1911,10 @@ def register_replacement(
                     invalid_args = True
                     return arg
 
+                if arg.layout != torch.strided:
+                    invalid_args = True
+                    return arg
+
                 refreshed_arg = torch.empty_strided(
                     arg.size(),
                     arg.stride(),

@@ -2190,7 +2190,10 @@ class GraphLowering(torch.fx.Interpreter):
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
-                        if user.target in need_fixed_layout:
+                        if (
+                            user.target in need_fixed_layout
+                            and n.meta["val"].layout == torch.strided
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(n.meta["val"].stride()),
