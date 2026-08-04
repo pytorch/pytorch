@@ -156,10 +156,14 @@ RUN rm install_onnx.sh common_utils.sh
 
 ARG TVM
 # Install apache-tvm for the dynamo tvm backend tests
+# apache-tvm declares apache-tvm-ffi>=0.1.12 with no upper bound, but its
+# prebuilt libtvm_runtime.so is ABI-bound to the tvm-ffi it was built against,
+# so the floating dep has to be pinned alongside it.
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/tvm.txt tvm.txt
-RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) && python -c "import tvm"'; fi
-RUN rm common_utils.sh tvm.txt
+COPY ci_commit_pins/tvm-ffi.txt tvm-ffi.txt
+RUN if [ -n "${TVM}" ]; then bash -c 'source ./common_utils.sh && pip_install apache-tvm==$(get_pinned_commit tvm) apache-tvm-ffi==$(get_pinned_commit tvm-ffi) && python -c "import tvm"'; fi
+RUN rm common_utils.sh tvm.txt tvm-ffi.txt
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
@@ -185,6 +189,14 @@ COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
 ENV INSTALLED_OPENBLAS=${OPENBLAS}
+
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
