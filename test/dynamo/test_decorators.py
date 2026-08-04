@@ -28,13 +28,6 @@ def my_custom_function(x):
     return x + 1
 
 
-def unregister_custom_class(cls):
-    name = torch._library.opaque_object.get_opaque_type_name(cls)
-    torch._library.opaque_object._OPAQUE_TYPES.pop(cls, None)
-    torch._library.opaque_object._OPAQUE_TYPES_BY_NAME.pop(name, None)
-    torch._C._unregister_opaque_type(name)
-
-
 class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -595,7 +588,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
-        self.addCleanup(unregister_custom_class, State)
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -892,7 +885,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
-        self.addCleanup(unregister_custom_class, State)
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1259,21 +1252,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
                     return i
             raise ValueError("sequence.index(x): x not in sequence")
 
-        def unregister_polyfill():
-            from torch._dynamo.trace_rules import (
-                _polyfilled_function_ids,
-                get_torch_obj_rule_map,
-            )
-            from torch._dynamo.variables import PolyfilledFunctionVariable
-            from torch._dynamo.variables.builder import VariableBuilder
-
-            for f in (operator.indexOf, polyfill):
-                VariableBuilder._id_dispatch().pop(id(f), None)
-                _polyfilled_function_ids.remove(id(f))
-                get_torch_obj_rule_map().pop(f, None)
-                PolyfilledFunctionVariable._get_polyfill_handlers().pop(f, None)
-
-        self.addCleanup(unregister_polyfill)
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, operator.indexOf)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf

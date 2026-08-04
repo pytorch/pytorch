@@ -202,7 +202,21 @@ class UserDefineSetAttr:
             return None
 
 
-_pybind11_enum_mod = None
+@functools.cache
+@scoped_load_inline
+def _load_pybind11_enum_mod(*, load_inline):
+    cpp_source = """
+    #include <torch/extension.h>
+
+    enum class E { A = 0, B = 1 };
+
+    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+        py::enum_<E>(m, "E")
+            .value("A", E::A)
+            .value("B", E::B);
+    }
+    """
+    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
@@ -236,25 +250,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
-    @torch.testing._internal.common_utils.scoped_load_inline
-    def test_pybind11_enum_conversion(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
-
-        enum class E { A = 0, B = 1 };
-
-        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-            py::enum_<E>(m, "E")
-                .value("A", E::A)
-                .value("B", E::B);
-        }
-        """
-        global _pybind11_enum_mod
-        if _pybind11_enum_mod is None:
-            _pybind11_enum_mod = load_inline(
-                name="pybind11_enum_test", cpp_sources=cpp_source
-            )
-        mod = _pybind11_enum_mod
+    def test_pybind11_enum_conversion(self):
+        mod = _load_pybind11_enum_mod()
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
