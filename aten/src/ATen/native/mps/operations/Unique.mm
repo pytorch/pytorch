@@ -333,9 +333,13 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
     }
   });
 
-  // cumsum runs as a separate dispatch on MPS; that's fine.
-  scan = at::cumsum(mask, /*dim=*/0);
-  // cumsum of int32 may upcast to int64 on some paths; track the scan dtype.
+  // cumsum runs as a separate dispatch on MPS; that's fine. at::cumsum promotes
+  // the int32 mask to int64 by default, but 32-bit math is much faster on Apple
+  // GPUs, so force an int32 scan when the counts are guaranteed to fit (every
+  // scan value is <= numel), and fall back to int64 otherwise. scan_suffix then
+  // selects the matching _32 / _64 emit/inverse kernel.
+  scan = (numel < std::numeric_limits<int32_t>::max()) ? at::cumsum(mask, /*dim=*/0, /*dtype=*/kInt)
+                                                       : at::cumsum(mask, /*dim=*/0);
   const auto scan_dtype = scan.scalar_type();
   TORCH_CHECK(scan_dtype == kInt || scan_dtype == kLong, "unique: unexpected cumsum output dtype ", scan_dtype);
   const auto scan_suffix = std::to_string(c10::elementSize(scan_dtype) * 8);
