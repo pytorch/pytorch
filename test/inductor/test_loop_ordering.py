@@ -1059,10 +1059,7 @@ class LoopOrderingTest(TestCase):
         mod = Mod(channels, groups).eval()
         x = torch.randn(batch, channels, spatial // 2, spatial // 2)
         residual = torch.randn_like(x)
-        target_origins = {
-            torch.ops.aten._unsafe_index.Tensor,
-            torch.ops.aten.var_mean.correction,
-        }
+        target_origins = {torch.ops.aten.var_mean.correction}
 
         with (
             torch.no_grad(),
