@@ -1975,39 +1975,49 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     target = make_target(num_classes, (*batch_dims, *of), torch.int64)
                     yield module_args, module_kwargs, (input, target)
 
-        # Chunked probability-target coverage (mean/sum/none). Appended
-        # after all other samples so the RNG draw order -- and therefore the
-        # data the calibrated index-target ULP caps were measured on -- is
-        # unchanged. "none" is last in the product so the mean/sum draws are
-        # also unchanged.
-        for sizes in [(8, 5, 4), (None, 8, 4)]:
-            num_batches, in_features, num_classes = sizes
-            batch_dims = () if num_batches is None else (num_batches,)
-            weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
-            for reduction, w in product(["mean", "sum", "none"], weights):
-                if acc_dtype is not None:
-                    options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
-                elif num_batches is not None:
-                    # batch_chunk_size=2 forces >=2 chunks on every device.
-                    options = dict(batch_chunk_size=2)
-                else:
-                    options = dict()
-                module_args = (in_features, num_classes)
-                module_kwargs = dict(
-                    out_features=(),
-                    device=device,
-                    dtype=dtype,
-                    reduction=reduction,
-                    weight=w,
-                    ignore_index=None,
-                    label_smoothing=0.0,
-                    options=torch.nn.LinearCrossEntropyOptions(
-                        allow_retain_graph=allow_retain_graph, **options
-                    ),
-                )
-                input = make_input(batch_dims, in_features)
-                target = make_target(num_classes, (*batch_dims, num_classes), dtype)
-                yield module_args, module_kwargs, (input, target)
+        # Chunked probability-target coverage (mean/sum/none), without and
+        # then with a linear bias. Appended after all other samples so the
+        # RNG draw order -- and therefore the data the calibrated index-target
+        # ULP caps were measured on -- is unchanged ("none" is last in the
+        # product so the mean/sum draws are also unchanged). The bias=True
+        # pass is emitted after the bias=False pass for the same reason
+        # (``bias=False`` is the constructor default, so its samples are
+        # identical to omitting the kwarg); it exercises the shared
+        # accumulator's bias-grad (the batch-sum of the dense grad_logits)
+        # for both the scalar and the none reductions.
+        def prob_target_samples(bias):
+            for sizes in [(8, 5, 4), (None, 8, 4)]:
+                num_batches, in_features, num_classes = sizes
+                batch_dims = () if num_batches is None else (num_batches,)
+                weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+                for reduction, w in product(["mean", "sum", "none"], weights):
+                    if acc_dtype is not None:
+                        options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
+                    elif num_batches is not None:
+                        # batch_chunk_size=2 forces >=2 chunks on every device.
+                        options = dict(batch_chunk_size=2)
+                    else:
+                        options = dict()
+                    module_args = (in_features, num_classes)
+                    module_kwargs = dict(
+                        out_features=(),
+                        bias=bias,
+                        device=device,
+                        dtype=dtype,
+                        reduction=reduction,
+                        weight=w,
+                        ignore_index=None,
+                        label_smoothing=0.0,
+                        options=torch.nn.LinearCrossEntropyOptions(
+                            allow_retain_graph=allow_retain_graph, **options
+                        ),
+                    )
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, (*batch_dims, num_classes), dtype)
+                    yield module_args, module_kwargs, (input, target)
+
+        yield from prob_target_samples(bias=False)
+        yield from prob_target_samples(bias=True)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
