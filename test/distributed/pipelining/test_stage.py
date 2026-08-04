@@ -15,12 +15,10 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningMetadataError
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -41,6 +39,8 @@ torch.manual_seed(0)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -127,21 +127,34 @@ def get_flatten_hook():
     return flatten_hook
 
 
-class StageTest(MultiProcContinuousTest):
+class PipelineStageTestBase(MultiProcContinuousTest):
+    # instantiate_device_type_tests copies non-test members using getattr(). A
+    # classmethod defined on generic_test_class is copied already bound to that
+    # class and cannot see the generated class's device_type. Defining backend_str
+    # on this base leaves it inherited, so cls refers to the generated
+    # device-specific test class when called.
     @classmethod
-    def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+    def _resolved_device_type(cls) -> str:
+        # MultiProcContinuousTest subprocesses run tests without calling
+        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
+        # "privateuse1" token; resolve it to the registered backend name.
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
 
     @classmethod
-    def device_type(cls) -> str:
-        return device_type
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls._resolved_device_type())
+
+
+class StageTest(PipelineStageTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self._resolved_device_type(), self.rank)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -190,7 +203,6 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -244,7 +256,6 @@ class StageTest(MultiProcContinuousTest):
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -278,7 +289,6 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -340,7 +350,6 @@ class StageTest(MultiProcContinuousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -401,23 +410,16 @@ class StageTest(MultiProcContinuousTest):
             )
 
 
-instantiate_parametrized_tests(StageTest)
+instantiate_device_type_tests(StageTest, globals(), except_for=["cpu"], allow_xpu=True)
 
 
-class StageNegativeTest(MultiProcContinuousTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return backend
-
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
+class StageNegativeTest(PipelineStageTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self._resolved_device_type(), self.rank)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -466,7 +468,6 @@ class StageNegativeTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
@@ -487,6 +488,13 @@ class StageNegativeTest(MultiProcContinuousTest):
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
+
+instantiate_device_type_tests(
+    StageNegativeTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
