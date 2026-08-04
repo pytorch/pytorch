@@ -4061,7 +4061,13 @@ class OBJECT_ALIASING : public RelationalGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    ++_operand_count;
+    // Object aliasing collapses every operand to the same pointer, so there is
+    // no container size from which the actual-partial operand count can be
+    // derived. A nonzero count is the preload-installed tracking sentinel;
+    // ordinary guard checks only pay this predicted-false read and never write.
+    if (C10_UNLIKELY(_operand_count != 0)) {
+      ++_operand_count;
+    }
     if (_is_first_call) {
       _first_tensor = value;
       _is_first_call = false;
@@ -4141,12 +4147,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    ++_operand_count;
-    if (_actual_partial_static_tensors != nullptr &&
-        _actual_partial_static_tensors->find(value) !=
-            _actual_partial_static_tensors->end()) {
-      return false;
-    }
     auto insertion = _unique_tensors.insert({value, nullptr});
     if (!insertion.second) {
       // No need to clear _unique_tensors, reset_state will do
@@ -4168,8 +4168,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
 
   void reset_state() final {
     _unique_tensors.clear();
-    _actual_partial_static_tensors = nullptr;
-    _operand_count = 0;
   }
 
   bool preload_actual_partial_relation(
@@ -4177,11 +4175,15 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     if (plan.kind != GuardCrossSliceRelationKind::NoTensorAliasing ||
         plan.guard != static_cast<const void*>(this) ||
         plan.stable_operands.empty() ||
-        plan.stable_operand_set.size() != plan.stable_operands.size()) {
+        plan.stable_operand_set.size() != plan.stable_operands.size() ||
+        !_unique_tensors.empty()) {
       return false;
     }
-    _actual_partial_static_tensors = &plan.stable_operand_set;
-    _operand_count = plan.stable_operands.size();
+    for (const auto& operand : plan.stable_operands) {
+      if (!_unique_tensors.insert({operand.ptr(), nullptr}).second) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -4189,7 +4191,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       const GuardCrossSliceRelationPlan& plan) const final {
     return plan.kind == GuardCrossSliceRelationKind::NoTensorAliasing &&
         plan.guard == static_cast<const void*>(this) &&
-        _operand_count == plan.expected_operand_count;
+        _unique_tensors.size() == plan.expected_operand_count;
   }
 
   bool supports_subtree_memo() const override {
@@ -4215,8 +4217,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
  private:
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
-  const ska::flat_hash_set<PyObject*>* _actual_partial_static_tensors{nullptr};
-  size_t _operand_count{0};
 };
 
 /**

@@ -2785,8 +2785,22 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
         script = """
             import torch
             from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
 
             assert torch._dynamo.config.enable_guard_lookup_memo is False
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_guard_names(entry):
+                names = set()
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    names.update(
+                        type(guard).__name__
+                        for guard in manager.get_leaf_guards()
+                    )
+                    pending.extend(manager.get_child_managers())
+                return names
 
             class Model(torch.nn.Module):
                 def forward(self, x):
@@ -2801,6 +2815,92 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
             assert len(cache_entries) == 1, len(cache_entries)
             assert not cache_entries[0]._debug_fast_guard_enabled
+
+            class ObjectAliasModel(torch.nn.Module):
+                def forward(self, x, y):
+                    if x is y:
+                        return x + y
+                    return x - y
+
+            object_model = ObjectAliasModel()
+            object_counter = CompileCounter()
+            object_compiled = torch.compile(
+                object_model, backend=object_counter, fullgraph=True
+            )
+            same = torch.ones(3)
+            for _ in range(8):
+                torch.testing.assert_close(
+                    object_compiled(same, same), object_model(same, same)
+                )
+            assert object_counter.frame_count == 1, object_counter.frame_count
+            object_entries = _debug_get_cache_entry_list(
+                ObjectAliasModel.forward.__code__
+            )
+            assert len(object_entries) == 1, len(object_entries)
+            assert "OBJECT_ALIASING" in relation_guard_names(object_entries[0])
+            assert not object_entries[0]._debug_fast_guard_enabled
+
+            different = torch.zeros_like(same)
+            torch.testing.assert_close(
+                object_compiled(same, different), object_model(same, different)
+            )
+            assert object_counter.frame_count == 2, object_counter.frame_count
+            torch.testing.assert_close(
+                object_compiled(same, same), object_model(same, same)
+            )
+            assert object_counter.frame_count == 2, object_counter.frame_count
+            assert all(
+                not entry._debug_fast_guard_enabled
+                for entry in _debug_get_cache_entry_list(
+                    ObjectAliasModel.forward.__code__
+                )
+            )
+
+            class NoTensorAliasModel(torch.nn.Module):
+                def forward(self, x, y):
+                    return x + 2 * y
+
+            no_tensor_model = NoTensorAliasModel()
+            no_tensor_counter = CompileCounter()
+            no_tensor_compiled = torch.compile(
+                no_tensor_model, backend=no_tensor_counter, fullgraph=True
+            )
+            left = torch.ones(3)
+            right = torch.zeros(3)
+            for _ in range(8):
+                torch.testing.assert_close(
+                    no_tensor_compiled(left, right), no_tensor_model(left, right)
+                )
+            assert (
+                no_tensor_counter.frame_count == 1
+            ), no_tensor_counter.frame_count
+            no_tensor_entries = _debug_get_cache_entry_list(
+                NoTensorAliasModel.forward.__code__
+            )
+            assert len(no_tensor_entries) == 1, len(no_tensor_entries)
+            assert "NO_TENSOR_ALIASING" in relation_guard_names(
+                no_tensor_entries[0]
+            )
+            assert not no_tensor_entries[0]._debug_fast_guard_enabled
+
+            torch.testing.assert_close(
+                no_tensor_compiled(left, left), no_tensor_model(left, left)
+            )
+            assert (
+                no_tensor_counter.frame_count == 2
+            ), no_tensor_counter.frame_count
+            torch.testing.assert_close(
+                no_tensor_compiled(left, right), no_tensor_model(left, right)
+            )
+            assert (
+                no_tensor_counter.frame_count == 2
+            ), no_tensor_counter.frame_count
+            assert all(
+                not entry._debug_fast_guard_enabled
+                for entry in _debug_get_cache_entry_list(
+                    NoTensorAliasModel.forward.__code__
+                )
+            )
         """
         subprocess.run(
             [sys.executable, "-c", textwrap.dedent(script)],
