@@ -25,7 +25,7 @@ if has_triton():
     import triton.language as tl
 
     @triton.jit
-    def _reduce_partials_first_dim_kernel(
+    def reduce_partials_first_dim_kernel(
         partials,
         out,
         shard_elems: tl.constexpr,
@@ -45,7 +45,8 @@ if has_triton():
             acc += vals.to(tl.float32)
         if do_avg:
             acc /= group_size
-        tl.store(out + offsets, acc, mask=mask)
+        # the accumulation stays in fp32 and is rounded exactly once, here
+        tl.store(out + offsets, acc.to(out.dtype.element_ty), mask=mask)
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -472,7 +473,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-def _ring_addmm_reduce_scatter(
+def ring_addmm_reduce_scatter(
     mm_out_op: torch._ops.OpOverload,
     A_shards: tuple[torch.Tensor, ...],
     B: torch.Tensor,
@@ -532,7 +533,7 @@ def _ring_addmm_reduce_scatter(
     return output
 
 
-def _reduce_partials(
+def reduce_partials(
     partials: torch.Tensor,
     *,
     dim: int,
@@ -546,7 +547,7 @@ def _reduce_partials(
         # reduction into one kernel so low-precision partials accumulate in fp32
         # and round only once when written to the output dtype.
         if normalized_dim == 0:
-            reduced = _triton_reduce_partials_first_dim(
+            reduced = triton_reduce_partials_first_dim(
                 partials,
                 reduce_op=reduce_op,
                 output_dtype=output_dtype,
@@ -565,7 +566,7 @@ def _reduce_partials(
     raise ValueError("reduce_op must be sum or avg")
 
 
-def _triton_reduce_partials_first_dim(
+def triton_reduce_partials_first_dim(
     partials: torch.Tensor,
     *,
     reduce_op: str,
@@ -587,7 +588,7 @@ def _triton_reduce_partials_first_dim(
     shard_elems = out.numel()
     block = 1024
     grid = (triton.cdiv(shard_elems, block),)
-    _reduce_partials_first_dim_kernel[grid](
+    reduce_partials_first_dim_kernel[grid](
         partials,
         out,
         shard_elems,
@@ -1472,7 +1473,7 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return _reduce_partials(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
             reduce_op=reduce_op,
@@ -1499,7 +1500,7 @@ def _fused_matmul_reduce_scatter_impl(
     )
     if can_use_ring:
         output = x.new_empty(A_shards[0].shape[0], B.shape[1], dtype=output_dtype)
-        return _ring_addmm_reduce_scatter(
+        return ring_addmm_reduce_scatter(
             mm_out_op,
             A_shards,
             B,
@@ -1522,7 +1523,7 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return _reduce_partials(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
@@ -1752,7 +1753,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = _reduce_partials(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
