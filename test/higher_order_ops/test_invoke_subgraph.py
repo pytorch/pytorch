@@ -4288,10 +4288,11 @@ class GraphModule(torch.nn.Module):
             with self._count_speculate_calls() as count:
                 res = torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(res, ref)
-            # Both calls retrace. The second captures the first's output, an
-            # intermediate with no source, so it cannot be re-derived by
-            # re-resolving a cached source. Reaching 1 trace would mean lifting
-            # the capture to a subgraph input keyed on tensor metadata instead.
+            # Both calls retrace: the global is rebound every iteration, so
+            # GlobalSource lands in both traced_sources and mutated_sources and
+            # no reuse entry is ever saved. Reaching 1 would need the captured
+            # tensor treated as a subgraph input rather than as a source to
+            # re-resolve, since its value differs between the two calls.
             self.assertEqual(count(), 2)
         finally:
             _reuse_test_global = None
