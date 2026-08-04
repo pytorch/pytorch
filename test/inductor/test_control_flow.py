@@ -1801,25 +1801,22 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result3)
 
     @requires_gpu
-    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("autograd", [False, True])
-    # pointwise combine_mode only supports GPU
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["combine_mode"] == "pointwise",
-    )
-    def test_associative_scan_non_pointwise_generic(self, combine_mode, autograd):
+    def test_associative_scan_non_pointwise_generic(self, autograd):
         device = GPU_TYPE
 
         def matmul_combine(x, y):
             return x @ y
 
         torch.compiler.reset()
-        compiled_scan = torch.compile(associative_scan, backend="inductor", fullgraph=True)
+        compiled_scan = torch.compile(
+            associative_scan, backend="inductor", fullgraph=True
+        )
 
-        x = torch.eye(2, device=device).unsqueeze(0).repeat(4, 1, 1).requires_grad_(autograd)
+        eye = torch.eye(2, device=device).unsqueeze(0)
+        x = eye.repeat(4, 1, 1).requires_grad_(autograd)
 
-        result = compiled_scan(matmul_combine, x, 0, combine_mode=combine_mode)
+        result = compiled_scan(matmul_combine, x, 0, combine_mode="generic")
         result_ref = _fake_associative_scan(matmul_combine, x, 0)
 
         self.assertEqual(result, result_ref)

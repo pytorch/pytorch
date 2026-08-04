@@ -554,8 +554,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         gl_ys_pinit = [gl_ys4, gl_ys3, gl_ys2, gl_ys1, 0]
         bwys_pinit =  [bwys43, bwys32, bwys21,      1, 1]
 
-        where bwys21 is an abbreviation for bw(ys2, ys1),
-        bwys321 is an abbreviation for bw(ys3, ys2) * bw(ys2, ys1) so on and so forth.
+        where bwys21 is an abbreviation for bw(ys2, ys1), and so on and so forth.
 
         The 1s appended to bwys_pinit are length-padding so that bwys_pinit and
         gl_ys_pinit have the same shape; they do not affect the final g_ys values.
@@ -773,7 +772,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             )
 
             def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-                return bw * bw_next, gl_next + bw_next * gl
+                return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
 
             # 5.2) Flip, scan left-to-right via generic_associative_scan (bypassing dynamo/compile),
             # flip back, and drop the last (padding) element to get g_ys.
@@ -808,10 +807,11 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         # Gradients for additional_inputs (lifted parameters) are not computed; the
         # autograd entrypoint already rejects any that require grad. Non-tensor lifted
-        # args (e.g. shape SymInts) are handled positionally and get a None grad slot;
-        # note the compile+dynamic-shape path that would surface interleaved SymInt
+        # args (e.g. shape SymInts) are handled positionally and get a None grad slot.
+        # TODO: the compile+dynamic-shape path that would surface interleaved SymInt
         # additional_inputs is currently blocked earlier by the inductor associative_scan
-        # lowering, which rejects lifted arguments outright.
+        # lowering (torch/_inductor/lowering.py, "unsupported lifted arguments"). If that
+        # restriction is lifted, this backward must be revisited to cover that path.
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
 
 

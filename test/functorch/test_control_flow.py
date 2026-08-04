@@ -6447,20 +6447,13 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     def test_associative_scan_non_pointwise_generic_autograd(self):
-        device = torch.device("cuda")
-
+        # combine_mode="generic" runs eagerly via generic_associative_scan (no triton
+        # codegen), so it is CPU-capable and does not need a GPU.
         def matmul_combine(x, y):
             return x @ y
 
-        x = (
-            torch.eye(2, device=device)
-            .unsqueeze(0)
-            .repeat(4, 1, 1)
-            .requires_grad_(True)
-        )
+        x = torch.eye(2).unsqueeze(0).repeat(4, 1, 1).requires_grad_(True)
         result = associative_scan(matmul_combine, x, dim=0, combine_mode="generic")
         result_ref = _fake_associative_scan(matmul_combine, x, dim=0)
 
