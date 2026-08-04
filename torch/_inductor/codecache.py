@@ -1630,6 +1630,38 @@ class FxGraphHashDetails:
                 ):
                     self.cudagraph_annotation = annotation
 
+        # The bucket_all_gathers_fx post-grad pass and the overlap scheduling
+        # pass both embed the distributed rank as a compile-time constant in
+        # the traced graph (narrow offset into the packed all-gather buffer).
+        # Since the cache key is computed before post_grad_passes run, we must
+        # include the rank to prevent cross-rank cache collisions.
+        #
+        # Note: this uses the global rank, which is conservative-correct
+        # (unique per process) but over-fragments for HSDP/TP where ranks
+        # sharing a group rank generate identical code. It also applies to all
+        # graphs in a job (including pure-compute graphs with no collectives)
+        # when these configs are process-wide. Narrowing to graphs that
+        # actually contain all_gather nodes is unsafe here because the
+        # AOTAutogradCacheDetails subclass sees Dynamo-level graphs where
+        # DTensor ops only expand to all-gathers later during lowering.
+        #
+        # ManualOverlapScheduler (driven by custom post-grad passes) also
+        # embeds rank via merge_all_gather_bucket, but is invoked through
+        # user-supplied custom pass UUIDs rather than these configs; that
+        # path is out of scope here and should be handled by the custom pass
+        # providing a rank-aware UUID.
+        #
+        # See https://github.com/pytorch/pytorch/issues/188332
+        if (
+            (
+                config.bucket_all_gathers_fx != "none"
+                or config.aten_distributed_optimizations.enable_overlap_scheduling
+            )
+            and dist.is_available()
+            and dist.is_initialized()
+        ):
+            self.distributed_rank = dist.get_rank()
+
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
