@@ -22,21 +22,6 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
-def my_index_select(self, dim, index):
-    """Stable ``index_select`` (build time 2.14+, runtime 2.10+)."""
-    return torch.ops.libtorch_agn_2_14.my_index_select.default(self, dim, index)
-
-
-def my_floor_divide(self, other):
-    """Stable ``floor_divide`` (build time 2.14+, runtime 2.10+)."""
-    return torch.ops.libtorch_agn_2_14.my_floor_divide.default(self, other)
-
-
-def my_is_pinned(self) -> bool:
-    """Stable ``is_pinned`` (build time 2.14+, runtime 2.10+)."""
-    return torch.ops.libtorch_agn_2_14.my_is_pinned.default(self)
-
-
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

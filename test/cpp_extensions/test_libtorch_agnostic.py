@@ -335,18 +335,18 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(result.data_ptr(), t.data_ptr())
 
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     def test_my_index_select(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(3, 4, device=device)
         index = torch.tensor([0, 2], device=device)
         result = libtorch_agnostic.ops.my_index_select(t, 0, index)
         self.assertEqual(result, torch.index_select(t, 0, index))
 
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     def test_my_floor_divide(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         a = torch.randint(1, 20, (3, 4), device=device, dtype=torch.int64)
         b = torch.randint(1, 5, (3, 4), device=device, dtype=torch.int64)
@@ -362,9 +362,9 @@ class TestLibtorchAgnostic(TestCase):
         )
 
     @onlyCPU
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     def test_my_is_pinned(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))

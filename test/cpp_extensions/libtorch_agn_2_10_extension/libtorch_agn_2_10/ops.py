@@ -749,6 +749,21 @@ def my_permute(self, dims) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
 
 
+def my_index_select(self, dim, index) -> Tensor:
+    """Stable index_select."""
+    return torch.ops.libtorch_agn_2_10.my_index_select.default(self, dim, index)
+
+
+def my_floor_divide(self, other) -> Tensor:
+    """Stable floor_divide."""
+    return torch.ops.libtorch_agn_2_10.my_floor_divide.default(self, other)
+
+
+def my_is_pinned(self) -> bool:
+    """Stable is_pinned."""
+    return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #
