@@ -1305,6 +1305,11 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
+  // Log (once per process) backward passes that span multiple non-CPU
+  // devices, to assess reliance on multithreaded autograd before changing
+  // its default. CPU + a single accelerator does not count.
+  static std::atomic<bool> multidevice_logged{false};
+  std::optional<at::Device> first_noncpu_device;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1317,6 +1322,17 @@ auto Engine::compute_dependencies(
     }
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
+    }
+    if (!multidevice_logged.load(std::memory_order_relaxed)) {
+      auto device = fn->device();
+      if (!should_run_in_cpu_ready_queue(device.type())) {
+        if (!first_noncpu_device.has_value()) {
+          first_noncpu_device = device;
+        } else if (first_noncpu_device.value() != device) {
+          multidevice_logged.store(true, std::memory_order_relaxed);
+          C10_LOG_API_USAGE_ONCE("torch.autograd.multidevice_backward");
+        }
+      }
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
