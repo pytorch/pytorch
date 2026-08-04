@@ -2296,16 +2296,22 @@ class TestMetaKernelRegistrations(TestCase):
         check(inp.transpose(2, 3).contiguous().transpose(2, 3), grid)
 
         # The C++ impls run check_grid_sampler_common/_2d themselves, so the
-        # metas must reject the same inputs rather than indexing past the end of
-        # a too-small shape.
-        bad_inp, bad_grid = torch.randn(2, 3, 4), grid
-        with self.assertRaises(RuntimeError):
+        # metas must reject the same inputs rather than silently returning a
+        # shape eager would refuse to compute. Use 5D input and grid: the last
+        # grid dim still equals input.ndim - 2, so check_grid_sampler_common
+        # passes and only check_grid_sampler_2d can reject it.
+        bad_inp, bad_grid = torch.randn(2, 3, 4, 5, 6), torch.rand(2, 6, 7, 8, 3)
+        bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+        msg = "expected 4D input"
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch._grid_sampler_2d_cpu_fallback(bad_inp, bad_grid, 0, 0, True)
         with FakeTensorMode() as mode:
-            with self.assertRaises(RuntimeError):
-                torch._grid_sampler_2d_cpu_fallback(
-                    mode.from_tensor(bad_inp), mode.from_tensor(bad_grid), 0, 0, True
-                )
+            f_inp, f_grid = mode.from_tensor(bad_inp), mode.from_tensor(bad_grid)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+            # the backward meta runs the same checks
+            with self.assertRaisesRegex(RuntimeError, msg):
+                bwd(mode.from_tensor(torch.randn(2, 3, 6, 7)), f_inp, f_grid, 0, 0, True)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
