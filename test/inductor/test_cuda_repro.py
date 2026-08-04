@@ -3126,10 +3126,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
-    @skipIfXpu(
-        msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
-    )
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = device_type
@@ -3174,7 +3170,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     v,
                     attn_bias,
                     dropout_p=0.0,
-                    is_causal=True,
+                    is_causal=False,
                     scale=scale,
                     compute_log_sumexp=True,
                 )
