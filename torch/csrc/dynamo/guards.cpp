@@ -5603,8 +5603,6 @@ class RootGuardManager : public GuardManager {
       LocalState state;
       _local_state = state;
     }
-    GuardLocalStateScope local_state_scope(&_local_state);
-
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
@@ -6536,9 +6534,7 @@ class TENSOR_MATCH : public LeafGuard {
             root_guard_manager,
             std::move(verbose_code_parts),
             std::move(user_stack)),
-        _tensor_name(py::cast<std::string>(std::move(tensor_name))),
-        _supports_subtree_memo_token(
-            tensor_match_source_supports_subtree_memo(_tensor_name)) {
+        _tensor_name(py::cast<std::string>(std::move(tensor_name))) {
     root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
 
@@ -6609,10 +6605,10 @@ class TENSOR_MATCH : public LeafGuard {
   }
 
   bool supports_subtree_memo() const override {
-    return _supports_subtree_memo_token;
+    return tensor_match_source_supports_subtree_memo(_tensor_name);
   }
   bool emits_subtree_memo_token() const override {
-    return _supports_subtree_memo_token;
+    return tensor_match_source_supports_subtree_memo(_tensor_name);
   }
 
   bool append_subtree_memo_token(
@@ -6630,7 +6626,6 @@ class TENSOR_MATCH : public LeafGuard {
 
  private:
   std::string _tensor_name;
-  bool _supports_subtree_memo_token;
   std::unique_ptr<TensorCheck> _tensor_check;
 };
 
