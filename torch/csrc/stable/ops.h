@@ -1139,8 +1139,7 @@ inline torch::stable::Tensor full(
 ///
 /// Computes the element-wise bitwise AND of self and other.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The first input tensor.
 /// @param other The second input tensor.
@@ -1160,8 +1159,7 @@ inline torch::stable::Tensor bitwise_and(
 ///
 /// Computes the element-wise bitwise OR of self and other.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The first input tensor.
 /// @param other The second input tensor.
@@ -1181,8 +1179,7 @@ inline torch::stable::Tensor bitwise_or(
 ///
 /// Computes the element-wise left bitwise shift of self by other.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor to shift.
 /// @param other The tensor of shift amounts.
@@ -1202,8 +1199,7 @@ inline torch::stable::Tensor bitwise_left_shift(
 ///
 /// Computes the element-wise right bitwise shift of self by other.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor to shift.
 /// @param other The tensor of shift amounts.
