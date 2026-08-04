@@ -61,6 +61,7 @@
 #include <c10/util/env.h>
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 namespace at::native {
@@ -146,6 +147,8 @@ std::string gemv_kernel_name(c10::ScalarType dt,
                              bool idx64,
                              int64_t vec_xs,
                              int64_t vec_offset) {
+  using namespace std::string_view_literals;
+
   const auto dt_str = scalarToMetalTypeString(dt);
   const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
   // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
@@ -153,6 +156,7 @@ std::string gemv_kernel_name(c10::ScalarType dt,
   const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
   const auto matrix_str = matrix_contiguous ? "" : "_strided";
   const auto idx_str = idx64 ? "_i64" : "";
+  const auto x_str = xc ? "xc"sv : "xs"sv;
   if (use_t2d) {
     return fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, config.nsimd, config.kq, epi_str);
   }
@@ -160,7 +164,7 @@ std::string gemv_kernel_name(c10::ScalarType dt,
     return fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, matrix_str, idx_str);
   }
   return fmt::format(
-      "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, xc ? "xc" : "xs", matrix_str, idx_str);
+      "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, x_str, matrix_str, idx_str);
 }
 
 GemvLaunch prepare_gemv_launch(c10::ScalarType dt,
