@@ -1347,6 +1347,53 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return run_kernel
 
 
+# TODO: Factor out a common DSL benchmark request base shared with
+# CuteDSLBenchmarkRequest.
+class FlyDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for FlyDSL kernels."""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
+        extra_args: tuple[Any, ...],
+        source_code: PartialRender,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(self.source_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
+
+        from .codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find FlyDSL main kernel function '{main_func_name}'. "
+                f"Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            device_interface = get_interface_for_device("cuda")
+            stream = device_interface.get_raw_stream(out.device.index)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
+
+        return run_kernel
+
+
 @functools.cache
 def get_tuning_process_pool() -> TuningProcessPool:
     pool = TuningProcessPool()
