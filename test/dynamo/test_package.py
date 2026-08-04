@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import gc
 import importlib
 import os
 import sys
@@ -15,6 +16,7 @@ import torch.utils.cpp_extension
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -305,6 +307,84 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
+    def test_install_survives_stale_cleanup_hooks(self):
+        # The first compile installs its generated functions -- and, on every
+        # compile, a builtins-dict global (see install_builtins_dict_in_fglobals)
+        # -- into the module globals behind a CleanupHook keyed on the generated
+        # code object. install() rebinds __compiled_fn/__resume_at names to fresh
+        # values, but leaves the builtins-dict binding alone when it's already
+        # correct, since it's the same dict object on every compile in this
+        # module. Either way, a hook firing afterwards must not delete the
+        # binding install() is now responsible for.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x + x.shape[0]
+            if y.sum() > 0:  # data-dependent branch, forces a resume function
+                return y * 2
+            return y
+
+        args = (torch.randn(3, 2),)
+        expected = fn(*args)
+
+        # Other tests in this file compile functions defined in this same
+        # module, so ignore what they left behind in the shared globals, and
+        # hold their code objects alive so ids stay unambiguous below.
+        prefixes = ("__compiled_fn", "__resume_at", "__builtins_dict__")
+        scope = fn.__globals__
+        preexisting = {name for name in scope if name.startswith(prefixes)}
+        # Plain loops with an explicit del, rather than a walrus in a list
+        # comprehension: a walrus target leaks into this method's own frame,
+        # which would pin the last code object seen and defeat the gc.collect()
+        # below.
+        others = []
+        code = None
+        for ref in list(CleanupManager.instance.refs.values()):
+            code = ref()
+            if code is not None:
+                others.append(code)
+        del code
+        other_ids = {id(o) for o in others}
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(*args)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        # Whether the hooks fire before or after install() is left to the
+        # garbage collector, so pin the code objects they are keyed on to pick
+        # the losing order deterministically.
+        pinned = []
+        code = None
+        for idx, ref in list(CleanupManager.instance.refs.items()):
+            if idx in other_ids:
+                continue
+            code = ref()
+            if code is not None:
+                pinned.append(code)
+        del code
+        pinned_ids = {id(p) for p in pinned}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+
+        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
+        self.assertTrue(installed)
+
+        del pinned
+        gc.collect()
+
+        # Without this the assert below can pass without any hook ever running.
+        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
+        self.assertEqual(installed - set(scope), set())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(expected, compiled_fn(*args))
+
     def test_file_change(self):
         ctx = DiskDynamoStore()
 
@@ -412,6 +492,34 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_reset_clears_installed_package(self, backend):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
+        # package.install() must register target_code in input_codes so that
+        # torch._dynamo.reset() clears precompile entries on the installed code.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
+        compiled_fn(torch.randn(3, 2))
+        if backend == "eager":
+            for backend_id, bknd in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
@@ -429,8 +537,8 @@ def add(x, y):
         arg1 = torch.randn(3, 2, device=device)
         arg2 = torch.randn(5, 2, device=device)
         expected = [fn(arg1), fn2(arg2)]
-        compiled_fn1 = torch.compile(fn)
-        compiled_fn2 = torch.compile(fn2)
+        compiled_fn1 = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn2 = torch.compile(fn2)  # noqa: UNSPECIFIED_BACKEND
         result = [compiled_fn1(arg1), compiled_fn2(arg2)]
         self.assertEqual(expected, result)
         DynamoCache.clear()
@@ -438,8 +546,8 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=2, expected_dynamo=2)
 
-        compiled_fn1 = torch.compile(fn)
-        compiled_fn2 = torch.compile(fn2)
+        compiled_fn1 = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn2 = torch.compile(fn2)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn1(arg1)
             result2 = compiled_fn2(arg2)
@@ -478,13 +586,13 @@ def add(x, y):
 
         arg = torch.randn(3, 2, device=device)
         expected = fn(arg)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(compiled_fn(arg), expected)
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result = compiled_fn(arg)
             self.assertEqual(result, expected)
@@ -503,7 +611,7 @@ def add(x, y):
 
         arg1 = torch.randn(3, 2, device=device)
         arg2 = torch.randn(5, 2, device=device)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
 
         # Should cause a recompile
@@ -512,7 +620,7 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=2, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn(arg1)
             result2 = compiled_fn(arg2)
@@ -588,14 +696,14 @@ def add(x, y):
         arg1 = torch.randn(3, 2, device=device, requires_grad=True)
         arg2 = arg1.clone().detach_().requires_grad_(True)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
         expected1.sum().backward()
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         # Run it again, no recompile needed
         with torch.compiler.set_stance("fail_on_recompile"):
             expected2 = compiled_fn(arg2)
@@ -618,7 +726,7 @@ def add(x, y):
 
         arg1 = torch.randn(3, 2, device=device, requires_grad=True)
         arg2 = arg1.clone().detach_().requires_grad_(True)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         expected1 = compiled_fn(arg1)
         expected1.sum().backward()
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
@@ -641,7 +749,7 @@ def add(x, y):
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         # Run it again. There will be a recompile because one of the backends is deleted, but it should
         # still work.
         expected2 = compiled_fn(arg2)
@@ -665,13 +773,13 @@ def add(x, y):
             return None
 
         args = (torch.randn(3, 2, device=device), mod)
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         compiled_fn(*args)
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         # Run it again, no recompile needed
         with torch.compiler.set_stance("fail_on_recompile"):
             compiled_fn(*args)
@@ -695,7 +803,7 @@ def add(x, y):
             return torch.cat(set_of_x, dim=0)
 
         args = ([torch.randn(3, 2, device=device) for _ in range(3)],)
-        compiled_fn = torch.compile(foo)
+        compiled_fn = torch.compile(foo)  # noqa: UNSPECIFIED_BACKEND
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
@@ -814,7 +922,7 @@ def add(x, y):
         x = torch.rand(10, device=device)
         model = TestPackage._tempNetForQualName()
         model.forward(x)
-        compiled_fn = torch.compile(
+        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             model.forward,
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
