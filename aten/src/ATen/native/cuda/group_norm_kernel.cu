@@ -7,6 +7,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -215,12 +216,13 @@ __global__ void RowwiseMomentsChannelsLastCUDAKernel(
   }
 }
 
-template <typename T, typename T_ACC>
+template <typename index_t, typename T, typename T_ACC>
 __global__ void GroupNormBackwardChannelsLastCUDAKernel(
-    int64_t numel,
-    int64_t C,
-    int64_t HxW,
-    int64_t D,
+    index_t numel,
+    index_t G,
+    at::cuda::detail::IntDivider<index_t> C_divider,
+    at::cuda::detail::IntDivider<index_t> HxW_divider,
+    at::cuda::detail::IntDivider<index_t> D_divider,
     const T* __restrict__ dY,
     const T* __restrict__ X,
     const T* __restrict__ rstd,
@@ -228,14 +230,15 @@ __global__ void GroupNormBackwardChannelsLastCUDAKernel(
     const T_ACC* __restrict__ c2,
     const T_ACC* __restrict__ c3,
     T* __restrict__ dX) {
-  for (int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x +
+  for (index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x +
            threadIdx.x;
        index < numel;
-       index += static_cast<int64_t>(blockDim.x) * gridDim.x) {
-    const int64_t c = index % C;
-    const int64_t n = index / (HxW * C);
-    const int64_t g = c / D;
-    const int64_t ng = n * (C / D) + g;
+       index += static_cast<index_t>(blockDim.x) * gridDim.x) {
+    const auto nhw_c = C_divider.divmod(index);
+    const index_t c = nhw_c.mod;
+    const index_t n = HxW_divider.div(nhw_c.div);
+    const index_t g = D_divider.div(c);
+    const index_t ng = n * G + g;
     const T_ACC scale = static_cast<T_ACC>(rstd[ng]) *
         (gamma ? static_cast<T_ACC>(gamma[c]) : T_ACC(1));
     dX[index] = scale * static_cast<T_ACC>(dY[index]) +
@@ -1278,19 +1281,39 @@ void GroupNormBackwardKernelImplInternal(
       const int64_t numel = N * C * HxW;
       const int64_t blocks =
           (numel + kCUDANumThreads - 1) / kCUDANumThreads;
-      GroupNormBackwardChannelsLastCUDAKernel<T, T_ACC>
-          <<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
-              numel,
-              C,
-              HxW,
-              D,
-              dY_data,
-              X_data,
-              rstd_data,
-              gamma_data,
-              c2_data,
-              c3_data,
-              dX.mutable_data_ptr<T>());
+      if (at::cuda::detail::canUse32BitIndexMath(X)) {
+        using index_t = uint32_t;
+        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, T_ACC>
+            <<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
+                static_cast<index_t>(numel),
+                static_cast<index_t>(G),
+                at::cuda::detail::IntDivider<index_t>(C),
+                at::cuda::detail::IntDivider<index_t>(HxW),
+                at::cuda::detail::IntDivider<index_t>(D),
+                dY_data,
+                X_data,
+                rstd_data,
+                gamma_data,
+                c2_data,
+                c3_data,
+                dX.mutable_data_ptr<T>());
+      } else {
+        using index_t = int64_t;
+        GroupNormBackwardChannelsLastCUDAKernel<index_t, T, T_ACC>
+            <<<blocks, kCUDANumThreads, 0, cuda_stream>>>(
+                numel,
+                G,
+                at::cuda::detail::IntDivider<index_t>(C),
+                at::cuda::detail::IntDivider<index_t>(HxW),
+                at::cuda::detail::IntDivider<index_t>(D),
+                dY_data,
+                X_data,
+                rstd_data,
+                gamma_data,
+                c2_data,
+                c3_data,
+                dX.mutable_data_ptr<T>());
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
