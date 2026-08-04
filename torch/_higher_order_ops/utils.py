@@ -11,6 +11,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch.vmap import restore_vmap
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
@@ -100,6 +101,66 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _move_batch_dims_to_last(unbatched_args, in_dims):
+    """Move each batched arg's vmap batch dim to the last axis so it does not
+    interfere with the scan dim (0). ``in_dims`` is the pytree of batch dims from
+    ``unwrap_batched`` (``None`` for unbatched leaves)."""
+    return pytree.tree_map(
+        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
+        unbatched_args,
+        in_dims,
+    )
+
+
+def _batch_dims_as_last(in_dims):
+    """Flatten a pytree of batch dims into a tuple of last-axis markers: ``-1``
+    where a leaf is batched (its batch dim was moved to the last axis by
+    :func:`_move_batch_dims_to_last`), ``None`` otherwise."""
+    return tuple(
+        pytree.tree_leaves(
+            pytree.tree_map(lambda bdim: -1 if bdim is not None else None, in_dims)
+        )
+    )
+
+
+class _VmapCombineFnWrapper:
+    """Combine_fn wrapper shared by the ``scan`` and ``associative_scan`` vmap
+    batching rules.
+
+    It re-vmaps ``combine_fn`` under the current interpreter, keeping the vmap
+    batch dim on the last axis so it does not interfere with the scan dim (0).
+    After the wrapped op runs, ``out_dims`` holds the flat per-output batch dims
+    (-1 where batched, None otherwise), aligned to the flat list of leaves the op
+    returns. ``in_dims`` must already be broadcast to the flat operator arg list
+    (e.g. associative_scan duplicates the xs markers for its two-input operator).
+    """
+
+    def __init__(self, combine_fn, in_dims, batch_size, randomness):
+        self.combine_fn = combine_fn
+        self.in_dims = in_dims
+        self.batch_size = batch_size
+        self.randomness = randomness
+        self.out_dims: tuple[Any, ...] | None = None
+
+    def __call__(self, *args):
+        outputs, per_slice_out_dims = restore_vmap(
+            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+        )(*args)
+        outputs = pytree.tree_map(
+            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
+            outputs,
+            per_slice_out_dims,
+        )
+        self.out_dims = tuple(
+            pytree.tree_leaves(
+                pytree.tree_map(
+                    lambda bdim: -1 if bdim is not None else None, per_slice_out_dims
+                )
+            )
+        )
+        return outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):
