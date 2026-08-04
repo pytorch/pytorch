@@ -4,7 +4,6 @@
 import builtins
 import collections.abc
 import contextlib
-import copy
 import ctypes
 import hashlib
 import io
@@ -6660,13 +6659,38 @@ def split_group(
     # loop honors this filter so unwanted backends are never split.
     device_types_filter: list[torch.device] | None = None
     if backend is not None:
+        # The parent's per-device backends are what BackendConfig expanded its
+        # backend string to when the group was built (see
+        # _new_process_group_helper), restricted to what actually got
+        # registered. Re-deriving them from Backend.default_device_backend_map
+        # answers a different question -- "which devices default to this
+        # backend" -- and gets a bare parent string wrong: a "gloo" parent runs
+        # gloo on cuda too, and "fake" is no device's default at all.
         parent_devices = {d.type for d in parent_pg._device_types}
-        parent_device_backends = _parse_backend_string(
-            parent_backend_str, available_devices=parent_devices
-        )
-        requested_device_backends = _parse_backend_string(
-            str(backend), available_devices=parent_devices
-        )
+        parent_device_backends = {
+            device_type: str(be)
+            for device_type, be in backend_config.get_device_backend_map().items()
+            if device_type in parent_devices
+        }
+        requested_backend_str = str(backend).lower()
+        if ":" in requested_backend_str:
+            requested_device_backends = _parse_backend_string(
+                requested_backend_str, available_devices=parent_devices
+            )
+        else:
+            # A bare backend name selects every parent device running it.
+            Backend._ensure_backend_registered(requested_backend_str)
+            requested_device_backends = {
+                device_type: be
+                for device_type, be in parent_device_backends.items()
+                if be == requested_backend_str
+            }
+            if not requested_device_backends:
+                raise ValueError(
+                    f"Requested backend '{requested_backend_str}' is not present "
+                    f"in the parent process group (parent backends: "
+                    f"{parent_device_backends})"
+                )
         for device_type, requested_be in requested_device_backends.items():
             if device_type not in parent_device_backends:
                 raise ValueError(
@@ -6687,11 +6711,12 @@ def split_group(
         pg_backend = Backend(str(backend))
         backend_config = BackendConfig(pg_backend)
 
-    if pg_options is None and not _use_torchcomms_enabled():
-        # default pg_options same as the parent process group
-        # A deep copy is needed because if the option will be modified inside split
-        # and if we split parent pg multiple times, we will run into device out of bound error.
-        pg_options = copy.deepcopy(parent_backend.options)
+    # pg_options is left as-is when the caller did not pass any: ProcessGroup::
+    # splitGroup gives each device's backend a copy of *that backend's* options,
+    # which is what the child needs. Substituting the default (accelerator)
+    # backend's options here would hand e.g. ProcessGroupNCCL::Options to the
+    # gloo leg of a "cpu:gloo,cuda:nccl" group, which rejects them and silently
+    # falls back to defaults, dropping the caller's timeout and group_name.
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
@@ -6736,17 +6761,19 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
 
-    if torch.accelerator.is_available():
-        split_backend_class = split_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        split_backend_class = split_pg._get_backend(torch.device("cpu"))
+    # `backend` may have filtered the accelerator's leg out of the child, so
+    # look the child's backend up on a device the child actually has.
+    accelerator = torch.accelerator.current_accelerator()
+    split_devices = {d.type for d in split_pg._device_types}
+    if accelerator is not None and accelerator.type in split_devices:
+        split_backend_device = accelerator
+    elif "cpu" in split_devices:
+        split_backend_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    split_backend_class = split_pg._get_backend(split_backend_device)
 
     if split_pg.group_name != group_name:
         raise AssertionError(
