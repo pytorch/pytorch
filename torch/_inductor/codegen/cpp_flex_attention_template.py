@@ -11,6 +11,7 @@ import torch.utils
 
 from ...utils._ordered_set import OrderedSet
 from .. import ir
+from ..cpu_vec_isa import pick_vec_isa, VecAMX
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
@@ -404,12 +405,17 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
 
   // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
+{%- if amx_supported %}
   bool use_amx_overlap = at::cpu::init_amx()
       && need_pack
       && std::is_same_v<scalar_t, at::BFloat16>
       && (headSize % 32 == 0)
       && (headSize_v % 32 == 0)
       && (kvSplitSize % 32 == 0);
+{%- else %}
+  // Not compiled with -mamx-*, so no AMX code was emitted below.
+  constexpr bool use_amx_overlap = false;
+{%- endif %}
 
   // AMX tiles always store in 16-row units, so a round up is applied
   int64_t eqSplitSize = use_amx_overlap ? (qSplitSize + 15) / 16 * 16 : qSplitSize;
@@ -424,9 +430,11 @@ FLEX_ATTENTION_TEMPLATE = r"""
   // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
+{%- if amx_supported %}
   // Double-buffers of the qk scores for overlapping; only the AMX path ping-pongs
   int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
   {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
+{%- endif %}
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
@@ -495,6 +503,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- if amx_supported %}
     // amx_state is released at the end of each q-block so it never carries a stale tile config across a
     // brgemm fallback (tail case).
     AMXState amx_state;
@@ -505,6 +514,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
     scalar_t* scaled_q_ptr = use_amx_overlap
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- endif %}
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
@@ -542,6 +552,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
         auto q_block_ptr = q_data + i * qStrideB + j * qStrideH + m * qStrideM;
         if (use_amx_overlap) {
+{%- if amx_supported %}
           // Pre-scale Q and round the rows up to a multiple of 16 so the AMX
           // Q@K^T reads whole A tiles.
           {{kernel.kernel_name}}_copy_value_with_pad<true>(
@@ -553,6 +564,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
             (cur_qSplitSize + 15) / 16 * 16,
             eheadSize,
             qStrideM);
+{%- endif %}
         } else if (!headSize_even && need_pack) {
           // Pad query if headSize is not even
           {{kernel.kernel_name}}_copy_value_with_pad<false>(
@@ -567,6 +579,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
         }
       }
 
+{%- if amx_supported %}
       // init variables for QK GEMM and Softmax overlapping
       int amx_buf_sel = 0; // index for the ping-pong buffer
       bool amx_pend = false; // a flag to indicate if there is any pending scoren[t - 1]
@@ -575,6 +588,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       accum_t* amx_pend_buf = nullptr;
       auto i_kv_qblk = is_broadcast_bs_kv ? i/bs_shards : i;
       auto j_kv_qblk = is_broadcast_head_kv ? j/gqa_shards : j;
+
 
       // Finishes the pending block's remaining softmax rows and PV
       // Handle the tail cases and end-of-kv-loop
@@ -603,6 +617,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
         }
         amx_pend = false;
       };
+{%- endif %}
 
 {%- if has_full_kv_block %}
       for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
@@ -622,16 +637,23 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
         // AMX overlap
         bool amx_this_block = use_amx_overlap && (cur_kvSplitSize % 32 == 0);
+{%- if amx_supported %}
         accum_t* qk_data = amx_this_block ? amx_score_buf[amx_buf_sel] : qk_data_buf;
+{%- else %}
+        accum_t* qk_data = qk_data_buf;
+{%- endif %}
 
+{%- if amx_supported %}
         // Remove resources if fall back to brgemm is required
         if (use_amx_overlap && !amx_this_block && amx_pend) {
           amx_drain_pending(0);
           amx_state.release([]() { _tile_release(); });
         }
+{%- endif %}
 
         // Interleave the QK[t] and Softmax(score[t - 1]) within this KV loop
         if (amx_this_block) {
+{%- if amx_supported %}
           int64_t amx_soft_row = 0;
           int64_t amx_nsteps = (cur_qSplitSize + 31) / 32 * (cur_kvSplitSize / 32) * (headSize / 32);
           int64_t amx_rows_per_step = amx_nsteps > 0 ? (cur_qSplitSize + amx_nsteps - 1) / amx_nsteps : cur_qSplitSize;
@@ -670,6 +692,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
           if (amx_pend) {
             amx_drain_pending(amx_soft_row);
           }
+{%- endif %}
         } else if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
@@ -750,6 +773,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
 {%- endif %}
         if (amx_this_block) {
+{%- if amx_supported %}
           // Overlap path: scores + mods for this block are done; defer its online
           // softmax and P@V to the next block's QK GEMM (interleaved above). Just
           // record it as pending and flip to the other score buffer.
@@ -760,6 +784,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
           amx_pend_ekvSplitSize = cur_ekvSplitSize;
           amx_pend_buf = qk_data;
           amx_buf_sel ^= 1;
+{%- endif %}
         } else {
           // Update coefficients with Softmax
           for (int64_t row = 0; row < cur_qSplitSize; ++row) {
@@ -834,6 +859,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
         }  // end else (non-AMX softmax + P@V)
       }  // end for n_idx (KV blocks)
 
+{%- if amx_supported %}
       // Drain the last pending AMX block: its softmax + P@V were deferred waiting
       // for a next-block QK to interleave with, but it is the final block.
       if (amx_pend) {
@@ -845,6 +871,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       if (use_amx_overlap) {
         amx_state.release([]() { _tile_release(); });
       }
+{%- endif %}
 
       // dst <- dst / sum[row]
       // reorder MHA output with strides
@@ -1336,7 +1363,9 @@ class CppFlexAttentionTemplate(CppTemplate):
             if self.has_other_buffer
             else None
         )
-        self.other_ptr_data = {}  # type: ignore[var-annotated]
+        self.other_ptr_data = {}
+        # Gate every AMX region on the ISA inductor will compile with.
+        self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
 
     def update_kernel_args(self, kernel_args):
         kernel_args.update(
@@ -1625,6 +1654,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
+            amx_supported=self.amx_supported,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1650,6 +1680,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
     def codegen_amx_helpers(self, kernel_name: str):
         # AMX/AVX-512 interleaving GEMM helpers
+        if not self.amx_supported:
+            return ""
         from .cpp_flex_attention_amx import codegen_flex_attention_amx_helpers
 
         return codegen_flex_attention_amx_helpers(kernel_name)
