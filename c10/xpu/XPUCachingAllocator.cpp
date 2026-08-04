@@ -1860,7 +1860,6 @@ class DeviceCachingAllocator {
     }
     offset = static_cast<const char*>(block->ptr) -
         static_cast<const char*>(base_block->ptr);
-#if SYCL_COMPILER_VERSION >= 20260000
     sycl::ext::oneapi::experimental::ipc_memory::handle handle =
         sycl::ext::oneapi::experimental::ipc_memory::get(
             base_block->ptr, c10::xpu::get_device_context());
@@ -1873,11 +1872,6 @@ class DeviceCachingAllocator {
     ss.write(
         reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
     return ShareableHandle{.offset = offset, .handle = ss.str()};
-#else
-    TORCH_CHECK(
-        false, "IPC sharing requires SYCL compiler version 2026.0 or later.");
-    return ShareableHandle{};
-#endif
   }
 
   // Called by XPUGraph::capture_begin
@@ -1997,7 +1991,6 @@ class NativeCachingAllocator : public XPUAllocator {
           type == SHAREABLE_XPU_MALLOC,
           "unexpected or illformed shareable handle type.");
       auto handle_size = static_cast<size_t>(ss.get());
-#if SYCL_COMPILER_VERSION >= 20260000
       sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
           handle_size);
       ss.read(
@@ -2008,10 +2001,6 @@ class NativeCachingAllocator : public XPUAllocator {
           handle_data,
           c10::xpu::get_device_context(),
           c10::xpu::get_raw_device(device));
-#else
-      TORCH_CHECK(
-          false, "IPC sharing requires SYCL compiler version 2026.0 or later.");
-#endif
     }
 
     // clear() must be called explicitly to release IPC resources. Using a
@@ -2019,10 +2008,8 @@ class NativeCachingAllocator : public XPUAllocator {
     // has already shut down during process exit.
     void clear() {
       if (xpu_ipc_ptr) {
-#if SYCL_COMPILER_VERSION >= 20260000
         sycl::ext::oneapi::experimental::ipc_memory::close(
             xpu_ipc_ptr, c10::xpu::get_device_context());
-#endif
         xpu_ipc_ptr = nullptr;
       }
     }
@@ -2507,4 +2494,3 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 }
 
 } // namespace c10::xpu
- 

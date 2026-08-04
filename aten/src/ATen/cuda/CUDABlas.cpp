@@ -1613,9 +1613,15 @@ bool gemm_and_bias(
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  // When c_ptr is null, C aliases D and these two layouts are identical.
   CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ptr ? c_ld : result_ld);
-  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
+  // When c_ptr is null, C aliases D and the layouts are identical, so reuse
+  // Cdesc rather than paying for a second cublasLtMatrixLayoutCreate on what is
+  // the hot nn.Linear path.
+  std::optional<CuBlasLtMatrixLayout> Ddesc;
+  if (c_ptr) {
+    Ddesc.emplace(cType, m, n, result_ld);
+  }
+  const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1625,8 +1631,7 @@ bool gemm_and_bias(
   uint32_t b_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
   uint32_t c_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(
       c_ptr ? static_cast<const void*>(c_ptr) : static_cast<const void*>(result_ptr)));
-  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(
-      c_ptr ? static_cast<const void*>(result_ptr) : static_cast<const void*>(bias)));
+  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
@@ -1642,7 +1647,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Ddesc.descriptor(),
+      Ddesc_raw,
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1664,7 +1669,7 @@ bool gemm_and_bias(
       c_ptr ? static_cast<const void*>(c_ptr) : static_cast<const void*>(result_ptr),
       Cdesc.descriptor(),
       result_ptr,
-      Ddesc.descriptor(),
+      Ddesc_raw,
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
@@ -1676,7 +1681,20 @@ bool gemm_and_bias(
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    TORCH_WARN_ONCE(
+    if (c_ptr) {
+      // Falling back here is expected and benign: the caller copies C into D
+      // and retries, so warn at most once instead of once per call.
+      TORCH_WARN_ONCE(
+        "gemm_and_bias with distinct C and D error: ",
+        at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+        " when calling cublasLtMatmul with m ", m, " n ", n, " k ", k,
+        " mat1_ld ", mat1_ld, " mat2_ld ", mat2_ld, " c_ld ", c_ld,
+        " result_ld ", result_ld, " abType ", abType, " cType ", cType,
+        " computeType ", computeType, " scaleType ", scaleType,
+        ". Will attempt to recover by copying C into D before the GEMM.");
+      return false;
+    }
+    TORCH_WARN(
       "gemm_and_bias error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",
@@ -1938,26 +1956,18 @@ void scaled_gemm(
   }
 
   // Handle user-passed alpha
-  float *alpha_ptr = &alpha_val;
-  float *beta_ptr = &beta_val;
+  const float* alpha_ptr = &alpha_val;
+  const float* beta_ptr = &beta_val;
 
   if (alpha.has_value()) {
     auto& a = alpha.value();
 
     // if device-tensor
     if (a.is_cuda()) {
-      // NOTE: there are lifetime requirements on device-side pointers for alpha/beta -- the value must be
-      //       valid & correct until the cublas call finishes (not is scheduled like host-side values). Thus
-      //       we need to use allocations for alpha/beta that have some guarantees on lifetime - a statically
-      //       managed 4B buffer for alpha that we'll copy the passed alpha value into, and constant memory
-      //       for beta respectively.
-      float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
-      at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
-      user_alpha.copy_(a);
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-      alpha_ptr = user_alpha.data_ptr<float>();
+      alpha_ptr = a.const_data_ptr<float>();
       beta_ptr = at::cuda::detail::get_cublas_device_zero();
     } else {
       alpha_val = a.item<float>();
