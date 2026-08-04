@@ -6671,10 +6671,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # normalized_shape[-1] instead of prod(normalized_shape), then rebound
         # dgamma to the flat sum(0). That both wrote out of bounds and returned
         # a gradient shaped [normalized_shape[-1]] instead of normalized_shape.
-        # normalized_shape is kept tiny so N // 32 < sm_count // 2 holds on every
-        # device, which is the second condition for selecting that kernel.
         dtype = torch.float
         normalized_shape = (2, 8)
+        # The second condition for selecting that kernel is N // warp_size <
+        # sm_count // 2. Skip rather than silently pass if the device can't meet it.
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        n = math.prod(normalized_shape)
+        if not n // props.warp_size < props.multi_processor_count // 2:
+            self.skipTest(
+                f"two-pass dgamma kernel not selected on this device: "
+                f"{n=} {props.warp_size=} {props.multi_processor_count=}"
+            )
         for m in (64 * 1024, 64 * 1024 + 1, 66000):
             x = torch.randn((m, *normalized_shape), dtype=dtype, requires_grad=True)
             grad_output = torch.rand_like(x)
