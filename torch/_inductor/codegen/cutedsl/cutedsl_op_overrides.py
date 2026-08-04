@@ -230,6 +230,8 @@ class CuteDSLOpOverrides(OpOverrides):
         node_flags = CuteDSLOpOverrides._node_tensor_flags()
         if node_flags is not None:
             a_is_tensor, b_is_tensor = node_flags
+            a_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(a)
+            b_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(b)
         else:
             a_is_tensor = CuteDSLOpOverrides._is_tensor_like(a)
             b_is_tensor = CuteDSLOpOverrides._is_tensor_like(b)
@@ -658,8 +660,9 @@ class CuteDSLOpOverrides(OpOverrides):
             )
 
         result_expr = (
-            f"cute.where({CuteDSLOpOverrides._as_expr(condition)}, "
-            f"{CuteDSLOpOverrides._as_expr(a)}, {CuteDSLOpOverrides._as_expr(b)})"
+            f"({CuteDSLOpOverrides._as_expr(a)} if "
+            f"{CuteDSLOpOverrides._as_expr(condition)} else "
+            f"{CuteDSLOpOverrides._as_expr(b)})"
         )
         if a_cse is None and b_cse is None and cond_cse is None:
             return result_expr

@@ -1190,6 +1190,7 @@ class FlexGemmEpilogueAnalysis:
                 outputs, main_transform=grouped_main.transform
             )
         else:
+            # TODO: Consider DCE before analysis if dead grouped selects become common.
             if any(
                 isinstance(normalized, NormalizedSelect)
                 and normalized.source in local_reduce.grouped_layouts
@@ -1374,10 +1375,7 @@ class FlexGemmEpilogueEmitter:
                 ValueRanges.unknown(),
                 dtype=physical_dtype,
                 shape=(1,),
-                is_scalar_expr=(
-                    self.outputs.main_transform is not None
-                    and statically_known_shape_equal(epilogue_arg_meta.shape, (1, 1))
-                ),
+                is_scalar_expr=self.outputs.main_transform is not None,
             )
             if logical_dtype != physical_dtype:
                 self.env[node] = FlexGemmCuteDSLOpOverrides.to_dtype(
