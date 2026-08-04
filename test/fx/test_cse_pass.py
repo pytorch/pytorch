@@ -6,7 +6,11 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 banned_ops = get_CSE_banned_ops()
@@ -94,6 +98,8 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
 
 
 class TestCSEPass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nochange(self):
         def f(x):
             a = x + 1
