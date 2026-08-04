@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
-    TestCase,
     run_tests,
     parametrize,
     freeze_rng_state,
@@ -41,6 +40,7 @@ from torch.testing._internal.common_utils import (
     xfailIf,
     setSdpaBackendsToDefaultFinally,
     skipIfXpu,
+    HardwareClassification,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -329,7 +329,9 @@ def make_strided_sdpa_input(
     return tensor.detach().requires_grad_(requires_grad)
 
 
-class TestTransformers(TestCase):
+class TestTransformers(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
         encoder_layer = nn.TransformerEncoderLayer(
@@ -359,6 +361,7 @@ class TestTransformers(TestCase):
                 mask=src_mask,
                 src_key_padding_mask=padding_mask,
             )
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/101787")
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_decoder_padding_and_src_mask_bool(self):
@@ -399,6 +402,7 @@ class TestTransformers(TestCase):
 
         with self.assertNoLogs(None):
             transformer_decoder(inputs, input_seq_len, memory)
+
     def test_encoder_is_causal(self):
 
         d_model = 3
@@ -555,6 +559,7 @@ class TestTransformersCUDA(NNTestCase):
 class TestTransformersDevice(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
@@ -6264,6 +6269,7 @@ else:
 
 if TEST_XPU:
     device_types += ("xpu", )
+
 
 instantiate_device_type_tests(TestTransformersDevice, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
