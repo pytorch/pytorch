@@ -171,8 +171,9 @@ def associative_scan(
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
-            This function must be pure, i.e., no lifted arguments are supported at the moment,
-            satisfy the associative property and have no side-effects.
+            This function must be pure, satisfy the associative property and have no
+            side-effects. It may close over lifted arguments (e.g. freevars), but those
+            must not require gradients (gradients for lifted arguments are not supported).
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
@@ -549,7 +550,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         Notice that the above can be re-written as a right-to-left associative_scan with flat operator
 
         def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-            return bw * bw_next, gl_next + bw_next * gl
+            return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl) # gl_next + bw_next * gl
 
         gl_ys_pinit = [gl_ys4, gl_ys3, gl_ys2, gl_ys1, 0]
         bwys_pinit =  [bwys43, bwys32, bwys21,      1, 1]
@@ -618,7 +619,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             5.2) Flip, scan left-to-right, flip back, and drop the last (padding) element
 
                 leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
-                result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
+                result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
                 g_ys = result_rev[1].flip([0])[:-1]
 
         6.) Scale with the instantaneous input gradients bwxs
@@ -770,7 +771,9 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
 
             # 5.2) Flip, scan left-to-right, flip back, and drop the last (padding)
-            # element to get g_ys.
+            # element to get g_ys. We call the raw associative_scan_op HOP (not
+            # generic_associative_scan) so this scan is Triton-lowerable under compiled
+            # autograd.
             result_rev = associative_scan_op(
                 g_ys_combine_fn_flat,
                 [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])],

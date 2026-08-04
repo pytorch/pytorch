@@ -6500,6 +6500,19 @@ class GraphModule(torch.nn.Module):
         grads_ref = torch.autograd.grad(result_ref.sum(), xs)
         self.assertEqual(grads, grads_ref)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_pointwise_additional_input_requires_grad_raises(self):
+        device = torch.device("cuda")
+        H = torch.rand(2, device=device, requires_grad=True)
+
+        def combine_fn(x, y):
+            return x + y + H
+
+        xs = torch.randn(4, 2, device=device, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
+            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
     @requires_cuda
     def test_associative_scan_input_mutation(self):
         device = torch.device("cuda")
