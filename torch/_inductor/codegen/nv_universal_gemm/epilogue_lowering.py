@@ -118,7 +118,7 @@ class NVGemmEpilogueProgram:
                 node.node.get_name(), gemm_name, gemm_dtype, n
             )
             is not None
-            for node in self.pointwise_nodes
+            for node in self.evt_nodes
         )
 
     @property

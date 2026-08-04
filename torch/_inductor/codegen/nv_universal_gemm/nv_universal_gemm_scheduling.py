@@ -410,16 +410,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             trial_removed_buffers.add(ir_node.get_name())
         try:
             trial_reads: list[str] = []
-            trial_writes: list[str] = []
             evt_nodes = epilogue_program.evt_nodes
             if evt_nodes:
-                trial_reads, trial_writes, _, _ = (
-                    CutlassEVTCodegen.ir_to_evt_python_code(
-                        ir_node.get_name(),
-                        list(evt_nodes),
-                        trial_removed_buffers,
-                    )
+                trial_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                    ir_node.get_name(),
+                    list(evt_nodes),
+                    trial_removed_buffers,
                 )
+                trial_reads = list(trial_epilogue.reads)
             if scaled_epilogue:
                 for read_name in trial_reads:
                     read_buf = name_to_buf.get(read_name)
@@ -770,31 +768,27 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         if isinstance(node.node, ComputedBuffer)
                     ]
                     try:
-                        reads, writes, var_renames, evt_code = (
-                            LoopIRCuteDSLCodegen.from_buffers(
-                                original_buffer_name,
-                                evt_buffers,
-                                removed_buffers_with_gemm,
-                                EPILOGUE_FN_NAME,
-                            )
+                        lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
+                            original_buffer_name,
+                            evt_buffers,
+                            removed_buffers_with_gemm,
+                            EPILOGUE_FN_NAME,
                         )
-                        epilogue_is_cutedsl = True
                     except NotImplementedError:
-                        reads, writes, var_renames, evt_code = (
-                            CutlassEVTCodegen.ir_to_evt_python_code(
-                                original_buffer_name,
-                                list(evt_nodes),
-                                removed_buffers_with_gemm,
-                                fn_name=EPILOGUE_FN_NAME,
-                                as_standalone_function=True,
-                            )
+                        lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                            original_buffer_name,
+                            list(evt_nodes),
+                            removed_buffers_with_gemm,
+                            fn_name=EPILOGUE_FN_NAME,
+                            as_standalone_function=True,
                         )
-                    epilogue_fn_code = evt_code
-                    epilogue_reads = reads
-                    epilogue_writes = writes
-                    epilogue_var_renames = var_renames
+                    epilogue_fn_code = lowered_epilogue.source
+                    epilogue_is_cutedsl = lowered_epilogue.is_cutedsl
+                    epilogue_reads = list(lowered_epilogue.reads)
+                    epilogue_writes = list(lowered_epilogue.writes)
+                    epilogue_var_renames = lowered_epilogue.renames
                     if feeds_main and reduction_plan is not None:
-                        d_buf = var_renames.get("D")
+                        d_buf = lowered_epilogue.renames.get("D")
                         if isinstance(d_buf, str):
                             reduction_plan = dataclasses.replace(
                                 reduction_plan, primary_output=d_buf
