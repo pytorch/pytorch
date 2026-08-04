@@ -9,43 +9,22 @@ import functools
 import torch
 
 from ... import flydsl_utils as fu
+from .flydsl_rmsnorm_utils import normalized_shape_1d, SUPPORTED_DTYPES
 
 
-_SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _SUPPORTED_ARCHES = ("gfx950",)
 _HIP_AVAILABLE = torch.version.hip is not None
 _is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
 _rmsnorm_fwd = None
 
 
-def _normalized_shape_1d(normalized_shape) -> int | None:
-    """Return N for one-dimensional normalization, or None if unsupported."""
-
-    if isinstance(normalized_shape, int):
-        return normalized_shape
-    if isinstance(normalized_shape, (tuple, list)):
-        if len(normalized_shape) != 1:
-            return None
-        try:
-            return int(normalized_shape[0])
-        except (TypeError, ValueError):
-            return None
-
-    try:
-        shape = tuple(int(x) for x in normalized_shape)
-    except TypeError:
-        try:
-            shape = (int(normalized_shape),)
-        except (TypeError, ValueError):
-            return None
-    except ValueError:
-        return None
-    return shape[0] if len(shape) == 1 else None
-
-
 @functools.cache
 def _is_supported_arch(device_index: int) -> bool:
-    return fu._resolve_rocm_arch(device_index) in _SUPPORTED_ARCHES
+    # HSA_OVERRIDE_GFX_VERSION may carry feature flags ("gfx950:sramecc+") and
+    # _resolve_rocm_arch passes those through, so compare the base arch only --
+    # the band tuning below does not depend on sramecc/xnack.
+    arch = fu._resolve_rocm_arch(device_index)
+    return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
 
 
 def _common_supported(
@@ -59,7 +38,7 @@ def _common_supported(
     device_index = input.device.index
     if not _is_supported_arch(device_index):
         return False
-    if input.dtype not in _SUPPORTED_DTYPES:
+    if input.dtype not in SUPPORTED_DTYPES:
         return False
     if input.ndim < 1 or input.shape[-1] != n or input.numel() == 0:
         return False
@@ -105,7 +84,7 @@ def _fused_rms_norm_cond(
     weight: torch.Tensor | None,
     eps: float | None,
 ) -> bool:
-    n = _normalized_shape_1d(normalized_shape)
+    n = normalized_shape_1d(normalized_shape)
     if n is None:
         return False
     if not _common_supported(input, n, weight):
@@ -115,7 +94,9 @@ def _fused_rms_norm_cond(
     return _fused_rms_norm_fwd_perf_wins(input, n)
 
 
-def _get_rmsnorm_fwd(input: torch.Tensor):
+def _get_rmsnorm_fwd():
+    # Imported on first dispatch, not at module scope: the kernel module pulls
+    # in flydsl, which must stay out of `import torch`.
     global _rmsnorm_fwd
     if _rmsnorm_fwd is None:
         from .flydsl_rmsnorm_fwd import rmsnorm_fwd
@@ -135,7 +116,7 @@ def _fused_rms_norm_impl(
     if weight is None or eps is None:
         raise RuntimeError("FlyDSL RMSNorm requires explicit weight and eps")
 
-    rmsnorm_fwd = _get_rmsnorm_fwd(input)
+    rmsnorm_fwd = _get_rmsnorm_fwd()
     return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
 
 

@@ -32,7 +32,20 @@ def _flydsl_rmsnorm_registered() -> bool:
 
 
 class TestFlyDSLRMSNormArch(TestCase):
-    @parametrize("arch,expected", (("gfx950:sramecc+", True), ("gfx942", False)))
+    @parametrize(
+        "arch,expected",
+        (
+            ("gfx950", True),
+            # _resolve_rocm_arch returns HSA_OVERRIDE_GFX_VERSION verbatim, so
+            # the gate has to tolerate feature flags rather than compare the
+            # whole string.
+            ("gfx950:sramecc+", True),
+            ("gfx950:sramecc+:xnack-", True),
+            ("gfx942", False),
+            ("gfx942:sramecc+", False),
+            (None, False),
+        ),
+    )
     def test_arch_gate_allows_only_gfx950(self, arch, expected):
         import torch._native.ops.norm.flydsl_rmsnorm_impl as flydsl_rmsnorm_impl
 
@@ -41,9 +54,7 @@ class TestFlyDSLRMSNormArch(TestCase):
         arch_is_supported.cache_clear()
         self.addCleanup(arch_is_supported.cache_clear)
         with patch.object(
-            flydsl_rmsnorm_impl.fu,
-            "_resolve_rocm_arch",
-            return_value=arch.split(":", 1)[0],
+            flydsl_rmsnorm_impl.fu, "_resolve_rocm_arch", return_value=arch
         ):
             self.assertEqual(arch_is_supported(0), expected)
 
@@ -288,6 +299,37 @@ class TestFlyDSLRMSNorm(TestCase):
 
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+    def test_cow_inputs_fall_back_without_materializing(self):
+        # The predicate declines copy-on-write inputs because flattening an N-D
+        # input calls reshape, which would materialize them. Both halves matter:
+        # that the shape is otherwise accepted, and that the tensors are still
+        # COW once the call has gone through aten instead.
+        from torch._native.ops.norm.flydsl_rmsnorm_impl import _fused_rms_norm_cond
+
+        x, weight = self._make_dispatch_inputs()
+        # Same shape without COW dispatches, so COW is the only thing declining
+        # the cases below. Checked before any _lazy_clone call: cloning marks
+        # the source COW as well, so x stops being a clean control afterwards.
+        self.assertTrue(_fused_rms_norm_cond(x, [DISPATCH_N], weight, EPS))
+
+        x_cow = x._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(x_cow))
+        self.assertFalse(_fused_rms_norm_cond(x_cow, [DISPATCH_N], weight, EPS))
+
+        plain_x, plain_weight = self._make_dispatch_inputs()
+        weight_cow = plain_weight._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(weight_cow))
+        self.assertFalse(_fused_rms_norm_cond(plain_x, [DISPATCH_N], weight_cow, EPS))
+
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got = torch.rms_norm(x_cow, (DISPATCH_N,), weight, EPS)
+
+        self.assertEqual(got, ref)
+        self._assert_no_flydsl_compiles()
+        self.assertTrue(torch._C._is_cow_tensor(x_cow))
+        self.assertTrue(torch._C._is_cow_tensor(weight_cow))
 
     def test_user_disable_falls_back_and_restores(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info

@@ -13,14 +13,12 @@ from flydsl.runtime.device import is_rdna_arch
 import torch
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
-from torch._native.ops.norm.flydsl_rmsnorm_impl import _normalized_shape_1d
+from torch._native.ops.norm.flydsl_rmsnorm_utils import (
+    normalized_shape_1d,
+    SUPPORTED_DTYPES,
+)
 
 
-_SUPPORTED_DTYPES: dict[torch.dtype, str] = {
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.bfloat16: "bf16",
-}
 BLOCK_THREADS = 256
 VEC_WIDTH = 8
 
@@ -73,7 +71,7 @@ def _to_elem(dtype_str: str, elem_dtype, y):
 
 def _dtype_str(dtype: torch.dtype) -> str:
     try:
-        return _SUPPORTED_DTYPES[dtype]
+        return SUPPORTED_DTYPES[dtype]
     except KeyError as exc:
         raise TypeError(f"unsupported RMSNorm dtype for FlyDSL: {dtype}") from exc
 
@@ -363,7 +361,7 @@ def rmsnorm_fwd(
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run FlyDSL forward and return the ATen output/rstd pair."""
-    n = _normalized_shape_1d(normalized_shape)
+    n = normalized_shape_1d(normalized_shape)
     if n is None:
         raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
 

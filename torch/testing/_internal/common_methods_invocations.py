@@ -46,7 +46,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
+    isRocmArchAnyOf, MI350_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -22948,10 +22949,13 @@ if "cutedsl" in dsl_ops_by_dsl:
                 skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
             ],
             skips=(
-                # Unsupported dtypes fall through to aten, so this variant's
-                # narrower dtype set fails test_dtypes.
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
                 DecorateInfo(
-                    unittest.expectedFailure,
+                    unittest.skip("override intentionally narrower than aten"),
                     "TestCommon", "test_dtypes",
                 ),
             ),
@@ -23031,7 +23035,12 @@ if "flydsl" in dsl_ops_by_dsl:
             sample_inputs_func=sample_inputs_rms_norm_flydsl,
             decorators=[
                 onlyCUDA,
-                skipCUDAIf(not TEST_WITH_ROCM, "flydsl rms_norm override requires ROCm"),
+                # The override declines every input on other archs, so without
+                # this the variant would silently compare aten against itself.
+                skipCUDAIf(
+                    not isRocmArchAnyOf(MI350_ARCH),
+                    "flydsl rms_norm override requires gfx950",
+                ),
                 # The predicate declines non-contiguous inputs, so this test
                 # compares the FlyDSL kernel against aten rather than one
                 # kernel against itself. Their reduction orders differ, which
