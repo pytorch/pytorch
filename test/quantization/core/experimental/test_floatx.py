@@ -537,15 +537,35 @@ class TestFloat4Dtype(TestCase):
         with self.assertRaisesRegex(RuntimeError, "other than float64"):
             x.to(torch.float4_e2m1fn_x2)
 
-    def test_float4_e2m1fn_x2_cast_non_contiguous(self, device):
-        # the pack/unpack kernels assume row-major layout, so non-contiguous
-        # inputs are rejected rather than silently made contiguous
+    def test_float4_e2m1fn_x2_cast_last_dim_not_contiguous(self, device):
+        # the pack fuses two adjacent last-dim values into one byte, so the last
+        # dim must be contiguous; a transpose makes it strided and is rejected
         x = torch.randn(4, 8, device=device).t()
-        with self.assertRaisesRegex(RuntimeError, "requires a contiguous input"):
+        with self.assertRaisesRegex(RuntimeError, "last dimension to be contiguous"):
             x.to(torch.float4_e2m1fn_x2)
-        f4 = torch.randn(4, 8, device=device).to(torch.float4_e2m1fn_x2)
-        with self.assertRaisesRegex(RuntimeError, "requires a contiguous input"):
-            f4[:, ::2].to(torch.float32)
+
+    def test_float4_e2m1fn_x2_cast_outer_strided(self, device):
+        # outer dims may be strided as long as the last dim is contiguous; the
+        # result must match casting a contiguous copy. Cover both an even outer
+        # stride (zero-copy wide view) and an odd one (contiguous fallback).
+        even_outer = torch.randn(8, 8, device=device)[::2]  # stride (16, 1)
+        odd_outer = torch.randn(8, 3, device=device)[:, 0:2]  # stride (3, 1)
+        for strided in (even_outer, odd_outer):
+            self.assertFalse(strided.is_contiguous())
+            self.assertEqual(strided.stride(-1), 1)
+            out = strided.to(torch.float4_e2m1fn_x2)
+            ref = strided.contiguous().to(torch.float4_e2m1fn_x2)
+            self.assertEqual(out.view(torch.uint8), ref.view(torch.uint8))
+
+    def test_float4_e2m1fn_x2_cast_from_strided(self, device):
+        # the unpack reads each byte independently, so any strided fp4 input is
+        # supported; the result must match unpacking a contiguous copy
+        f4 = torch.randn(8, 8, device=device).to(torch.float4_e2m1fn_x2)
+        for strided in (f4[:, ::2], f4.t(), f4[::2]):
+            self.assertFalse(strided.is_contiguous())
+            out = strided.to(torch.float32)
+            ref = strided.contiguous().to(torch.float32)
+            self.assertEqual(out, ref)
 
     def test_float4_e2m1fn_x2_cast_cross_device(self, device):
         # dtype + device together: the conversion kernel runs on the source

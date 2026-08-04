@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/bit_cast.h>
+#include <c10/util/irange.h>
 
 #include <cuda.h>
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
@@ -56,16 +57,15 @@ Tensor _convert_to_float4_e2m1fn_x2_cuda(const Tensor& self) {
       "conversion to Float4_e2m1fn_x2 is only supported from a floating point "
       "dtype other than float64, got ",
       self.scalar_type());
-  // Require a contiguous input: the pack reinterprets each pair of last-dim
-  // values as one wider element, which assumes row-major layout. Supporting
-  // arbitrary strides would need stride-aware kernels, which is not worth it
-  // right now.
-  TORCH_CHECK(
-      self.is_contiguous(),
-      "conversion to Float4_e2m1fn_x2 requires a contiguous input");
   TORCH_CHECK(
       self.dim() >= 1,
       "conversion to Float4_e2m1fn_x2 requires at least 1 dimension, got a 0-dim tensor");
+  // Require the last dimension to be contiguous: the pack fuses two adjacent
+  // last-dim values into one byte, so they must be adjacent in memory. Outer
+  // dimensions may be strided; TensorIterator handles the outer strides.
+  TORCH_CHECK(
+      self.stride(-1) == 1,
+      "conversion to Float4_e2m1fn_x2 requires the last dimension to be contiguous");
   TORCH_CHECK(
       self.size(-1) % 2 == 0,
       "conversion to Float4_e2m1fn_x2 requires the last dimension to be even, got shape ",
@@ -81,7 +81,14 @@ Tensor _convert_to_float4_e2m1fn_x2_cuda(const Tensor& self) {
   // Pack two consecutive inputs into each output byte. We reinterpret each input
   // pair as a single element twice as wide (fp32->fp64, bf16/fp16->fp32) so the
   // cast becomes a 1:1 elementwise map; TensorIterator then handles vectorized
-  // loads/stores instead of a hand-written kernel.
+  // loads/stores instead of a hand-written kernel. The wide view additionally
+  // needs even outer strides and storage offset, which last-dim contiguity does
+  // not guarantee, so fall back to a contiguous copy when it does not hold.
+  bool can_view_wide = self.storage_offset() % 2 == 0;
+  for (const auto d : c10::irange(self.dim() - 1)) {
+    can_view_wide = can_view_wide && self.stride(d) % 2 == 0;
+  }
+  const Tensor src = can_view_wide ? self : self.contiguous();
   auto out_bytes = out.view(kByte);
   AT_DISPATCH_V2(
       self.scalar_type(),
@@ -89,7 +96,7 @@ Tensor _convert_to_float4_e2m1fn_x2_cuda(const Tensor& self) {
       AT_WRAP([&] {
         constexpr bool is_4byte = std::is_same_v<scalar_t, float>;
         using wide_t = std::conditional_t<is_4byte, double, float>;
-        auto input = self.view(is_4byte ? kDouble : kFloat);
+        auto input = src.view(is_4byte ? kDouble : kFloat);
         auto iter = TensorIteratorConfig()
                         .check_all_same_dtype(false)
                         .add_output(out_bytes)
@@ -113,13 +120,9 @@ Tensor _convert_from_float4_e2m1fn_x2_cuda(const Tensor& self) {
       "conversion from Float4_e2m1fn_x2 is only supported from a "
       "Float4_e2m1fn_x2 dtype, got ",
       self.scalar_type());
-  // Require a contiguous input: the unpack reinterprets each pair of output
-  // values as one wider element, which assumes row-major layout. Supporting
-  // arbitrary strides would need stride-aware kernels, which is not worth it
-  // right now.
-  TORCH_CHECK(
-      self.is_contiguous(),
-      "conversion from Float4_e2m1fn_x2 requires a contiguous input");
+  // No layout requirement: each byte unpacks independently into two outputs, so
+  // any strided input is fine. The input is viewed as kByte (same itemsize, any
+  // strides) and TensorIterator reads it; only the output is reinterpreted wide.
   TORCH_CHECK(
       self.dim() >= 1,
       "conversion from Float4_e2m1fn_x2 requires at least 1 dimension, got shape ",

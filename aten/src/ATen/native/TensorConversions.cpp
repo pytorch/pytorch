@@ -264,12 +264,17 @@ static void check_convert_to_float4_input(const Tensor& self) {
       "conversion to Float4_e2m1fn_x2 is only supported from a floating point "
       "dtype other than float64, got ",
       self.scalar_type());
-  // Require a contiguous input: the pack kernel assumes row-major layout (two
-  // fp4 values share a byte along the last dim). Supporting arbitrary strides
-  // would need stride-aware kernels, which is not worth it right now.
-  TORCH_CHECK(
-      self.is_contiguous(),
-      "conversion to Float4_e2m1fn_x2 requires a contiguous input");
+  // Require the last dimension to be contiguous: the pack fuses two adjacent
+  // last-dim values into one byte, so they must be adjacent in memory. Outer
+  // dimensions may be strided; the kernels handle that (CUDA via
+  // TensorIterator, CPU via a contiguous copy). Use the symbolic stride so the
+  // dynamic-shape meta path stays unspecialized (a contiguous tensor has a
+  // literal stride of 1 here, so this adds no guard).
+  if (self.dim() >= 1) {
+    TORCH_SYM_CHECK(
+        self.sym_stride(-1).sym_eq(1),
+        "conversion to Float4_e2m1fn_x2 requires the last dimension to be contiguous");
+  }
 }
 
 // Output sizes for unpacking a Float4_e2m1fn_x2 tensor: the last dimension is
@@ -291,12 +296,9 @@ static void check_convert_from_float4_input(const Tensor& self) {
       "conversion from Float4_e2m1fn_x2 is only supported from a "
       "Float4_e2m1fn_x2 dtype, got ",
       self.scalar_type());
-  // Require a contiguous input: the unpack kernel assumes row-major layout (two
-  // fp4 values share a byte along the last dim). Supporting arbitrary strides
-  // would need stride-aware kernels, which is not worth it right now.
-  TORCH_CHECK(
-      self.is_contiguous(),
-      "conversion from Float4_e2m1fn_x2 requires a contiguous input");
+  // No layout requirement: each byte unpacks independently into two outputs, so
+  // any strided input is fine (CUDA reads it through TensorIterator, CPU
+  // through a contiguous copy).
 }
 
 Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
@@ -304,6 +306,10 @@ Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
   auto out = at::empty_symint(
       float4_e2m1fn_x2_packed_sizes(self),
       self.options().dtype(kFloat4_e2m1fn_x2));
+  // The loop below reads the input as a flat contiguous buffer; materialize a
+  // contiguous copy when the input is only last-dim contiguous (no-op if it is
+  // already contiguous).
+  const Tensor input = self.contiguous();
   auto* out_ptr = reinterpret_cast<uint8_t*>(out.data_ptr());
   const int64_t n = out.numel();
   // Read the low-precision input directly and narrow per element, rather than
@@ -315,7 +321,7 @@ Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
       self.scalar_type(),
       "_convert_to_float4_e2m1fn_x2_cpu",
       [&] {
-        const scalar_t* in_ptr = self.const_data_ptr<scalar_t>();
+        const scalar_t* in_ptr = input.const_data_ptr<scalar_t>();
         at::parallel_for(
             0, n, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
               for (const auto i : c10::irange(begin, end)) {
@@ -339,7 +345,9 @@ Tensor _convert_to_float4_e2m1fn_x2_meta(const Tensor& self) {
 
 Tensor _convert_from_float4_e2m1fn_x2_cpu(const Tensor& self) {
   check_convert_from_float4_input(self);
-  const Tensor& input = self;
+  // The loop below reads the input as a flat contiguous buffer; materialize a
+  // contiguous copy when the input is strided (no-op if already contiguous).
+  const Tensor input = self.contiguous();
   auto out = at::empty_symint(
       float4_e2m1fn_x2_unpacked_sizes(input), input.options().dtype(kFloat));
   const auto* in_ptr = reinterpret_cast<const uint8_t*>(input.const_data_ptr());
