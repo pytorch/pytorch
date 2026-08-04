@@ -35,6 +35,7 @@ NVGEMM_SOFTMAX_GROUP_LIMIT = 32
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class NVGemmFeedPlan:
     plan: GemmReductionPlan
+    intermediate_outputs: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -93,6 +94,7 @@ class NVGemmEpilogueProgram:
     capture: "NVGemmEpilogueCapture"
     reduction_partition: NVGemmReductionPartition
     reduction_plan: GemmReductionPlan | None
+    intermediate_outputs: tuple[str, ...] = ()
 
     @property
     def supported(self) -> bool:
@@ -145,6 +147,7 @@ class NVGemmEpilogueProgram:
             (
                 reduction_plan.primary_output,
                 *reduction_plan.auxiliary_outputs,
+                *self.intermediate_outputs,
             )
             if reduction_plan is not None
             else ()
@@ -152,14 +155,7 @@ class NVGemmEpilogueProgram:
         owned.update(
             node
             for node in self.capture.nodes
-            if (isinstance(node.node, Buffer) and node.node.get_name() in feed_names)
-            or (
-                reduction_plan is not None
-                and reduction_plan.feeds_main
-                and reduction_plan.reduction_type == "online_softmax"
-                and isinstance(node.node, ComputedBuffer)
-                and isinstance(node.node.data, MultiOutputReduction)
-            )
+            if isinstance(node.node, Buffer) and node.node.get_name() in feed_names
         )
         return tuple(owned)
 
@@ -918,6 +914,9 @@ class NVGemmEpilogueLowering:
             capture=context,
             reduction_partition=reduction_partition,
             reduction_plan=reduction_plan,
+            intermediate_outputs=(
+                feed_plan.intermediate_outputs if feed_plan is not None else ()
+            ),
         )
 
     @staticmethod
@@ -1030,6 +1029,7 @@ class NVGemmEpilogueLowering:
                 consumer_fn=matched_source,
                 secondary_consumer_fn=secondary_consumer,
             ),
+            intermediate_outputs=tuple(feed_reads),
         )
 
     @staticmethod
