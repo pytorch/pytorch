@@ -9,6 +9,8 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
 
 namespace py = pybind11;
@@ -51,16 +53,23 @@ typedef struct CacheEntry CacheEntry;
 typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
-  void* root_mgr;
+  void* root_mgr{nullptr};
+  void* last_success_receipt{nullptr};
 
-  PrecompileEntry(py::object gm, py::object c);
+  PrecompileEntry(py::object gm, py::object c, bool enable_guard_lookup_memo);
+  PrecompileEntry(const PrecompileEntry&) = delete;
+  PrecompileEntry(PrecompileEntry&&) = delete;
+  PrecompileEntry& operator=(const PrecompileEntry&) = delete;
+  PrecompileEntry& operator=(PrecompileEntry&&) = delete;
+  ~PrecompileEntry();
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
   // A pointer to the orig_code object to prevent race conditions in invalidate
   // function.
   PyCodeObject* orig_code;
-  std::list<PrecompileEntry> precompile_entries;
+  std::list<std::shared_ptr<PrecompileEntry>> precompile_entries;
+  std::mutex precompile_entries_mutex;
   // Per-compile cache map: isolate_recompiles_id -> list of CacheEntry.
   // id -1 is the default (non-isolated) bucket. id >= 0 are isolated compiles.
   // All cache entries live in this map — there is no separate default list.
@@ -197,6 +206,8 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 //  - extra_state: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
+//   - matched_precompile_code_owner: New reference when a precompile entry
+//     matches, otherwise nullptr. The caller owns this reference.
 //   - Py_None or PyObject: Trace id of the compiled code.
 void lookup(
     ExtraState* extra_state,
@@ -204,6 +215,7 @@ void lookup(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
+    PyObject** matched_precompile_code_owner,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
 
@@ -215,6 +227,7 @@ bool try_lookup_without_guard_eval(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
+    PyObject** matched_precompile_code_owner,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
 

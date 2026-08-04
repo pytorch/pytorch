@@ -37,6 +37,7 @@ class _CacheEntry:
 
 class _PrecompileEntry:
     guard_manager: GuardManagerWrapper
+    _debug_fast_guard_enabled: bool
 
 class _ExtraState:
     def invalidate(

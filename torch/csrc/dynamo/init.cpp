@@ -486,8 +486,14 @@ void initDynamoBindings(PyObject* torch) {
           "update_diff_guard_root_manager",
           &CacheEntry::update_diff_guard_root_manager);
 
-  py::class_<PrecompileEntry>(m, "_PrecompileEntry")
-      .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
+  py::class_<PrecompileEntry, std::shared_ptr<PrecompileEntry>>(
+      m, "_PrecompileEntry")
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager)
+      .def_property_readonly(
+          "_debug_fast_guard_enabled", [](const PrecompileEntry& entry) {
+            return torch::dynamo::is_guard_last_success_receipt_enabled(
+                entry.last_success_receipt);
+          });
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);

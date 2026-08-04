@@ -534,12 +534,14 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   PyObject* maybe_cached_code = nullptr;
+  PyObject* matched_precompile_code_owner_raw = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
           extra,
           backend,
           isolate_recompiles_id,
           &maybe_cached_code,
+          &matched_precompile_code_owner_raw,
           &trace_annotation,
           is_skip_guard_eval_unsafe)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
@@ -551,10 +553,15 @@ PyObject* dynamo__custom_eval_frame(
         backend,
         isolate_recompiles_id,
         &maybe_cached_code,
+        &matched_precompile_code_owner_raw,
         &trace_annotation,
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
+  py::object matched_precompile_code_owner =
+      matched_precompile_code_owner_raw == nullptr
+      ? py::object()
+      : py::reinterpret_steal<py::object>(matched_precompile_code_owner_raw);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.

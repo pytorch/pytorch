@@ -3670,6 +3670,86 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
         """
         self._run_guard_lookup_memo_script(script)
 
+    def test_precompile_entry_owns_actual_partial_receipt(self):
+        script = """
+            import threading
+
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+                _reset_precompile_entries,
+            )
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.scale = 2.0
+
+                def forward(self, x):
+                    return x * self.scale
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.ones(4)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            code = Model.forward.__code__
+            source_entry = _only_cache_entry(code)
+            should_block = threading.Event()
+            guard_entered = threading.Event()
+            guard_release = threading.Event()
+
+            def blocking_guard(_):
+                if should_block.is_set():
+                    guard_entered.set()
+                    assert guard_release.wait(10), "timed out waiting for reset"
+                return True
+
+            source_entry.guard_manager.root.add_lambda_guard(
+                blocking_guard, ["blocking precompile guard"], None
+            )
+            _reset_precompile_entries(code)
+            _load_precompile_entry(
+                code, source_entry.guard_manager, source_entry.code
+            )
+
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+
+            precompile_entries = _debug_get_precompile_entries(code)
+            assert len(precompile_entries) == 1, len(precompile_entries)
+            assert precompile_entries[0]._debug_fast_guard_enabled
+
+            # Do not let the debug wrapper mask the container/lookup ownership
+            # race that this reset is intended to exercise.
+            del precompile_entries
+
+            errors = []
+
+            def run_lookup():
+                try:
+                    torch.testing.assert_close(compiled(x), model(x))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            should_block.set()
+            worker = threading.Thread(target=run_lookup)
+            worker.start()
+            assert guard_entered.wait(10), "guard lookup did not block"
+            _reset_precompile_entries(code)
+            guard_release.set()
+            worker.join(10)
+            assert not worker.is_alive(), "guard lookup did not finish"
+            assert not errors, errors
+            assert _debug_get_precompile_entries(code) == []
+        """
+        self._run_guard_lookup_memo_script(script)
+
     def test_guard_lookup_memo_defaults_off(self):
         script = """
             import torch
