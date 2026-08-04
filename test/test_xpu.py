@@ -3834,7 +3834,7 @@ class TestMemPool(TestCase):
         pool_do_not_use = torch.xpu.MemPool()
         pool_use = torch.xpu.MemPool(use_on_oom=True)
 
-        _1mb = 1 * 1024 * 1024 / 4  # for int data type
+        _1mb = 1 * 1024 * 1024 // 4  # for int data type
         init_fraction = torch.xpu.get_per_process_memory_fraction()
         _, all_memory = torch.xpu.memory.mem_get_info()
         pre_reserved = torch.xpu.memory_reserved()
