@@ -68,7 +68,6 @@ class _ChunkViews:
     bchunk_size: int
     input_chunk: torch.Tensor
     target_chunk: torch.Tensor
-    weight_chunk: torch.Tensor | None  # None on the prob path (see prob_wt)
     logits: torch.Tensor
     input_chunk_acc: torch.Tensor
 
@@ -85,7 +84,25 @@ class _ChunkViews:
             torch.mul(self.target_chunk, ctx.weight_row, out=out)
         else:
             out.copy_(self.target_chunk)
+        if ctx.loss_grad_output is not None:
+            # reduction="none" backward: fold the per-sample upstream grad in
+            # (the prob analogue of neg_weight_target), so the shared grad
+            # loop emits grad_output[n] * (softmax * s_n - w*t).
+            g = ctx.loss_grad_output.narrow(0, self.bchunk_start, self.bchunk_size)
+            out.mul_(g.unsqueeze(1))
         return out
+
+    @property
+    def weight_chunk(self) -> torch.Tensor:
+        # Per-row weighting, the dense analogue of the index per-row weight.
+        # Index: a read-only view of the masked, reduction-scaled
+        # ``neg_weight_target``. Prob: a FRESH row mass ``sum_v (w*t)`` --
+        # owned, so the grad loop scales it in place; the loops apply
+        # ``loss_scale`` on top. Not cached: each path reads it once.
+        ctx = self.ctx
+        if ctx.is_prob_target:
+            return self.prob_wt.sum(1, dtype=ctx.weight_chunk_dtype)
+        return ctx.neg_weight_target.narrow(0, self.bchunk_start, self.bchunk_size)
 
     @property
     def input(self) -> torch.Tensor:
@@ -441,11 +458,6 @@ class _ChunkContext:
                     "linear_cross_entropy: probability target shape must be "
                     f"{(input.shape[0], linear_weight.shape[0])}, got {tuple(target.shape)}."
                 )
-            if reduction not in {"mean", "sum"}:
-                raise NotImplementedError(
-                    "linear_cross_entropy: probability target requires"
-                    f" reduction in {{'mean', 'sum'}}, got {reduction!r}"
-                )
         elif target.dtype != torch.int64:
             raise TypeError(
                 f"linear_cross_entropy: target dtype must be torch.int64, got {target.dtype}."
@@ -558,7 +570,11 @@ class _ChunkContext:
         # logits dtype. Skipped when target_chunk can be used directly
         # (no class weight and dtype already matches).
         alloc_prob_target_buf = is_prob_target and (
-            weight is not None or dtype != logits_buf_dtype
+            weight is not None
+            or dtype != logits_buf_dtype
+            # none backward folds the per-sample upstream grad into prob_wt,
+            # which must be a writable scratch (not the target view).
+            or (reduction == "none" and loss_grad_output is not None)
         )
         if is_prob_target and reduction == "mean":
             loss_scale = 1.0 / num_batches if num_batches else float("nan")
@@ -645,13 +661,6 @@ class _ChunkContext:
     def bind_chunk(self, bchunk_start: int, bchunk_size: int) -> _ChunkViews:
         input_chunk = self.input.narrow(0, bchunk_start, bchunk_size)
         target_chunk = self.corrected_target.narrow(0, bchunk_start, bchunk_size)
-        # The prob loop derives its per-chunk row weighting from
-        # ``prob_wt`` instead of the per-row ``neg_weight_target``.
-        weight_chunk = (
-            None
-            if self.is_prob_target
-            else self.neg_weight_target.narrow(0, bchunk_start, bchunk_size)
-        )
         logits = self.logits_buf.narrow(0, 0, bchunk_size)
         input_chunk_acc = (
             self.input_chunk_acc_buf.narrow(0, 0, bchunk_size).copy_(input_chunk)
@@ -664,7 +673,6 @@ class _ChunkContext:
             bchunk_size=bchunk_size,
             input_chunk=input_chunk,
             target_chunk=target_chunk,
-            weight_chunk=weight_chunk,
             logits=logits,
             input_chunk_acc=input_chunk_acc,
         )
@@ -846,22 +854,37 @@ def _linear_cross_entropy_batch_chunked_accumulator(
         loss_grad_output=loss_grad_output,
     )
     dtype = ctx.dtype
-    # reduction='none' forward (no upstream grad yet): per-sample loss
-    # into an (N,) output, no gradient precompute. ``chunk.weight_chunk``
-    # is the unsigned masked class weight here (neg_weight_target's "none"
-    # forward form), so each row's loss is W[T[n]] * (log denom -
-    # shifted_logit[T[n]]) = W[T[n]] * (-log_softmax). The "none" backward
-    # (loss_grad_output set) routes through the grad loop below instead.
+    # reduction='none' forward (no upstream grad yet): per-sample loss into
+    # an (N,) output, no gradient precompute. Both targets compute the same
+    # loss, row-weight ``s_n`` times (log denom_n - mean target logit), but
+    # realize it differently. Index is the one-hot case: the per-row weight
+    # w[T[n]] factors out and the mean is the single target logit, so
+    # ``(log_denom - shifted[T[n]]) * w`` stays factored (exact, in place).
+    # Prob is general: factoring would need the weighted mean
+    # ``<(w*t)_n, shifted_n> / s_n``, so the expanded
+    # ``s_n * log_denom - <(w*t)_n, shifted_n>`` is used instead -- it cancels
+    # that division (better precision, and a clean 0 rather than 0/0 when the
+    # row mass s_n is 0). The "none" backward (loss_grad_output set) routes
+    # through the grad loop below.
     if reduction == "none" and loss_grad_output is None:
         out = torch.empty(ctx.num_batches, dtype=dtype, device=ctx.input.device)
         for chunk in ctx.chunks():
             logits = ctx.shifted_logits(chunk)
-            # Read the target logit BEFORE ``sumexp_`` -- it does ``exp_()``
-            # in place, overwriting logits with exp(shifted).
-            ls_target = logits.gather(1, chunk.target_chunk.unsqueeze(1)).squeeze(1)
-            softmax_denom = ctx.sumexp_(logits, dim=1)
-            loss_chunk = softmax_denom.log_().sub_(ls_target.to(softmax_denom.dtype))
-            loss_chunk.mul_(chunk.weight_chunk.to(softmax_denom.dtype))
+            s = chunk.weight_chunk
+            # Read the target term BEFORE ``sumexp_`` -- it ``exp_()``s
+            # logits in place, overwriting them with exp(shifted).
+            if ctx.is_prob_target:
+                target_logit_sum = torch.einsum("bv,bv->b", chunk.prob_wt, logits)
+                softmax_denom = ctx.sumexp_(logits, dim=1)
+                loss_chunk = softmax_denom.log_().mul_(s).sub_(target_logit_sum)
+            else:
+                # gather is the prob-branch einsum specialized to a one-hot
+                # target: with the indicator row e where e[v] = (v == T[n]),
+                # einsum("bv,bv->b", e, logits) == logits[T[n]] -- evaluated
+                # sparsely here, with no dense (B, V) indicator materialized.
+                target_logit = logits.gather(1, chunk.target_chunk[:, None]).squeeze(1)
+                softmax_denom = ctx.sumexp_(logits, dim=1)
+                loss_chunk = softmax_denom.log_().sub_(target_logit).mul_(s)
             out.narrow(0, chunk.bchunk_start, chunk.bchunk_size).copy_(loss_chunk)
         return (
             out,
@@ -893,31 +916,44 @@ def _linear_cross_entropy_batch_chunked_accumulator(
         # Signs are direct (positive ``loss_scale``), unlike the index
         # loop's negated ``neg_weight_target`` convention.
         loss_scale = ctx.loss_scale
+        # The reduction='none' backward enters this loop only for gradients --
+        # its scalar ``output`` is discarded. ``loss_needed`` skips the
+        # loss-only work (the (B, V) ``loss_term`` reduction and the two
+        # ``output`` updates), leaving the gradient path (``s``,
+        # ``softmax_denom``, the softmax scaling) untouched. The scalar
+        # mean/sum forward passes loss_grad_output=None, so it still runs them.
+        loss_needed = ctx.loss_grad_output is None
         for chunk in ctx.chunks():
             logits = ctx.shifted_logits(chunk)
             wt = chunk.prob_wt
-            # Loss target term sum_{n,c} (w*t)*x_shifted, read BEFORE
-            # ``sumexp_`` (it ``exp_``s logits in place). torch.dot returns its
-            # scalar at the operand dtype, so when the logits buffer is fp16
-            # (CUDA compact) the sum overflows fp16 (>65504) for a
-            # large batch of max-shifted (<=0) logits; a per-row einsum summed
-            # across rows in fp32 stays finite (same cost as the dot). bf16/fp32
-            # operands return a wide-enough scalar, so keep the flat dot.
-            if logits.dtype == torch.float16:
-                per_row = torch.einsum("bv,bv->b", wt, logits)
-                loss_term = per_row.sum(dtype=torch.float32)
-            else:
-                loss_term = torch.dot(wt.reshape(-1), logits.reshape(-1))
-            # ``output`` is fp16 when acc_dtype is fp16 (e.g. MPS). MPS narrows
-            # the large fp32 loss_term to fp16 (-> inf) BEFORE applying alpha,
-            # unlike the documented type-promoted in-place subtract other
-            # backends do; scale first there so the operand stays in fp16 range.
-            if output.device.type == "mps":
-                output.sub_(loss_term * loss_scale)
-            else:
-                output.sub_(loss_term, alpha=loss_scale)
-            # Per-row weight mass with the reduction factor folded in.
-            s = wt.sum(1, dtype=ctx.weight_chunk_dtype).mul_(loss_scale)
+            if loss_needed:
+                # Loss target term sum_{n,c} (w*t)*x_shifted, read BEFORE
+                # ``sumexp_`` (it ``exp_``s logits in place). torch.dot returns
+                # its scalar at the operand dtype, so when the logits buffer is
+                # fp16 the sum overflows fp16 (>65504) for a large batch of
+                # max-shifted (<=0) logits; a per-row einsum summed across rows
+                # in fp32 stays finite (same cost as the dot). bf16/fp32
+                # operands return a wide-enough scalar, so keep the flat dot.
+                if logits.dtype == torch.float16:
+                    per_row = torch.einsum("bv,bv->b", wt, logits)
+                    loss_term = per_row.sum(dtype=torch.float32)
+                else:
+                    loss_term = torch.dot(wt.reshape(-1), logits.reshape(-1))
+                # ``output`` is fp16 when acc_dtype is fp16 (e.g. MPS). MPS
+                # narrows the large fp32 loss_term to fp16 (-> inf) BEFORE
+                # applying alpha, unlike the documented type-promoted in-place
+                # subtract other backends do; scale first there so the operand
+                # stays in fp16 range.
+                if output.device.type == "mps":
+                    output.sub_(loss_term * loss_scale)
+                else:
+                    output.sub_(loss_term, alpha=loss_scale)
+            # Per-row weight mass with the reduction factor folded in (prob
+            # ``weight_chunk`` is a fresh row-sum; scale in place when needed --
+            # loss_scale is 1 for sum and the none backward).
+            s = chunk.weight_chunk
+            if loss_scale != 1.0:
+                s = s.mul_(loss_scale)
             softmax_denom = ctx.sumexp_(logits, dim=1)
             if compute_grads:
                 # logits *= s/denom      (= loss_scale * softmax(x) * s_n)
@@ -926,8 +962,9 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                     ctx.div(s, softmax_denom).unsqueeze(1),
                     out=logits,
                 )
-            # output += <s, log denom>   (loss_scale already in s)
-            output.add_(s.to(softmax_denom.dtype).dot(softmax_denom.log_()))
+            if loss_needed:
+                # output += <s, log denom>   (loss_scale already in s)
+                output.add_(s.to(softmax_denom.dtype).dot(softmax_denom.log_()))
             if compute_grads:
                 # grad_logits = loss_scale * (softmax*s_n - w*t); from
                 # here every gradient is a single dense op.
@@ -1434,6 +1471,17 @@ def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
     #  batch_chunk_size, acc_policy, acc_dtype).
     input, linear_weight, target, linear_bias, weight = ctx.saved_tensors
     needs = ctx.needs_input_grad
+    if needs[2]:
+        # needs[2] is the target slot. This backward never sets result[2], so a
+        # probability target requiring grad would silently get no gradient.
+        # Raise instead, matching the scalar op's intent (whose forward guard
+        # covers the same case). Unreachable in eager -- functional.py routes a
+        # grad-requiring target to the reference -- but reliable under tracing,
+        # where needs_input_grad reflects the actual requested gradients.
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: gradients w.r.t. a probability "
+            "target are not supported on the chunked path; use options=None."
+        )
     compute_input_grad = needs[0]
     compute_linear_weight_grad = needs[1]
     compute_linear_bias_grad = linear_bias is not None and needs[3]
