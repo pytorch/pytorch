@@ -2,11 +2,15 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import ctypes
+import os
 import time
+from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import ReconfigureOptions
+from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
@@ -142,6 +146,110 @@ class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
         return "nccl-legacy"
 
 
+class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
+    """Base for tests that tear a group down.
+
+    They run on a throwaway subgroup so the class-wide default group survives;
+    a collective on that default group afterwards is what proves the process is
+    still alive and healthy.
+    """
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    def _new_subgroup(self, timeout=timedelta(seconds=60)):
+        return dist.new_group(
+            backend="nccl2",
+            use_local_synchronization=True,
+            timeout=timeout,
+        )
+
+    def _check_all_reduce(self, group=None) -> None:
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+
+class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_backend_abort_on_healthy_group(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        backend = pg._get_backend(self.device)
+        # Must return instead of ::abort()ing the process, like stock NCCL.
+        backend.abort()
+        self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_abort_process_group_on_healthy_group(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        dist.distributed_c10d._abort_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_process_group_returns(self) -> None:
+        pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_timeout_without_process_abort(self) -> None:
+        # NoHandling is how a stock NCCL user opts out of the process being
+        # taken down by the watchdog; nccl2 reads the same variable, when the
+        # backend is constructed.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            # Nobody else joins, so this can never complete and the watchdog
+            # trips. Without the tear-down the process must survive and the
+            # timeout must become readable through get_error().
+            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            deadline = time.time() + 60
+            while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
+                time.sleep(0.5)
+            self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
+            # The next collective on the timed-out group raises rather than
+            # silently proceeding on a dead communicator.
+            with self.assertRaises(RuntimeError):
+                dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+        else:
+            time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -240,6 +348,94 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
+
+
+def _live_env(name: str) -> str | None:
+    # os.environ is a snapshot taken at interpreter startup and does NOT observe
+    # values set later by C++ via setenv (which is how the nccl2 backend forces
+    # NCCL_ALGO under deterministic mode), so read the live environ via libc.
+    libc = ctypes.CDLL(None)
+    libc.getenv.restype = ctypes.c_char_p
+    val = libc.getenv(name.encode())
+    return val.decode() if val is not None else None
+
+
+class _DeterministicNVLSTest(MultiProcContinuousTest):
+    """Base for the nccl2 deterministic-mode NVLS-disable hook.
+
+    Under torch deterministic mode, if the user has not set NCCL_ALGO the nccl2
+    backend forces NCCL_ALGO=^NVLS (NVLS can give non-deterministic reductions),
+    mirroring the stock ProcessGroupNCCL. The hook runs during PG init and the
+    env var persists once set, so each scenario is its own subclass: every class
+    gets a freshly spawned process pool (clean deterministic flag / NCCL_ALGO)
+    and configures the env in _init_pg before the PG (and thus the hook) runs.
+    """
+
+    deterministic: bool = False
+    preset_nccl_algo: str | None = None
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        if cls.preset_nccl_algo is not None:
+            os.environ["NCCL_ALGO"] = cls.preset_nccl_algo
+        else:
+            os.environ.pop("NCCL_ALGO", None)
+        if cls.deterministic:
+            torch.use_deterministic_algorithms(True)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    def _all_reduce_and_read_algo(self) -> str | None:
+        # Force the (possibly lazy) nccl2 comm to initialize so the hook runs,
+        # and confirm the reduction is numerically correct under the chosen algo.
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+        return _live_env("NCCL_ALGO")
+
+
+class ProcessGroupNCCL2DeterministicNVLSDisabledTest(_DeterministicNVLSTest):
+    deterministic = True
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_deterministic_disables_nvls(self) -> None:
+        self.assertEqual(self._all_reduce_and_read_algo(), "^NVLS")
+
+
+class ProcessGroupNCCL2DeterministicNVLSPresetTest(_DeterministicNVLSTest):
+    deterministic = True
+    preset_nccl_algo = "Ring"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_deterministic_respects_user_nccl_algo(self) -> None:
+        self.assertEqual(self._all_reduce_and_read_algo(), "Ring")
+
+
+class ProcessGroupNCCL2NonDeterministicNVLSTest(_DeterministicNVLSTest):
+    deterministic = False
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_non_deterministic_does_not_force_nccl_algo(self) -> None:
+        self.assertIsNone(self._all_reduce_and_read_algo())
 
 
 if __name__ == "__main__":
