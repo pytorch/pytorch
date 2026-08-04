@@ -7426,8 +7426,8 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
 // by index participates in the output, so the gradient outside it is zero.
 static Tensor narrow_to_index_domain(Tensor t, const Tensor& index) {
   for (const auto d : c10::irange(t.dim())) {
-    const auto len = d < index.dim() ? index.sym_size(d) : c10::SymInt(1);
-    t = t.narrow_symint(d, 0, len);
+    t = t.narrow_symint(
+        d, 0, d < index.dim() ? index.sym_size(d) : c10::SymInt(1));
   }
   return t;
 }
