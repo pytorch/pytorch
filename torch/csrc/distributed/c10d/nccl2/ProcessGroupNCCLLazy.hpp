@@ -21,8 +21,7 @@ namespace c10d::nccl2 {
 // comm stays lazy: it runs on the first send/recv, which knows the tensor's
 // device.
 class TORCH_API ProcessGroupNCCLLazy
-    : public ::c10d::LazyBackend<ProcessGroupNCCL>,
-      public ::c10d::NCCLCommProvider {
+    : public ::c10d::LazyBackend<ProcessGroupNCCL> {
  public:
   static constexpr std::string_view kBackendName = "nccl-lazy";
 
@@ -37,9 +36,6 @@ class TORCH_API ProcessGroupNCCLLazy
     return std::string(kBackendName);
   }
 
-  int64_t getCommPtr() override {
-    return getPrimary()->getCommPtr();
-  }
 };
 
 } // namespace c10d::nccl2
