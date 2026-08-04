@@ -127,12 +127,14 @@ struct StreamSegmentSize {
 
 // Registers one CUDA stream capture and its place in the capture hierarchy.
 // Conditional child captures share their parent's private mempool but have
-// distinct capture IDs and primary capture streams.
+// distinct capture IDs and primary capture streams. The parent dependency
+// stream identifies the parent-side ordering point for a child capture.
 struct CaptureRegistration {
   MempoolId_t mempool_id;
   CaptureId_t capture_id{0};
   cudaStream_t primary_capture_stream{};
   std::optional<CaptureId_t> parent_capture_id;
+  std::optional<cudaStream_t> parent_dependency_stream;
 };
 
 // State returned after allocator capture bookkeeping has ended. Expected
