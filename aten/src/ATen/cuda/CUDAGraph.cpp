@@ -185,12 +185,17 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
-  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
   TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
       "Stream should be actively capturing after cudaStreamBeginCapture");
   capture_id_ = capture_id_opt.value();
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(
+      capture_dev_,
+      {.mempool_id = mempool_id_,
+       .capture_id = capture_id_,
+       .primary_capture_stream = capture_stream_.stream(),
+       .parent_capture_id = std::nullopt});
 
   {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -215,13 +220,14 @@ void CUDAGraph::capture_end_pre() {
   // Clear bookkeeping before propagating the return status so watchdog-side
   // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
-  c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+  auto capture_end_result = c10::cuda::CUDACachingAllocator::markCaptureEnd(
+      capture_dev_, capture_id_);
+
+  bool capture_was_registered = false;
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
-    TORCH_CHECK(
-        _currently_capturing_graphs.count(capture_id_),
-        "capture_end() called before capture_begin().");
-    _currently_capturing_graphs.erase(capture_id_);
+    capture_was_registered =
+        _currently_capturing_graphs.erase(capture_id_) == 1;
   }
 
   // End pool allocation before checking the capture error. This ensures
@@ -234,7 +240,11 @@ void CUDAGraph::capture_end_pre() {
   // Allocation recording has stopped (even if endCaptureErr is a failure), so
   // reset() must not end the pool again.
   capturing_to_pool_ = false;
+  TORCH_CHECK(
+      capture_was_registered, "capture_end() called before capture_begin().");
   AT_CUDA_CHECK(endCaptureErr);
+  c10::cuda::CUDACachingAllocator::finalizeCaptureEnd(
+      capture_dev_, capture_end_result);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -490,8 +500,12 @@ void CUDAGraph::begin_capture_to_conditional_node(
 
   cudaStreamCaptureStatus status{};
   cudaGraph_t currently_capturing_graph{};
+  CaptureId_t parent_capture_id = 0;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-      getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
+      getCurrentCUDAStream(),
+      &status,
+      &parent_capture_id,
+      &currently_capturing_graph));
   TORCH_CHECK(
       status == cudaStreamCaptureStatusActive,
       "capture_begin() must be called before begin_capture_to_conditional_node()");
@@ -508,7 +522,7 @@ void CUDAGraph::begin_capture_to_conditional_node(
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(),
       &status,
-      nullptr,
+      &parent_capture_id,
       &currently_capturing_graph,
       &dependencies,
       &dependency_edges,
@@ -517,12 +531,11 @@ void CUDAGraph::begin_capture_to_conditional_node(
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo_v3(
       getCurrentCUDAStream(),
       &status,
-      nullptr,
+      &parent_capture_id,
       &currently_capturing_graph,
       &dependencies,
       &dependency_edges,
-      &num_dependencies
-  ));
+      &num_dependencies));
 #endif
   TORCH_CHECK(status == cudaStreamCaptureStatusActive);
 
@@ -585,12 +598,17 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
       nullptr,
       0,
       capture_mode_));
-  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
   TORCH_INTERNAL_ASSERT(child_capture_id_opt.has_value(),
       "Child stream should be actively capturing after cudaStreamBeginCaptureToGraph");
   conditional_graph_capture_ids_.top() = child_capture_id_opt.value();
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(
+      capture_dev_,
+      {.mempool_id = mempool_id_,
+       .capture_id = child_capture_id_opt.value(),
+       .primary_capture_stream = child_stream.stream(),
+       .parent_capture_id = parent_capture_id});
 
   conditional_node_streams_.emplace(child_stream);
 
@@ -627,8 +645,10 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
-  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
-  c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+  cudaError_t end_capture_error =
+      cudaStreamEndCapture(stream.stream(), nullptr);
+  auto capture_end_result = c10::cuda::CUDACachingAllocator::markCaptureEnd(
+      capture_dev_, child_capture_id);
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
@@ -650,6 +670,9 @@ void CUDAGraph::end_capture_to_conditional_node() {
       return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
     });
   }
+  AT_CUDA_CHECK(end_capture_error);
+  c10::cuda::CUDACachingAllocator::finalizeCaptureEnd(
+      capture_dev_, capture_end_result);
   constexpr const char* rng_with_conditional_nodes_error =
       "RNG within data-dependent conditional nodes is not supported yet.";
   TORCH_CHECK(!rng_or_generators_changed, rng_with_conditional_nodes_error);
