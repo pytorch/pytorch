@@ -431,8 +431,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     std::chrono::milliseconds timeout,
     const std::vector<at::Tensor>& inputTensors) {
   // Only create the work object without enqueuing it
+  auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
   auto work =
-      c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensors);
+      c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensors);
+  work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
 }
@@ -442,9 +444,34 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     std::chrono::milliseconds timeout,
     const at::Tensor& inputTensor) {
   // Single-tensor overload to avoid vector allocation
-  auto work = c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensor);
+  auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
+  auto work =
+      c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensor);
+  work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
+}
+
+std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
+ProcessGroupNCCL::applyEphemeralTimeout(std::chrono::milliseconds timeout) {
+  std::lock_guard<std::mutex> lock(ephemeral_timeout_mutex_);
+  timeout += ephemeral_timeout_active_;
+  auto ownedTimeout = ephemeral_timeout_active_ - ephemeral_timeout_inflight_;
+  ephemeral_timeout_inflight_ = ephemeral_timeout_active_;
+  return {timeout, ownedTimeout};
+}
+
+void ProcessGroupNCCL::releaseEphemeralTimeout(
+    std::chrono::milliseconds timeout) {
+  std::lock_guard<std::mutex> lock(ephemeral_timeout_mutex_);
+  ephemeral_timeout_active_ -= timeout;
+  ephemeral_timeout_inflight_ -= timeout;
+}
+
+void ProcessGroupNCCL::addEphemeralTimeout(
+    const std::chrono::milliseconds& timeout) {
+  std::lock_guard<std::mutex> lock(ephemeral_timeout_mutex_);
+  ephemeral_timeout_active_ += timeout;
 }
 
 void ProcessGroupNCCL::enqueueWork(

@@ -1079,11 +1079,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
-        bankend = pg._get_backend(torch.device(f"cuda:{self.rank}"))
+        backend = dist.get_backend_impl(device=torch.device(f"cuda:{self.rank}"))
         w = pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=123)))
+        self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
-        bankend._set_default_timeout(timedelta(seconds=3))
+        backend._set_default_timeout(timedelta(seconds=3))
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
@@ -1092,7 +1092,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             time.sleep(5)
             pg.allreduce(torch.rand(5).cuda(self.rank))
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=3)))
+            self.assertEqual(w.timeout, timedelta(seconds=3))
             w.wait()
         else:
             dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
@@ -1100,8 +1100,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w1, timedelta(seconds=13)))
-            self.assertTrue(bankend._verify_work_timeout(w2, timedelta(seconds=13)))
+            self.assertEqual(w1.timeout, timedelta(seconds=13))
+            self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
             dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
                 timedelta(seconds=5)
@@ -1110,7 +1110,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # for watchdog to reset first timeout extension.
             torch.cuda.synchronize(torch.device(f"cuda:{self.rank}"))
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
-            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=8)))
+            self.assertEqual(w.timeout, timedelta(seconds=8))
             w.wait()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
