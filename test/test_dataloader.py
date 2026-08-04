@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -2952,6 +2953,8 @@ except RuntimeError as e:
 
 
 class TestDataLoaderDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
@@ -3193,6 +3196,8 @@ class TestDictDataLoader(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDictDataLoaderDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.dataset = DictDataset()
@@ -3487,6 +3492,8 @@ if __name__ == '__main__':
     "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
 )
 class TestDataLoaderCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
