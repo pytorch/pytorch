@@ -534,6 +534,23 @@ class ListTests(TupleTests):
         p[1:3] = ["x", "y"]
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
 
+    @make_dynamo_test
+    def test_unbound_len(self):
+        a = [1, 2, 3]
+        self.assertEqual(list.__len__(a), 3)
+
+    @make_dynamo_test
+    def test_unbound_append(self):
+        a = [1, 2, 3]
+        list.append(a, 9)
+        self.assertEqual(a, [1, 2, 3, 9])
+
+    @make_dynamo_test
+    def test_unbound_extend(self):
+        a = [1, 2]
+        list.extend(a, [3, 4])
+        self.assertEqual(a, [1, 2, 3, 4])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
