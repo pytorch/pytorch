@@ -5584,9 +5584,7 @@ exit(2)
 
                 with torch.cuda.stream(auxiliary_stream):
                     graph.begin_capture_to_if_node(pred)
-                    child_temporary = torch.empty(
-                        LARGE_BUFFER // 4, device="cuda"
-                    )
+                    child_temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
                     child_temporary.fill_(2.0)
                     child_sink.add_(child_temporary[0])
                     child_pointer = child_temporary.data_ptr()
