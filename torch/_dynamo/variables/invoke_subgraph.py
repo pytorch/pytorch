@@ -1085,7 +1085,11 @@ def build_subgraph_input_mapping(
                 else outer_proxy.node.meta.get("example_value", None)
             )
             if isinstance(example, torch.SymInt):
-                subgraph_input_mapping.append(LiftedBoundSymbol(example.node.expr))
+                # _expr rather than expr: expr applies the ShapeEnv's
+                # replacements, so a symbol the region lifted before it was
+                # specialized comes back as a constant, which bound_symbols has
+                # no entry for.
+                subgraph_input_mapping.append(LiftedBoundSymbol(example.node._expr))
                 continue
             if source is None:
                 raise AssertionError(
