@@ -365,9 +365,9 @@ void ProcessGroupNCCL::abort() {
     // Stop the watchdog before publishing the error: this failure is one the
     // caller asked for, so it must not trigger a process abort, and there is no
     // communicator left to watch either. Not done in reconfigurable mode, where
-    // the comm is revoked rather than destroyed and the watchdog is needed again
-    // after reconfigure(). The error is still published before the teardown, so
-    // work in flight reports it instead of completing.
+    // the comm is revoked rather than destroyed and the watchdog is needed
+    // again after reconfigure(). The error is still published before the
+    // teardown, so work in flight reports it instead of completing.
     stopWatchdog();
     comm_state_ = CommState::ERROR;
     abortNcclComm();
