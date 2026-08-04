@@ -68,6 +68,7 @@ class WorkNCCL : public c10d::Work {
   void synchronize() override;
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+  c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
 
@@ -76,7 +77,7 @@ class WorkNCCL : public c10d::Work {
   }
 
   WorkStatus status() const {
-    return status_.load(std::memory_order_relaxed);
+    return status_.load(std::memory_order_acquire);
   }
 
   // Output tensors for result()/getFuture(). Set by the backend after issuing.
@@ -101,11 +102,10 @@ class WorkNCCL : public c10d::Work {
   friend class WindowNCCL;
 
  private:
-  void setStatus(WorkStatus status) {
-    status_.store(status, std::memory_order_relaxed);
-  }
+  bool setTerminalStatus(WorkStatus status);
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
-  WorkStatus checkStatus();
+  WorkStatus checkStatus(
+      std::optional<std::chrono::milliseconds> timeout = std::nullopt);
   void recordFunctionStart(std::string_view coll_name);
   // Make the current stream wait on the work's end event (the c10d "wait"
   // semantics for CUDA work: order subsequent current-stream ops after this).
@@ -121,16 +121,18 @@ class WorkNCCL : public c10d::Work {
   std::unique_ptr<at::cuda::CUDAEvent> end_event_;
   at::cuda::CUDAStream stream_;
 
+  std::chrono::steady_clock::time_point work_start_time_;
   std::chrono::milliseconds timeout_ms_;
   // Whether the events above were created with CUDA timing enabled, i.e.
   // whether getDuration() can be served for this work.
   bool timing_enabled_{false};
   uint64_t seq_{0};
 
+  std::mutex terminal_status_mutex_;
   std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};
-  std::optional<std::chrono::steady_clock::time_point> start_completed_time_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
+  c10::intrusive_ptr<c10::ivalue::Future> future_work_result_;
 
   // Set by the backend for a synchronous barrier: synchronizeInternal() then
   // host-blocks the CPU thread (in addition to the stream-ordered wait) to
