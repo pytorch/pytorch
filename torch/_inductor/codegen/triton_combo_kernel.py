@@ -893,17 +893,11 @@ class ComboKernel(Kernel):
             log.debug("uniform dispatch: skipped (< 2 sub-kernels)")
             return False
 
-        # Bail when cudagraphs is enabled. Uniform dispatch builds its slot
-        # pointer table on the host from buffer data_ptr()s and copies it to the
-        # GPU inside the wrapper. That is incompatible with cudagraph trees: the
-        # table must be a cudagraph-managed static input (framework-level work),
-        # otherwise the captured host->device copy is invalid on replay
-        # ("cudaErrorInvalidValue") and/or the table is rejected by
-        # check_memory_pool. Fall back to sequential dispatch, which is
-        # cudagraph-safe. See D114510783 stack for the WIP cudagraph-native table.
-        if config.triton.cudagraphs:
-            log.debug("uniform dispatch: skipped (cudagraphs enabled)")
-            return False
+        # cudagraphs is supported: the pointer table is built from a persistent
+        # pinned staging buffer (valid, stable source for the captured H2D on
+        # replay) into a cudagraph-pool-tracked device table, with the event guard
+        # skipped during capture. See ComboKernel._emit_uniform_pointer_tables /
+        # the _uniform_stage wrapper helper.
 
         # Bail on per-subkernel blocks
         if config.combo_kernel_per_subkernel_blocks:
@@ -2133,33 +2127,16 @@ class ComboKernel(Kernel):
         first_buf = slots[0]["call_args"][0]
         device_expr = f"{first_buf}.device"
 
-        # Build the slot pointer tables. These MUST be rebuilt on every call:
-        # the combo pass reuses the same uniform kernel for multiple sub-kernel
-        # groups, each with different buffers, so a name-keyed global cache would
-        # make later groups reuse the FIRST group's buffer pointers and silently
-        # produce wrong results (observed on CMF LN+SiLU: 88/103 arcs wrong).
-        slot_var_names: list[str] = []
-        for slot_idx, slot in enumerate(slots):
-            var_name = f"_uniform_slot_{slot_idx}_ptrs"
-            buf_names = slot["call_args"]
-            n = len(buf_names)
-            data_ptr_exprs = [f"{buf}.data_ptr()" for buf in buf_names]
-            # Stage addresses on a pinned CPU tensor (device="cpu" so it stays
-            # valid under an active CUDA device context), then async-copy to a
-            # fresh device tensor built for this specific call.
-            wrapper.writeline(
-                f"_cpu = torch.tensor("
-                f"[{', '.join(data_ptr_exprs)}], "
-                f'dtype=torch.int64, device="cpu").pin_memory()'
-            )
-            wrapper.writeline(
-                f"{var_name} = torch.empty("
-                f"{n}, dtype=torch.int64, device={device_expr})"
-            )
-            wrapper.writeline(
-                f"{var_name}.copy_(_cpu, non_blocking=True)"
-            )
-            slot_var_names.append(var_name)
+        # Materialize the per-slot GPU pointer tables. Delegated to a single
+        # construction seam (extended for cudagraphs in the follow-up step). It
+        # reuses a persistent pinned staging buffer + persistent device table per
+        # call site, so no per-iteration cudaHostAlloc / device-alloc is paid --
+        # this is what fixed the no_cudagraphs host overhead -- while staying
+        # correct when one uniform kernel is reused across multiple sub-kernel
+        # groups (see _emit_uniform_pointer_tables).
+        slot_var_names = self._emit_uniform_pointer_tables(
+            wrapper, slots, device_expr
+        )
 
         # Build the new call_args: slot pointer tables + non-buffer args
         slot_inner_names: set[str] = set()
@@ -2188,6 +2165,129 @@ class ComboKernel(Kernel):
             arg_types=new_arg_types,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
+        )
+
+    def _emit_uniform_pointer_tables(
+        self, wrapper: Any, slots: list[dict[str, Any]], device_expr: str
+    ) -> list[str]:
+        """
+        Emit wrapper code that materializes the per-slot GPU pointer tables for
+        one uniform-dispatch kernel call, and return the per-slot arg variable
+        names to pass to the kernel.
+
+        This is the single construction seam for the uniform pointer table.
+
+        no_cudagraphs: the table *content* changes every iteration because
+        intermediate buffers are re-allocated on each call, so it cannot be built
+        once. Allocation is amortized instead: a persistent pinned staging buffer
+        and a persistent device table are allocated ONCE per call site (keyed by a
+        codegen-assigned id) and reused every iteration. Each call only fills the
+        pinned buffer and issues a single async H2D copy, eliminating the
+        per-iteration cudaHostAlloc + device alloc that dominated small many-group
+        models (e.g. resnet18: 44 pin_memory()/iter -> 0 in steady state). A
+        per-call-site CUDA event guards reuse so the host cannot overwrite the
+        pinned buffer before its previous async copy has drained.
+
+        cudagraphs: the wrapper runs only during warmup + capture (never on
+        replay), and pool buffer addresses are stable across replays. The pinned
+        staging buffer is persistent so the captured H2D copy has a valid, stable
+        source on replay (a freed per-call pinned source was the original
+        cudaErrorInvalidValue). The device table is allocated fresh so it is
+        cudagraph-pool tracked during capture, and the event sync/record is
+        skipped while the stream is capturing (illegal there). All of this lives
+        in the once-emitted `_uniform_stage` helper; the regime is selected by the
+        codegen-time `config.triton.cudagraphs` literal passed below.
+
+        Distinct buffers per call site keep it correct when one uniform kernel is
+        reused across multiple sub-kernel groups (each group is a separate call
+        site with a distinct id).
+        """
+        self._emit_uniform_stage_helper_once(wrapper)
+
+        # Every slot spans the same sub-kernels, so each slot occupies a
+        # contiguous num_kernels-sized block in the flattened table.
+        num_kernels = len(slots[0]["call_args"])
+        flat_ptr_exprs: list[str] = []
+        for slot in slots:
+            for buf in slot["call_args"]:
+                flat_ptr_exprs.append(f"{buf}.data_ptr()")
+
+        # Unique id per uniform call site (a single uniform kernel may be called
+        # for several groups; each group must get its own reusable buffers).
+        call_site_id = getattr(wrapper, "_uniform_call_site_counter", 0)
+        wrapper._uniform_call_site_counter = call_site_id + 1
+
+        dev_var = f"_uniform_tbl_{call_site_id}"
+        cudagraphs_literal = "True" if config.triton.cudagraphs else "False"
+        wrapper.writeline(
+            f"{dev_var} = _uniform_stage("
+            f"{call_site_id}, [{', '.join(flat_ptr_exprs)}], {device_expr}, "
+            f"{cudagraphs_literal})"
+        )
+
+        slot_var_names: list[str] = []
+        for slot_idx in range(len(slots)):
+            start = slot_idx * num_kernels
+            end = start + num_kernels
+            var_name = f"_uniform_slot_{slot_idx}_ptrs"
+            wrapper.writeline(f"{var_name} = {dev_var}[{start}:{end}]")
+            slot_var_names.append(var_name)
+        return slot_var_names
+
+    def _emit_uniform_stage_helper_once(self, wrapper: Any) -> None:
+        """
+        Emit the module-level uniform-dispatch staging pool + helper once per
+        graph. The pool lives at wrapper module scope so it persists across
+        call() invocations; each entry (per call site id) holds a reused pinned
+        host staging buffer, a reused device pointer table, and a CUDA event that
+        serializes host refills against the previous async H2D copy.
+        """
+        if getattr(wrapper, "_uniform_stage_helper_emitted", False):
+            return
+        wrapper._uniform_stage_helper_emitted = True
+        wrapper.header.splice(
+            """
+_uniform_ptr_pool = {}
+
+
+def _uniform_stage(_uid, _ptrs, _device, _cudagraphs):
+    # Build the per-call-site GPU pointer table.
+    #
+    # The pinned host staging buffer is persistent (allocated once per call site,
+    # never freed) so that a captured host->device copy stays valid on cudagraph
+    # replay -- a per-call/freed pinned source was the original cudaErrorInvalidValue.
+    #
+    # Device table:
+    #   * no_cudagraphs: persistent and reused (no per-iteration alloc); a CUDA
+    #     event prevents the host from overwriting the pinned buffer before its
+    #     previous async copy drains.
+    #   * cudagraphs: allocated fresh so it is cudagraph-pool tracked when the
+    #     wrapper runs during capture; the host wrapper does not run on replay, so
+    #     the captured H2D re-copies the (stable) pinned addresses into the (stable)
+    #     pool table each replay. Event sync/record is illegal during capture and
+    #     is therefore skipped while capturing.
+    _n = len(_ptrs)
+    _ent = _uniform_ptr_pool.get(_uid)
+    if _ent is None or _ent[0].numel() < _n:
+        if _ent is not None:
+            _ent[2].synchronize()
+        _pinned = torch.empty(_n, dtype=torch.int64, device="cpu").pin_memory()
+        _ent = [_pinned, None, torch.cuda.Event()]
+        _uniform_ptr_pool[_uid] = _ent
+    _pinned, _devtbl, _ev = _ent
+    _capturing = torch.cuda.is_current_stream_capturing()
+    if not _capturing:
+        _ev.synchronize()
+    _pinned[:_n].copy_(torch.tensor(_ptrs, dtype=torch.int64))
+    if _cudagraphs or _devtbl is None or _devtbl.numel() < _n:
+        _devtbl = torch.empty(_n, dtype=torch.int64, device=_device)
+        if not _cudagraphs:
+            _ent[1] = _devtbl
+    _devtbl[:_n].copy_(_pinned[:_n], non_blocking=True)
+    if not _capturing:
+        _ev.record()
+    return _devtbl
+"""
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:

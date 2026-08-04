@@ -587,16 +587,15 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
-    def test_uniform_dispatch_cudagraphs_falls_back_safely(self):
-        # Uniform dispatch is not cudagraph-safe: its host-built pointer table is
-        # not a cudagraph-managed static input, so under cudagraph trees the
-        # captured host->device copy is invalid on replay and/or the table is
-        # rejected by check_memory_pool. _detect_uniform_subkernels therefore
-        # bails when config.triton.cudagraphs is set, falling back to sequential
-        # combo dispatch (which is cudagraph-safe). This runs a uniform-eligible
-        # LN+SiLU group under cudagraphs (mode="reduce-overhead") across several
-        # iterations (warmup -> capture -> replay) and asserts it runs and matches
-        # eager -- i.e. the fallback is correct and does not crash/corrupt.
+    def test_uniform_dispatch_cudagraphs_correct(self):
+        # Uniform dispatch is now cudagraph-safe (no longer gated off). Its slot
+        # pointer table is built from a persistent pinned staging buffer (a valid,
+        # stable source for the captured host->device copy on replay) into a
+        # cudagraph-pool-tracked device table, with the event guard skipped while
+        # the stream is capturing. This runs a uniform-eligible LN+SiLU group under
+        # cudagraphs (mode="reduce-overhead") across several iterations
+        # (warmup -> capture -> replay) and asserts every replay matches eager --
+        # i.e. uniform dispatch runs under cudagraphs without crashing/corrupting.
         if self.combo_kernel_per_subkernel_blocks:
             return
 
@@ -712,6 +711,45 @@ class ComboKernelTests(TestCase):
         # uniform-dispatch path.)
         full_code = "\n".join(code)
         self.assertNotIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
+
+    @requires_gpu_and_triton
+    def test_uniform_dispatch_reuses_pointer_table_pool(self):
+        # The uniform pointer table must be built via the reused, once-emitted
+        # staging pool (_uniform_stage) rather than a per-call
+        # torch.tensor(...).pin_memory() + torch.empty + copy_. The per-call
+        # pin_memory() (a cudaHostAlloc every iteration) dominated runtime for
+        # many-small-group models -- resnet18 emitted 44 pin_memory()/iter and
+        # regressed ~20% -- so uniform dispatch must amortize the allocation.
+        # Assert the wrapper uses the pool helper and emits pin_memory() at most
+        # once (inside the helper definition), never per call site.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
+
+        def ln_silu(x):
+            mean = x.mean(dim=-1, keepdim=True)
+            var = x.var(dim=-1, keepdim=True, unbiased=False)
+            ln = (x - mean) * torch.rsqrt(var + 1e-5)
+            return ln * torch.sigmoid(ln)
+
+        def fn(a, b, c, d):
+            return ln_silu(a), ln_silu(b), ln_silu(c), ln_silu(d)
+
+        inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            out_eager = fn(*inps)
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        full_code = "\n".join(code)
+        # Uniform dispatch actually engaged.
+        self.assertIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
+        # Table is built through the reused pool helper...
+        self.assertIn("_uniform_stage(", full_code)
+        self.assertIn("_uniform_ptr_pool", full_code)
+        # ...and pin_memory() appears at most once (the helper), never per call.
+        self.assertLessEqual(full_code.count(".pin_memory()"), 1)
 
     @requires_gpu_and_triton
     def test_mutated_args(self):
