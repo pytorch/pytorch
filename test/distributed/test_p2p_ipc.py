@@ -123,6 +123,9 @@ class P2PIpcTest(MultiProcContinuousTest):
         if self.rank == 0 or is_consumer:
             expected = torch.ones_like(tensor)
             self.assertEqual(tensor, expected, atol=0.0, rtol=0.0)
+            # Drop the comparison tensor so it doesn't pin the segment that the
+            # producer is about to free below.
+            del expected
 
         if free_producer_segment:
             # Release the consumer's import (ref-counter 1 -> 0), then free the
