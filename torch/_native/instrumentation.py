@@ -308,7 +308,7 @@ def instrument_flydsl_compile(
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Instrument a FlyDSL (``@jit_cache``-decorated) compile function.
+    """Instrument a FlyDSL (``@flydsl_jit_cache``-decorated) compile function.
 
     Same contract as :func:`instrument_cutedsl_compile`; only the DSL name
     reported in the event differs.
