@@ -58,11 +58,10 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
     _cute_call,
     _local_reduce_store_arg,
-    FlexGemmGroupedLayoutMatch,
     FlexGemmPhysicalReduction,
-    FlexGemmStructuralInt,
     grouped_tensor_layout,
     GroupedTensorSSALayout,
+    guarded_int,
     is_shape_preserving_pointwise_node,
     lower_full_scalar,
     lower_getitem,
@@ -189,21 +188,14 @@ class FlexGemmLocalReduceMatch:
     Attributes:
         value_node: FX node that produces the matched local-reduction value.
         geometry: Group size and GEMM output axis reduced by the value.
-        structural_values: Backed shape values guarded after analysis accepts the graph.
     """
 
     value_node: torch.fx.Node
     geometry: FlexGemmLocalReduceGeometry
-    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
             raise RuntimeError(LOCAL_REDUCE_MATCH_NODE_ERROR)
-
-    def commit_guards(self) -> None:
-        """Install structural guards after the epilogue analysis is accepted."""
-        for structural in self.structural_values:
-            structural.guard()
 
     def to_plan(
         self,
@@ -226,12 +218,7 @@ class FlexGemmLocalReduceMatch:
         match = matches[0]
         if any(item.geometry != match.geometry for item in matches):
             raise NotImplementedError(mixed_match_error)
-        return dataclasses.replace(
-            match,
-            structural_values=tuple(
-                value for item in matches for value in item.structural_values
-            ),
-        )
+        return match
 
     @classmethod
     def common_value(
@@ -322,7 +309,7 @@ class FlexGemmLocalReduceAnalysis:
     """
 
     graph: GemmEpilogueGraph
-    grouped_layouts: dict[torch.fx.Node, FlexGemmGroupedLayoutMatch] = (
+    grouped_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = (
         dataclasses.field(default_factory=dict)
     )
     matches: dict[torch.fx.Node, FlexGemmLocalReduceMatch] = dataclasses.field(
@@ -406,7 +393,7 @@ class FlexGemmLocalReduceAnalysis:
         grouped_layout = self.grouped_layouts.get(input_node)
         if grouped_layout is None:
             return False
-        layout = grouped_layout.layout
+        layout = grouped_layout
         if dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
@@ -414,9 +401,7 @@ class FlexGemmLocalReduceAnalysis:
             if not raise_invalid_dims:
                 return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-        self.matches[node] = FlexGemmLocalReduceMatch(
-            node, layout, grouped_layout.structural_values
-        )
+        self.matches[node] = FlexGemmLocalReduceMatch(node, layout)
         return True
 
     def has_physical_grouped_input(self, value: Any) -> bool:
@@ -427,8 +412,8 @@ class FlexGemmLocalReduceAnalysis:
         physical_grouped_nodes = OrderedSet(
             node
             for node, grouped_layout in self.grouped_layouts.items()
-            if grouped_layout.layout.needs_physical_callbacks
-            and grouped_layout.layout in active_geometries
+            if grouped_layout.needs_physical_callbacks
+            and grouped_layout in active_geometries
         )
         return any(
             node in physical_grouped_nodes
@@ -488,11 +473,7 @@ class FlexGemmLocalReduceAnalysis:
                 or not layout.matches_reduction_dim(normalized.dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-            return FlexGemmLocalReduceMatch(
-                value,
-                layout,
-                self.grouped_layouts[grouped_source].structural_values,
-            )
+            return FlexGemmLocalReduceMatch(value, layout)
         if not is_shape_preserving_pointwise_node(value):
             return None
         matches = [
@@ -624,7 +605,7 @@ class FlexGemmLocalReduceAnalysis:
         grouped_layout = self.grouped_layouts.get(grouped_source)
         if grouped_layout is None:
             return None
-        layout = grouped_layout.layout
+        layout = grouped_layout
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
@@ -840,7 +821,6 @@ class GroupedMainLaneMatch:
         chunked: Whether lanes occupy contiguous physical N chunks.
         indices: Lanes covered by this spelling before modulo normalization.
         layout_node: Split/view node registered after complete validation.
-        structural_values: Symbolic values guarded only after acceptance.
     """
 
     source: torch.fx.Node
@@ -848,7 +828,6 @@ class GroupedMainLaneMatch:
     chunked: bool
     indices: tuple[int, ...]
     layout_node: torch.fx.Node | None = None
-    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -857,13 +836,7 @@ class GroupedMainOutputMatch:
 
     transform: FlexGemmGroupedMainOutputTransform
     select_indices: dict[torch.fx.Node, int]
-    grouped_layouts: dict[torch.fx.Node, FlexGemmGroupedLayoutMatch]
-    structural_values: tuple[FlexGemmStructuralInt, ...]
-
-    def commit_guards(self) -> None:
-        """Install symbolic specializations after all composition checks pass."""
-        for structural in self.structural_values:
-            structural.guard()
+    grouped_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry]
 
 
 def canonical_grouped_main_source(
@@ -871,7 +844,11 @@ def canonical_grouped_main_source(
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> torch.fx.Node:
-    """Strip shape-preserving pointwise wrappers from one grouped lane source."""
+    """Find one lane's GEMM provenance through single-input pointwise wrappers.
+
+    The original FX nodes remain available for emission; this only compares lane
+    origins while validating NOTE [Non-shape-preserving FlexGEMM outputs].
+    """
     while node is not gemm and is_shape_preserving_pointwise_node(node):
         inputs = [
             arg
@@ -890,10 +867,11 @@ def match_grouped_main_lane(
     gemm_shape: tuple[Any, ...] | None,
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> GroupedMainLaneMatch | None:
-    """Normalize one supported grouped-N output spelling.
+    """Match one grouped-N lane from NOTE [Non-shape-preserving FlexGEMM outputs].
 
-    The accepted leaves are ``split(...)[i]`` for chunked lanes and
-    ``view(...).select(..., i)`` for interleaved or chunked lanes.
+    The current FX spellings are ``split(...)[i]`` for chunked lanes and
+    ``view(...).select(..., i)`` for interleaved or chunked lanes. Complete lane
+    coverage and a common source are checked after collection.
     """
     if gemm_shape is None:
         return None
@@ -914,14 +892,10 @@ def match_grouped_main_lane(
             or split_normalized.dim not in (-1, 1)
         ):
             return None
-        split_size = FlexGemmStructuralInt.from_value(split_normalized.split_size)
-        if (
-            split_size is None
-            or split_size.value <= 0
-            or shape[-1] % split_size.value != 0
-        ):
+        split_size = guarded_int(split_normalized.split_size)
+        if split_size is None or split_size <= 0 or shape[-1] % split_size != 0:
             return None
-        group = shape[-1] // split_size.value
+        group = shape[-1] // split_size
         if group <= 1:
             return None
         return GroupedMainLaneMatch(
@@ -930,7 +904,6 @@ def match_grouped_main_lane(
             chunked=True,
             indices=(normalized.index,),
             layout_node=split,
-            structural_values=(split_size,),
         )
 
     if not isinstance(normalized, NormalizedSelect):
@@ -947,25 +920,21 @@ def match_grouped_main_lane(
         or not -len(shape) <= normalized.dim < len(shape)
     ):
         return None
-    index = FlexGemmStructuralInt.from_value(normalized.index)
+    index = guarded_int(normalized.index)
     if index is None:
         return None
     dim = normalized.dim % len(shape)
-    structural_values = [index]
     if dim == 1:
-        structural_group = FlexGemmStructuralInt.from_value(shape[1])
-        if structural_group is None or structural_group.value <= 1:
+        group = guarded_int(shape[1])
+        if group is None or group <= 1:
             return None
-        group = structural_group.value
-        structural_values.append(structural_group)
         chunked = True
         layout_node = view
     elif dim == len(shape) - 1:
         grouped_layout = local_reduce.grouped_layouts.get(view)
-        if grouped_layout is None or grouped_layout.layout.axis != 1:
+        if grouped_layout is None or grouped_layout.axis != 1:
             return None
-        group = grouped_layout.layout.group
-        structural_values.extend(grouped_layout.structural_values)
+        group = grouped_layout.group
         chunked = False
         layout_node = None
     else:
@@ -974,9 +943,8 @@ def match_grouped_main_lane(
         source=view_normalized.source,
         group=group,
         chunked=chunked,
-        indices=(index.value,),
+        indices=(index,),
         layout_node=layout_node,
-        structural_values=tuple(structural_values),
     )
 
 
@@ -985,7 +953,7 @@ def collect_grouped_main_lanes(
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> list[tuple[torch.fx.Node, GroupedMainLaneMatch]] | None:
-    """Collect grouped lane leaves without mutating analysis or installing guards."""
+    """Collect grouped lane leaves without mutating analysis state."""
     gemm_shape = tensor_meta_shape(gemm)
     lanes: list[tuple[torch.fx.Node, GroupedMainLaneMatch]] = []
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
@@ -1025,8 +993,7 @@ def grouped_main_output_match(
     source = canonical_grouped_main_source(first.source, gemm, local_reduce)
     indices: OrderedSet[int] = OrderedSet()
     select_indices: dict[torch.fx.Node, int] = {}
-    grouped_layouts: dict[torch.fx.Node, FlexGemmGroupedLayoutMatch] = {}
-    structural_values: list[FlexGemmStructuralInt] = []
+    grouped_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = {}
     for node, match in collected:
         if (
             canonical_grouped_main_source(match.source, gemm, local_reduce)
@@ -1042,10 +1009,9 @@ def grouped_main_output_match(
         if isinstance(local_reduce.graph.normalized_nodes.get(node), NormalizedSelect):
             select_indices[node] = match.indices[0] % first.group
         if match.layout_node is not None:
-            grouped_layouts[match.layout_node] = FlexGemmGroupedLayoutMatch(
-                FlexGemmLocalReduceGeometry(group=match.group, axis=1)
+            grouped_layouts[match.layout_node] = FlexGemmLocalReduceGeometry(
+                group=match.group, axis=1
             )
-        structural_values.extend(match.structural_values)
     if indices != OrderedSet(range(first.group)):
         return None
     gemm_meta = gemm.meta.get("val")
@@ -1059,7 +1025,6 @@ def grouped_main_output_match(
         FlexGemmGroupedMainOutputTransform(group=first.group, chunked=first.chunked),
         select_indices,
         grouped_layouts,
-        tuple(structural_values),
     )
 
 
@@ -1093,7 +1058,6 @@ class FlexGemmEpilogueAnalysis:
         if grouped_main is not None:
             if outputs.aux_outputs or outputs.local_reduce is not None:
                 raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
-            grouped_main.commit_guards()
             local_reduce.grouped_layouts.update(grouped_main.grouped_layouts)
             grouped_select_indices = grouped_main.select_indices
             outputs = dataclasses.replace(
@@ -1103,7 +1067,7 @@ class FlexGemmEpilogueAnalysis:
             if any(
                 isinstance(normalized, NormalizedSelect)
                 and normalized.source in local_reduce.grouped_layouts
-                and local_reduce.grouped_layouts[normalized.source].layout.axis == 1
+                and local_reduce.grouped_layouts[normalized.source].axis == 1
                 for normalized in local_reduce.graph.normalized_nodes.values()
             ):
                 raise NotImplementedError(
@@ -1117,16 +1081,7 @@ class FlexGemmEpilogueAnalysis:
                 or not statically_known_shape_equal(main_shape, gemm_shape)
             ):
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
-        for match in local_reduce.matches.values():
-            match.commit_guards()
-        if outputs.local_reduce is not None:
-            outputs.local_reduce.match.commit_guards()
-        analysis = cls(gemm, outputs, local_reduce, grouped_select_indices)
-        active_geometries = OrderedSet(analysis.required_geometries)
-        for grouped_layout in local_reduce.grouped_layouts.values():
-            if grouped_layout.layout in active_geometries:
-                grouped_layout.commit_guards()
-        return analysis
+        return cls(gemm, outputs, local_reduce, grouped_select_indices)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -1238,9 +1193,7 @@ class FlexGemmEpilogueEmitter:
             )
         }
         self.grouped_tensors = {
-            node: GroupedTensorSSALayout(
-                group=grouped.layout.group, axis=grouped.layout.axis
-            )
+            node: GroupedTensorSSALayout(group=grouped.group, axis=grouped.axis)
             for node, grouped in analysis.local_reduce.grouped_layouts.items()
         }
         self.active_grouped_layouts = OrderedSet(
