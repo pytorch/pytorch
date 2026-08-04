@@ -44,7 +44,6 @@ from cutlass.cute.runtime import from_dlpack
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 import torch
-from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -449,6 +448,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         local_reduce_combine: cutlass.Constexpr = lambda lhs, rhs: lhs + rhs,
         local_reduce_source_op: cutlass.Constexpr = lambda value: value,
         local_reduce_finalize: cutlass.Constexpr = lambda value, group: value,
+        local_reduce_consumer: cutlass.Constexpr = None,
     ):
         """Execute the GEMM operation in steps:
         - Setup static attributes before smem/grid/tma computation
@@ -502,49 +502,6 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
 
         self.local_reduce_group = local_reduce_group
         self.local_reduce_axis = local_reduce_axis
-        self.local_reduce_input_coefficient = 1.0
-        self.local_reduce_result_coefficient = 0.0
-        self.local_reduce_bias = 0.0
-        self.local_reduce_affine_scale = 1.0
-        self.local_reduce_affine_bias = 0.0
-        self.local_reduce_denominator_scale = 1.0
-        self.local_reduce_denominator_bias = 0.0
-        reduction_expression = GemmReductionDescriptor.parse(local_reduce_type)
-        assert reduction_expression.has_valid_parameters, (
-            f"invalid parameters for local reduction {reduction_expression.kind}"
-        )
-        local_reduce_type = reduction_expression.kind
-        if cutlass.const_expr(local_reduce_type == "mean_linear"):
-            input_coefficient, result_coefficient, bias = (
-                reduction_expression.parameters
-            )
-            self.local_reduce_input_coefficient = float(input_coefficient)
-            self.local_reduce_result_coefficient = float(result_coefficient)
-            self.local_reduce_bias = float(bias)
-        if cutlass.const_expr(local_reduce_type == "normalize_sum_affine"):
-            (
-                affine_scale,
-                affine_bias,
-                denominator_scale,
-                denominator_bias,
-            ) = reduction_expression.parameters
-            local_reduce_type = "normalize_sum"
-            self.local_reduce_affine_scale = float(affine_scale)
-            self.local_reduce_affine_bias = float(affine_bias)
-            self.local_reduce_denominator_scale = float(denominator_scale)
-            self.local_reduce_denominator_bias = float(denominator_bias)
-        if cutlass.const_expr(local_reduce_type == "normalize_sum_reverse_affine"):
-            (
-                affine_scale,
-                affine_bias,
-                denominator_scale,
-                denominator_bias,
-            ) = reduction_expression.parameters
-            local_reduce_type = "normalize_sum_reverse"
-            self.local_reduce_affine_scale = float(affine_scale)
-            self.local_reduce_affine_bias = float(affine_bias)
-            self.local_reduce_denominator_scale = float(denominator_scale)
-            self.local_reduce_denominator_bias = float(denominator_bias)
         self.local_reduce_type = local_reduce_type
         self.local_reduce_source = local_reduce_source
         self.local_reduce_feeds_main = local_reduce_feeds_main
@@ -553,6 +510,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_combine = local_reduce_combine
         self.local_reduce_source_op = local_reduce_source_op
         self.local_reduce_finalize = local_reduce_finalize
+        self.local_reduce_consumer = local_reduce_consumer
         self.has_cross_warp_local_reduce = cutlass.const_expr(
             (local_reduce_tensor is not None or local_reduce_feeds_main)
             and local_reduce_axis == 0
@@ -1802,16 +1760,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         local_reduce_vec = self.local_reduce_source_op(local_reduce_vec)
                     if cutlass.const_expr(self.local_reduce_feeds_main):
                         group = cutlass.const_expr(self.local_reduce_group)
-                        if cutlass.const_expr(
-                            self.local_reduce_axis == 1
-                            and self.local_reduce_type
-                            in (
-                                "normalize_absmax",
-                                "normalize_sum",
-                                "normalize_sum_reverse",
-                                "online_softmax",
+                        if cutlass.const_expr(self.local_reduce_axis == 1):
+                            assert (
+                                self.local_reduce_consumer is not None
+                                or self.local_reduce_type == "online_softmax"
                             )
-                        ):
                             fragment_n = cutlass.const_expr(
                                 cute.size(local_reduce_vec.shape, mode=[0])
                             )
@@ -1820,13 +1773,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             grouped = local_reduce_vec.reshape(
                                 ((1, group, repeats), 1, 1)
                             )
-                            numerator = grouped
-                            if cutlass.const_expr(
-                                self.local_reduce_type == "normalize_absmax"
-                            ):
-                                numerator = acc_vec.to(epilogue_input_dtype).reshape(
-                                    grouped.shape
-                                )
+                            numerator = acc_vec.to(epilogue_input_dtype).reshape(
+                                grouped.shape
+                            )
                             if cutlass.const_expr(
                                 self.local_reduce_type == "online_softmax"
                             ):
@@ -1840,21 +1789,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             denominator_input = (
                                 grouped
                                 if cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_absmax"
+                                    self.local_reduce_consumer is not None
                                 )
                                 else numerator
                             )
                             denominator_op = (
-                                cute.ReductionOp.MAX
+                                self.local_reduce_op
                                 if cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_absmax"
+                                    self.local_reduce_consumer is not None
                                 )
                                 else cute.ReductionOp.ADD
                             )
                             denominator_init = (
-                                -cutlass.Float32.inf
+                                self.local_reduce_init
                                 if cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_absmax"
+                                    self.local_reduce_consumer is not None
                                 )
                                 else 0.0
                             )
@@ -1865,33 +1814,23 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ).reshape(((1, 1, repeats), 1, 1))
                             denominator = denominator.broadcast_to(grouped.shape)
                             if cutlass.const_expr(
-                                self.local_reduce_type
-                                in ("normalize_sum", "normalize_sum_reverse")
+                                self.local_reduce_consumer is not None
                             ):
-                                denominator = (
-                                    denominator * self.local_reduce_denominator_scale
-                                    + self.local_reduce_denominator_bias
+                                consumer_result = self.local_reduce_consumer(
+                                    numerator, denominator, 0.0
                                 )
-                            if cutlass.const_expr(
-                                self.local_reduce_type == "normalize_sum_reverse"
-                            ):
-                                epilogue_result = (denominator / numerator).reshape(
-                                    local_reduce_vec.shape
+                                epilogue_result = cute.TensorSSA(
+                                    consumer_result.ir_value(),
+                                    local_reduce_vec.shape,
+                                    consumer_result.dtype,
                                 )
                             else:
                                 epilogue_result = (numerator / denominator).reshape(
                                     local_reduce_vec.shape
                                 )
-                            if cutlass.const_expr(
-                                self.local_reduce_type
-                                in ("normalize_sum", "normalize_sum_reverse")
-                            ):
-                                epilogue_result = (
-                                    epilogue_result * self.local_reduce_affine_scale
-                                    + self.local_reduce_affine_bias
-                                )
                         else:
                             assert self.local_reduce_axis == 0
+                            assert self.local_reduce_consumer is not None
                             epilogue_result = acc_vec.to(epilogue_input_dtype)
                     else:
                         epilogue_result = epilogue_op(
@@ -2094,9 +2033,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         reduced_flt[i], other
                                     )
                                     rows = rows // 2
-                                reduced_flt[i] = self.local_reduce_finalize(
-                                    reduced_flt[i], group
-                                )
+                                if cutlass.const_expr(
+                                    self.local_reduce_consumer is None
+                                ):
+                                    reduced_flt[i] = self.local_reduce_finalize(
+                                        reduced_flt[i], group
+                                    )
                             groups_per_cta = cutlass.const_expr(
                                 self.cta_tile_shape_mnk[0] // group
                             )
@@ -2181,7 +2123,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         and n_idx < limit_n
                                         and global_group_idx < limit_groups
                                     ):
-                                        gReduce[group_idx, n_idx] = group_value
+                                        output_value = (
+                                            self.local_reduce_finalize(
+                                                group_value, group
+                                            )
+                                            if self.local_reduce_consumer is not None
+                                            else group_value
+                                        )
+                                        gReduce[group_idx, n_idx] = output_value
                             if cutlass.const_expr(group > lanes_in_m):
                                 self.epilog_sync_barrier.arrive_and_wait()
                             if cutlass.const_expr(self.local_reduce_feeds_main):
@@ -2199,47 +2148,17 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                             n_idx, row_idx // group
                                         ]
                                     self.epilog_sync_barrier.arrive_and_wait()
-                                if cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_sum"
-                                ):
-                                    acc_vec = (
-                                        acc_vec.to(self.acc_dtype)
-                                        / (
-                                            tDrReduce.load()
-                                            * self.local_reduce_denominator_scale
-                                            + self.local_reduce_denominator_bias
-                                        )
-                                        * self.local_reduce_affine_scale
-                                        + self.local_reduce_affine_bias
-                                    )
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "normalize_sum_reverse"
-                                ):
-                                    acc_vec = (
-                                        (
-                                            tDrReduce.load()
-                                            * self.local_reduce_denominator_scale
-                                            + self.local_reduce_denominator_bias
-                                        )
-                                        / acc_vec.to(self.acc_dtype)
-                                        * self.local_reduce_affine_scale
-                                        + self.local_reduce_affine_bias
-                                    )
-                                elif cutlass.const_expr(
-                                    self.local_reduce_type == "mean_linear"
-                                ):
-                                    acc_vec = (
-                                        acc_vec.to(self.acc_dtype)
-                                        * self.local_reduce_input_coefficient
-                                        + tDrReduce.load()
-                                        * self.local_reduce_result_coefficient
-                                        + self.local_reduce_bias
-                                    )
-                                else:
-                                    assert self.local_reduce_type == "mean"
-                                    acc_vec = (
-                                        acc_vec.to(self.acc_dtype) - tDrReduce.load()
-                                    )
+                                assert self.local_reduce_consumer is not None
+                                consumer_result = self.local_reduce_consumer(
+                                    acc_vec.to(self.acc_dtype),
+                                    tDrReduce.load(),
+                                    0.0,
+                                )
+                                acc_vec = cute.TensorSSA(
+                                    consumer_result.ir_value(),
+                                    acc_vec.shape,
+                                    consumer_result.dtype,
+                                )
                             if cutlass.const_expr(
                                 local_reduce_feed_tensor is not None
                                 and self.local_reduce_axis == 0
