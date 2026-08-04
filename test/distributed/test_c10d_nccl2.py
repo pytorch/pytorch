@@ -78,6 +78,10 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             with self.assertRaisesRegex(RuntimeError, "Unsupported Float8"):
                 dist.all_reduce(tensor)
 
+        tensor = torch.empty(4, dtype=torch.float4_e2m1fn_x2, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "Unsupported Float4"):
+            dist.all_reduce(tensor)
+
     @requires_nccl()
     @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
     @skip_if_lt_x_gpu(2)
@@ -88,6 +92,18 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             tensor = torch.ones(4, device=self.device).to(dtype)
             dist.all_reduce(tensor)
             self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_float4_transport(self) -> None:
+        tensor = torch.full(
+            (4,), self.rank + 1, dtype=torch.uint8, device=self.device
+        ).view(torch.float4_e2m1fn_x2)
+        dist.broadcast(tensor, src=0)
+        self.assertEqual(
+            tensor.view(torch.uint8),
+            torch.ones(4, dtype=torch.uint8, device=self.device),
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -162,28 +178,26 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
-class ProcessGroupNCCL2SymmMemRendezvousTest(_ProcessGroupNCCL2OptionsTest):
-    @classmethod
-    def opts(cls, high_priority_stream=False):
-        opts = dist.ProcessGroupNCCL.Options()
-        opts.use_pg_for_symm_mem_rendezvous = True
-        return opts
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_option_propagated(self) -> None:
-        pg = dist.distributed_c10d._get_default_group()
-        self.assertTrue(pg.use_pg_for_symm_mem_rendezvous)
-
-
 class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
+    ranks_per_root = 1
+
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
-        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = str(cls.ranks_per_root)
         super()._init_pg(rank, world_size, rdvz_file)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
+    world_size = 3
+    ranks_per_root = 2
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(3)
     def test_collective_with_scalable_init(self) -> None:
         self._check_all_reduce()
 

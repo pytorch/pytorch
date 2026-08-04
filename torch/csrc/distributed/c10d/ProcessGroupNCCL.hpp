@@ -21,7 +21,6 @@
 #include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/NCCLCommProvider.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
@@ -312,7 +311,7 @@ class TensorShelf {
 //   work->wait()
 //
 //   // Now continue on other work in the current stream.
-class TORCH_API ProcessGroupNCCL : public Backend, public NCCLCommProvider {
+class TORCH_API ProcessGroupNCCL : public Backend {
  public:
   class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
    public:
@@ -922,7 +921,7 @@ class TORCH_API ProcessGroupNCCL : public Backend, public NCCLCommProvider {
       int srcRank,
       int tag) override;
 
-  int64_t getCommPtr() override;
+  int64_t getCommPtr();
 
   void groupStart();
 
