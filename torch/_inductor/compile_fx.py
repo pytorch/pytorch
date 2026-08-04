@@ -2955,6 +2955,16 @@ def compile_fx(
             # device guard, and fx_wrapper's device-context codegen is a no-op (see
             # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
             # emit a non-portable artifact.
+            #
+            # NB cudagraphs is deliberately NOT refused here. Its device dependence
+            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
+            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
+            # artifact is not shared across ranks today: the FX graph cache key embeds the
+            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
+            # and that is what the device-agnostic launcher handles. Whoever makes the FX
+            # graph cache key device-agnostic must revisit device_idxs (and re-check that
+            # graph-partition functions still define _coor_device_idx in their own scope)
+            # before cudagraphs can ride on a shared artifact.
             raise RuntimeError(
                 "compile-on-one-rank (device-as-parameter) is not supported with "
                 "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "

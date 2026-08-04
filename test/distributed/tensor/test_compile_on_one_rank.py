@@ -394,8 +394,13 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # cpp_wrapper/AOTInductor bakes the compile-time device index into the C++ device
         # guard, which is not rank-portable. Compile-on-one-rank must refuse it rather than
         # silently emit a non-portable artifact.
+        # Exception (not RuntimeError) because dynamo wraps this in BackendCompilerFailed,
+        # so the regex has to carry the specificity.
         with torch.cuda.device(0):
-            with self.assertRaisesRegex(Exception, "cpp_wrapper|compile-on-one-rank"):
+            with self.assertRaisesRegex(
+                Exception,
+                r"compile-on-one-rank .*not supported with cpp_wrapper/AOTInductor",
+            ):
                 torch.compile(lambda x: x + 1)(torch.randn(8, device="cuda"))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -406,7 +411,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # device index like cpp_wrapper. Compile-on-one-rank must refuse it rather than
         # silently emit a non-portable artifact.
         with torch.cuda.device(0):
-            with self.assertRaisesRegex(Exception, "fx_wrapper|compile-on-one-rank"):
+            with self.assertRaisesRegex(
+                Exception, r"compile-on-one-rank .*not supported with .*fx_wrapper"
+            ):
                 torch.compile(lambda x: x + 1)(torch.randn(8, device="cuda"))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -494,7 +501,167 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device.type, "cuda")
         code = "\n".join(codes)
         FileCheck().check("torch.cuda.current_device()").run(code)
+        self._assert_no_baked_device(code)
+
+    def _assert_no_baked_device(self, code):
+        # A baked index reaches generated code in more forms than "cuda:N": repr() of a
+        # torch.device gives device(type='cuda', index=0), and triton_meta renders
+        # DeviceProperties(..., index=0). Check all three.
         self.assertNotRegex(code, r"cuda:\d")
+        self.assertNotRegex(code, r"device\(type=.cuda., index=\d")
+        self.assertNotRegex(code, r"DeviceProperties\([^)]*index=\d")
+
+    def _inductor_code_on_device(self, dev):
+        from torch._inductor.utils import run_and_get_code
+
+        torch._dynamo.reset()
+        with torch.cuda.device(dev):
+            compiled = torch.compile(
+                self._coor_inductor_fn, backend="inductor", fullgraph=True
+            )
+            _, codes = run_and_get_code(
+                compiled, torch.randn(2, 8, device=f"cuda:{dev}")
+            )
+        return "\n".join(codes)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_inductor_code_identical_across_devices(self):
+        # The inductor-side rewrite is a dozen independent opt-in `if _coor_enabled():`
+        # sites with no structural funnel, so pattern-matching one rank's output cannot
+        # show that none was missed. Diffing the code generated on two different devices
+        # can. benchmark_kernel is enabled because that harness is emitted into the
+        # kernel's own source (hence its hash), so a baked index there breaks
+        # rank-identity too.
+        import re
+
+        # The AOT id is a per-process compile counter ("0_inference", "1_inference"), not
+        # a rank-specific value -- it differs only because both compiles run in this one
+        # process, so normalize it before diffing.
+        def norm(s):
+            return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+
+        # Each config emits device references through a different path: the kernel's own
+        # benchmark harness, and the compile-time autotune harness
+        # (generate_example_value). Both are part of generated text that must match.
+        for cfg in (
+            {"benchmark_kernel": True},
+            {"triton.autotune_at_compile_time": True},
+        ):
+            with self.subTest(cfg=cfg), torch._inductor.config.patch(**cfg):
+                code0 = self._inductor_code_on_device(0)
+                code1 = self._inductor_code_on_device(1)
+                if norm(code0) != norm(code1):
+                    diff = "".join(
+                        difflib.unified_diff(
+                            norm(code0).splitlines(keepends=True),
+                            norm(code1).splitlines(keepends=True),
+                            fromfile="cuda:0",
+                            tofile="cuda:1",
+                        )
+                    )
+                    self.fail(
+                        f"inductor code differs across devices under CooR "
+                        f"with {cfg}:\n{diff}"
+                    )
+                self._assert_no_baked_device(code0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch({"triton.force_cooperative_reductions": True})
+    def test_cooperative_reduction_workspace_name_not_baked(self):
+        # The cooperative-reduction semaphore workspace is named after its device, and
+        # that name is emitted into the wrapper -- so an index in it makes the wrapper
+        # differ across ranks even though no "cuda:N" literal appears.
+        from torch._inductor.utils import run_and_get_code
+
+        torch._dynamo.reset()
+        with torch.cuda.device(1):
+            compiled = torch.compile(
+                lambda x: x.sum(), backend="inductor", fullgraph=True
+            )
+            _, codes = run_and_get_code(
+                compiled, torch.randn(4096, 4096, device="cuda:1")
+            )
+        code = "\n".join(codes)
+        self.assertIn("semaphores_cuda", code)  # the workspace is actually in play
+        self.assertNotRegex(code, r"semaphores_cuda_\d")
+        self._assert_no_baked_device(code)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_inductor_code_identical_across_cache_dirs(self):
+        # The artifact may be built on one machine and run on another (compatible) one,
+        # so generated text must not embed machine-specific paths -- the inductor cache
+        # dir is absolute and carries the building user's name. Two fresh cache roots
+        # stand in for two machines; a cross-device diff cannot see this class at all
+        # because both ranks there share one cache dir.
+        import re
+
+        from torch._inductor.utils import fresh_cache
+
+        def code_with_fresh_cache():
+            with fresh_cache():
+                return self._inductor_code_on_device(0)
+
+        code_a, code_b = code_with_fresh_cache(), code_with_fresh_cache()
+
+        def norm(s):
+            return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+
+        if norm(code_a) != norm(code_b):
+            diff = "".join(
+                difflib.unified_diff(
+                    norm(code_a).splitlines(keepends=True),
+                    norm(code_b).splitlines(keepends=True),
+                    fromfile="cache_dir_a",
+                    tofile="cache_dir_b",
+                )
+            )
+            self.fail(
+                f"inductor code depends on the cache dir, so it is not portable to "
+                f"another machine:\n{diff}"
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_extern_kernel_device_arg_not_baked(self):
+        # An aten fallback that keeps a device= argument (randperm has no inductor
+        # lowering) renders that argument through val_to_arg_str's repr() path, which
+        # bakes the index as device(type='cuda', index=0) -- a form the "cuda:N" checks
+        # miss entirely.
+        from torch._inductor.utils import run_and_get_code
+
+        def f(x):
+            return torch.randperm(8, device=x.device) + 0
+
+        torch._dynamo.reset()
+        with torch.cuda.device(0):
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            out, codes = run_and_get_code(compiled, torch.randn(2, 8, device="cuda:0"))
+        code = "\n".join(codes)
+        self.assertIn("torch.ops.aten.randperm", code)  # still the fallback path
+        self._assert_no_baked_device(code)
+        self.assertEqual(sorted(out.tolist()), list(range(8)))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch({"triton.cudagraphs": True})
+    def test_cudagraphs_under_coor_runs_on_nonzero_device(self):
+        # cudagraphs is not refused under CooR (see the guard in compile_fx.py): its
+        # device dependence lives in the wrapper-level artifact, which is not shared
+        # across ranks today. Pin that it works on a rank's own device.
+        inp = torch.randn(2, 8, device="cuda:1")
+        ref = self._coor_inductor_fn(inp)
+        torch._dynamo.reset()
+        with torch.cuda.device(1):
+            compiled = torch.compile(
+                self._coor_inductor_fn, backend="inductor", fullgraph=True
+            )
+            for _ in range(3):  # replay, not just record
+                out = compiled(inp)
+        self.assertEqual(out.device, torch.device("cuda:1"))
+        self.assertEqual(out, ref)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -512,19 +679,21 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_inductor_cached_kernel_reused_across_devices(self):
-        # Problem 3 (shareable artifact): under CooR the inductor kernel cache key is
-        # device-agnostic, so a kernel compiled on cuda:0 is reloaded on cuda:1 -- the
-        # same bundle/static-launcher reload path precompile uses. If a rank-specific
-        # device is baked there, the cubin loads on device 0 and launching on cuda:1
-        # raises `invalid resource handle`. (Comparing source is necessary but does not
-        # exercise reload-on-another-device, so this runs the reloaded kernel instead.)
-        from torch._inductor.utils import clear_inductor_caches
-
-        try:
-            from torch._inductor.utils import fresh_cache
-        except ImportError:
-            from torch._inductor.utils import fresh_inductor_cache as fresh_cache
+    def test_inductor_compiled_on_one_device_runs_on_another(self):
+        # Problem 3 (shareable artifact): a graph first compiled on cuda:0 must produce a
+        # correct result when the same code is compiled and run on cuda:1 with the on-disk
+        # cache warm from the cuda:0 run.
+        #
+        # NB: this does NOT yet exercise reload-of-the-cuda:0-artifact. The FX graph cache
+        # key embeds the input device (FxGraphCachePickler normalizes indices only under
+        # device_id_agnostic=True, which the real key does not use), so the cuda:1 compile
+        # misses and rebuilds. Cross-rank reuse of one artifact needs a device-agnostic
+        # key, which in turn needs CompiledFxGraph.device_idxs to stop carrying the
+        # compile-time index -- a follow-up, not something this PR implements. The
+        # miss is asserted below so that landing the device-agnostic key trips this test
+        # instead of silently changing what it covers.
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import clear_caches, fresh_cache
 
         inp1 = torch.randn(2, 8, device="cuda:1")
         ref = self._coor_inductor_fn(inp1)
@@ -538,53 +707,17 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             # from disk -- simulating a fresh per-rank process rather than reusing the
             # cuda:0 launcher in memory.
             torch._dynamo.reset()
-            clear_inductor_caches()
+            clear_caches()
+            counters.clear()
             with torch.cuda.device(1):
                 compiled = torch.compile(
                     self._coor_inductor_fn, backend="inductor", fullgraph=True
                 )
-                out = compiled(inp1)  # reload the cuda:0 bundle and run on cuda:1
+                out = compiled(inp1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
-    @compiler_config.patch(compile_on_one_rank=True)
-    def test_inductor_shared_kernel_reused_in_process_across_devices(self):
-        # Under CooR the kernel cache key is device-agnostic, so a single in-process
-        # compiled artifact (the autotuner and its loaded launcher) can be invoked on
-        # more than one device -- e.g. one process driving multiple GPUs. A loaded
-        # CUfunction is device-bound, so the launcher must keep per-device handles;
-        # otherwise a kernel first loaded on cuda:0 is launched on a cuda:1 stream and
-        # raises `invalid resource handle`. Unlike
-        # test_inductor_cached_kernel_reused_across_devices, the in-memory caches are
-        # NOT dropped between the two device runs, so this exercises in-process reuse of
-        # the loaded launcher (not reload-from-disk).
-        from torch._inductor.utils import clear_inductor_caches
-
-        try:
-            from torch._inductor.utils import fresh_cache
-        except ImportError:
-            from torch._inductor.utils import fresh_inductor_cache as fresh_cache
-
-        inp0 = torch.randn(2, 8, device="cuda:0")
-        ref0 = self._coor_inductor_fn(inp0)
-        inp1 = torch.randn(2, 8, device="cuda:1")
-        ref1 = self._coor_inductor_fn(inp1)
-        torch._dynamo.reset()
-        clear_inductor_caches()
-        with fresh_cache():
-            compiled = torch.compile(
-                self._coor_inductor_fn, backend="inductor", fullgraph=True
-            )
-            with torch.cuda.device(0):
-                out0 = compiled(inp0)
-            # The same in-process autotuner (loaded on cuda:0) now launches on cuda:1.
-            with torch.cuda.device(1):
-                out1 = compiled(inp1)
-        self.assertEqual(out0.device, torch.device("cuda:0"))
-        self.assertEqual(out1.device, torch.device("cuda:1"))
-        self.assertEqual(out0, ref0)
-        self.assertEqual(out1, ref1)
 
 
 def _baked_pg_constants(gm):
@@ -669,6 +802,28 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
 
         # Serializes once the distributed node metadata is stripped (the actual
         # failure mode: a baked torchbind ProcessGroup would raise here).
+        GraphPickler.dumps(
+            gm,
+            Options(ops_filter=None, node_metadata_key_filter=_drop_distributed_meta),
+        )
+
+    @staticmethod
+    def _rs_fn(t, mesh):
+        out = torch.empty_like(t)
+        group = mesh.get_group()
+        dist.reduce_scatter(out, [t, t + 1], op=dist.ReduceOp.MAX, group=group)
+        return out + 1
+
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_legacy_reduce_scatter_serializes_under_coor(self):
+        gm = make_fx(self._rs_fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
+        targets = _call_targets(gm)
+
+        self.assertIn("_dtensor.mesh_get_process_group.default", targets)
+        self.assertIn("_c10d_functional.reduce_scatter_tensor.default", targets)
+        self.assertNotIn("c10d.reduce_scatter_.default", targets)
+        self.assertEqual(_baked_pg_constants(gm), [])
+
         GraphPickler.dumps(
             gm,
             Options(ops_filter=None, node_metadata_key_filter=_drop_distributed_meta),

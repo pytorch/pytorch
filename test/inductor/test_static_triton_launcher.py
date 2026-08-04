@@ -61,9 +61,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher = object.__new__(StaticallyLaunchedXpuKernel)
         launcher.function = None
         launcher.module = None
-        launcher.device_agnostic = False
-        launcher.functions = {}
-        launcher.modules = {}
         launcher.cubin_path = "/tmp/kernel.zebin"
         launcher.cubin_raw = b"zebin"
         launcher.name = "kernel"
@@ -577,8 +574,6 @@ def kernel_many_args(out_tensor, {decl}):
                 self.name = "fake_kernel"
                 self.module = 0xC0FFEE
                 self.function = 0xF00D
-                self.functions = {}
-                self.modules = {}
                 self.C_impl = FakeImpl
 
             def close(self):

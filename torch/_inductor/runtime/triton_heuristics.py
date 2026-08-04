@@ -1229,21 +1229,23 @@ class CachingAutotuner(KernelInterface):
 
         cfg_kwargs = {**cfg.kwargs}
         if self.device_props.type == "hip":
-            # `compile_meta["signature"]` contains the actual Triton kernel argument
-            # names, including constexprs such as XBLOCK_0/XBLOCK_1 for combo kernels.
-            # Any HIP config kwarg that is *not* in that signature is not a kernel
+            kernel_arg_names = OrderedSet(compile_meta["signature"])
+            combo_meta = self.inductor_meta.get("combo_grid_meta") or {}
+            kernel_arg_names.update(combo_meta.get("block_arg_names", ()))
+            # AttrsDescriptor signatures omit constexprs, so combo block argument
+            # names are carried separately in combo_grid_meta.
+            # Any HIP config kwarg that is *not* in that set is not a kernel
             # argument at all; it is a backend compile option that should be forwarded
             # to triton.compile via `options`, not materialized as a constexpr.
-            signature_arg_names = OrderedSet(compile_meta["signature"])
             backend_options = {
                 key: value
                 for key, value in cfg_kwargs.items()
-                if key not in signature_arg_names
+                if key not in kernel_arg_names
             }
             cfg_kwargs = {
                 key: value
                 for key, value in cfg_kwargs.items()
-                if key in signature_arg_names
+                if key in kernel_arg_names
             }
             if backend_options:
                 # Stash backend-only options separately so they do not get mixed into
@@ -1964,7 +1966,8 @@ class CachingAutotuner(KernelInterface):
 
         self._ensure_kernel_loaded()
 
-        signature_keys = OrderedSet(self.triton_meta["signature"])
+        combo_meta = self.inductor_meta.get("combo_grid_meta") or {}
+        block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
         best_config = launcher.config
         current_kwargs = dict(best_config.kwargs)
         base_num_warps = best_config.num_warps
@@ -2003,7 +2006,7 @@ class CachingAutotuner(KernelInterface):
                 trial_kwargs = dict(current_kwargs)
                 for idx in member_indices:
                     _update_combo_kernel_kwargs(
-                        trial_kwargs, cfg.kwargs, idx, skip_rblock, signature_keys
+                        trial_kwargs, cfg.kwargs, idx, skip_rblock, block_arg_names
                     )
 
                 if trial_kwargs == current_kwargs:
@@ -2629,11 +2632,6 @@ class CachingAutotuner(KernelInterface):
             if not callable(runner):
                 return None
             kernel = runner.__self__
-            # compile-on-one-rank kernels keep their loaded handles per device, so
-            # kernel.function is None; the fast launcher binds a single device's
-            # function pointer, so fall back to the per-device static launcher.
-            if getattr(kernel, "device_agnostic", False):
-                return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
@@ -3038,9 +3036,6 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
-        # kernel, so the launcher must keep its loaded handles per device.
-        self.kernel.device_agnostic = self.compile_meta.get("device") is None
         device = _resolve_load_device(
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),
@@ -4092,17 +4087,16 @@ def _update_combo_kernel_kwargs(
     cfg_kwargs: dict[str, Any],
     subkernel_idx: int,
     skip_rblock: bool,
-    signature_keys: OrderedSet[str],
+    block_arg_names: OrderedSet[str],
 ) -> None:
     for key, value in cfg_kwargs.items():
         if skip_rblock and key.startswith("R") and "BLOCK" in key:
             continue
         suffixed_key = f"{key}_{subkernel_idx}"
-        # Only suffix keys that actually exist in the combo kernel signature.
-        # Signature keys are real per-subkernel constexpr args such as XBLOCK_0.
+        # Only suffix keys emitted as combo kernel block arguments.
         # Everything else must stay unsuffixed so HIP-specific compile options like
         # waves_per_eu continue to flow through the backend-options path above.
-        kwargs[suffixed_key if suffixed_key in signature_keys else key] = value
+        kwargs[suffixed_key if suffixed_key in block_arg_names else key] = value
 
 
 def _handle_combo_kernel_per_subkernel_blocks(
@@ -4141,9 +4135,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
     if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
         # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
         # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
-        # are passed as args via default_config. No-bench mode has no candidates and bakes its
-        # blocks into the body, so its config carries only backend kwargs (no block args).
-        # Must use the same key-presence check as _combo_has_reduction_subkernel.
+        # are passed as args via default_config. No-bench mode has no candidates and reuses
+        # default_config for the explicitly recorded combo block arguments.
         if "stitched_launch_candidates" in combo_meta:
             launch_candidates = combo_meta["stitched_launch_candidates"]
             block_config = combo_meta.get("default_config") or {}
@@ -4151,9 +4144,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates
             ]
+        block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
+        block_config = {
+            k: v
+            for k, v in (combo_meta.get("default_config") or {}).items()
+            if k in block_arg_names
+        }
         return [
             triton.Config(
-                combo_meta["stitched_backend_kwargs"],
+                {**block_config, **combo_meta["stitched_backend_kwargs"]},
                 num_warps=stitched_warps,
                 num_stages=combo_meta["stitched_num_stages"],
             )
@@ -4169,7 +4168,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
-    signature_keys = OrderedSet(triton_meta.get("signature", ()))
+    block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -4230,7 +4229,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         _update_combo_kernel_kwargs(
-            combined_kwargs, cfg.kwargs, i, skip_rblock, signature_keys
+            combined_kwargs, cfg.kwargs, i, skip_rblock, block_arg_names
         )
         for key in cfg.kwargs:
             if skip_rblock and key.startswith("R") and "BLOCK" in key:

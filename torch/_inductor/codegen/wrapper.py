@@ -55,7 +55,12 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
-from ..stream_utils import get_raw_stream_name, get_stream_name
+from ..stream_utils import (
+    COOR_DEVICE_IDX_VAR,
+    coor_device_str,
+    get_raw_stream_name,
+    get_stream_name,
+)
 from ..utils import (
     cache_on_self,
     DeferredLineBase,
@@ -460,6 +465,17 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     return compile_wrapper.getvalue()
 
 
+def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
+    """Escape src for a '''...''' literal, optionally nested in an r\"\"\"...\"\"\" block."""
+    src = src.replace("\\", "\\\\")
+    if config.cpp_wrapper:
+        # With cpp_wrapper + autotune_at_compile_time=False, the source is
+        # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
+        # So we need to add backslash here.
+        src = src.replace('"""', '\\"\\"\\"')
+    return src.replace("'''", "\\'\\'\\'")
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: sympy.Symbol
@@ -601,7 +617,7 @@ class ExitSubgraphLine(WrapperLine):
 
 # [device-as-parameter] Name of the call()-local variable holding the runtime current
 # device index under compile-on-one-rank, so the wrapper is byte-identical across ranks.
-_COOR_DEVICE_IDX_VAR = "_coor_device_idx"
+_COOR_DEVICE_IDX_VAR = COOR_DEVICE_IDX_VAR
 
 
 def _coor_device_idx_ref(device_idx: int) -> int | str:
@@ -1422,6 +1438,16 @@ class PythonWrapperCodegen(CodeGen):
         self._last_default_stream_device: int | None = None
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
+        # Inputs read on more than one stream get a copy_if_misaligned per
+        # consuming stream (each cloning a preserved copy of the original), so
+        # every stream is ordered after its own aligned clone.  A single shared
+        # copy would leave other streams reading a clone made on -- and ordered
+        # only after -- the first reader's stream, a cross-stream race.  These
+        # track the reclassified inputs, the saved originals, and the stream
+        # each working name is currently aligned for.
+        self._multistream_alignment_copies: OrderedSet[str] = OrderedSet()
+        self._alignment_orig_saved: OrderedSet[str] = OrderedSet()
+        self._alignment_aligned_stream: dict[str, int] = {}
         self._names_iter: Iterator[int] = count()
         self.args_to_buffers: dict[
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
@@ -1982,15 +2008,52 @@ class PythonWrapperCodegen(CodeGen):
                 "from torch._C._dynamo.guards import copy_if_misaligned"
             )
 
-    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
-        """Emit alignment check + clone just before the first kernel
-        that reads each input, hiding the cost behind GPU execution."""
+    def codegen_deferred_alignment_copies(
+        self, input_names: Iterable[str], stream: int = 0
+    ) -> None:
+        """Emit alignment checks/clones for the given stream.
+
+        An input with an alignment constraint needs that input to be
+        potentially reallocated. This emits the proper copy_if_misaligned calls
+        to perform that realignment.
+
+        For inputs read on a simple stream this is trivial: we emit immediately
+        before the first reader. Inputs read on multiple streams get 1 copy per
+        stream, each reading from a preserved version of the original input.
+        This ensures we do not need to worry about ordering between multiple
+        streams.
+        """
         if V.graph.cpp_wrapper:
             return
         for name in input_names:
             if name in self._pending_alignment_copies:
                 self._pending_alignment_copies.discard(name)
                 self.writeline(f"{name} = copy_if_misaligned({name})")
+            elif name in self._multistream_alignment_copies:
+                # TODO: if the same input is read again on a stream after an
+                # intervening different stream (e.g. s1, s2, s1) this re-clones
+                # on the second s1 use -- correct, but an extra copy.  Tracking
+                # stream joins / per-(name, stream) clone names would let the
+                # later same-stream use reuse the earlier clone.
+                if self._alignment_aligned_stream.get(name) == stream:
+                    continue
+                if name not in self._alignment_orig_saved:
+                    # Preserve the original (still un-rewritten here) so every
+                    # stream clones from it, not from another stream's clone.
+                    self._alignment_orig_saved.add(name)
+                    self.writeline(f"{name}_orig = {name}")
+                self.writeline(f"{name} = copy_if_misaligned({name}_orig)")
+                self._alignment_aligned_stream[name] = stream
+
+    def mark_multistream_alignment(self, names: Iterable[str]) -> None:
+        """Reclassify inputs read on more than one stream so their alignment
+        copy is emitted per consuming stream (see codegen_deferred_alignment_copies)
+        rather than once at the first reader by line order -- which would place
+        the only copy inside one branch's stream and race the other branches."""
+        for name in names:
+            if name in self._pending_alignment_copies:
+                self._pending_alignment_copies.discard(name)
+                self._multistream_alignment_copies.add(name)
 
     # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this
@@ -3708,13 +3771,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = kernel_src.replace("\\", "\\\\")
-        if config.cpp_wrapper:
-            # With cpp_wrapper + autotune_at_compile_time=False, the source is
-            # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
-            # So we need to add backslash here.
-            kernel_src = kernel_src.replace('"""', '\\"\\"\\"')
-        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
+        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
@@ -3913,7 +3970,7 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
+            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
@@ -4191,8 +4248,15 @@ class PythonWrapperCodegen(CodeGen):
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
+            # The autotune block inlines the current-device expression rather than using the
+            # call()-local _coor_device_idx variable, which is not in scope here.
+            guard_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device.index
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device.index)}:"
+                f"with {V.graph.device_ops.device_guard(guard_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
@@ -4270,6 +4334,12 @@ class PythonWrapperCodegen(CodeGen):
             for n, t in opaque_types.items():
                 V.graph.opaque_value_type_classes[n] = t
             return obj_repr
+        elif isinstance(s, torch.device) and _coor_enabled() and s.index is not None:
+            # compile-on-one-rank: repr() of an indexed device would bake this rank's
+            # index into the wrapper (e.g. an aten fallback's device= arg renders as
+            # device(type='cuda', index=0)), which the "cuda:N" checks do not catch.
+            # Emit the bare type so the value follows the enclosing runtime device guard.
+            return repr(torch.device(s.type))
         else:
             return repr(s)
 
@@ -4454,6 +4524,13 @@ class PythonWrapperCodegen(CodeGen):
         # can be freed but not reused
         if isinstance(buffer, (ir.InputBuffer, ir.TorchBindObject)):
             self.writeline(FreeLine(self, buffer))
+            # A multistream input keeps a preserved copy of its original
+            # ({name}_orig, see codegen_deferred_alignment_copies) that each
+            # per-stream clone reads from; its lifetime matches the input's, so
+            # free it here on the normal last_usage -> codegen_free path.
+            if name in self._alignment_orig_saved:
+                self._alignment_orig_saved.discard(name)
+                self.writeline(self.make_free_by_names([f"{name}_orig"]))
             return
 
         if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
