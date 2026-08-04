@@ -987,6 +987,31 @@ class TestScheduler(TestCase):
         with inductor_config.patch(deterministic=True):
             check_realizes()
 
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_select_scatter_realizes_expensive_src(self):
+        def fn(base, a, b, c, d, e):
+            p = a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
+            return torch.select_scatter(base, p, dim=2, index=1)
+
+        device = "cuda"
+        torch.manual_seed(0)
+        args = [
+            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
+            for _ in range(6)
+        ]
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual)
+        # src must not be inlined into the 3D scatter loop, which would recompute
+        # it once per element of the scattered dim.
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
 
 class TestScoreFusionMemory(TestCase):
     """

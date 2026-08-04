@@ -4091,6 +4091,10 @@ def select_scatter(x, src, dim: int, index: int):
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    # src is evaluated at every position of `dim` below even though only
+    # `index` keeps the value, so this is real fanout rather than the free loop
+    # reuse that the expand lowering assumes for its own mark_reuse.
+    src.mark_reuse(V.graph.sizevars.optimization_hint(x.get_size()[dim]))
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
