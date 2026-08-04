@@ -25,6 +25,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
@@ -1110,12 +1111,18 @@ class FlexGemmEpilogueAnalysis:
         if grouped_main is not None:
             if outputs.aux_outputs or outputs.local_reduce is not None:
                 raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+            if grouped_main.transform.chunked and any(
+                local_reduce.graph.depends_on(outputs.main, reduced)
+                for reduced in local_reduce.matches
+            ):
+                raise NotImplementedError(FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR)
             local_reduce.grouped_layouts.update(grouped_main.grouped_layouts)
             grouped_select_indices = grouped_main.select_indices
             outputs = dataclasses.replace(
                 outputs, main_transform=grouped_main.transform
             )
         else:
+            # TODO: Consider DCE before analysis if dead grouped selects become common.
             if any(
                 isinstance(normalized, NormalizedSelect)
                 and normalized.source in local_reduce.grouped_layouts
@@ -1300,10 +1307,7 @@ class FlexGemmEpilogueEmitter:
                 ValueRanges.unknown(),
                 dtype=physical_dtype,
                 shape=(1,),
-                is_scalar_expr=(
-                    self.outputs.main_transform is not None
-                    and statically_known_shape_equal(epilogue_arg_meta.shape, (1, 1))
-                ),
+                is_scalar_expr=self.outputs.main_transform is not None,
             )
             if logical_dtype != physical_dtype:
                 self.env[node] = FlexGemmCuteDSLOpOverrides.to_dtype(
