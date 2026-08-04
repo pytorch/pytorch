@@ -978,7 +978,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.nll_loss: (
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean": -1
         ),
-        torch.nn.functional.normalize: lambda input, p=2, dim=1, eps=1e-12, out=None: -1,
+        torch.nn.functional.normalize: lambda input, p=2, dim=1, eps=None, out=None: -1,
         torch.nn.functional.one_hot: lambda tensor, num_classes=-1: -1,
         torch.nn.functional.pad: lambda input, pad, mode="constant", value=0: -1,
         torch.nn.functional.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
