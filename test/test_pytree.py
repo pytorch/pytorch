@@ -1357,6 +1357,22 @@ if "optree" in sys.modules:
         finally:
             python_pytree._deregister_pytree_node(CustomClass)
 
+    def test_deregister_then_reregister_pytree_node(self):
+        class MyDict(UserDict):
+            pass
+
+        def register():
+            python_pytree.register_pytree_node(
+                MyDict,
+                lambda d: (list(d.values()), list(d.keys())),
+                lambda values, keys: MyDict(zip(keys, values)),
+            )
+
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a

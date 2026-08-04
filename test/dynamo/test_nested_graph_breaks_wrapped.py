@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import unittest
 
 import torch
@@ -155,17 +154,9 @@ for case in xfails:
 del case, xfails
 
 
-def _xfail_inherited_copy(fn):
-    # expectedFailure on the inherited method would leak into the original class
-    @functools.wraps(fn)
-    def copied(self):
-        return fn(self)
-
-    return unittest.expectedFailure(copied)
-
-
+# make_test_cls_with_patches drops the @config.patch class decorator; reapply it
 NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision = (  # noqa: F821
-    _xfail_inherited_copy(
+    torch._dynamo.config.patch(assume_static_by_default=False)(
         NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision  # noqa: F821
     )
 )
