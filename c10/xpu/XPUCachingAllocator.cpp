@@ -2446,6 +2446,10 @@ void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
 }
 
+void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  return native_allocator.setNoSplit(device, mempool_id);
+}
+
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
 }
