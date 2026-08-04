@@ -322,6 +322,8 @@ def _update_param_kwargs(param_kwargs, name, value):
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
+    _device_base: ClassVar[type["DeviceTypeTestBase"] | None] = None
+
     # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
     # skip tests for this device type. This is a pragmatic short-term solution to
     # allow PrivateUse1 backends to run tests that are currently gated behind
@@ -533,14 +535,8 @@ class DeviceTypeTestBase(TestCase):
         except Exception:
             # For CUDATestBase, XPUTestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
-            # only the device base's setUpClass: the full one would leak at import time
-            for klass in cls.__mro__[1:]:
-                if (
-                    issubclass(klass, DeviceTypeTestBase)
-                    and "setUpClass" in klass.__dict__
-                ):
-                    klass.setUpClass()
-                    break
+            if cls._device_base is not None:
+                cls._device_base.setUpClass()
             else:
                 cls.setUpClass()
             return cls.get_primary_device()
@@ -1133,6 +1129,7 @@ def instantiate_device_type_tests(
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+        device_type_test_class._device_base = base
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test

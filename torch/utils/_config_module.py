@@ -431,9 +431,7 @@ class ConfigModule(ModuleType):
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
-                config.user_override.set(value)
-                self._hash_dirty_var.set(True)
-                self._mark_get_dict_dirty(name)
+                self._set_user_override(name, config, value)
                 # Avoid a redundant instance-__dict__ write: hide defaults to False on
                 # the class and is only ever set True by __delattr__ (the mock.patch
                 # workaround), so only clear it when it is actually set.
@@ -782,7 +780,7 @@ class ConfigModule(ModuleType):
             elif importable_callable(v):
                 ref = importable_ref(v)
                 if ref is None:
-                    return f"# {mod}.{k} omitted: callable cannot be re-imported"
+                    return f"# WARNING: {mod}.{k} omitted (callable cannot be re-imported), repro may not reproduce"
                 func_ref, import_name = ref
                 if import_name:
                     imports.add(import_name)
@@ -792,7 +790,7 @@ class ConfigModule(ModuleType):
             ):
                 refs = [importable_ref(item) for item in v]
                 if any(ref is None for ref in refs):
-                    return f"# {mod}.{k} omitted: callable cannot be re-imported"
+                    return f"# WARNING: {mod}.{k} entirely omitted (an element cannot be re-imported), repro may not reproduce"
                 v_list = []
                 for func_ref, import_name in refs:  # type: ignore[misc]
                     if import_name:
@@ -872,13 +870,24 @@ class ConfigModule(ModuleType):
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 
+    def _set_user_override(self, name: str, entry: _ConfigEntry, value: Any) -> None:
+        entry.user_override.set(value)
+        self._hash_dirty_var.set(True)
+        self._mark_get_dict_dirty(name)
+
     def _save_user_overrides(self) -> dict[str, Any]:
-        return {k: e.user_override.get() for k, e in self._config.items()}
+        saved = {}
+        for k, e in self._config.items():
+            v = e.user_override.get()
+            if not isinstance(v, _IMMUTABLE_CONFIG_TYPES) and v is not _UNSET_SENTINEL:
+                v = copy.deepcopy(v)
+            saved[k] = v
+        return saved
 
     def _restore_user_overrides(self, saved: dict[str, Any]) -> None:
         self._hash_dirty_var.set(True)
+        self._get_dict_dirty_keys_var.set(None)
         for k, v in saved.items():
-            self._mark_get_dict_dirty(k)
             self._config[k].user_override.set(v)
 
     def get_serializable_config_copy(self) -> dict[str, Any]:
@@ -976,9 +985,7 @@ class ConfigModule(ModuleType):
                     if entry.alias is not None:
                         config.__setattr__(k, v)
                     else:
-                        entry.user_override.set(v)
-                        config._hash_dirty_var.set(True)
-                        config._mark_get_dict_dirty(k)
+                        config._set_user_override(k, entry, v)
 
         return ConfigPatch()
 
@@ -1005,15 +1012,11 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
-                config[k].user_override.set(v)
-                self._hash_dirty_var.set(True)
-                self._mark_get_dict_dirty(k)
+                self._set_user_override(k, config[k], v)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    config[k].user_override.set(v)
-                    self._hash_dirty_var.set(True)
-                    self._mark_get_dict_dirty(k)
+                    self._set_user_override(k, config[k], v)
 
             return revert
 

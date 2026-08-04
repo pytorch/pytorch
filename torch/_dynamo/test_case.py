@@ -215,7 +215,8 @@ class CPythonTestCase(TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._stack.close()
+        if "_stack" in cls.__dict__:
+            cls._stack.close()
         super().tearDownClass()
 
     @classmethod
