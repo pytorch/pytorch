@@ -40,6 +40,7 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     IS_MACOS,
@@ -131,6 +132,8 @@ else:
 
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pytorch_autograd_np(self):
         x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
@@ -196,6 +199,8 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
 
 
 class TestTensorBoardPyTorchNumpyDevice(BaseTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_pytorch_np(self, device):
         tensors = [
             torch.rand(3, 10, 10, device=device),
@@ -212,6 +217,8 @@ class TestTensorBoardPyTorchNumpyDevice(BaseTestCase):
 
 
 class TestTensorBoardUtils(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_to_HWC(self):
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, "chw")
@@ -277,6 +284,8 @@ recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
 class TestTensorBoardWriter(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_writer(self):
         with self.createSummaryWriter() as writer:
             sample_rate = 44100
@@ -339,6 +348,8 @@ class TestTensorBoardWriter(BaseTestCase):
 
 
 class TestTensorBoardSummaryWriter(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_summary_writer_ctx(self):
         # after using a SummaryWriter as a ctx it should be closed
         with self.createSummaryWriter() as writer:
@@ -365,6 +376,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
 
 class TestTensorBoardEmbedding(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_embedding(self):
         w = self.createSummaryWriter()
         all_features = torch.tensor([[1.0, 2.0, 3.0], [5.0, 4.0, 1.0], [3.0, 7.0, 7.0]])
@@ -408,6 +421,8 @@ class TestTensorBoardEmbedding(BaseTestCase):
 
 
 class TestTensorBoardSummary(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_uint8_image(self):
         """
         Tests that uint8 image (pixel values in [0, 255]) is not changed
@@ -562,6 +577,8 @@ def write_proto(str_to_compare, function_ptr):
 
 
 class TestTensorBoardPytorchGraph(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pytorch_graph(self):
         dummy_input = (torch.zeros(1, 3),)
 
@@ -729,6 +746,8 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
 
 class TestTensorBoardFigure(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfNoMatplotlib
     @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure(self):
@@ -789,6 +808,8 @@ class TestTensorBoardFigure(BaseTestCase):
 
 
 class TestTensorBoardNumpy(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
@@ -808,6 +829,8 @@ class TestTensorBoardNumpy(BaseTestCase):
 
 
 class TestTensorProtoSummary(BaseTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "tensor_type,proto_type",
         [
