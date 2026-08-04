@@ -62,7 +62,7 @@ def find_free_port():
         except OSError as e:
             if s is not None:
                 s.close()
-            print(f"Socket creation attempt failed: {e}")
+            logger.warning("Socket creation attempt failed: %s", e)
     raise RuntimeError("Failed to create a socket")
 
 
@@ -218,3 +218,33 @@ class EtcdServer:
         self._etcd_proc = subprocess.Popen(etcd_cmd, close_fds=True, stderr=stderr)
         self._wait_for_ready(timeout)
 
+    def get_client(self):
+        """Return an etcd client object that can be used to make requests to this server."""
+        return etcd.Client(
+            host=self._host, port=self._port, version_prefix="/v2", read_timeout=10
+        )
+
+    def _wait_for_ready(self, timeout: int = 60) -> None:
+        client = etcd.Client(
+            host=f"{self._host}", port=self._port, version_prefix="/v2", read_timeout=5
+        )
+        max_time = time.time() + timeout
+
+        while time.time() < max_time:
+            if self._get_etcd_server_process().poll() is not None:
+                # etcd server process finished
+                exitcode = self._get_etcd_server_process().returncode
+                raise RuntimeError(
+                    f"Etcd server process exited with the code: {exitcode}"
+                )
+            try:
+                logger.info("etcd server ready. version: %s", client.version)
+                return
+            except Exception:
+                time.sleep(1)
+        raise TimeoutError("Timed out waiting for etcd server to be ready!")
+
+    def stop(self) -> None:
+        """Stop the server and cleans up auto generated resources (e.g. data dir)."""
+        logger.info("EtcdServer stop method called")
+        stop_etcd(self._etcd_proc, self._base_data_dir)
