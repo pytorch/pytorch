@@ -466,7 +466,7 @@ class TestSplitDevice(TestCase):
 
             for i, part in enumerate(result):
                 ordered = part.order(x, d1 if i == 0 else d2, z)
-                self.assertEqual(ordered.device.type, device)
+                self.assertEqual(ordered.device.type, device.type)
                 self.assertEqual(ordered.shape[0], 3)
                 self.assertEqual(ordered.shape[2], 5)
 
