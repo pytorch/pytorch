@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import glob
 import json
 import logging
 import os
@@ -374,10 +375,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+        # self.file_name plus anything a test derived from it, e.g. the flight
+        # recorder dumps of test_global_rank_of_pg_created_after_another_nccl_pg
+        for path in glob.glob(f"{self.file_name}*"):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     @property
     def world_size(self):
@@ -1267,6 +1271,43 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(tensor, torch.full((1,), 0))
 
         dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_global_rank_of_pg_created_after_another_nccl_pg(self):
+        # Regression test: ProcessGroupNCCL::globalRank() used to be a
+        # function-local static, so it was seeded by whichever pg was
+        # constructed first in the process (the constructor calls it while
+        # logging) and never updated. A stateless subgroup built before the
+        # default pg therefore froze its own group-local rank as "the global
+        # rank" for every pg in the process. Checked here through the flight
+        # recorder dump, which is named after globalRank(); the same value also
+        # names broadcastSignal(kStoreDumpKey) and picks the device in
+        # guessDeviceId(), which split() relies on.
+        trace_prefix = f"{self.file_name}_trace_"
+        os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
+        os.environ["TORCH_NCCL_EXTRA_DUMP_ON_EXEC"] = "1"
+        os.environ["TORCH_FR_DUMP_TEMP_FILE"] = trace_prefix
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # (1) a single-rank stateless pg, constructed before the default pg.
+        prior = c10d.ProcessGroupNCCL(c10d.PrefixStore("prior", store), 0, 1)
+        # (2) the real default pg, whose rank is the global one.
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.PrefixStore("world", store),
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        dist.all_reduce(torch.ones(1, device=device))
+
+        # abort() dumps the flight recorder to <prefix><globalRank()>.
+        pg._get_backend(device).abort()
+        self.assertTrue(os.path.exists(f"{trace_prefix}{self.rank}"))
+        del prior
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
