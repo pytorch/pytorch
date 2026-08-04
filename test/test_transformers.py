@@ -484,6 +484,78 @@ class TestTransformers(NNTestCase):
         torch.jit.script(mha)
 
 
+class TestTransformersCUDA(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    def setUp(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
+    def test_decoder_only_layer(self):
+        class FairseqDecoder(torch.nn.Module):
+            def __init__(
+                self,
+                embed_dim,
+                attention_heads,
+                ffn_embed_dim,
+                num_layers,
+                embedding_layer,  # torch.nn.Embedding. Must have a padding_idx field
+                dropout=0,
+                normalize_before=False,
+                torch_encoder=None,  # torch encoder that you can map weights from
+                activation="relu",
+            ):
+                super().__init__()
+
+                cfg = fairseq_transformer.TransformerConfig()
+                cfg.decoder.embed_dim = embed_dim
+                cfg.decoder.output_dim = embed_dim
+                cfg.decoder.attention_heads = attention_heads
+                cfg.decoder.ffn_embed_dim = ffn_embed_dim
+                cfg.dropout = dropout
+                cfg.decoder.normalize_before = normalize_before
+                cfg.decoder.layers = num_layers
+                # make embedding behavior same as other encoders
+                cfg.no_token_positional_embeddings = True
+                cfg.no_scale_embedding = True
+                cfg.activation_fn = activation
+
+                dictionary = {}  # TODO: verify what this is
+
+                self.decoder = fairseq_transformer.TransformerDecoder(
+                    cfg,
+                    dictionary,
+                    embedding_layer,
+                    no_encoder_attn=True,
+                    output_projection=None,
+                )
+
+                if torch_encoder is not None:
+                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
+                self.decoder = self.decoder.eval().cuda().half()
+
+            def forward(
+                self,
+                tokens,
+                src_lengths=None,
+                with_triangle_mask=False,
+                incremental_state=None,
+            ):
+                return self.decoder(
+                    prev_output_tokens=tokens,
+                    encoder_out=None,
+                    incremental_state=incremental_state,
+                    features_only=True,
+                    full_context_alignment=not with_triangle_mask,
+                    alignment_layer=None,
+                    alignment_heads=None,
+                    src_lengths=src_lengths,
+                    return_all_hiddens=False,
+                )[0]
+
+
 class TestTransformersDevice(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1291,69 +1363,6 @@ class TestTransformersDevice(NNTestCase):
             self.assertEqual(result, scripted_result)
 
 
-    @onlyCUDA
-    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
-    def test_decoder_only_layer(self):
-        class FairseqDecoder(torch.nn.Module):
-            def __init__(
-                self,
-                embed_dim,
-                attention_heads,
-                ffn_embed_dim,
-                num_layers,
-                embedding_layer,  # torch.nn.Embedding. Must have a padding_idx field
-                dropout=0,
-                normalize_before=False,
-                torch_encoder=None,  # torch encoder that you can map weights from
-                activation="relu",
-            ):
-                super().__init__()
-
-                cfg = fairseq_transformer.TransformerConfig()
-                cfg.decoder.embed_dim = embed_dim
-                cfg.decoder.output_dim = embed_dim
-                cfg.decoder.attention_heads = attention_heads
-                cfg.decoder.ffn_embed_dim = ffn_embed_dim
-                cfg.dropout = dropout
-                cfg.decoder.normalize_before = normalize_before
-                cfg.decoder.layers = num_layers
-                # make embedding behavior same as other encoders
-                cfg.no_token_positional_embeddings = True
-                cfg.no_scale_embedding = True
-                cfg.activation_fn = activation
-
-                dictionary = {}  # TODO: verify what this is
-
-                self.decoder = fairseq_transformer.TransformerDecoder(
-                    cfg,
-                    dictionary,
-                    embedding_layer,
-                    no_encoder_attn=True,
-                    output_projection=None,
-                )
-
-                if torch_encoder is not None:
-                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
-                self.decoder = self.decoder.eval().cuda().half()
-
-            def forward(
-                self,
-                tokens,
-                src_lengths=None,
-                with_triangle_mask=False,
-                incremental_state=None,
-            ):
-                return self.decoder(
-                    prev_output_tokens=tokens,
-                    encoder_out=None,
-                    incremental_state=incremental_state,
-                    features_only=True,
-                    full_context_alignment=not with_triangle_mask,
-                    alignment_layer=None,
-                    alignment_heads=None,
-                    src_lengths=src_lengths,
-                    return_all_hiddens=False,
-                )[0]
 
     @tf32_on_and_off(0.003)
     @parametrize("batch_size", [1, 5])
