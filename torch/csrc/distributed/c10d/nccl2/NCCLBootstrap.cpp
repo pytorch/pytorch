@@ -12,7 +12,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
-
+#include <exception>
 #include <cstring>
 #include <set>
 
@@ -236,10 +236,30 @@ ncclComm_t NCCLBootstrap::createNcclComm(
     ncclErr = nccl_api_->commInitRankConfig(
         &nccl_comm, comm_size_, uniqueId, rank_, &config);
   }
-  if (ncclErr != ncclSuccess || nccl_comm == nullptr) {
+  if (nccl_comm == nullptr) {
     throw std::runtime_error(
         "Failed to initialize NCCL communicator: " +
         std::string(nccl_api_->getErrorString(ncclErr)));
+  }
+  try {
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm,
+        ncclErr,
+        timeout_,
+        "Failed to initialize NCCL communicator");
+  } catch (...) {
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm,
+          nccl_api_->commAbort(nccl_comm),
+          timeout_,
+          "Failed to abort NCCL communicator after initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
+    throw;
   }
 
   return nccl_comm;
