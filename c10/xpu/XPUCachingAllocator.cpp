@@ -2343,7 +2343,7 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->releasePool(std::move(mempool_id));
   }
 
-  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     device_allocators[device]->setNoSplit(mempool_id);
   }
