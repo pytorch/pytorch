@@ -620,14 +620,10 @@ class CublasltScaledGemmProblem : public CublasltGemmProblemBase {
     if (params_->alpha.has_value()) {
       const auto& alpha = params_->alpha.value();
       if (alpha.is_cuda()) {
-        float* user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
-        at::Tensor user_alpha = at::from_blob(
-            user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
-        user_alpha.copy_(alpha);
         auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
         compute_desc_.setAttribute(
             CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-        alpha_ptr_ = user_alpha.data_ptr<float>();
+        alpha_ptr_ = alpha.const_data_ptr<float>();
         beta_ptr_ = at::cuda::detail::get_cublas_device_zero();
       } else {
         alpha_val_ = alpha.template item<float>();
