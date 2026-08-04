@@ -1483,6 +1483,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The number of ProcessGroupNCCL created on the current rank.
   size_t local_id_;
 
+  // Identity rank mapping [0, size_), used by groupRanks() when
+  // options_->global_ranks_in_group is empty. Filled in the constructor.
+  std::vector<uint64_t> defaultRanks_;
+
   std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
