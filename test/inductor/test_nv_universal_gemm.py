@@ -1089,6 +1089,56 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 primary_output="out",
             )
 
+    def test_epilogue_program_owns_only_named_feed_intermediates(self):
+        from torch._inductor.codegen.nv_universal_gemm import epilogue_lowering
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            NVGemmEpilogueCapture,
+            NVGemmEpilogueProgram,
+            NVGemmReductionPartition,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+                self.data = FakeMultiOutputReduction()
+
+            def get_name(self):
+                return self.name
+
+        class FakeMultiOutputReduction:
+            pass
+
+        feed = mock.Mock(node=FakeBuffer("softmax_intermediate"))
+        unrelated = mock.Mock(node=FakeBuffer("unrelated_reduction"))
+        capture = NVGemmEpilogueCapture(
+            gemm=mock.Mock(), nodes=(feed, unrelated), analysis=None
+        )
+        plan = GemmReductionPlan(
+            reduction_output=None,
+            group=4,
+            axis=1,
+            reduction_type="online_softmax",
+            source_type="identity",
+            primary_output="out",
+            feeds_main=True,
+        )
+        program = NVGemmEpilogueProgram(
+            capture=capture,
+            reduction_partition=NVGemmReductionPartition(()),
+            reduction_plan=plan,
+            intermediate_outputs=("softmax_intermediate",),
+        )
+        with (
+            mock.patch.object(epilogue_lowering, "Buffer", FakeBuffer),
+            mock.patch.object(epilogue_lowering, "ComputedBuffer", FakeBuffer),
+            mock.patch.object(
+                epilogue_lowering, "MultiOutputReduction", FakeMultiOutputReduction
+            ),
+        ):
+            self.assertEqual(program.owned_nodes, (feed,))
+            self.assertEqual(program.pointwise_nodes, (unrelated,))
+
     def test_static_reduction_plan_composition(self):
         import dataclasses
 
