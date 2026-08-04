@@ -4232,6 +4232,15 @@ class TestTorchDeviceType(TestCase):
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_addcdiv_zero_divisor(self, device, dtype):
+        input = torch.ones(17, dtype=dtype, device=device)
+        tensor1 = torch.ones(17, dtype=dtype, device=device)
+        tensor2 = torch.zeros(17, dtype=dtype, device=device)
+        expected = torch.full((17,), float("inf"), dtype=dtype, device=device)
+        self.assertEqual(torch.addcdiv(input, tensor1, tensor2), expected)
+
     def test_nullary_op_mem_overlap(self, device):
         ops = (
             ("random_", ()),
