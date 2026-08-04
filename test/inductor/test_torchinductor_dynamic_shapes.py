@@ -200,9 +200,7 @@ if HAS_CPU:
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
-    if hasattr(
-        DynamicShapesCpuTests, "test_tmp_not_defined_issue3_dynamic_shapes_cpu"
-    ):
+    if hasattr(DynamicShapesCpuTests, "test_tmp_not_defined_issue3_dynamic_shapes_cpu"):
         # The vec-ISA probe child cannot resolve ROCm SDK libraries in CI.
         DynamicShapesCpuTests.test_tmp_not_defined_issue3_dynamic_shapes_cpu = (
             skipIfRocmVersionAtLeast([7, 14])(
