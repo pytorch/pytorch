@@ -1219,6 +1219,50 @@ inline torch::stable::Tensor bitwise_right_shift(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+/// Stable version of the permute op.
+///
+/// Returns a view of the input tensor with its dimensions rearranged according
+/// to dims. The returned tensor shares the same underlying data with the input.
+///
+/// Minimum build-time version: PyTorch 2.14.
+/// Minimum runtime version: PyTorch 2.10.
+///
+/// @param self The input tensor.
+/// @param dims The desired ordering of dimensions.
+/// @return A permuted view of the input tensor.
+inline torch::stable::Tensor permute(
+  const torch::stable::Tensor& self,
+  torch::headeronly::IntHeaderOnlyArrayRef dims) {
+const auto num_args = 2;
+std::array<StableIValue, num_args> stack{
+    torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+    "aten::permute", "", stack.data(), TORCH_ABI_VERSION));
+return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the view.dtype op.
+///
+/// Returns a view of the input tensor with the same data reinterpreted as the
+/// given dtype. This is a different overload than the shape-based view op.
+///
+/// Minimum build-time version: PyTorch 2.14.
+/// Minimum runtime version: PyTorch 2.10.
+///
+/// @param self The input tensor.
+/// @param dtype The dtype to reinterpret the data as.
+/// @return A view of the input tensor with the specified dtype.
+inline torch::stable::Tensor view_dtype(
+  const torch::stable::Tensor& self,
+  torch::headeronly::ScalarType dtype) {
+const auto num_args = 2;
+std::array<StableIValue, num_args> stack{
+    torch::stable::detail::from(self), torch::stable::detail::from(dtype)};
+STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+    "aten::view", "dtype", stack.data(), TORCH_ABI_VERSION));
+return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

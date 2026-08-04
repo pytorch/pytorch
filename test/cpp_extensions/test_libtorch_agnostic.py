@@ -293,6 +293,26 @@ class TestLibtorchAgnostic(TestCase):
         other_1d = torch.randint(0, other_high, (4,), device=device, dtype=torch.int64)
         self.assertEqual(stable_op(a, other_1d), torch_op(a, other_1d))
 
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_permute(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        t = torch.randn(2, 3, 4, device=device)
+        result = libtorch_agnostic.ops.my_permute(t, [2, 0, 1])
+        self.assertEqual(result, t.permute(2, 0, 1))
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_view_dtype(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        t = torch.randn(2, 4, device=device, dtype=torch.float32)
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int32)
+        expected = t.view(torch.int32)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
