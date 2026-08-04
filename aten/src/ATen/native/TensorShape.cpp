@@ -1515,7 +1515,7 @@ Tensor narrow_copy_sparse(
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    new_indices = indices;
+    new_indices = std::move(indices);
     int64_t dense_dim = dim - sparse_dim + 1;
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
@@ -2253,10 +2253,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
     result = as_strided_qtensorimpl(
         self, sizes, strides, storage_offset, std::move(quantizer));
   } else {
-    std::vector<c10::SymInt> sizes(
-        self.sym_sizes().begin(), self.sym_sizes().end());
-    std::vector<c10::SymInt> strides(
-        self.sym_strides().begin(), self.sym_strides().end());
+    SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
     auto storage_offset = self.sym_storage_offset() + index * strides[dim];
     sizes.erase(sizes.begin() + dim);
     strides.erase(strides.begin() + dim);
@@ -4330,6 +4328,7 @@ Tensor numpy_T(const Tensor& self) {
         "Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
   }
   DimVector transpose_dims;
+  transpose_dims.reserve(n);
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }
