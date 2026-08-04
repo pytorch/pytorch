@@ -86,31 +86,9 @@ class Benchmark(BenchmarkBase):
 
 def main():
     result_path = sys.argv[1]
+    # Only eager variants are gated: inductor runtime instruction counts drift
+    # with codegen changes, so they are too unstable to pin as pr_time baselines.
     all = [
-        Benchmark(
-            requires_grad=False, inference_mode=False, backward=False, dynamic=False
-        ),
-        Benchmark(
-            requires_grad=False, inference_mode=True, backward=False, dynamic=False
-        ),
-        Benchmark(
-            requires_grad=True, inference_mode=False, backward=False, dynamic=False
-        ),
-        Benchmark(
-            requires_grad=True, inference_mode=False, backward=True, dynamic=False
-        ),
-        Benchmark(
-            requires_grad=False, inference_mode=False, backward=False, dynamic=True
-        ),
-        Benchmark(
-            requires_grad=False, inference_mode=True, backward=False, dynamic=True
-        ),
-        Benchmark(
-            requires_grad=True, inference_mode=False, backward=False, dynamic=True
-        ),
-        Benchmark(
-            requires_grad=True, inference_mode=False, backward=True, dynamic=True
-        ),
         # cpu + eager isolates the compile_wrapper per-call prologue (dispatch
         # key set save/restore) with no CUDA launch or inductor runtime noise.
         Benchmark(
@@ -120,6 +98,17 @@ def main():
             dynamic=False,
             backend="eager",
             device="cpu",
+        ),
+        # cuda + eager: on an accelerator the ambient current stream is
+        # registered per call, so this catches the stream-free reconstruction
+        # elision (name: runtime_overhead_eager).
+        Benchmark(
+            requires_grad=False,
+            inference_mode=False,
+            backward=False,
+            dynamic=False,
+            backend="eager",
+            device="cuda",
         ),
     ]
 
