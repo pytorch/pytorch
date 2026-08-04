@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import IS_FBCODE, run_tests, TestCase
 
 
 class TestSchema(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     def test_schema_compatibility(self):
         msg = """
 Detected an invalidated change to export schema. Please run the following script to update the schema:
