@@ -8,53 +8,6 @@ that follow ``AMXState``'s slot order (C tiles, then A, then B).
 # The C++ is a Jinja template only to substitute the kernel-name prefix so the
 # symbols do not collide across multiple compiled kernels in one process.
 FLEX_ATTENTION_AMX_HELPERS = r"""
-// Zero-padded the rows up to a multiple of 16 so the AMX Q@K^T can read whole 16-row A tiles.
-// Also fold the scale into the Q.
-//   rows  -> real query rows; prows -> rows rounded up to a multiple of 16 (the AMX A-tile height)
-//   cols  -> real head size;  pcols -> head size padded (eheadSize), the packed row stride of out_ptr
-//   ldi   -> row stride of the source q_ptr
-template <typename scalar_t>
-inline void {{kernel_name}}_amx_scale_q(
-    const scalar_t* q_ptr,
-    scalar_t* out_ptr,
-    float scale,
-    int64_t rows,
-    int64_t prows,
-    int64_t cols,
-    int64_t pcols,
-    int64_t ldi) {
-  using Vec = at::vec::Vectorized<scalar_t>;
-  int64_t vec_size = Vec::size();
-  auto fscale = at::vec::Vectorized<float>(scale);
-  for (int64_t r = 0; r < rows; ++r) {
-    const scalar_t* src = q_ptr + r * ldi;
-    scalar_t* dst = out_ptr + r * pcols;
-    int64_t c = 0;
-    // bf16/half: widen to fp32, scale, narrow back so the multiply keeps fp32 precision.
-    if constexpr (c10::is_reduced_floating_point_v<scalar_t>) {
-      // vec_size * (cols / vec_size) is the largest whole-vector prefix of the row.
-      for (; c < vec_size * (cols / vec_size); c += vec_size) {
-        auto [v0, v1] = at::vec::convert_to_float<scalar_t>(Vec::loadu(src + c));
-        at::vec::convert_from_float<scalar_t>(v0 * fscale, v1 * fscale).store(dst + c);
-      }
-      for (; c < cols; ++c) dst[c] = static_cast<scalar_t>(static_cast<float>(src[c]) * scale);
-    } else {
-      auto vscale = Vec(static_cast<scalar_t>(scale));
-      for (; c < vec_size * (cols / vec_size); c += vec_size) {
-        (Vec::loadu(src + c) * vscale).store(dst + c);
-      }
-      for (; c < cols; ++c) dst[c] = src[c] * static_cast<scalar_t>(scale);
-    }
-    // Zero the cols..pcols column padding so K^T reads garbage-free head-size lanes.
-    for (int64_t p = cols; p < pcols; ++p) dst[p] = static_cast<scalar_t>(0);
-  }
-  // Zero the rows..prows row padding so the final A tile is a full 16 rows.
-  for (int64_t r = rows; r < prows; ++r) {
-    scalar_t* dst = out_ptr + r * pcols;
-    for (int64_t p = 0; p < pcols; ++p) dst[p] = static_cast<scalar_t>(0);
-  }
-}
-
 // AMX bf16 accumulator block. C[NROWS,32] (+)= A[NROWS,K] @ Bp[K,32] (VNNI2).
 //
 // A hardware tile is at most 16 rows x 64 bytes. bf16 is 2 bytes, so one tile
@@ -181,54 +134,6 @@ inline void {{kernel_name}}_amx_gemm(
     int64_t M, int64_t N, int64_t K,
     int64_t lda, int64_t ldb, int64_t ldc) {
   {{kernel_name}}_amx_gemm_cb<accum>(amx_state, A, B, C, M, N, K, lda, ldb, ldc, []() {});
-}
-
-// One row of online softmax for the AMX bf16 path (scale already folded into Q).
-// This is the AVX-512 work interleaved with the next block's AMX Q@K^T GEMM.
-//   qk_row     -> this kv block's raw scores (overwritten in place)
-//   p_row      -> output probabilities, fed to the P@V GEMM as VNNI2 A operand
-//   row_max/row_sum -> running softmax statistics carried across kv blocks
-//   dst_row    -> running P@V accumulator that must be rescaled when row_max grows
-template <typename scalar_t>
-inline void {{kernel_name}}_amx_online_softmax_row(
-    float* qk_row,
-    scalar_t* p_row,
-    int64_t cur_kvSplitSize,
-    float& row_max,
-    float& row_sum,
-    float* dst_row,
-    int64_t headSize_v,
-    bool first_block) {
-  using Vec = at::vec::Vectorized<float>;
-  float block_max = -std::numeric_limits<float>::infinity();
-  // scale=1: scale is already folded into Q, so this just finds this block's max.
-  {{kernel_name}}_mul_reduce_max_fusion_kernel(
-      qk_row, static_cast<float>(1), cur_kvSplitSize, qk_row, block_max);
-  float new_max = row_max > block_max ? row_max : block_max;
-  if (new_max == -std::numeric_limits<float>::infinity()) {
-    // Whole row masked out: emit zero probabilities, leave stats untouched.
-    {{kernel_name}}_fill_stub(p_row, static_cast<scalar_t>(0), cur_kvSplitSize);
-  } else {
-    // exp_reduce_sum seeds val with new_max, so it computes exp(qk - new_max)
-    // and returns sum() in block_sum.
-    float block_sum = new_max;
-    {{kernel_name}}_exp_reduce_sum_fusion_kernel(
-        qk_row, cur_kvSplitSize, p_row, block_sum);
-    // Rescale the previous running sum/accumulator from old row_max to new_max.
-    float exp_tmp = std::exp(row_max - new_max);
-    row_sum = block_sum + exp_tmp * row_sum;
-    if (!first_block) {
-      at::vec::map<float>(
-          [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-          dst_row, dst_row, headSize_v);
-    }
-  }
-  row_max = new_max;
-  // P is the VNNI2 A operand of P@V; VNNI2 packs K in pairs, so an odd
-  // cur_kvSplitSize needs one zero-padded column to complete the last pair.
-  if (cur_kvSplitSize % 2 != 0) {
-    p_row[cur_kvSplitSize] = static_cast<scalar_t>(0);
-  }
 }
 """
 
