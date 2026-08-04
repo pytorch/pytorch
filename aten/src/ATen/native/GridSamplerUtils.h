@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/TensorProperties.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <c10/util/DimVector.h>
 
 namespace at::native {
 
@@ -88,42 +89,45 @@ inline void check_grid_sampler_3d(
 }
 
 // See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  c10::DimVector expected_grad_output_shape = {input.size(0), input.size(1)};
+  for (const auto i : c10::irange(1, grid.dim() - 1)) {
+    expected_grad_output_shape.push_back(grid.size(i));
+  }
+
+  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
+  TORCH_CHECK_VALUE(
+    grad_output.sizes() == expected_grad_output_shape,
+    "grid_sampler(): expected grad_output to have sizes ",
+    expected_grad_output_shape,
+    " but got grad_output with sizes ", grad_output.sizes());
+}
+
+// See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_2d_backward(
   const TensorBase& input,
   const TensorBase& grid,
   const TensorBase& grad_output
 ) {
-  auto N = input.size(0);
-  auto C = input.size(1);
-  auto H = grid.size(1);
-  auto W = grid.size(2);
-
-  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
-  TORCH_CHECK_VALUE(
-    grad_output.sizes() == IntArrayRef({N, C, H, W}),
-    "grid_sampler(): expected grad_output to have sizes ",
-    IntArrayRef({N, C, H, W}),
-    " but got grad_output with sizes ", grad_output.sizes());
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_backward(input, grid, grad_output);
 }
 
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d_backward(
   const TensorBase& input,
   const TensorBase& grid,
-  const TensorBase& grad_output
+  const TensorBase& grad_output,
+  int64_t interpolation_mode
 ) {
-  auto N = input.size(0);
-  auto C = input.size(1);
-  auto D = grid.size(1);
-  auto H = grid.size(2);
-  auto W = grid.size(3);
-
-  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
-  TORCH_CHECK_VALUE(
-    grad_output.sizes() == IntArrayRef({N, C, D, H, W}),
-    "grid_sampler(): expected grad_output to have sizes ",
-    IntArrayRef({N, C, D, H, W}),
-    " but got grad_output with sizes ", grad_output.sizes());
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_backward(input, grid, grad_output);
 }
 
 // See NOTE [ grid_sampler Native Functions ].
