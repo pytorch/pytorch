@@ -1178,6 +1178,56 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 primary_output="out",
             )
 
+    def test_epilogue_program_owns_only_named_feed_intermediates(self):
+        from torch._inductor.codegen.nv_universal_gemm import epilogue_lowering
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            NVGemmEpilogueCapture,
+            NVGemmEpilogueProgram,
+            NVGemmReductionPartition,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+                self.data = FakeMultiOutputReduction()
+
+            def get_name(self):
+                return self.name
+
+        class FakeMultiOutputReduction:
+            pass
+
+        feed = mock.Mock(node=FakeBuffer("softmax_intermediate"))
+        unrelated = mock.Mock(node=FakeBuffer("unrelated_reduction"))
+        capture = NVGemmEpilogueCapture(
+            gemm=mock.Mock(), nodes=(feed, unrelated), analysis=None
+        )
+        plan = GemmReductionPlan(
+            reduction_output=None,
+            group=4,
+            axis=1,
+            reduction_type="online_softmax",
+            source_type="identity",
+            primary_output="out",
+            feeds_main=True,
+        )
+        program = NVGemmEpilogueProgram(
+            capture=capture,
+            reduction_partition=NVGemmReductionPartition(()),
+            reduction_plan=plan,
+            intermediate_outputs=("softmax_intermediate",),
+        )
+        with (
+            mock.patch.object(epilogue_lowering, "Buffer", FakeBuffer),
+            mock.patch.object(epilogue_lowering, "ComputedBuffer", FakeBuffer),
+            mock.patch.object(
+                epilogue_lowering, "MultiOutputReduction", FakeMultiOutputReduction
+            ),
+        ):
+            self.assertEqual(program.owned_nodes, (feed,))
+            self.assertEqual(program.pointwise_nodes, (unrelated,))
+
     def test_static_reduction_plan_composition(self):
         import dataclasses
 
@@ -3979,6 +4029,35 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
         torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused, "broadcast bias+relu was not fused")
+
+    def test_epilogue_with_scalar_aux_input_reuses_compiled_kernel(self):
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+        bias1 = torch.tensor(0.5, device="cuda", dtype=dtype)
+        bias2 = torch.tensor(-0.5, device="cuda", dtype=dtype)
+
+        def fn(a, b, bias):
+            return torch.relu((a @ b) + bias)
+
+        torch._dynamo.reset()
+        with (
+            config.patch(_nvgemm_config(force_disable_caches=True)),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn)
+            result1, code_list = run_and_get_code(compiled, a, b, bias1)
+            result1 = result1.clone()
+            result2 = compiled(a, b, bias2)
+
+        self.assertEqual(result1, fn(a, b, bias1), atol=1e-2, rtol=1e-2)
+        self.assertEqual(result2, fn(a, b, bias2), atol=1e-2, rtol=1e-2)
+        self.assertIn("EpilogueArguments", "\n".join(code_list))
 
     def test_epilogue_with_fp32_row_scale(self):
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)

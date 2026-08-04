@@ -61,6 +61,30 @@ def _local_reduce_source_constant(field: str) -> str:
     return f"_LOCAL_REDUCE_{field.removesuffix('_fn').upper()}_FN_SRC"
 
 
+def _normalize_scalar_epilogue_tensor(value: Any, permute=None) -> Any:
+    import torch
+
+    if not isinstance(value, torch.Tensor):
+        return value
+    is_scalar = value.ndim == 0
+    if is_scalar:
+        value = value.view(1, 1)
+    if permute is not None:
+        value = value.permute(permute)
+    if is_scalar:
+        value = value.expand(8, 1).contiguous()
+    return value
+
+
+class _CuTeDSLEpilogueSource(str):  # noqa: SLOT000
+    scalar_broadcast_names: frozenset[str]
+
+    def __new__(cls, source: str, scalar_broadcast_names: frozenset[str]):
+        value = super().__new__(cls, source)
+        value.scalar_broadcast_names = scalar_broadcast_names
+        return value
+
+
 class CuTeDSLEpilogueArguments:
     """Epilogue arguments for direct CuTeDSL functions that bypass EVT tracing."""
 
@@ -68,6 +92,8 @@ class CuTeDSLEpilogueArguments:
 
     def __init__(self, epilogue_fn: str, **kwargs: Any) -> None:
         from cutlass.operators.fusion import trace_in_out
+
+        import torch
 
         inputs, outputs = trace_in_out(epilogue_fn)
         names = dict.fromkeys((*inputs, *outputs))
@@ -79,7 +105,12 @@ class CuTeDSLEpilogueArguments:
                 f"CuTeDSL epilogue argument mismatch: missing={missing}, "
                 f"unexpected={unexpected}"
             )
-        self.epilogue_fn = epilogue_fn
+        scalar_broadcast_names = frozenset(
+            name
+            for name, value in kwargs.items()
+            if isinstance(value, torch.Tensor) and value.ndim == 0
+        )
+        self.epilogue_fn = _CuTeDSLEpilogueSource(epilogue_fn, scalar_broadcast_names)
         self.tensors = OrderedDict((name, kwargs[name]) for name in names)
         self.traced_epilogue = None
 
@@ -100,11 +131,8 @@ class CuTeDSLEpilogueArguments:
         import torch
 
         for name, value in self.tensors.items():
+            value = _normalize_scalar_epilogue_tensor(value, permute)
             if isinstance(value, torch.Tensor):
-                if value.ndim == 0:
-                    value = value.view(1, 1)
-                if permute is not None:
-                    value = value.permute(permute)
                 self.tensors[name] = TensorWrapper(value)
 
 
@@ -739,7 +767,8 @@ def _update_reuse_args_tensors(
     if epilogue is not None:
         for name, wrapper in epilogue.tensors.items():
             val = epilogue_args.tensors[name]
-            wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
+            runtime_tensor = getattr(val, "runtime_tensor", val)
+            wrapper._runtime_tensor = _normalize_scalar_epilogue_tensor(runtime_tensor)
     runtime_reduce = args_kwargs.get("local_reduce") if args_kwargs else None
     for field, output in args.local_reduce.tensor_items():
         if output is not None:
