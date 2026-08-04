@@ -6,10 +6,16 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestComparisonUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_equal_no_assert(self):
         t = torch.tensor([0.5])
         torch._assert_tensor_metadata(t, [1], [1], torch.float)
@@ -44,6 +50,8 @@ class TestComparisonUtils(TestCase):
 
 
 class TestComparisonUtilsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     def test_assert_device(self, device):
         t = torch.tensor([0.5], device="cpu")
