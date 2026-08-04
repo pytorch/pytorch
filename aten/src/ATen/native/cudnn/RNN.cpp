@@ -108,6 +108,8 @@ Tensor _cudnn_init_dropout_state(
       false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
+void _cudnn_clear_dropout_state() {}
+
 } // namespace native
 } // namespace at
 
@@ -2404,21 +2406,29 @@ struct DropoutState {
   }
 };
 
+// Each state is slightly over 2MB and initialized lazily, so it's fine to
+// cache them. The cache is process-lifetime state; it can be released via
+// clear_dropout_state() (exposed as torch._C._cudnn_clear_dropout_state()).
+std::vector<DropoutState>& dropout_state_cache() {
+  static std::vector<DropoutState> cache{
+      static_cast<size_t>(cuda::getNumGPUs())};
+  return cache;
+}
+
+std::mutex& dropout_state_cache_mutex() {
+  static std::mutex mut;
+  return mut;
+}
+
 DropoutState& get_dropout_state(
     double dropout_p,
     bool train,
     TensorOptions options) {
-  // Each state is slightly over 2MB and initialized lazily, so it's fine to
-  // cache them.
-  static std::vector<DropoutState> dropout_state_cache{
-      static_cast<size_t>(cuda::getNumGPUs())};
-  static std::mutex state_cache_mut;
-
   AT_ASSERT(options.device().is_cuda());
   auto device = options.device().index();
 
-  std::unique_lock<std::mutex> lock{state_cache_mut};
-  auto& state = dropout_state_cache.at(device);
+  std::unique_lock<std::mutex> lock{dropout_state_cache_mutex()};
+  auto& state = dropout_state_cache().at(device);
   if (train && dropout_p > 0) {
     const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
@@ -2816,6 +2826,15 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 }
 
 } // namespace
+
+void _cudnn_clear_dropout_state() {
+  std::lock_guard<std::mutex> lock{dropout_state_cache_mutex()};
+  for (auto& state : dropout_state_cache()) {
+    std::lock_guard<std::mutex> state_lock{state.mutex};
+    state.buffer = Tensor();
+    state.event.reset();
+  }
+}
 
 } // namespace at::native
 
