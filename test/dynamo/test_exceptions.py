@@ -1244,6 +1244,34 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         assert exc2.__context__ is None  # noqa: S101
 
+    @make_dynamo_test
+    def test_exception_identity_compare(self):
+        exc1 = Exception(1)
+        exc2 = Exception(2)
+        # Same object: `is` is True. Distinct objects of the same type: False.
+        same_self = exc1 is exc1
+        same_other = exc1 is exc2
+        assert same_self  # noqa: S101
+        assert not same_other  # noqa: S101
+        assert exc1 is not exc2  # noqa: S101
+
+        # Distinct exception types are never identical either.
+        val = ValueError(1)
+        assert exc1 is not val  # noqa: S101
+        assert not (ValueError(1) is TypeError(1))  # noqa: S101, E714
+
+        # Subclass VTs (StopIteration) follow the same rule.
+        stop1 = StopIteration()
+        stop2 = StopIteration()
+        assert stop1 is not stop2  # noqa: S101
+        assert not (stop1 is stop2)  # noqa: S101, E714
+
+        # Distinct same-type exceptions read back out of a container.
+        exc_list = [Exception(1), Exception(2)]
+        a, b = exc_list[0], exc_list[1]
+        assert not (a is b)  # noqa: S101, E714
+        assert a is a  # noqa: S101
+
     def test_exception_kwargs(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn():
