@@ -95,6 +95,12 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
     but still process recursively invoked frames.
 
     If reason is provided, it will be printed when Dynamo attempts to trace the disabled function.
+
+    Note: the recursive form returns an opaque C-level wrapper
+    (torch._C._dynamo.eval_frame.DisableWrapper), not a types.FunctionType. Code
+    that needs the original callable should use
+    torch._dynamo.eval_frame.innermost_fn or read the _torchdynamo_orig_callable
+    attribute rather than assuming a Python function is returned.
     """
     if recursive:
         if fn is not None:
