@@ -6,6 +6,7 @@ from torch._C import (
     _dispatch_get_registrations_for_dispatch_key as get_registrations_for_dispatch_key,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -256,6 +257,8 @@ def filter_vmap_implementable(reg):
 
 
 class TestFunctorchDispatcher(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @dispatch_registrations("CompositeImplicitAutograd", xfail_functorch_batched)
     def test_register_a_batching_rule_for_composite_implicit_autograd(
         self, registration
