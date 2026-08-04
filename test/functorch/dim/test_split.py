@@ -456,10 +456,10 @@ class TestSplitDevice(TestCase):
     def test_device_handling(self, device):
         """Test split behavior with different devices."""
         if torch.accelerator.is_available():
-            # Test on CUDA
-            cuda_tensor = torch.randn(3, 12, 5, device=device)
+            # Test on accelerator
+            accelerator_tensor = torch.randn(3, 12, 5, device=device)
             x, y, z = dims(3)
-            t = cuda_tensor[x, y, z]
+            t = accelerator_tensor[x, y, z]
 
             d1, d2 = Dim("d1", 4), Dim("d2", 8)
             result = t.split([d1, d2], dim=y)
