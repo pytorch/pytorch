@@ -2211,8 +2211,30 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
     @staticmethod
     def _run_guard_lookup_memo_script(script):
         prefix = (
-            "import torch; "
+            "import torch\n"
             "torch._dynamo.config.enable_guard_lookup_memo = True\n"
+            "from torch._dynamo.eval_frame import _debug_get_cache_entry_list\n"
+            "def _only_cache_entry(code):\n"
+            "    entries = _debug_get_cache_entry_list(code)\n"
+            "    assert len(entries) == 1, len(entries)\n"
+            "    return entries[0]\n"
+            "def _guard_tree_shapes(entry):\n"
+            "    leaves = []\n"
+            "    accessors = []\n"
+            "    pending = [entry.guard_manager.root]\n"
+            "    while pending:\n"
+            "        manager = pending.pop()\n"
+            "        source = manager.get_source()\n"
+            "        leaves.extend(\n"
+            "            (source, type(guard).__name__)\n"
+            "            for guard in manager.get_leaf_guards()\n"
+            "        )\n"
+            "        accessors.extend(\n"
+            "            (source, type(accessor).__name__)\n"
+            "            for accessor in manager.get_accessors()\n"
+            "        )\n"
+            "        pending.extend(manager.get_child_managers())\n"
+            "    return leaves, accessors\n"
         )
         subprocess.run(
             [sys.executable, "-c", prefix + textwrap.dedent(script)],
@@ -2250,20 +2272,25 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
 
             cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
             assert len(cache_entries) == 1, len(cache_entries)
-            assert cache_entries[0]._debug_fast_guard_enabled
+            original_entry = cache_entries[0]
+            assert original_entry._debug_fast_guard_enabled
 
             model.scale = 4.0
             torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
 
             model.offsets[0] = 5.0
             torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
 
             global_bias = torch.tensor(7.0)
             torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
 
             model.scale = 6.0
             x = torch.ones(9)
             torch.testing.assert_close(compiled(x), model(x))
+            assert original_entry._debug_fast_guard_enabled
 
             def alias_sensitive(a, b):
                 return a + b if a is b else a - b
@@ -2275,6 +2302,375 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             b = torch.full((4,), 2.0)
             torch.testing.assert_close(compiled_alias(a, a), alias_sensitive(a, a))
             torch.testing.assert_close(compiled_alias(a, b), alias_sensitive(a, b))
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_fail_closed_leaf_and_container_shapes(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class ExactContainerModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [torch.ones(2)]
+                    self.options = (torch.full((2,), 2.0),)
+
+                def forward(self, x):
+                    return (
+                        x
+                        + self.values[0]
+                        + len(self.values)
+                        + self.options[0]
+                        + len(self.options)
+                    )
+
+            exact_model = ExactContainerModel()
+            exact_counter = CompileCounter()
+            exact_compiled = torch.compile(
+                exact_model, backend=exact_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(exact_compiled(x), exact_model(x))
+            assert exact_counter.frame_count == 1, exact_counter.frame_count
+            exact_entry = _only_cache_entry(ExactContainerModel.forward.__code__)
+            _, exact_accessors = _guard_tree_shapes(exact_entry)
+            assert any(
+                kind == "ListGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in exact_accessors
+            ), exact_accessors
+            assert any(
+                kind == "TupleGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in exact_accessors
+            ), exact_accessors
+            assert exact_entry._debug_fast_guard_enabled
+
+            class Holder:
+                pass
+
+            class NoHasattrModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    if hasattr(self.holder, "scale"):
+                        return x + self.holder.scale
+                    return x + 1
+
+            no_hasattr_model = NoHasattrModel()
+            no_hasattr_counter = CompileCounter()
+            no_hasattr_compiled = torch.compile(
+                no_hasattr_model, backend=no_hasattr_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    no_hasattr_compiled(x), no_hasattr_model(x)
+                )
+            assert no_hasattr_counter.frame_count == 1, no_hasattr_counter.frame_count
+            no_hasattr_entry = _only_cache_entry(NoHasattrModel.forward.__code__)
+            leaves, _ = _guard_tree_shapes(no_hasattr_entry)
+            assert any(
+                kind == "NO_HASATTR" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert not no_hasattr_entry._debug_fast_guard_enabled
+
+            no_hasattr_model.holder.scale = torch.full((2,), 4.0)
+            torch.testing.assert_close(
+                no_hasattr_compiled(x), no_hasattr_model(x)
+            )
+            assert no_hasattr_counter.frame_count == 2, no_hasattr_counter.frame_count
+
+            class MutableEqualsModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = [1, 2]
+
+                def forward(self, x):
+                    if self.mode == [1, 2]:
+                        return x + 1
+                    return x - 1
+
+            mutable_model = MutableEqualsModel()
+            mutable_counter = CompileCounter()
+            mutable_compiled = torch.compile(
+                mutable_model, backend=mutable_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(mutable_compiled(x), mutable_model(x))
+            assert mutable_counter.frame_count == 1, mutable_counter.frame_count
+            mutable_entry = _only_cache_entry(MutableEqualsModel.forward.__code__)
+            leaves, _ = _guard_tree_shapes(mutable_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert not mutable_entry._debug_fast_guard_enabled
+
+            mutable_model.mode.append(3)
+            torch.testing.assert_close(mutable_compiled(x), mutable_model(x))
+            assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+
+            class FancyList(list):
+                pass
+
+            class NonExactListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = FancyList([1.0])
+
+                def forward(self, x):
+                    return x + self.values[0] + len(self.values)
+
+            nonexact_model = NonExactListModel()
+            nonexact_counter = CompileCounter()
+            nonexact_compiled = torch.compile(
+                nonexact_model, backend=nonexact_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(nonexact_compiled(x), nonexact_model(x))
+            assert nonexact_counter.frame_count == 1, nonexact_counter.frame_count
+            nonexact_entry = _only_cache_entry(NonExactListModel.forward.__code__)
+            leaves, accessors = _guard_tree_shapes(nonexact_entry)
+            assert any(
+                kind == "LENGTH_CHECK" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            assert any(
+                kind == "ListGetItemGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            assert not nonexact_entry._debug_fast_guard_enabled
+
+            nonexact_model.values.append(2.0)
+            torch.testing.assert_close(nonexact_compiled(x), nonexact_model(x))
+            assert nonexact_counter.frame_count == 2, nonexact_counter.frame_count
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_instance_attr_binding_and_type_refresh(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class OtherHolder:
+                pass
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            Holder._fastguard_unrelated_type_change = None
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 1, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder._fastguard_unrelated_type_change
+
+            original_scale = model.holder.scale
+            model.holder.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.scale = original_scale
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            Holder.scale = property(lambda self: torch.full((2,), 5.0))
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 3, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder.scale
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__class__ = OtherHolder
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__class__ = Holder
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_default_getattribute_change(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class InitiallyCustomHolder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+                def __getattribute__(self, name):
+                    return object.__getattribute__(self, name)
+
+            class InitiallyCustomModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = InitiallyCustomHolder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            initial_model = InitiallyCustomModel()
+            initial_counter = CompileCounter()
+            initial_compiled = torch.compile(
+                initial_model, backend=initial_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(initial_compiled(x), initial_model(x))
+            assert initial_counter.frame_count == 1, initial_counter.frame_count
+            initial_entry = _only_cache_entry(
+                InitiallyCustomModel.forward.__code__
+            )
+            assert not initial_entry._debug_fast_guard_enabled
+
+            class InitiallyGetattrHolder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+                def __getattr__(self, name):
+                    raise AttributeError(name)
+
+            class InitiallyGetattrModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = InitiallyGetattrHolder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            getattr_model = InitiallyGetattrModel()
+            getattr_counter = CompileCounter()
+            getattr_compiled = torch.compile(
+                getattr_model, backend=getattr_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    getattr_compiled(x), getattr_model(x)
+                )
+            assert getattr_counter.frame_count == 1, getattr_counter.frame_count
+            getattr_entry = _only_cache_entry(
+                InitiallyGetattrModel.forward.__code__
+            )
+            assert not getattr_entry._debug_fast_guard_enabled
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.scale + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            replacement_scale = torch.full((2,), 5.0)
+
+            def replacement_getattribute(self, name):
+                if name == "scale":
+                    return replacement_scale
+                return object.__getattribute__(self, name)
+
+            Holder.__getattribute__ = replacement_getattribute
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 2, counter.frame_count
+                assert original_entry._debug_fast_guard_enabled
+            finally:
+                del Holder.__getattribute__
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_generic_dict_binding_proof(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.scale = torch.ones(2)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return self.holder.__dict__["scale"] + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            _, accessors = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "GetGenericDictGuardAccessor"
+                and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            assert original_entry._debug_fast_guard_enabled
+
+            original_dict = model.holder.__dict__
+            model.holder.__dict__ = {"scale": torch.full((2,), 4.0)}
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.holder.__dict__ = original_dict
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
         """
         self._run_guard_lookup_memo_script(script)
 

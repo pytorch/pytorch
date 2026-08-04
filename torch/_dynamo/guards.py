@@ -185,6 +185,7 @@ from .utils import (
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
+    is_safe_constant,
     istype,
     key_is_id,
     key_to_id,
@@ -1054,7 +1055,10 @@ def getitem_on_dict_manager(
             example_value=source.index,
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         ).add_equals_match_guard(
-            source.index, [f"{key_source} == {key_example_value!r}"], None
+            source.index,
+            [f"{key_source} == {key_example_value!r}"],
+            None,
+            is_safe_constant(source.index),
         )
 
     return base_guard_manager.get_value_manager(
@@ -1448,6 +1452,7 @@ class GuardBuilder(GuardBuilderBase):
                     key,
                     get_verbose_code_parts(f"{key_source} == {key!r}", guard),
                     guard.user_stack,
+                    is_safe_constant(key),
                 )
 
     @staticmethod
@@ -1515,7 +1520,12 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"], None)
+                ).add_equals_match_guard(
+                    key,
+                    [f"{key_source} == {key!r}"],
+                    None,
+                    is_safe_constant(key),
+                )
 
                 # Install the value manager
                 return mgr.get_value_manager(
@@ -2925,7 +2935,10 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         self.get_guard_manager(guard).add_equals_match_guard(
-            val, verbose_code_parts, guard.user_stack
+            val,
+            verbose_code_parts,
+            guard.user_stack,
+            is_safe_constant(val),
         )
         self._set_guard_export_info(guard, code)
         return

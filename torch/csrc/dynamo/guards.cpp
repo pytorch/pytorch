@@ -1086,12 +1086,16 @@ static bool guard_subtree_type_version_is_valid(PyTypeObject* type) {
 #endif
 }
 
-static bool guard_subtree_ensure_absent_type_version(
+static bool guard_actual_partial_uses_default_getattribute(PyTypeObject* type) {
+  return type != nullptr && type->tp_getattr == nullptr &&
+      type->tp_getattro == PyObject_GenericGetAttr;
+}
+
+static bool guard_subtree_refresh_absent_lookup_type_version(
     PyTypeObject* type,
     PyObject* lookup_key,
     unsigned int& version) {
   if (type == nullptr || lookup_key == nullptr ||
-      type->tp_getattro != PyObject_GenericGetAttr ||
       _PyType_Lookup(type, lookup_key) != nullptr) {
     return false;
   }
@@ -1114,12 +1118,82 @@ static bool guard_subtree_ensure_absent_type_version(
 struct GuardSubtreeTypeProof {
   py::object type;
   py::object lookup_key;
+  getattrfunc getattr{nullptr};
+  getattrofunc getattro{nullptr};
+  bool requires_default_getattribute{false};
   unsigned int version{0};
 
-  bool matches_current() const {
+  bool matches_or_refreshes_current() {
     auto* current_type = reinterpret_cast<PyTypeObject*>(type.ptr());
-    return guard_subtree_type_version_is_valid(current_type) &&
-        current_type->tp_version_tag == version;
+    if (guard_subtree_type_version_is_valid(current_type) &&
+        current_type->tp_version_tag == version) {
+      return !requires_default_getattribute ||
+          guard_actual_partial_uses_default_getattribute(current_type);
+    }
+    if (current_type == nullptr || current_type->tp_getattr != getattr ||
+        current_type->tp_getattro != getattro ||
+        (requires_default_getattribute &&
+         !guard_actual_partial_uses_default_getattribute(current_type))) {
+      return false;
+    }
+    return guard_subtree_refresh_absent_lookup_type_version(
+        current_type, lookup_key.ptr(), version);
+  }
+};
+
+enum class GuardActualPartialAccessorRecordKind : uint8_t {
+  GenericDictBinding,
+  InstanceAttrBinding,
+};
+
+struct GuardActualPartialAccessorRecord {
+  GuardActualPartialAccessorRecordKind kind{
+      GuardActualPartialAccessorRecordKind::GenericDictBinding};
+  py::object owner;
+  PyObject* owner_ptr{nullptr};
+  py::object key;
+  py::object resolved;
+  py::object owner_dict;
+  PyTypeObject* owner_type{nullptr};
+  bool requires_default_getattribute{false};
+};
+
+struct GuardSubtreeGenericDictOwnerProof {
+  py::object owner;
+  PyObject* owner_ptr{nullptr};
+  py::object dict;
+  PyTypeObject* owner_type{nullptr};
+  bool owner_is_self{false};
+
+  bool matches_current(PyObject* current_self) const {
+    PyObject* current_owner = owner_is_self ? current_self : owner.ptr();
+    if (current_owner == nullptr || Py_TYPE(current_owner) != owner_type) {
+      return false;
+    }
+    PyObject** dictptr = _PyObject_GetDictPtr(current_owner);
+    return dictptr != nullptr && *dictptr == dict.ptr() &&
+        PyDict_CheckExact(*dictptr);
+  }
+};
+
+struct GuardSubtreeInstanceAttrOwnerProof {
+  py::object owner;
+  PyObject* owner_ptr{nullptr};
+  py::object key;
+  py::object expected;
+  py::object dict;
+  PyTypeObject* owner_type{nullptr};
+  bool owner_is_self{false};
+
+  bool matches_current(PyObject* current_self) const {
+    PyObject* current_owner = owner_is_self ? current_self : owner.ptr();
+    if (current_owner == nullptr || Py_TYPE(current_owner) != owner_type) {
+      return false;
+    }
+    PyObject** dictptr = _PyObject_GetDictPtr(current_owner);
+    return dictptr != nullptr && *dictptr == dict.ptr() &&
+        PyDict_CheckExact(*dictptr) &&
+        PyDict_GetItem(*dictptr, key.ptr()) == expected.ptr();
   }
 };
 
@@ -1453,7 +1527,6 @@ static bool guard_subtree_token_vectors_match(
 
 enum class GuardLastSuccessPartialTokenDecision : uint8_t {
   Keep,
-  DropReachabilityOnly,
   UnsupportedBail,
 
 };
@@ -1467,11 +1540,10 @@ guard_last_success_partial_token_decision(
   }
   switch (token.kind) {
     case GuardSubtreeProbeTokenKind::ObjectOnly:
-      // Parent container tokens prove whether this object is still reachable.
-      // Dropping this token is safe only for reachability-only objects: any
-      // semantic guard attached to the object must emit its own token or force
-      // the partial plan to bail.
-      return GuardLastSuccessPartialTokenDecision::DropReachabilityOnly;
+      // Preserve the cheap identity/type proof. TYPE_MATCH can be attached to
+      // an otherwise reachability-only node, and __class__ may change in place
+      // without changing its parent binding.
+      return GuardLastSuccessPartialTokenDecision::Keep;
     case GuardSubtreeProbeTokenKind::BoundMethod:
       // Keep bound methods as hot tokens. A stored bound method is protected by
       // its parent structural token; the runtime matcher validates the bound
@@ -1508,8 +1580,6 @@ static bool guard_last_success_make_partial_hot_tokens(
     switch (guard_last_success_partial_token_decision(tokens[i], i)) {
       case GuardLastSuccessPartialTokenDecision::Keep:
         hot_tokens.push_back(tokens[i]);
-        break;
-      case GuardLastSuccessPartialTokenDecision::DropReachabilityOnly:
         break;
       case GuardLastSuccessPartialTokenDecision::UnsupportedBail:
         return false;
@@ -1692,15 +1762,26 @@ static bool guard_last_success_build_relation_plans(
 static bool guard_last_success_add_type_proof(
     PyTypeObject* type,
     PyObject* lookup_key,
+    bool requires_default_getattribute,
     std::vector<GuardSubtreeTypeProof>& proofs) {
-  for (const auto& proof : proofs) {
+  for (auto& proof : proofs) {
     if (proof.type.ptr() == reinterpret_cast<PyObject*>(type) &&
         proof.lookup_key.ptr() == lookup_key) {
+      if (requires_default_getattribute &&
+          !proof.requires_default_getattribute) {
+        if (!guard_actual_partial_uses_default_getattribute(type)) {
+          return false;
+        }
+        proof.requires_default_getattribute = true;
+      }
       return true;
     }
   }
   unsigned int version = 0;
-  if (!guard_subtree_ensure_absent_type_version(type, lookup_key, version)) {
+  if ((requires_default_getattribute &&
+       !guard_actual_partial_uses_default_getattribute(type)) ||
+      !guard_subtree_refresh_absent_lookup_type_version(
+          type, lookup_key, version)) {
     PyErr_Clear();
     return false;
   }
@@ -1708,6 +1789,9 @@ static bool guard_last_success_add_type_proof(
   proof.type =
       py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(type));
   proof.lookup_key = py::reinterpret_borrow<py::object>(lookup_key);
+  proof.getattr = type->tp_getattr;
+  proof.getattro = type->tp_getattro;
+  proof.requires_default_getattribute = requires_default_getattribute;
   proof.version = version;
   proofs.push_back(std::move(proof));
   return true;
@@ -1771,12 +1855,77 @@ static bool guard_last_success_build_partial_plan_tokens(
     if (token.kind ==
             GuardSubtreeProbeTokenKind::TensorDimensionMarkingAbsent &&
         !guard_last_success_add_type_proof(
-            token.type, token.dimension_marking_key, type_proofs)) {
+            token.type, token.dimension_marking_key, true, type_proofs)) {
       return false;
     }
   }
   guard_last_success_retain_token_objects(
       partial_tokens, retained_token_objects);
+  return true;
+}
+
+static bool guard_last_success_build_accessor_proofs(
+    const std::vector<GuardActualPartialAccessorRecord>& records,
+    PyObject* current_self,
+    std::vector<GuardSubtreeTypeProof>& type_proofs,
+    std::vector<GuardSubtreeGenericDictOwnerProof>& generic_dict_proofs,
+    std::vector<GuardSubtreeInstanceAttrOwnerProof>& instance_attr_proofs) {
+  generic_dict_proofs.clear();
+  instance_attr_proofs.clear();
+  for (const auto& record : records) {
+    if (record.owner_ptr == nullptr || record.owner_type == nullptr ||
+        Py_TYPE(record.owner_ptr) != record.owner_type) {
+      return false;
+    }
+    if (record.kind ==
+        GuardActualPartialAccessorRecordKind::GenericDictBinding) {
+      if (record.resolved.ptr() == nullptr ||
+          !PyDict_CheckExact(record.resolved.ptr())) {
+        return false;
+      }
+      PyObject** dictptr = _PyObject_GetDictPtr(record.owner_ptr);
+      if (dictptr == nullptr || *dictptr != record.resolved.ptr()) {
+        return false;
+      }
+      GuardSubtreeGenericDictOwnerProof proof;
+      proof.owner_is_self = record.owner_ptr == current_self;
+      if (!proof.owner_is_self) {
+        proof.owner = record.owner;
+        proof.owner_ptr = record.owner_ptr;
+      }
+      proof.dict = record.resolved;
+      proof.owner_type = record.owner_type;
+      generic_dict_proofs.push_back(std::move(proof));
+      continue;
+    }
+
+    if (record.key.ptr() == nullptr || record.resolved.ptr() == nullptr ||
+        record.owner_dict.ptr() == nullptr ||
+        !PyUnicode_Check(record.key.ptr()) ||
+        !PyDict_CheckExact(record.owner_dict.ptr()) ||
+        PyDict_GetItem(record.owner_dict.ptr(), record.key.ptr()) !=
+            record.resolved.ptr() ||
+        _PyType_Lookup(record.owner_type, record.key.ptr()) != nullptr ||
+        !guard_last_success_add_type_proof(
+            record.owner_type,
+            record.key.ptr(),
+            record.requires_default_getattribute,
+            type_proofs)) {
+      PyErr_Clear();
+      return false;
+    }
+    GuardSubtreeInstanceAttrOwnerProof proof;
+    proof.owner_is_self = record.owner_ptr == current_self;
+    if (!proof.owner_is_self) {
+      proof.owner = record.owner;
+      proof.owner_ptr = record.owner_ptr;
+    }
+    proof.key = record.key;
+    proof.expected = record.resolved;
+    proof.dict = record.owner_dict;
+    proof.owner_type = record.owner_type;
+    instance_attr_proofs.push_back(std::move(proof));
+  }
   return true;
 }
 
@@ -1803,12 +1952,6 @@ static bool guard_subtree_bound_method_token_matches_current(
   return token.bound_c_method_func != nullptr;
 }
 
-static bool guard_subtree_token_is_reachability_only(
-    const GuardSubtreeEntryToken& token,
-    size_t index) {
-  return index != 0 && token.kind == GuardSubtreeProbeTokenKind::ObjectOnly;
-}
-
 enum class GuardLastSuccessPartialPlanState : uint8_t {
   Empty,
   Training,
@@ -1829,6 +1972,8 @@ struct GuardLastSuccessPartialPlan {
     stability_tokens.clear();
     tokens.clear();
     type_proofs.clear();
+    generic_dict_owner_proofs.clear();
+    instance_attr_owner_proofs.clear();
     cross_slice_relations.clear();
     retained_token_objects.clear();
   }
@@ -1853,6 +1998,10 @@ struct GuardLastSuccessPartialPlan {
       std::vector<GuardSubtreeEntryToken>&& new_stability_tokens,
       std::vector<GuardSubtreeEntryToken>&& new_tokens,
       std::vector<GuardSubtreeTypeProof>&& new_type_proofs,
+      std::vector<GuardSubtreeGenericDictOwnerProof>&&
+          new_generic_dict_owner_proofs,
+      std::vector<GuardSubtreeInstanceAttrOwnerProof>&&
+          new_instance_attr_owner_proofs,
       std::vector<GuardCrossSliceRelationPlan>&& new_cross_slice_relations,
       std::vector<py::object>&& new_retained_token_objects) {
     const bool stable = entry_key == new_entry_key &&
@@ -1870,6 +2019,8 @@ struct GuardLastSuccessPartialPlan {
     }
     tokens = std::move(new_tokens);
     type_proofs = std::move(new_type_proofs);
+    generic_dict_owner_proofs = std::move(new_generic_dict_owner_proofs);
+    instance_attr_owner_proofs = std::move(new_instance_attr_owner_proofs);
     cross_slice_relations = std::move(new_cross_slice_relations);
     retained_token_objects = std::move(new_retained_token_objects);
     if (state != GuardLastSuccessPartialPlanState::Enabled &&
@@ -1891,6 +2042,8 @@ struct GuardLastSuccessPartialPlan {
   std::vector<GuardSubtreeEntryToken> stability_tokens;
   std::vector<GuardSubtreeEntryToken> tokens;
   std::vector<GuardSubtreeTypeProof> type_proofs;
+  std::vector<GuardSubtreeGenericDictOwnerProof> generic_dict_owner_proofs;
+  std::vector<GuardSubtreeInstanceAttrOwnerProof> instance_attr_owner_proofs;
   std::vector<GuardCrossSliceRelationPlan> cross_slice_relations;
   std::vector<py::object> retained_token_objects;
 };
@@ -1966,10 +2119,6 @@ static bool guard_subtree_memo_tokens_match(
       if (!guard_subtree_bound_method_token_matches_current(token)) {
         return false;
       }
-      continue;
-    }
-    if (guard_subtree_token_is_reachability_only(token, i)) {
-      // Parent tokens prove whether this non-root object is still reachable.
       continue;
     }
     if (token.kind == GuardSubtreeProbeTokenKind::FrameGlobals) {
@@ -2112,6 +2261,8 @@ struct GuardLastSuccessPartialPlanBuild {
   std::vector<GuardSubtreeEntryToken> stability_tokens;
   std::vector<GuardSubtreeEntryToken> hot_tokens;
   std::vector<GuardSubtreeTypeProof> type_proofs;
+  std::vector<GuardSubtreeGenericDictOwnerProof> generic_dict_owner_proofs;
+  std::vector<GuardSubtreeInstanceAttrOwnerProof> instance_attr_owner_proofs;
   std::vector<GuardCrossSliceRelationPlan> cross_slice_relations;
   std::vector<py::object> retained_token_objects;
 };
@@ -2122,6 +2273,7 @@ static bool guard_last_success_prepare_actual_partial(
     int self_framelocals_index,
     const std::vector<GuardSubtreeEntryToken>& tokens,
     const std::vector<std::string>& debug_paths,
+    const std::vector<GuardActualPartialAccessorRecord>& accessor_records,
     GuardLastSuccessPartialPlanBuild& build) {
   std::vector<GuardSubtreeEntryToken> partial_tokens;
   if (!guard_last_success_extract_self_partial_tokens(
@@ -2153,18 +2305,26 @@ static bool guard_last_success_prepare_actual_partial(
   plan->self_type = Py_TYPE(current_self);
   plan->self_framelocals_index = self_framelocals_index;
 
-  return guard_last_success_build_partial_plan_tokens(
-      tokens,
-      partial_tokens,
-      build.stability_tokens,
-      build.hot_tokens,
+  if (!guard_last_success_build_partial_plan_tokens(
+          tokens,
+          partial_tokens,
+          build.stability_tokens,
+          build.hot_tokens,
+          build.type_proofs,
+          build.cross_slice_relations,
+          build.retained_token_objects)) {
+    return false;
+  }
+  return guard_last_success_build_accessor_proofs(
+      accessor_records,
+      current_self,
       build.type_proofs,
-      build.cross_slice_relations,
-      build.retained_token_objects);
+      build.generic_dict_owner_proofs,
+      build.instance_attr_owner_proofs);
 }
 
 static bool guard_last_success_actual_partial_tokens_match(
-    const GuardLastSuccessPartialPlan& plan,
+    GuardLastSuccessPartialPlan& plan,
     FrameLocalsMapping* f_locals,
     const LocalState* local_state) {
   if (plan.tokens.empty()) {
@@ -2189,8 +2349,18 @@ static bool guard_last_success_actual_partial_tokens_match(
   if (!self_matches) {
     return false;
   }
-  for (const auto& proof : plan.type_proofs) {
-    if (!proof.matches_current()) {
+  for (const auto& proof : plan.generic_dict_owner_proofs) {
+    if (!proof.matches_current(current_self)) {
+      return false;
+    }
+  }
+  for (const auto& proof : plan.instance_attr_owner_proofs) {
+    if (!proof.matches_current(current_self)) {
+      return false;
+    }
+  }
+  for (auto& proof : plan.type_proofs) {
+    if (!proof.matches_or_refreshes_current()) {
       return false;
     }
   }
@@ -2204,21 +2374,92 @@ thread_local std::vector<std::string>*
     active_guard_subtree_memo_debug_paths = nullptr;
 thread_local bool active_guard_subtree_memo_relax_global_dicts = false;
 thread_local bool* active_guard_actual_partial_supported = nullptr;
+thread_local std::vector<GuardActualPartialAccessorRecord>*
+    active_guard_actual_partial_accessor_records = nullptr;
+
+static void guard_actual_partial_mark_unsupported() {
+  if (active_guard_actual_partial_supported != nullptr) {
+    *active_guard_actual_partial_supported = false;
+  }
+}
+
+static void guard_actual_partial_record_generic_dict_binding(
+    PyObject* owner,
+    PyObject* dict,
+    const std::string& source) {
+  if (active_guard_actual_partial_accessor_records == nullptr ||
+      !is_self_local_source_path(source)) {
+    return;
+  }
+  PyObject** dictptr = owner == nullptr ? nullptr : _PyObject_GetDictPtr(owner);
+  if (dict == nullptr || dictptr == nullptr || *dictptr != dict ||
+      !PyDict_CheckExact(dict)) {
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  GuardActualPartialAccessorRecord record;
+  record.owner = py::reinterpret_borrow<py::object>(owner);
+  record.owner_ptr = owner;
+  record.resolved = py::reinterpret_borrow<py::object>(dict);
+  record.owner_type = Py_TYPE(owner);
+  active_guard_actual_partial_accessor_records->push_back(std::move(record));
+}
+
+static void guard_actual_partial_record_instance_attr_binding(
+    PyObject* owner,
+    PyObject* key,
+    PyObject* expected,
+    const std::string& source,
+    bool require_default_getattribute) {
+  if (active_guard_actual_partial_accessor_records == nullptr ||
+      !is_self_local_source_path(source)) {
+    return;
+  }
+  if (owner == nullptr || key == nullptr || expected == nullptr ||
+      !PyUnicode_Check(key) ||
+      (require_default_getattribute &&
+       !guard_actual_partial_uses_default_getattribute(Py_TYPE(owner)))) {
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  PyObject** dictptr = _PyObject_GetDictPtr(owner);
+  if (dictptr == nullptr || *dictptr == nullptr ||
+      !PyDict_CheckExact(*dictptr) ||
+      PyDict_GetItem(*dictptr, key) != expected ||
+      _PyType_Lookup(Py_TYPE(owner), key) != nullptr) {
+    PyErr_Clear();
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  GuardActualPartialAccessorRecord record;
+  record.kind = GuardActualPartialAccessorRecordKind::InstanceAttrBinding;
+  record.owner = py::reinterpret_borrow<py::object>(owner);
+  record.owner_ptr = owner;
+  record.key = py::reinterpret_borrow<py::object>(key);
+  record.resolved = py::reinterpret_borrow<py::object>(expected);
+  record.owner_dict = py::reinterpret_borrow<py::object>(*dictptr);
+  record.owner_type = Py_TYPE(owner);
+  record.requires_default_getattribute = require_default_getattribute;
+  active_guard_actual_partial_accessor_records->push_back(std::move(record));
+}
 
 struct GuardSubtreeMemoRecorderScope {
   explicit GuardSubtreeMemoRecorderScope(
       std::vector<GuardSubtreeEntryToken>* tokens,
       std::vector<std::string>* debug_paths = nullptr,
+      std::vector<GuardActualPartialAccessorRecord>* accessor_records = nullptr,
       bool* actual_partial_supported = nullptr,
       bool relax_global_dicts = false)
       : previous(active_guard_subtree_memo_recorder),
         previous_debug_paths(active_guard_subtree_memo_debug_paths),
+        previous_accessor_records(active_guard_actual_partial_accessor_records),
         previous_actual_partial_supported(
             active_guard_actual_partial_supported),
         previous_relax_global_dicts(
             active_guard_subtree_memo_relax_global_dicts) {
     active_guard_subtree_memo_recorder = tokens;
     active_guard_subtree_memo_debug_paths = debug_paths;
+    active_guard_actual_partial_accessor_records = accessor_records;
     active_guard_actual_partial_supported = actual_partial_supported;
     active_guard_subtree_memo_relax_global_dicts = relax_global_dicts;
   }
@@ -2226,6 +2467,7 @@ struct GuardSubtreeMemoRecorderScope {
   ~GuardSubtreeMemoRecorderScope() {
     active_guard_subtree_memo_recorder = previous;
     active_guard_subtree_memo_debug_paths = previous_debug_paths;
+    active_guard_actual_partial_accessor_records = previous_accessor_records;
     active_guard_actual_partial_supported = previous_actual_partial_supported;
     active_guard_subtree_memo_relax_global_dicts =
         previous_relax_global_dicts;
@@ -2233,6 +2475,8 @@ struct GuardSubtreeMemoRecorderScope {
 
   std::vector<GuardSubtreeEntryToken>* previous{nullptr};
   std::vector<std::string>* previous_debug_paths{nullptr};
+  std::vector<GuardActualPartialAccessorRecord>* previous_accessor_records{
+      nullptr};
   bool* previous_actual_partial_supported{nullptr};
   bool previous_relax_global_dicts{false};
 };
@@ -3167,8 +3411,9 @@ class LeafGuard {
   virtual bool supports_subtree_memo() const {
     return true;
   }
-  virtual bool supports_actual_partial_subtree_memo(PyObject* /*value*/) const {
-    return supports_subtree_memo();
+  virtual bool supports_actual_partial_subtree_memo(
+      PyObject* /*parent*/) const {
+    return false;
   }
   virtual bool emits_subtree_memo_token() const {
     return false;
@@ -3297,6 +3542,10 @@ class TYPE_MATCH : public LeafGuard {
     return Py_TYPE(value) == (void*)_expected;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+
  private:
   // id of the type of the original object.
   intptr_t _expected;
@@ -3369,6 +3618,10 @@ class ID_MATCH : public LeafGuard {
     return value == (void*)_expected;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+
  private:
   // id of the original object.
   intptr_t _expected;
@@ -3388,6 +3641,10 @@ class NONE_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_IsNone(value);
   }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
 };
 
 class TRUE_MATCH : public LeafGuard {
@@ -3403,6 +3660,10 @@ class TRUE_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_IsTrue(value);
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 };
 
@@ -3420,22 +3681,47 @@ class FALSE_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_IsFalse(value);
   }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
 };
+
+static bool guard_actual_partial_is_deeply_immutable(
+    PyObject* value,
+    size_t depth = 0) {
+  if (value == Py_None || PyBool_Check(value) || PyLong_CheckExact(value) ||
+      PyFloat_CheckExact(value) || PyComplex_CheckExact(value) ||
+      PyUnicode_CheckExact(value) || PyBytes_CheckExact(value)) {
+    return true;
+  }
+  if (!PyTuple_CheckExact(value) || depth >= 32) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(value); ++i) {
+    if (!guard_actual_partial_is_deeply_immutable(
+            PyTuple_GET_ITEM(value, i), depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 class EQUALS_MATCH : public LeafGuard {
  public:
-
   EQUALS_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
       py::object verbose_code_parts,
-      py::object user_stack)
+      py::object user_stack,
+      bool actual_partial_safe_constant = false)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
             std::move(user_stack)),
         _value(value),
-        _value_type(Py_TYPE(value.ptr())) {}
+        _value_type(Py_TYPE(value.ptr())),
+        _actual_partial_safe_constant(actual_partial_safe_constant) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Fast path - pointer equality check. Pointer equality checks are ok
@@ -3450,6 +3736,11 @@ class EQUALS_MATCH : public LeafGuard {
     return true;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return _actual_partial_safe_constant ||
+        guard_actual_partial_is_deeply_immutable(value);
+  }
+
  private:
   // value to compare against. This is py::object so that we hold on to the
   // original value and prevent garbage collection. We run EQUALS_MATCH only on
@@ -3459,6 +3750,7 @@ class EQUALS_MATCH : public LeafGuard {
 
   // Type of the value
   PyTypeObject* _value_type;
+  bool _actual_partial_safe_constant{false};
 };
 
 class RANGE_ITERATOR_MATCH : public LeafGuard {
@@ -3574,6 +3866,10 @@ class LENGTH_CHECK : public LeafGuard {
     return length == _length;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return PyList_CheckExact(value) || PyTuple_CheckExact(value);
+  }
+
  private:
   // Length of the guarded list
   Py_ssize_t _length;
@@ -3597,6 +3893,10 @@ class DICT_LENGTH : public LeafGuard {
     return PyDict_Check(value) && PyDict_Size(value) == _length;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return PyDict_CheckExact(value);
+  }
+
  private:
   // Length of the guarded dict
   Py_ssize_t _length;
@@ -3615,6 +3915,10 @@ class NOT_NONE : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return !Py_IsNone(value);
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 };
 
@@ -3643,6 +3947,10 @@ class MAPPING_KEYS_MATCH : public LeafGuard {
     return match;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return PyDict_CheckExact(value);
+  }
+
  private:
   py::object _keys;
 };
@@ -3662,6 +3970,10 @@ class DEFAULT_DEVICE : public LeafGuard {
     // Save the dict using py::object
     _utils_device_dict = device_module.attr("__dict__");
     _device = _utils_device_dict["CURRENT_DEVICE"];
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 
   template <typename T>
@@ -3778,6 +4090,10 @@ class GLOBAL_STATE : public LeafGuard {
     return GuardDebugInfo(true, 1);
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+
   bool supports_subtree_memo() const override {
     return true;
   }
@@ -3872,6 +4188,10 @@ class DICT_CONTAINS : public LeafGuard {
     return result == _contains;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return PyDict_CheckExact(value);
+  }
+
  private:
   int _contains;
   py::object _key;
@@ -3926,6 +4246,10 @@ class FLOAT_IS_NAN : public LeafGuard {
     }
     return std::isnan(PyFloat_AsDouble(value));
   }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
 };
 
 // Check if the float is nan
@@ -3946,6 +4270,10 @@ class COMPLEX_IS_NAN : public LeafGuard {
     }
     Py_complex c_value = PyComplex_AsCComplex(value);
     return std::isnan(c_value.real) || std::isnan(c_value.imag);
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 };
 
@@ -4101,6 +4429,10 @@ class OBJECT_ALIASING : public RelationalGuard {
         _operand_count == plan.expected_operand_count;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+
   bool supports_subtree_memo() const override {
     return true;
   }
@@ -4184,6 +4516,10 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
         return false;
       }
     }
+    return true;
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
     return true;
   }
 
@@ -4738,6 +5074,10 @@ class DICT_VERSION : public LeafGuard {
     return PyDict_Check(value) && get_dict_version_unchecked(value) == _tag;
   }
 
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    return PyDict_CheckExact(value);
+  }
+
   // Saved dict version.
   uint64_t _tag;
 };
@@ -4881,6 +5221,10 @@ class GuardAccessor {
   bool check_child_manager_nopybind(PyObject* obj);
   virtual bool supports_subtree_memo() const {
     return true;
+  }
+  virtual bool supports_actual_partial_subtree_memo(
+      PyObject* /*parent*/) const {
+    return false;
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -5719,6 +6063,14 @@ class GuardManager {
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
+      if constexpr (std::is_same_v<T, PyObject>) {
+        if (C10_UNLIKELY(
+                active_guard_actual_partial_supported != nullptr &&
+                is_self_local_source_path(accessor->get_source()) &&
+                !accessor->supports_actual_partial_subtree_memo(value))) {
+          *active_guard_actual_partial_supported = false;
+        }
+      }
       const bool accessor_result =
           accessor->check_nopybind(value, matches_dict_tag);
       if (!accessor_result) { // early exit
@@ -6080,7 +6432,7 @@ class RootGuardManager : public GuardManager {
   bool check_nopybind_template(
       T* value,
       const std::string* skip_accessor_source = nullptr,
-      const GuardLastSuccessPartialPlan* actual_partial_plan = nullptr,
+      GuardLastSuccessPartialPlan* actual_partial_plan = nullptr,
       bool* actual_partial_token_miss = nullptr) { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions with GIL.
@@ -6185,7 +6537,7 @@ class RootGuardManager : public GuardManager {
   bool check_nopybind_actual_partial(
       FrameLocalsMapping* value,
       const std::string& skip_accessor_source,
-      const GuardLastSuccessPartialPlan& plan,
+      GuardLastSuccessPartialPlan& plan,
       bool& token_miss) {
     return check_nopybind_template<true>(
         value, &skip_accessor_source, &plan, &token_miss);
@@ -6977,6 +7329,9 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   bool supports_subtree_memo() const override {
     return true;
   }
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
   bool emits_subtree_memo_token() const override {
     return true;
   }
@@ -7141,6 +7496,12 @@ class TENSOR_MATCH : public LeafGuard {
   bool supports_subtree_memo() const override {
     return tensor_match_source_supports_subtree_memo(_tensor_name);
   }
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+  bool emits_actual_partial_subtree_memo_token() const override {
+    return true;
+  }
   bool emits_subtree_memo_token() const override {
     return tensor_match_source_supports_subtree_memo(_tensor_name);
   }
@@ -7193,9 +7554,15 @@ class GetAttrGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
+    guard_actual_partial_record_instance_attr_binding(
+        obj, _attr_name, x, get_source(), true);
     bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -7274,9 +7641,15 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
+    guard_actual_partial_record_instance_attr_binding(
+        obj, _attr_name, x, get_source(), false);
     bool result = check_child_manager_nopybind(x);
     Py_DECREF(x);
     return result;
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -7359,10 +7732,15 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
+    guard_actual_partial_record_generic_dict_binding(obj, x, get_source());
     bool result = _guard_manager->check_nopybind(x);
     Py_DECREF(x);
     return result;
 
+  }
+
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -7481,6 +7859,10 @@ class GetItemGuardAccessor : public GuardAccessor {
  */
 class FrameLocalsGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject*) const override {
+    return true;
+  }
+
   int framelocals_index() const override {
     return _framelocals_idx;
   }
@@ -7610,6 +7992,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
  */
 class DictGetItemGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject* parent) const override {
+    return PyDict_CheckExact(parent);
+  }
+
   DictGetItemGuardAccessor(
       RootGuardManager* root,
       py::object key,
@@ -7702,6 +8088,10 @@ class DictGetItemGuardAccessor : public GuardAccessor {
  */
 class ListGetItemGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject* parent) const override {
+    return PyList_CheckExact(parent);
+  }
+
   ListGetItemGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -7878,6 +8268,10 @@ class SetGetItemGuardAccessor : public GuardAccessor {
  */
 class TupleGetItemGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject* parent) const override {
+    return PyTuple_CheckExact(parent);
+  }
+
   TupleGetItemGuardAccessor(
       RootGuardManager* root,
       const py::object& index,
@@ -9546,10 +9940,11 @@ bool run_root_guard_manager_with_last_success_receipt(
 
   std::vector<GuardSubtreeEntryToken> tokens;
   std::vector<std::string> debug_paths;
+  std::vector<GuardActualPartialAccessorRecord> accessor_records;
   bool actual_partial_supported = true;
   {
     GuardSubtreeMemoRecorderScope recorder(
-        &tokens, &debug_paths, &actual_partial_supported);
+        &tokens, &debug_paths, &accessor_records, &actual_partial_supported);
     if (!run_root_guard_manager(root, f_locals)) {
       // Cache lookup probes entries that commonly do not own the current
       // input. Keep this entry's plan and training state on a probe miss.
@@ -9575,6 +9970,7 @@ bool run_root_guard_manager_with_last_success_receipt(
           self_framelocals_index,
           tokens,
           debug_paths,
+          accessor_records,
           build)) {
     state->actual_partial.disable();
     return true;
@@ -9586,6 +9982,8 @@ bool run_root_guard_manager_with_last_success_receipt(
       std::move(build.stability_tokens),
       std::move(build.hot_tokens),
       std::move(build.type_proofs),
+      std::move(build.generic_dict_owner_proofs),
+      std::move(build.instance_attr_owner_proofs),
       std::move(build.cross_slice_relations),
       std::move(build.retained_token_objects));
   return true;
@@ -9749,7 +10147,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &FALSE_MATCH::check);
   py::class_<EQUALS_MATCH, LeafGuard, std::shared_ptr<EQUALS_MATCH>>(
       py_m, "EQUALS_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
+      .def(
+          py::init<RootGuardManager*, py::object, py::list, py::object, bool>(),
+          py::arg("root_guard_manager"),
+          py::arg("value"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("actual_partial_safe_constant") = false)
       .def("__call__", &EQUALS_MATCH::check);
   py::class_<LENGTH_CHECK, LeafGuard, std::shared_ptr<LENGTH_CHECK>>(
       py_m, "LENGTH_CHECK")
@@ -10142,14 +10546,20 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts,
-             py::object user_stack) -> void {
+             py::object user_stack,
+             bool actual_partial_safe_constant) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("EQUALS_MATCH");
             self.add_leaf_guard(std::make_shared<EQUALS_MATCH>(
                 self.get_root(),
                 std::move(value),
                 std::move(verbose_code_parts),
-                std::move(user_stack)));
-          })
+                std::move(user_stack),
+                actual_partial_safe_constant));
+          },
+          py::arg("value"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("actual_partial_safe_constant") = false)
       .def(
           "add_length_check_guard",
           [](GuardManager& self,
