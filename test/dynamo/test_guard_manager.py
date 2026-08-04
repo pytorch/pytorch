@@ -2197,6 +2197,7 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
     def test_actual_partial_preserves_module_and_residual_guards(self):
         script = """
             import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
             from torch._dynamo.testing import CompileCounter
 
             global_bias = torch.tensor(3.0)
@@ -2204,7 +2205,7 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             class Model(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.register_buffer("scale", torch.tensor(2.0))
+                    self.scale = 2.0
                     self.offsets = [1.0]
 
                 def forward(self, x):
@@ -2221,10 +2222,11 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
                 torch.testing.assert_close(compiled(x), model(x))
             assert counter.frame_count == 1, counter.frame_count
 
-            model.scale = torch.tensor(4.0)
-            torch.testing.assert_close(compiled(x), model(x))
+            cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(cache_entries) == 1, len(cache_entries)
+            assert cache_entries[0]._debug_fast_guard_enabled
 
-            model.scale.resize_(4).fill_(6.0)
+            model.scale = 4.0
             torch.testing.assert_close(compiled(x), model(x))
 
             model.offsets[0] = 5.0
@@ -2233,7 +2235,7 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             global_bias = torch.tensor(7.0)
             torch.testing.assert_close(compiled(x), model(x))
 
-            model.scale = torch.tensor(6.0)
+            model.scale = 6.0
             x = torch.ones(9)
             torch.testing.assert_close(compiled(x), model(x))
 
