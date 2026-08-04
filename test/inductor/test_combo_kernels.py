@@ -663,6 +663,57 @@ class ComboKernelTests(TestCase):
             self.assertEqual(r, g)
 
     @requires_gpu_and_triton
+    def test_uniform_dispatch_indirect_load_gather_correct(self):
+        # Regression for silent corruption when uniform-dispatch-eligible
+        # sub-kernels read an input through an INDIRECT (gathered) index.
+        #
+        # Indirect loads bypass record_op_trace: CSEProxy.load returns early to
+        # indirect_load *before* recording, so the gathered input buffer never
+        # enters op_trace / op_trace_buffer_arg_names. It is therefore neither
+        # compared for sub-kernel equality (so structurally "identical" gathers
+        # over DIFFERENT inputs look interchangeable and uniform dispatch
+        # engages) nor turned into a per-slot pointer table. Without the guard
+        # the buffer is appended to the uniform call once and shared across all
+        # groups, so the single shared body (built from sub-kernel 0) hardcodes
+        # group 0's input while the other groups' inputs become dead args ->
+        # every non-first group silently reads group 0's data. This is exactly
+        # what regressed Super_SloMo / inception_v3 (upsample_bilinear2d) on the
+        # dashboard. The guard detects the unslotted buffer arg and falls back to
+        # sequential combo dispatch, which is correct.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
+
+        narcs = 4
+
+        # Shared index buffer (loaded directly -> slotted); each arc gathers from
+        # its OWN source tensor via that index (the source is reached only via an
+        # indirect load -> unslotted). Different source data means a shared-input
+        # bug corrupts every group after the first in a detectable way.
+        def fn(xs, idx):
+            return [torch.index_select(xs[i], 0, idx) for i in range(narcs)]
+
+        torch.manual_seed(0)
+        xs = [torch.randn(64, 64, device=GPU_TYPE) for _ in range(narcs)]
+        idx = torch.randperm(64, device=GPU_TYPE)[:32]
+
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+            ref = fn(xs, idx)
+            got, code = run_and_get_code(torch.compile(fn), xs, idx)
+
+        # Every group must match eager, not just the first. This is the property
+        # the shared-indirect-buffer bug violated (pre-fix, groups 1..N-1 gather
+        # from group 0's source tensor).
+        for r, g in zip(ref, got):
+            self.assertEqual(r, g)
+
+        # The guard must force a fallback: no uniform-dispatch kernel may be
+        # emitted when a sub-kernel input is reached via an indirect load. (The
+        # `kernel_idx = pid // num_blocks_per_kernel` form is unique to the
+        # uniform-dispatch path.)
+        full_code = "\n".join(code)
+        self.assertNotIn("kernel_idx = pid // num_blocks_per_kernel", full_code)
+
+    @requires_gpu_and_triton
     def test_mutated_args(self):
         def test_mutated(a, b, c, d):
             a.add_(1)

@@ -998,6 +998,30 @@ class ComboKernel(Kernel):
             log.debug("uniform dispatch build: FAILED - buffer ref count mismatch")
             return False
 
+        # Correctness guard: every pointer/buffer kernel arg must be reachable
+        # through the op trace (i.e. slotted per sub-kernel). A buffer that is
+        # read only via an indirect (gathered) index bypasses record_op_trace --
+        # CSEProxy.load returns early to indirect_load before recording -- so it
+        # is neither compared for sub-kernel equality nor turned into a per-slot
+        # pointer table. Such a buffer is appended to the uniform call once and
+        # shared across every group, so the single generated body (built from
+        # sub-kernel 0) hardcodes group 0's buffer while the other groups'
+        # buffers become dead args: all non-first groups silently read group 0's
+        # data (observed on Super_SloMo / inception_v3 upsample_bilinear2d, where
+        # group 1 reused group 0's input). Fall back to sequential dispatch
+        # whenever any buffer arg is unslotted.
+        slotted_inner_names = {
+            name for refs in buf_refs_per_kernel for name in refs
+        }
+        unslotted_buffers = set(inner_to_dtype) - slotted_inner_names
+        if unslotted_buffers:
+            log.debug(
+                "uniform dispatch build: FAILED - unslotted buffer arg(s) %s "
+                "(likely reached via indirect load); falling back to sequential",
+                sorted(unslotted_buffers),
+            )
+            return False
+
         # Build slot info: for each slot position, record the buffer inner name
         # used in sub-kernel 0's body plus the outer (call_arg) names and dtype.
         # Op-trace equality guarantees the buffers correspond positionally
