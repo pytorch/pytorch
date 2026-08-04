@@ -62,6 +62,9 @@ if TYPE_CHECKING:
     # _DYNAMO_STATE is base64(pickle({used_globals, closure, argdefs, kwdefaults})).
     BACKEND_ID: str | None = None
     IMPORT_SOURCES: dict[str, str] = {}
+    # (positional arg index of the owning module, param name) per param the captured
+    # backward accumulates a gradient into; empty for a forward capture.
+    GRAD_ACCUM_PARAMS: list[tuple[int, str]] = []
     _DYNAMO_CODE: str = ""
     _DYNAMO_STATE: str = ""
 
@@ -493,4 +496,23 @@ def _build_dynamo_forward():
     fn = types.FunctionType(code, f_globals, closure=cells, argdefs=state["argdefs"])
     if state["kwdefaults"]:
         fn.__kwdefaults__ = state["kwdefaults"]
-    return fn
+    if not GRAD_ACCUM_PARAMS:
+        return fn
+
+    import torch
+
+    def forward(*args):
+        # Training capture: the baked backward ACCUMULATES into each param's .grad in
+        # place (p.grad.add_(new)), matching eager .backward(). That needs the tensor to
+        # exist, so materialize a zero one wherever the runtime model left .grad at None
+        # (a fresh model, or the usual zero_grad(set_to_none=True)); zero + accumulate is
+        # exactly eager's first-step assign. Only the params the captured graph actually
+        # accumulates into are listed, so a frozen or non-contributing param keeps
+        # .grad = None as eager leaves it.
+        for _pos, _name in GRAD_ACCUM_PARAMS:
+            _p = args[_pos].get_parameter(_name)
+            if _p.grad is None:
+                _p.grad = torch.zeros_like(_p)
+        return fn(*args)
+
+    return forward

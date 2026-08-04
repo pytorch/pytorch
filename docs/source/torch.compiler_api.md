@@ -26,6 +26,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
+     cudagraph_mark_warmup_incomplete
      is_compiling
      is_dynamo_compiling
      is_exporting
@@ -63,8 +64,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
       With the default ``make_fx`` tracer, capture is non-strict. Control flow is
       specialized to the example inputs, and shapes are static -- each size is baked in.
-      The exception is a tensor dim explicitly marked unbacked (inductor backend only)
-      with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
+      The exception is a tensor dim explicitly marked unbacked with
+      ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
+      ``make_fx`` this requires the inductor backend; with ``tracer="dynamo"`` either
+      backend works); such
       a dim is captured as an unbacked symint, so one artifact serves any runtime size of
       it, and a graph that needs to guard on it fails at capture. Each input's dtype and
       device are specialized too (a runtime mismatch is rejected), and the inductor backend
@@ -90,10 +93,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
        trace. ``"dynamo"`` analyzes the Python (bytecode) rather than tracing one path and
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
-       compiled subgraph through the same ``backend`` choices; it is scoped to inference
-       forward computations today (a training step or other graph-breaking ``fn``,
-       ``mark_unbacked`` dynamic shapes, and ``decompositions`` are not supported with it
-       yet and raise). Unlike ``make_fx``, the dynamo driver does NOT re-validate the
+       compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
+       dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
+       Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
+       training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
+       and the parameter gradients are accumulated onto the runtime model like eager). A
+       ``fn`` whose Python graph-breaks for other reasons
+       raises. Unlike ``make_fx``, the dynamo driver does NOT re-validate the
        runtime model/inputs, so on the eager backend a drifted model (broken weight tying,
        a retyped/reshaped weight) or a broadcast-compatible input-shape mismatch can
        silently miscompute where ``make_fx`` would raise; pass a model and inputs matching
@@ -104,8 +110,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``backend='eager'`` for portability across torch builds too, since the default
        ``make_fx`` inductor artifact inlines private ``torch._inductor`` modules).
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
-       decomposition function) forwarded to ``make_fx``; defaults to ``None``. Honored only
-       by ``tracer="make_fx"``; passing it with ``tracer="dynamo"`` raises.
+       decomposition function) controlling how ATen ops are broken down in the captured
+       graph; defaults to ``None``. ``tracer="make_fx"`` forwards it to ``make_fx`` during
+       capture; ``tracer="dynamo"`` applies the same table by re-tracing Dynamo's captured
+       subgraph with it.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
