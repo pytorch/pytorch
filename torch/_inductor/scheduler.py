@@ -3752,7 +3752,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
                     module_path = _clean_stack_name(next(reversed(stack.values()))[0])
                     if module_path:
                         op_name = _strip_instance_suffix(lowering_node.name)
-                        module_fqn = f"{module_path}.{op_name}"
+                        module_fqn = f"L.{module_path}.{op_name}"
             else:
                 # lowering_fx_node not set for this extern kernel (e.g. convolution);
                 # fall back to walking origins. For ops whose inputs are weights
@@ -3760,7 +3760,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
                 # single-FQN result without cascading upstream names.
                 module_fqn = get_fused_kernel_module_fqn([self])
             if module_fqn:
-                V.graph.fx_extern_fqns.add(module_fqn)
+                V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
                 n_before = len(wrapper.lines)
                 self.node.codegen(wrapper)
                 inner_lines = wrapper.lines[n_before:]
