@@ -8060,6 +8060,21 @@ for dtype in (torch.int32, torch.int64):
         compiled_out = compiled(a)
         self.assertNotEqual(eager_out, compiled_out)
 
+    @config.patch(fallback_random=False)
+    def test_uniform_non_contiguous_view(self):
+        def fn(x):
+            y = x[:, ::2, :]
+            y.uniform_(0.0, 1.0)
+            return y
+
+        x = torch.randn(3, 5, 6, device=self.device)
+        compiled = torch.compile(fn, fullgraph=True)
+        res = compiled(x.clone())
+        ref = fn(x.clone())
+        self.assertEqual(res.shape, ref.shape)
+        self.assertEqual(res.stride(), ref.stride())
+        self.assertTrue(bool(((res >= 0.0) & (res <= 1.0)).all()))
+
     def test_complex_from_real_imag(self):
         def fn(x, y):
             return aten.complex.default(x, y)
