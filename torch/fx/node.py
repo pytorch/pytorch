@@ -689,8 +689,11 @@ class Node(_NodeBase):
                 and isinstance(meta_val, torch.Tensor)
                 and meta_val.layout
                 not in (
+                    torch.sparse_coo,
                     torch.sparse_csc,
                     torch.sparse_csr,
+                    torch.sparse_bsc,
+                    torch.sparse_bsr,
                 )
             ):
                 stride_annotation = f"{stringify_shape(meta_val.stride())}"

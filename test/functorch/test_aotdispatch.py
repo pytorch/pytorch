@@ -960,6 +960,29 @@ def forward(self, primals_1):
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
 
+    def test_sparse_csr_creation(self):
+        def f(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return a.to_dense() * 2
+
+        f_compiled = aot_function(f, nop)
+        inp = torch.randn(4)
+        self.assertEqual(f(inp), f_compiled(inp))
+
+    def test_sparse_csr_creation_requires_grad_errors(self):
+        # backward through sparse creation is unsupported; used to abort in C++
+        def f(v):
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return a.to_dense().sum()
+
+        f_compiled = aot_function(f, nop)
+        with self.assertRaises(RuntimeError):
+            f_compiled(torch.randn(4, requires_grad=True))
+
     # https://github.com/pytorch/pytorch/issues/93363
     def test_mutates_input_noncontiguous(self):
         def f(a):
