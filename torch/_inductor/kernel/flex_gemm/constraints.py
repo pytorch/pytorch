@@ -134,6 +134,10 @@ FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR = (
     "FlexGEMM grouped main outputs currently support only numeric [1, 1] and "
     "[M, 1] captured tensors"
 )
+FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR = (
+    "FlexGEMM concat-layout grouped main outputs do not compose with grouped "
+    "reductions because concat layout permutes accumulator columns"
+)
 FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
     "FlexGEMM concat-layout grouped-N outputs require B's output dimension to "
     "be non-contiguous, as in linear weight.t()"

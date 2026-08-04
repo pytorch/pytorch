@@ -24,7 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
-from ...utils import has_free_symbols
+from ...utils import ceildiv, has_free_symbols
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
     FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR,
@@ -483,11 +483,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         gemm_op, outputs.aux_outputs, physical_output_size
     )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
+    output_stride = ir.convert_shape_to_inductor(output_meta.stride())
+    if main_transform is not None:
+        # Grouped-main uses TMA stores, whose outer strides must be 16-byte aligned.
+        output_alignment = max(16 // output_meta.dtype.itemsize, 1)
+        output_stride[-2] = (
+            ceildiv(logical_output_size[-1], output_alignment) * output_alignment
+        )
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
         logical_output_size,
-        ir.convert_shape_to_inductor(output_meta.stride()),
+        output_stride,
     )
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
