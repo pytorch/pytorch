@@ -1424,6 +1424,7 @@ def forward(self, args_0):
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperimentFlex(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_export_blockmask_with_mask_fn(self, make_mask_fn, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1882,7 +1883,6 @@ def forward(self, arg0_1):
 
 
 instantiate_device_type_tests(TestExperimentFlex, globals(), except_for="cpu")
-
 
 
 if __name__ == "__main__":
