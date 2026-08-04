@@ -235,6 +235,7 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
                                                         std::array<bool, 2> output_mask) {
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
+  check_grid_sampler_2d_backward(input, grid, grad_output);
 
   TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
               "expected input and grid to have the same type, but got ",
@@ -332,6 +333,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   using namespace mps;
   check_grid_sampler_common(input, grid);
   check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
                               "grid_sampler_3d backward on MPS only supports bilinear and nearest interpolation");
