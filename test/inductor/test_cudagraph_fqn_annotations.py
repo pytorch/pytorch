@@ -348,6 +348,29 @@ class TestCudagraphFqnAnnotations(TestCase):
             f"recovered FQNs lack layer hierarchy: {sorted(set(recovered.values()))}",
         )
 
+    def test_extern_and_triton_fqns_share_L_prefix(self):
+        """Extern kernels (e.g. cuBLAS addmm from nn.Linear) and Triton fused
+        kernels must both carry the 'L.' prefix in their FQN annotations.
+
+        OuterModel produces both: nn.Linear -> cuBLAS addmm (extern kernel) and
+        silu*h+x -> Triton fused kernel.  Without the fix, extern kernels emit
+        e.g. "model.layers.0.fc1.linear.addmm" while Triton kernels emit
+        "L.model.layers.0.fc1.linear", making the two namespaces inconsistent.
+        """
+        model = OuterModel(dim=64, num_layers=2).cuda()
+        x = torch.randn(1, 64, device="cuda")
+        self._run_inductor_cg(model, x, annotate=True)
+        annotations = dict(get_kernel_annotations())
+        self.assertTrue(annotations, "expected non-empty kernel annotations")
+        all_strs = _all_fqn_strings(annotations)
+        self.assertTrue(all_strs, "expected non-empty FQN strings in annotations")
+        missing_prefix = [s for s in all_strs if not s.startswith("L.")]
+        self.assertEqual(
+            missing_prefix,
+            [],
+            f"FQNs missing 'L.' prefix (likely extern kernels): {missing_prefix}",
+        )
+
     def test_save_annotations_and_join_trace(self):
         """End-to-end save -> annotate workflow: save_kernel_annotations writes the
         annotations pickle, the profiler writes the Chrome trace JSON, and
