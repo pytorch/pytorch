@@ -415,6 +415,146 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(masked_output, is_causal_output)
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
+    @torch.no_grad()
+    def test_mask_check_fastpath(self):
+        """
+        Test that fastpath is executed independently of the masks that are passed.
+        If the passed key padding mask is left aligned or mask_check=False, test that nested tensors are used
+        (sparsity fastpath), otherwise use fastpath with traditional tensors.
+        Also test that fast path is executed with both key padding mask and attention mask passed at the same time.
+        """
+
+        x = torch.Tensor([[[1, 2], [3, 4], [5, 6]]]).to(torch.float)
+
+        def _test_fastpath(model, key_padding_mask, mock_return_value, attn_mask=None, nested_tensors=True):
+            with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
+                fastpath_mock.return_value = mock_return_value
+                model(x, src_key_padding_mask=key_padding_mask, mask=attn_mask)
+
+                # If mock was called, fastpath was taken
+                self.assertTrue(fastpath_mock.called)
+
+                # If mock was called with nested tensors, sparsity fastpath was taken
+                for call_args, _ in fastpath_mock.call_args_list:
+                    self.assertEqual(call_args[0].is_nested, nested_tensors)
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
+        model.eval()
+
+        aligned_key_padding_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
+        not_aligned_key_padding_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
+        attn_mask = torch.Tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]]).to(torch.bool)
+        nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
+        tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
+
+        # Left aligned mask results in sparsity fastpath
+        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+
+        # Not aligned mask results in fastpath
+        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
+        model.eval()
+
+        # If nested tensor disabled, fastpath is always taken
+        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+        # Fast path is taken if both attention mask and key padding mask are present
+        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, attn_mask=attn_mask, nested_tensors=False)
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
+        model.eval()
+
+        # Mask check disabled results in sparisty fastpath, independently of the mask
+        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+        _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+    def test_bias_is_none(self):
+        x = torch.rand((1, 5, 10))
+        model = torch.nn.modules.activation.MultiheadAttention(10, 1, bias=False, batch_first=True)
+        model.eval()
+        model(x, x, x)
+    def test_script_mha_in_proj_weight_none(self):
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=128, num_heads=8, kdim=256, vdim=256
+        ).eval()
+
+        torch.jit.script(mha)
+
+
+class TestTransformersCUDA(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    def setUp(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
+    def test_decoder_only_layer(self):
+        class FairseqDecoder(torch.nn.Module):
+            def __init__(
+                self,
+                embed_dim,
+                attention_heads,
+                ffn_embed_dim,
+                num_layers,
+                embedding_layer,  # torch.nn.Embedding. Must have a padding_idx field
+                dropout=0,
+                normalize_before=False,
+                torch_encoder=None,  # torch encoder that you can map weights from
+                activation="relu",
+            ):
+                super().__init__()
+
+                cfg = fairseq_transformer.TransformerConfig()
+                cfg.decoder.embed_dim = embed_dim
+                cfg.decoder.output_dim = embed_dim
+                cfg.decoder.attention_heads = attention_heads
+                cfg.decoder.ffn_embed_dim = ffn_embed_dim
+                cfg.dropout = dropout
+                cfg.decoder.normalize_before = normalize_before
+                cfg.decoder.layers = num_layers
+                # make embedding behavior same as other encoders
+                cfg.no_token_positional_embeddings = True
+                cfg.no_scale_embedding = True
+                cfg.activation_fn = activation
+
+                dictionary = {}  # TODO: verify what this is
+
+                self.decoder = fairseq_transformer.TransformerDecoder(
+                    cfg,
+                    dictionary,
+                    embedding_layer,
+                    no_encoder_attn=True,
+                    output_projection=None,
+                )
+
+                if torch_encoder is not None:
+                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
+                self.decoder = self.decoder.eval().cuda().half()
+
+            def forward(
+                self,
+                tokens,
+                src_lengths=None,
+                with_triangle_mask=False,
+                incremental_state=None,
+            ):
+                return self.decoder(
+                    prev_output_tokens=tokens,
+                    encoder_out=None,
+                    incremental_state=incremental_state,
+                    features_only=True,
+                    full_context_alignment=not with_triangle_mask,
+                    alignment_layer=None,
+                    alignment_heads=None,
+                    src_lengths=src_lengths,
+                    return_all_hiddens=False,
+                )[0]
+
 
 class TestTransformersDevice(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -1223,69 +1363,6 @@ class TestTransformersDevice(NNTestCase):
             self.assertEqual(result, scripted_result)
 
 
-    @onlyCUDA
-    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
-    def test_decoder_only_layer(self):
-        class FairseqDecoder(torch.nn.Module):
-            def __init__(
-                self,
-                embed_dim,
-                attention_heads,
-                ffn_embed_dim,
-                num_layers,
-                embedding_layer,  # torch.nn.Embedding. Must have a padding_idx field
-                dropout=0,
-                normalize_before=False,
-                torch_encoder=None,  # torch encoder that you can map weights from
-                activation="relu",
-            ):
-                super().__init__()
-
-                cfg = fairseq_transformer.TransformerConfig()
-                cfg.decoder.embed_dim = embed_dim
-                cfg.decoder.output_dim = embed_dim
-                cfg.decoder.attention_heads = attention_heads
-                cfg.decoder.ffn_embed_dim = ffn_embed_dim
-                cfg.dropout = dropout
-                cfg.decoder.normalize_before = normalize_before
-                cfg.decoder.layers = num_layers
-                # make embedding behavior same as other encoders
-                cfg.no_token_positional_embeddings = True
-                cfg.no_scale_embedding = True
-                cfg.activation_fn = activation
-
-                dictionary = {}  # TODO: verify what this is
-
-                self.decoder = fairseq_transformer.TransformerDecoder(
-                    cfg,
-                    dictionary,
-                    embedding_layer,
-                    no_encoder_attn=True,
-                    output_projection=None,
-                )
-
-                if torch_encoder is not None:
-                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
-                self.decoder = self.decoder.eval().cuda().half()
-
-            def forward(
-                self,
-                tokens,
-                src_lengths=None,
-                with_triangle_mask=False,
-                incremental_state=None,
-            ):
-                return self.decoder(
-                    prev_output_tokens=tokens,
-                    encoder_out=None,
-                    incremental_state=incremental_state,
-                    features_only=True,
-                    full_context_alignment=not with_triangle_mask,
-                    alignment_layer=None,
-                    alignment_heads=None,
-                    src_lengths=src_lengths,
-                    return_all_hiddens=False,
-                )[0]
 
     @tf32_on_and_off(0.003)
     @parametrize("batch_size", [1, 5])
@@ -1432,69 +1509,8 @@ class TestTransformersDevice(NNTestCase):
 
             self.assertRaises(RuntimeError, func)
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
-    @torch.no_grad()
-    def test_mask_check_fastpath(self):
-        """
-        Test that fastpath is executed independently of the masks that are passed.
-        If the passed key padding mask is left aligned or mask_check=False, test that nested tensors are used
-        (sparsity fastpath), otherwise use fastpath with traditional tensors.
-        Also test that fast path is executed with both key padding mask and attention mask passed at the same time.
-        """
-
-        x = torch.Tensor([[[1, 2], [3, 4], [5, 6]]]).to(torch.float)
-
-        def _test_fastpath(model, key_padding_mask, mock_return_value, attn_mask=None, nested_tensors=True):
-            with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
-                fastpath_mock.return_value = mock_return_value
-                model(x, src_key_padding_mask=key_padding_mask, mask=attn_mask)
-
-                # If mock was called, fastpath was taken
-                self.assertTrue(fastpath_mock.called)
-
-                # If mock was called with nested tensors, sparsity fastpath was taken
-                for call_args, _ in fastpath_mock.call_args_list:
-                    self.assertEqual(call_args[0].is_nested, nested_tensors)
-
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
-
-        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
-        model.eval()
-
-        aligned_key_padding_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
-        not_aligned_key_padding_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
-        attn_mask = torch.Tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]]).to(torch.bool)
-        nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
-        tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
-
-        # Left aligned mask results in sparsity fastpath
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
-
-        # Not aligned mask results in fastpath
-        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
-
-        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
-        model.eval()
-
-        # If nested tensor disabled, fastpath is always taken
-        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
-        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
-        # Fast path is taken if both attention mask and key padding mask are present
-        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, attn_mask=attn_mask, nested_tensors=False)
-
-        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
-        model.eval()
-
-        # Mask check disabled results in sparisty fastpath, independently of the mask
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
-        _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
 
     # Test failing MHA when bias was NoneType
-    def test_bias_is_none(self):
-        x = torch.rand((1, 5, 10))
-        model = torch.nn.modules.activation.MultiheadAttention(10, 1, bias=False, batch_first=True)
-        model.eval()
-        model(x, x, x)
         # completes without error
 
     def test_transformer_bias_is_none(self, device):
@@ -1608,12 +1624,6 @@ class TestTransformersDevice(NNTestCase):
     def test_is_causal_gpu(self, device):
         self.is_causal_kernels([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION], device)
 
-    def test_script_mha_in_proj_weight_none(self):
-        mha = torch.nn.MultiheadAttention(
-            embed_dim=128, num_heads=8, kdim=256, vdim=256
-        ).eval()
-
-        torch.jit.script(mha)
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @skipIfXpu(msg="MHA fastpath is not available on XPU")
