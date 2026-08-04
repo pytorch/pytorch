@@ -1265,6 +1265,8 @@ op_db: list[OpInfo] = [
         "linalg.cholesky",
         aten_name="linalg_cholesky",
         dtypes=floating_and_complex_types(),
+        # cholesky backward calls solve_triangular, which is float-only on MPS
+        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1272,24 +1274,13 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # Exception: linalg.cholesky: The factorization could not be completed because the input is not positive-definite
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.cholesky_ex",
         aten_name="linalg_cholesky_ex",
         dtypes=floating_and_complex_types(),
+        # cholesky backward calls solve_triangular, which is float-only on MPS
+        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1297,23 +1288,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # The following dtypes worked in forward but are not listed by the
-            # OpInfo: {torch.bfloat16, torch.float16}. The following dtypes did
-            # not work in backward but are listed by the OpInfo:
-            # {torch.complex64}.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # RuntimeError: linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.vecdot",
