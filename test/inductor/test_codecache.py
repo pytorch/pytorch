@@ -542,6 +542,116 @@ class TestFxGraphCache(TestCase):
                     found.append(os.path.join(dirpath, filename))
         return found
 
+    def test_cache_artifact_load_precedes_compilation(self):
+        import threading
+
+        from torch._dynamo import convert_frame
+
+        order = []
+        errors = []
+        result = []
+        cache_deserializing = threading.Event()
+        cache_lock_held = threading.Event()
+        release_deserialize = threading.Event()
+        compilation_attempted = threading.Event()
+        compile_lock = threading.RLock()
+        cache_had_priority = []
+
+        class ObservedCompileLock:
+            def __enter__(self):
+                current_thread = threading.current_thread()
+                if current_thread is compile_thread:
+                    cache_had_priority.append(cache_lock_held.is_set())
+                    compilation_attempted.set()
+                result = compile_lock.__enter__()
+                if current_thread is load_thread:
+                    cache_lock_held.set()
+                return result
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                if threading.current_thread() is load_thread:
+                    cache_lock_held.clear()
+                return compile_lock.__exit__(exc_type, exc_value, traceback)
+
+        def deserialize(_):
+            cache_deserializing.set()
+            if not release_deserialize.wait(timeout=5):
+                raise TimeoutError("timed out waiting to finish cache deserialization")
+            return {}
+
+        def populate_caches(_):
+            order.append("cache")
+            return mock.sentinel.cache_info
+
+        def load_cache_artifacts():
+            try:
+                result.append(torch.compiler.load_cache_artifacts(b"artifacts"))
+            except Exception as exc:
+                errors.append(exc)
+
+        def compile():
+            with convert_frame.compile_lock:
+                order.append("compile")
+
+        with (
+            mock.patch.object(
+                CacheArtifactManager, "deserialize", side_effect=deserialize
+            ),
+            mock.patch.object(
+                CacheArtifactManager, "populate_caches", side_effect=populate_caches
+            ),
+            mock.patch.object(convert_frame, "compile_lock", ObservedCompileLock()),
+        ):
+            load_thread = threading.Thread(target=load_cache_artifacts)
+            load_thread.start()
+            cache_load_started = cache_deserializing.wait(timeout=5)
+
+            compile_thread = threading.Thread(target=compile)
+            compile_thread.start()
+            compile_tried_to_start = compilation_attempted.wait(timeout=5)
+
+            release_deserialize.set()
+            load_thread.join(timeout=5)
+            compile_thread.join(timeout=5)
+
+        self.assertTrue(cache_load_started)
+        self.assertTrue(compile_tried_to_start)
+        self.assertEqual(cache_had_priority, [True])
+        self.assertFalse(load_thread.is_alive())
+        self.assertFalse(compile_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(result, [mock.sentinel.cache_info])
+        self.assertEqual(order, ["cache", "compile"])
+
+    def test_cache_population_preserves_compiled_triton_kernel(self):
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.triton_bundler import (
+            StaticallyLaunchedAutotuner,
+            TritonBundler,
+        )
+
+        cache_key = "compiled-kernel"
+        compiled_future = mock.sentinel.compiled_future
+        cached_autotuner = StaticallyLaunchedAutotuner(
+            cache_key,
+            "cached_kernel",
+            mock.Mock(compile_results=[]),
+        )
+
+        with mock.patch.object(
+            CompiledTritonKernels,
+            "_cache",
+            {cache_key: compiled_future},
+        ):
+            loaded_kernel_names = TritonBundler.load_autotuners([cached_autotuner])
+
+            self.assertIs(
+                CompiledTritonKernels._cache[cache_key],
+                compiled_future,
+            )
+
+        self.assertEqual(loaded_kernel_names, [])
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""
