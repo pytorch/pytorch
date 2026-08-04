@@ -39,6 +39,7 @@ class _JitCacheWrapper:
         self._key_locks = {}
         self._hits = 0
         self._misses = 0
+        self._generation = 0
 
     def __call__(self, *args, **kwargs):
         kwargs = dict(kwargs)
@@ -59,6 +60,7 @@ class _JitCacheWrapper:
                     self._hits += 1
                     return cached
                 self._misses += 1
+                generation = self._generation
 
             if compile_args is _MISSING:
                 compiled = self._fn(*args, **kwargs)
@@ -66,18 +68,24 @@ class _JitCacheWrapper:
                 compiled = self._fn(*args, compile_args=compile_args, **kwargs)
 
             with self._lock:
-                self._cache[cache_key] = compiled
+                # A cache_clear() that landed while this compile was running
+                # bumped the generation. The caller still gets its result, but
+                # storing it would leave the cache non-empty, and the miss it
+                # counted already went away with the clear.
+                if generation == self._generation:
+                    self._cache[cache_key] = compiled
             return compiled
-
-    @property
-    def cache(self):
-        return self._cache
 
     def cache_clear(self) -> None:
         with self._lock:
             self._cache.clear()
+            # The key locks go too: a compile still running under the old lock
+            # will not store its result, so the next caller for that key has to
+            # be free to compile again rather than wait behind it.
+            self._key_locks.clear()
             self._hits = 0
             self._misses = 0
+            self._generation += 1
 
     def cache_info(self) -> CacheInfo:
         with self._lock:
@@ -91,9 +99,10 @@ def flydsl_jit_cache(fn):
     normal arguments. Runtime sample objects can be passed by callers through the
     reserved ``compile_args=...`` keyword; they are forwarded only on cache miss
     and do not participate in keying.
+
+    Deliberately not named ``jit_cache``: the instrumentation coverage scan in
+    test_instrumentation.py attributes compile sites by decorator name, and that
+    name already belongs to CuTeDSL's vendored cache.
     """
 
     return _JitCacheWrapper(fn)
-
-
-jit_cache = flydsl_jit_cache

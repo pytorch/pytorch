@@ -91,12 +91,23 @@ def _version_is_ok() -> bool:
     if version is not None and version.release[:2] == _FLYDSL_SUPPORTED_RELEASE:
         return True
 
-    log.info(
-        "FlyDSL version %s is not supported (expected %s.x); "
-        "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
-        version,
-        ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE)),
-    )
+    supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
+    if version is None:
+        # Importable but with no installed distribution -- a source checkout on
+        # PYTHONPATH looks like this. Saying "version None" would read as a
+        # version mismatch and send the reader looking for the wrong problem.
+        log.info(
+            "FlyDSL version metadata is missing (expected %s.x); "
+            "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to use it anyway",
+            supported,
+        )
+    else:
+        log.info(
+            "FlyDSL version %s is not supported (expected %s.x); "
+            "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
+            version,
+            supported,
+        )
     return False
 
 
