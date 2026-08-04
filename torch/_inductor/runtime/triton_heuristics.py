@@ -2632,6 +2632,11 @@ class CachingAutotuner(KernelInterface):
             if not callable(runner):
                 return None
             kernel = runner.__self__
+            # compile-on-one-rank kernels keep their loaded handles per device, so
+            # kernel.function is None; the fast launcher binds a single device's
+            # function pointer, so fall back to the per-device static launcher.
+            if getattr(kernel, "device_agnostic", False):
+                return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
@@ -3036,6 +3041,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
+        # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
+        # kernel, so the launcher must keep its loaded handles per device.
+        self.kernel.device_agnostic = self.compile_meta.get("device") is None
         device = _resolve_load_device(
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),

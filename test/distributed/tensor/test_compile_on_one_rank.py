@@ -719,6 +719,39 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_inductor_shared_kernel_reused_in_process_across_devices(self):
+        # A rank only ever drives one device, but CooR's kernel cache key is
+        # device-agnostic, so within one process the in-memory autotuner hands the same
+        # loaded launcher to whatever device is current. A loaded CUfunction is
+        # device-bound, so the launcher must keep per-device handles; otherwise a kernel
+        # first loaded on cuda:0 and then launched on a cuda:1 stream raises `invalid
+        # resource handle`. This is not the production execution model, but it is
+        # reachable from any process that compiles for two devices -- including this
+        # test file -- and it only shows up on a cold cache, so it is pinned here.
+        from torch._inductor.utils import clear_caches, fresh_cache
+
+        inp0 = torch.randn(2, 8, device="cuda:0")
+        ref0 = self._coor_inductor_fn(inp0)
+        inp1 = torch.randn(2, 8, device="cuda:1")
+        ref1 = self._coor_inductor_fn(inp1)
+        torch._dynamo.reset()
+        clear_caches()
+        with fresh_cache():
+            compiled = torch.compile(
+                self._coor_inductor_fn, backend="inductor", fullgraph=True
+            )
+            with torch.cuda.device(0):
+                out0 = compiled(inp0)
+            # The same in-process autotuner (loaded on cuda:0) now launches on cuda:1.
+            with torch.cuda.device(1):
+                out1 = compiled(inp1)
+        self.assertEqual(out0.device, torch.device("cuda:0"))
+        self.assertEqual(out1.device, torch.device("cuda:1"))
+        self.assertEqual(out0, ref0)
+        self.assertEqual(out1, ref1)
+
 
 def _baked_pg_constants(gm):
     """get_attr nodes that resolve to a torchbind ProcessGroup baked onto the gm.

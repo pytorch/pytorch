@@ -7212,11 +7212,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # the launcher resolves the real device at load time.
             # NB: torch.device("cuda").index is None, not 0 -- that None is what reaches
             # DeviceProperties.create below. It is not merely cosmetic for the cache key:
-            # index=None is the sentinel _resolve_load_device (triton_heuristics.py) uses
-            # to load the cubin onto the running rank's current device. Keeping the index
-            # here would still give byte-identical source on every rank while loading the
-            # kernel onto the compile-time device -- a wrong-device bug that a
-            # byte-identity check would not catch.
+            # index=None is the sentinel _resolve_load_device and make_launcher
+            # (triton_heuristics.py) use to set kernel.device_agnostic, which enables the
+            # per-device module/function handles. Keeping the index here would still give
+            # byte-identical source on every rank while silently disabling those handles --
+            # a wrong-device bug that a byte-identity check would not catch.
             props_device = torch.device(props_device.type)
         triton_meta: TritonMeta = cast(
             TritonMeta,
