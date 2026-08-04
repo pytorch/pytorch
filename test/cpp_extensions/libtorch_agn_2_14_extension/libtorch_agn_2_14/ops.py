@@ -18,7 +18,7 @@ _NAMESPACE = "libtorch_agn_2_14"
 
 
 def my_has_storage(t) -> bool:
-    """Stable ``Tensor::has_storage()`` (build time 2.14+, runtime 2.14+)."""
+    """Stable ``Tensor::has_storage()`` (2.14+)."""
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
