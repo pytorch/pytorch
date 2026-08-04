@@ -32,7 +32,10 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
   if (tensor_logical_rank >= logical_rank) {
     return tensor;
   }
-  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  const auto tensor_sizes = tensor.sizes();
+  VmapDimVector new_sizes;
+  new_sizes.reserve(tensor_sizes.size() + logical_rank - tensor_logical_rank);
+  new_sizes.append(tensor_sizes.begin(), tensor_sizes.end());
   for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
     new_sizes.push_back(1);
   }
@@ -642,7 +645,8 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         normalized_shape,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim);
-    grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+    grad_input = makeBatched(
+        std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }

@@ -1,9 +1,9 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for vt_getitem: CPython PyObject_GetItem dispatch in Dynamo.
+"""Tests for generic_getitem: CPython PyObject_GetItem dispatch in Dynamo.
 
 Tests are organized by dispatch branch:
   - Branch 1 (mp_subscript): list, tuple, range, size, dict, defaultdict, tensor, etc.
-  - Branch 2 (sq_item via vt_sequence_getitem): deque (natural), reversed str/bytes
+  - Branch 2 (sq_item via pysequence_getitem): deque (natural), reversed str/bytes
   - Branch 3 (__class_getitem__): type subscript
   - Explicit __getitem__ dunder calls
 
@@ -843,7 +843,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # Explicit __getitem__ dunder call path tests
     # Exercises: obj.__getitem__(key) → LOAD_ATTR + CALL, which may
     # route through call_method → mp_subscript_impl rather than
-    # vt_getitem → mp_subscript_impl.
+    # generic_getitem → mp_subscript_impl.
     # ===================================================================
 
     def test_list_dunder_getitem(self):
@@ -880,7 +880,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # Branch 3: __class_getitem__ (type subscript)
     # Exercises: MyClass[int] → type.__getitem__ → __class_getitem__
     # In Python 3.10+, type.__getitem__ sets mp_subscript on type objects,
-    # so this goes through Branch 1 of vt_getitem.
+    # so this goes through Branch 1 of generic_getitem.
     # ===================================================================
 
     def test_class_getitem_builtin(self):
@@ -918,7 +918,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager")(x)
 
     # ===================================================================
-    # Branch 2: sq_item via vt_sequence_getitem
+    # Branch 2: sq_item via pysequence_getitem
     #
     # CPython's PyObject_GetItem branch 2: types with sq_item but no
     # mp_subscript go through _PyIndex_Check → PySequence_GetItem → sq_item.
@@ -926,12 +926,12 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # Sub-sections:
     #   (a) Natural dispatch — deque (only sq_item, no mp_subscript)
     #   (b) reversed() → sq_item — str/bytes lack __reversed__, so
-    #       reversed() falls back to vt_sequence_getitem naturally
+    #       reversed() falls back to pysequence_getitem naturally
     # ===================================================================
 
     # --- (a) Natural dispatch: deque ---
     # CPython's deque only has sq_item (Modules/_collectionsmodule.c:1888),
-    # not mp_subscript. vt_getitem dispatches to sq_item_impl directly.
+    # not mp_subscript. generic_getitem dispatches to sq_item_impl directly.
 
     def test_deque_int_index(self):
         def fn(x):
@@ -942,7 +942,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), self._compile(fn, x))
 
     def test_deque_negative_index(self):
-        """vt_sequence_getitem wraps negative indices via sq_length before sq_item."""
+        """pysequence_getitem wraps negative indices via sq_length before sq_item."""
 
         def fn(x):
             d = collections.deque([x, x + 1, x + 2])
