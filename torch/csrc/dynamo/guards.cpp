@@ -109,6 +109,9 @@ uint64_t count_instructions(const std::function<void()>& fn) {
 
 #define Py_BUILD_CORE
 #include <internal/pycore_range.h> // _PyRangeIterObject
+#if PY_VERSION_HEX >= 0x030D0000
+#include <internal/pycore_setobject.h> // _PySet_NextEntry
+#endif
 #include <internal/pycore_tuple.h> // _PyTupleIterObject
 #undef Py_BUILD_CORE
 
@@ -1216,6 +1219,7 @@ struct GuardSubtreeInstanceAttrOwnerProof {
   py::object dict;
   PyTypeObject* owner_type{nullptr};
   bool owner_is_self{false};
+  bool requires_non_descriptor_value{false};
 
   bool matches_current(PyObject* current_self) const {
     PyObject* current_owner = owner_is_self ? current_self : owner.ptr();
@@ -1225,7 +1229,9 @@ struct GuardSubtreeInstanceAttrOwnerProof {
     PyObject** dictptr = _PyObject_GetDictPtr(current_owner);
     return dictptr != nullptr && *dictptr == dict.ptr() &&
         PyDict_CheckExact(*dictptr) &&
-        PyDict_GetItem(*dictptr, key.ptr()) == expected.ptr();
+        PyDict_GetItem(*dictptr, key.ptr()) == expected.ptr() &&
+        (!requires_non_descriptor_value ||
+         Py_TYPE(expected.ptr())->tp_descr_get == nullptr);
   }
 };
 
@@ -2088,6 +2094,7 @@ static bool guard_last_success_build_accessor_proofs(
     proof.expected = record.resolved;
     proof.dict = record.owner_dict;
     proof.owner_type = record.owner_type;
+    proof.requires_non_descriptor_value = type_binding;
     instance_attr_proofs.push_back(std::move(proof));
   }
   return true;
@@ -2244,6 +2251,13 @@ struct GuardLastSuccessReceipt {
 
 static bool py_equals(PyObject* a, PyObject* b, bool false_on_error);
 
+static bool guard_actual_partial_is_deeply_immutable(
+    PyObject* value,
+    size_t depth = 0);
+
+static bool guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+    PyObject* value);
+
 static bool guard_subtree_exact_list_token_matches_current(
     const GuardSubtreeEntryToken& token,
     PyObject* current_object) {
@@ -2371,7 +2385,12 @@ static bool guard_subtree_exact_set_equals_token_matches_current(
   if (token.object == nullptr || Py_TYPE(token.object) != token.type ||
       !PySet_CheckExact(token.object) || token.expected_value == nullptr ||
       !PySet_CheckExact(token.expected_value) ||
-      PySet_GET_SIZE(token.expected_value) != token.size) {
+      PySet_GET_SIZE(token.expected_value) != token.size ||
+      !guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+          token.object) ||
+      (token.object != token.expected_value &&
+       !guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+           token.expected_value))) {
     return false;
   }
   return py_equals(token.object, token.expected_value, /*false_on_error=*/true);
@@ -4127,7 +4146,7 @@ class FALSE_MATCH : public LeafGuard {
 
 static bool guard_actual_partial_is_deeply_immutable(
     PyObject* value,
-    size_t depth = 0) {
+    size_t depth) {
   if (value == Py_None || PyBool_Check(value) || PyLong_CheckExact(value) ||
       PyFloat_CheckExact(value) || PyComplex_CheckExact(value) ||
       PyUnicode_CheckExact(value) || PyBytes_CheckExact(value)) {
@@ -4139,6 +4158,22 @@ static bool guard_actual_partial_is_deeply_immutable(
   for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(value); ++i) {
     if (!guard_actual_partial_is_deeply_immutable(
             PyTuple_GET_ITEM(value, i), depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+    PyObject* value) {
+  if (!PySet_CheckExact(value)) {
+    return false;
+  }
+  Py_ssize_t position = 0;
+  PyObject* item = nullptr;
+  Py_hash_t hash = 0;
+  while (_PySet_NextEntry(value, &position, &item, &hash)) {
+    if (!guard_actual_partial_is_deeply_immutable(item)) {
       return false;
     }
   }
@@ -4175,18 +4210,31 @@ class EQUALS_MATCH : public LeafGuard {
   }
 
   bool supports_actual_partial_subtree_memo(PyObject* value) const override {
+    if (PySet_CheckExact(_value.ptr()) || PySet_CheckExact(value)) {
+      return guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+                 _value.ptr()) &&
+          (value == _value.ptr() ||
+           guard_actual_partial_is_exact_set_of_deeply_immutable_values(value));
+    }
     return _actual_partial_safe_constant ||
-        guard_actual_partial_is_deeply_immutable(value) ||
-        (PySet_CheckExact(_value.ptr()) && PySet_CheckExact(value));
+        guard_actual_partial_is_deeply_immutable(value);
   }
 
   bool emits_actual_partial_subtree_memo_token() const override {
-    return PySet_CheckExact(_value.ptr());
+    return guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+        _value.ptr());
   }
 
   bool append_actual_partial_subtree_memo_token(
       PyObject* value,
       std::vector<GuardSubtreeEntryToken>* tokens) override {
+    if (!guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+            _value.ptr()) ||
+        (value != _value.ptr() &&
+         !guard_actual_partial_is_exact_set_of_deeply_immutable_values(
+             value))) {
+      return false;
+    }
     if (!check_nopybind(value)) {
       return false;
     }

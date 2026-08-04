@@ -8,6 +8,7 @@
 
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <atomic>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -70,6 +71,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   PyCodeObject* orig_code;
   std::list<std::shared_ptr<PrecompileEntry>> precompile_entries;
   std::mutex precompile_entries_mutex;
+  // Lock-free empty-list hint for the ordinary cache hot path. A false reader
+  // never touches the list; a true reader still takes the mutex and snapshots.
+  std::atomic<bool> has_precompile_entries{false};
   // Per-compile cache map: isolate_recompiles_id -> list of CacheEntry.
   // id -1 is the default (non-isolated) bucket. id >= 0 are isolated compiles.
   // All cache entries live in this map — there is no separate default list.

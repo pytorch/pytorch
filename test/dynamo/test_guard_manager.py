@@ -3513,6 +3513,48 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             assert counter.frame_count == 2, counter.frame_count
             assert original_entry._debug_fast_guard_enabled
 
+            class DescriptorValue:
+                def __init__(self, value):
+                    self.value = value
+
+            original_value = DescriptorValue(torch.ones(2))
+            replacement_value = DescriptorValue(torch.full((2,), 5.0))
+
+            class MutableDescriptorNamespace:
+                scale = original_value
+
+            class MutableDescriptorModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = MutableDescriptorNamespace
+
+                def forward(self, x):
+                    return self.namespace.scale.value + x
+
+            mutable_descriptor_model = MutableDescriptorModel()
+            mutable_compiled, mutable_counter, mutable_entry, mutable_x = (
+                _warm_model(mutable_descriptor_model)
+            )
+
+            def descriptor_get(self, obj, owner):
+                return replacement_value
+
+            DescriptorValue.__get__ = descriptor_get
+            try:
+                torch.testing.assert_close(
+                    mutable_compiled(mutable_x),
+                    mutable_descriptor_model(mutable_x),
+                )
+                assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+            finally:
+                del DescriptorValue.__get__
+
+            torch.testing.assert_close(
+                mutable_compiled(mutable_x), mutable_descriptor_model(mutable_x)
+            )
+            assert mutable_counter.frame_count == 2, mutable_counter.frame_count
+            assert mutable_entry._debug_fast_guard_enabled
+
             class Descriptor:
                 def __init__(self):
                     self.value = torch.ones(2)
@@ -3667,6 +3709,32 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
 
             fancy_model = FancySetModel()
             _warm_model(fancy_model, enabled=False)
+
+            class Comparable(int):
+                __hash__ = int.__hash__
+
+                def __eq__(self, other):
+                    return int.__eq__(self, other)
+
+            expected_mode = {Comparable(1), Comparable(2)}
+
+            class CallbackSetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = {Comparable(1), Comparable(2)}
+
+                def forward(self, value):
+                    if self.mode == expected_mode:
+                        return value + 1
+                    return value - 1
+
+            callback_model = CallbackSetModel()
+            _, _, callback_entry, _ = _warm_model(callback_model, enabled=False)
+            callback_leaves, _ = _guard_tree_shapes(callback_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in callback_leaves
+            ), callback_leaves
         """
         self._run_guard_lookup_memo_script(script)
 
@@ -3747,6 +3815,7 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             assert not worker.is_alive(), "guard lookup did not finish"
             assert not errors, errors
             assert _debug_get_precompile_entries(code) == []
+            torch.testing.assert_close(compiled(x), model(x))
         """
         self._run_guard_lookup_memo_script(script)
 

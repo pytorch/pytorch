@@ -305,21 +305,23 @@ void lookup(
   CacheEntry* found = nullptr;
   bool guard_error = false;
 
-  for (const auto& entry : snapshot_precompile_entries(extra_state)) {
-    const bool valid = entry->last_success_receipt == nullptr
-        ? torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)
-        : torch::dynamo::run_root_guard_manager_with_last_success_receipt(
-              entry->last_success_receipt,
-              entry.get(),
-              entry->root_mgr,
-              f_locals,
-              is_skip_guard_eval_unsafe);
-    if (valid) {
-      PyObject* code = entry->code.ptr();
-      Py_INCREF(code);
-      *matched_precompile_code_owner = code;
-      *maybe_cached_code = code;
-      return;
+  if (extra_state->has_precompile_entries.load(std::memory_order_relaxed)) {
+    for (const auto& entry : snapshot_precompile_entries(extra_state)) {
+      const bool valid = entry->last_success_receipt == nullptr
+          ? torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)
+          : torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                entry->last_success_receipt,
+                entry.get(),
+                entry->root_mgr,
+                f_locals,
+                is_skip_guard_eval_unsafe);
+      if (valid) {
+        PyObject* code = entry->code.ptr();
+        Py_INCREF(code);
+        *matched_precompile_code_owner = code;
+        *maybe_cached_code = code;
+        return;
+      }
     }
   }
 
@@ -370,20 +372,22 @@ bool try_lookup_without_guard_eval(
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   *matched_precompile_code_owner = nullptr;
-  auto precompile_entries = snapshot_precompile_entries(extra_state);
-  if (!precompile_entries.empty()) {
-    // Only the first precompile entry can be safely fast-pathed: a later
-    // guardless entry must not preempt an earlier guarded entry whose guards
-    // may pass.
-    const auto& entry = precompile_entries.front();
-    if (torch::dynamo::root_guard_manager_has_no_guards(entry->root_mgr)) {
-      PyObject* code = entry->code.ptr();
-      Py_INCREF(code);
-      *matched_precompile_code_owner = code;
-      *maybe_cached_code = code;
-      return true;
+  if (extra_state->has_precompile_entries.load(std::memory_order_relaxed)) {
+    auto precompile_entries = snapshot_precompile_entries(extra_state);
+    if (!precompile_entries.empty()) {
+      // Only the first precompile entry can be safely fast-pathed: a later
+      // guardless entry must not preempt an earlier guarded entry whose guards
+      // may pass.
+      const auto& entry = precompile_entries.front();
+      if (torch::dynamo::root_guard_manager_has_no_guards(entry->root_mgr)) {
+        PyObject* code = entry->code.ptr();
+        Py_INCREF(code);
+        *matched_precompile_code_owner = code;
+        *maybe_cached_code = code;
+        return true;
+      }
+      return false;
     }
-    return false;
   }
 
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
@@ -532,6 +536,7 @@ void _reset_precompile_entries(const py::handle& code_obj) {
     {
       std::lock_guard<std::mutex> lock(extra->precompile_entries_mutex);
       retired_entries.swap(extra->precompile_entries);
+      extra->has_precompile_entries.store(false, std::memory_order_relaxed);
     }
   }
 }
@@ -556,6 +561,7 @@ void _load_precompile_entry(
   {
     std::lock_guard<std::mutex> lock(extra->precompile_entries_mutex);
     extra->precompile_entries.emplace_back(std::move(entry));
+    extra->has_precompile_entries.store(true, std::memory_order_relaxed);
   }
 }
 
