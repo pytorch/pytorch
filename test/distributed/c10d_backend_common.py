@@ -47,7 +47,9 @@ class BackendConfig:
     supports_sequence_numbers: bool = True
     supports_collectives_timing: bool = False
     supports_work_sequence_number: bool = False
+    supports_work_result: bool = False
     supports_gather_single: bool = False
+    supports_uneven_all_gather: bool = False
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
@@ -68,7 +70,9 @@ C10D_BACKENDS = (
         supports_dropped_p2p_work=True,
         supports_collectives_timing=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
         supports_gather_single=True,
+        supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
     ),
@@ -80,7 +84,9 @@ C10D_BACKENDS = (
         supports_dropped_p2p_work=True,
         supports_collectives_timing=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
         supports_gather_single=True,
+        supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -90,8 +96,8 @@ C10D_BACKENDS = (
         ),
     ),
     # nccl-lazy wraps a primary ProcessGroupNCCL (all collectives delegate to
-    # it) plus lazily-built per-peer P2P comms, so it matches nccl2's
-    # capabilities except that it does not implement sequence numbers.
+    # it) plus lazily-built per-peer P2P comms. Timing and sequence APIs are not
+    # forwarded.
     BackendConfig(
         "nccl-lazy",
         "cuda",
@@ -99,6 +105,9 @@ C10D_BACKENDS = (
         supports_cuda_graph_barrier=True,
         supports_dropped_p2p_work=True,
         supports_sequence_numbers=False,
+        supports_work_result=True,
+        supports_gather_single=True,
+        supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -169,7 +178,9 @@ def instantiate_backend_tests(namespace, suite_name, base_class, backends):
                 "supports_sequence_numbers": backend.supports_sequence_numbers,
                 "supports_collectives_timing": backend.supports_collectives_timing,
                 "supports_work_sequence_number": backend.supports_work_sequence_number,
+                "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
+                "supports_uneven_all_gather": backend.supports_uneven_all_gather,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
