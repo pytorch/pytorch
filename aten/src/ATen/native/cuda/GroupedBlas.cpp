@@ -503,7 +503,6 @@ _scaled_grouped_mm_cuda(
         const std::optional<at::Tensor>& scale_result,
         std::optional<c10::ScalarType> out_dtype,
         bool use_fast_accum) {
-  // On ROCm, sm90_only/sm100_only are ignored.
   bool allowed_device = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
@@ -624,7 +623,6 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-  // On ROCm, sm90_only/sm100_only are ignored.
   bool allowed_device = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 

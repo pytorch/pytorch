@@ -373,7 +373,6 @@ _scaled_gemm(
       scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  // On ROCm, sm90_only/sm100_only are ignored.
   if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
   }

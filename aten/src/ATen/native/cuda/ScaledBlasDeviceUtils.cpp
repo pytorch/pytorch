@@ -2,6 +2,9 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 
+#include <string>
+#include <vector>
+
 namespace at::native::scaled {
 
 #ifdef USE_ROCM
@@ -31,4 +34,4 @@ bool scaled_mm_arch_allowed(bool sm90_only, bool sm100_only) {
 }
 #endif
 
-}  // namespace at::native::scaled
+} // namespace at::native::scaled
