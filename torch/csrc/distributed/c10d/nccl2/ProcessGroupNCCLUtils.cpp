@@ -265,22 +265,15 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       if (shutdown_) {
         break;
       }
-      if (comm_state_ != CommState::NORMAL &&
-          abort_process_on_timeout_or_error_ &&
-          !options_c10d_->enable_reconfigure) {
-        if (comm_state_ == CommState::TIMEOUT) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to timeout on rank " << rank_
-              << " - timeout watchdog detected operation timeout";
-        } else if (comm_state_ == CommState::ERROR) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to error on rank " << rank_
-              << " - timeout watchdog detected operation error. ";
-        }
-
-        runAbortHooks();
-
-        ::abort();
+      // With abort_process_on_timeout_or_error disabled this is a no-op and
+      // the loop keeps running: comm_state_ stays TIMEOUT/ERROR so getError()
+      // reports it, and the next collective throws from
+      // checkAndAbortIfTimedOutOrError().
+      if (comm_state_ != CommState::NORMAL) {
+        abortProcess(
+            comm_state_ == CommState::TIMEOUT
+                ? "timeout - timeout watchdog detected operation timeout"
+                : "error - timeout watchdog detected operation error");
       }
 
       // Detect a communicator-level async error while the comm is still
@@ -295,13 +288,14 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
           if (!options_c10d_->enable_reconfigure) {
-            TC_LOG(ERROR, this)
-                << "Aborting process due to error on rank " << rank_
-                << " - nccl hit async error: " << ncclGetErrorString(asyncErr);
-
-            runAbortHooks();
-
+            TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
+                                << ": " << ncclGetErrorString(asyncErr);
+            // abort() only tears the communicator down; abortProcess() runs
+            // the abort hooks and terminates if the mode allows it.
             abort();
+            abortProcess(
+                std::string("error - nccl hit async error: ") +
+                ncclGetErrorString(asyncErr));
           } else {
             // Revoked below by the reconfigurable-mode handler.
             TC_LOG(ERROR, this)
@@ -360,15 +354,17 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::runtime_error("NCCL operation timed out");
     } else {
       abortNcclComm();
-      if (abort_process_on_timeout_or_error_) {
-        TC_LOG(ERROR, this) << "Aborting process due to timeout";
-        runAbortHooks();
-        ::abort();
-      } else {
-        throw std::runtime_error("NCCL operation timed out");
-      }
+      abortProcess("timeout - collective operation timed out");
+      throw std::runtime_error("NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
+    // With abort_process_on_timeout_or_error disabled the watchdog aborts the
+    // communicator on an async error and lets the process live, so a later
+    // collective can reach here with no communicator left to query.
+    if (!nccl_comm_) {
+      throw std::runtime_error(
+          "NCCL communicator was aborted after a previous error");
+    }
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -384,14 +380,8 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       throw std::move(ncclException);
     }
     abortNcclComm();
-    if (abort_process_on_timeout_or_error_) {
-      TC_LOG(ERROR, this) << "Aborting process due to error: "
-                          << ncclException.what();
-      runAbortHooks();
-      ::abort();
-    } else {
-      throw std::move(ncclException);
-    }
+    abortProcess(std::string("error - ") + ncclException.what());
+    throw std::move(ncclException);
   }
 }
 
