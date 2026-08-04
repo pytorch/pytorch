@@ -5,13 +5,14 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder, unique
+from torch._inductor.utils import Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import FlyDSLBenchmarkRequest, TensorMeta
 from ...ir import Buffer, ChoiceCaller, FlyDSLTemplateBuffer, IRNode, Layout, TensorBox
 from ..common import KernelTemplate
+from . import flydsl_utils
 from .flydsl_kernel import FlyDSLTemplateKernel
 
 
@@ -19,7 +20,7 @@ log = getArtifactLogger(__name__, "output_code")
 
 
 def _ordered_unique_input_names(input_nodes: Iterable[IRNode]) -> tuple[str, ...]:
-    return tuple(unique(node.get_name() for node in input_nodes))
+    return tuple(dict.fromkeys(node.get_name() for node in input_nodes))
 
 
 class FlyDSLTemplate(KernelTemplate):
@@ -48,6 +49,8 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
+        if not flydsl_utils.runtime_available():
+            return NotImplementedError("FlyDSL runtime is unavailable")
         try:
             choices.append(self.generate(**kwargs))
             return None
@@ -78,7 +81,6 @@ class FlyDSLTemplate(KernelTemplate):
                 output_node=output_node,
             )
             code = kernel.render(self.template, **kwargs)
-            log.debug("Generated FlyDSL Code:\n%s", code)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
             expected_input_args = _ordered_unique_input_names(input_nodes)
@@ -108,6 +110,7 @@ class FlyDSLTemplate(KernelTemplate):
                 extra_args=extra_args,
                 source_code=code,
             )
+            log.debug("Generated FlyDSL Code:\n%s", bmreq.source_code)
 
             def make_kernel_render(out_node, hint_override: int | None = None):
                 render_kernel = self.kernel_type(
