@@ -25,10 +25,15 @@ namespace {
 c10::intrusive_ptr<Backend::Options> cloneOptions(
     const c10::intrusive_ptr<Backend::Options>& opts) {
   auto copy = opts->clone();
-  if (copy == nullptr || typeid(*copy) != typeid(*opts)) {
-    // An out-of-tree Options subclass that does not override clone() would be
-    // sliced. Keep the legacy aliasing behavior for it rather than handing its
-    // backend an object of the wrong type.
+  // An out-of-tree Options subclass that does not override clone() would be
+  // sliced. Keep the legacy aliasing behavior for it rather than handing its
+  // backend an object of the wrong type.
+  if (copy == nullptr) {
+    return opts;
+  }
+  const Backend::Options& copyRef = *copy;
+  const Backend::Options& optsRef = *opts;
+  if (typeid(copyRef) != typeid(optsRef)) {
     return opts;
   }
   return copy;
