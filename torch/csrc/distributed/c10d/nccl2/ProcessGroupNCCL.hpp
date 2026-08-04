@@ -328,7 +328,19 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
+  // Tears the NCCL communicator down. This NEVER terminates the process --
+  // a user-initiated abort()/shutdown() must be survivable, matching
+  // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
+  // watchdog-detected timeout or async error follow it with abortProcess().
   void abortNcclComm();
+  // Terminates the process (after running the abort hooks) if
+  // TORCH_NCCL_ASYNC_ERROR_HANDLING asks for a tear-down and we are not in
+  // reconfigurable mode. `reason` is logged after "Aborting process on rank N
+  // due to ", so it must describe the actual trigger.
+  void abortProcess(const std::string& reason);
+  // Signals the watchdog thread to exit and reaps it. Detaches instead of
+  // joining when called from the watchdog thread itself.
+  void stopWatchdog();
   void revokeNcclComm();
 
   enum class CommState {
@@ -567,8 +579,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
-  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
+
+  // Whether a watchdog-detected timeout or async error takes the process down,
+  // read from TORCH_NCCL_ASYNC_ERROR_HANDLING so both NCCL backends fail the
+  // same way. Only the tear-down half of the mode applies here: our watchdog
+  // deliberately leaves the communicator for the next collective to abort.
+  const bool abort_process_on_timeout_or_error_;
 
   c10::intrusive_ptr<Options> options_c10d_;
 
