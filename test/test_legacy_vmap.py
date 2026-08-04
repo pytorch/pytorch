@@ -11,7 +11,12 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._vmap_internals import vmap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 FALLBACK_REGEX = r"There is a performance drop"
@@ -27,6 +32,8 @@ class EnableVmapFallbackWarnings:
 
 
 class TestVmapAPILegacy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(
             ValueError, "got type <class 'float'> as the return"
@@ -965,6 +972,7 @@ def allowVmapFallbackUsage(fn):
 # NB: TestVmapBaseLegacy is a nested class. This prevents test runners from picking
 # it up and running it.
 class Namespace:
+    # Helper base only -- no test_* methods (avoids leaking into ACCELERATOR subclasses).
     class TestVmapBaseLegacy(TestCase):
         def __init__(self, method_name="runTest"):
             super().__init__(method_name)
@@ -1003,35 +1011,41 @@ class Namespace:
 
             return types.MethodType(wrapper, self)
 
-        @allowVmapFallbackUsage
-        def test_vmap_fallback_check_ok(self):
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
+
+class TestVmapFallbackCheckLegacy(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.GENERIC
+
+    @allowVmapFallbackUsage
+    def test_vmap_fallback_check_ok(self):
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+        vmap(op_using_fallback)(torch.rand(3))
+
+    def test_vmap_fallback_check(self):
+        @self._wrap_method_with_vmap_fallback_check
+        def no_fallback(self):
+            pass
+
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+
+        @self._wrap_method_with_vmap_fallback_check
+        def uses_fallback(self):
             vmap(op_using_fallback)(torch.rand(3))
 
-        def test_vmap_fallback_check(self):
-            @self._wrap_method_with_vmap_fallback_check
-            def no_fallback(self):
-                pass
+        no_fallback(self)
 
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
-
-            @self._wrap_method_with_vmap_fallback_check
-            def uses_fallback(self):
-                vmap(op_using_fallback)(torch.rand(3))
-
-            no_fallback(self)
-
-            with self.assertRaises(AssertionError):
-                uses_fallback(self)
+        with self.assertRaises(AssertionError):
+            uses_fallback(self)
 
 
 class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.GENERIC
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -2553,6 +2567,8 @@ def _get_rand_no_zeros(*args, **kwargs):
 
 
 class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
