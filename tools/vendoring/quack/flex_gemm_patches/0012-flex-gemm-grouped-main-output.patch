@@ -57,7 +57,7 @@ index f6bbf7f..0fc8cc0 100644
 +                    result_dtype = main_result.element_type
 +                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
 +                tRS_rAuxOut.store(main_result)
-@@ -491,0 +508,51 @@ class GemmActSm120(GemmActMixin, GemmSm120):
+@@ -491,0 +508,57 @@ class GemmActSm120(GemmActMixin, GemmSm120):
 +def _grouped_n_contract_epi_tile(epi_tile, group):
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
@@ -73,6 +73,12 @@ index f6bbf7f..0fc8cc0 100644
 +
 +
 +class GemmGroupedNContractMixin(GemmActMixin):
++    """Store the contracted logical main through PostAct while leaving D unused.
++
++    TODO: Move this specialization behind a stable provider-extension boundary
++    so Inductor can own it beside the generated epilogue.
++    """
++
 +    grouped_n_contract_group = 2
 +    _epi_ops = (
 +        Scalar("alpha"),
@@ -150,11 +156,25 @@ index f6bbf7f..0fc8cc0 100644
 +                "grouped_n_contract does not compose with auxiliary outputs"
 +            )
 +        gemm_cls_name = "grouped_n_contract"
-@@ -957,0 +1092,4 @@ def gemm_act(
+@@ -957,0 +1092,18 @@ def gemm_act(
 +    if main_output_transform_group is not None and any(
 +        tensor.stride(-1) != 1 for tensor in postact_tensors
 +    ):
 +        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
++    if main_output_transform_group is not None:
++        physical_n = B.shape[-2]
++        if physical_n % main_output_transform_group != 0:
++            raise RuntimeError(
++                f"grouped_n_contract physical N={physical_n} must be divisible by "
++                f"group={main_output_transform_group}"
++            )
++        expected_shape = (*A.shape[:-1], physical_n // main_output_transform_group)
++        for tensor in postact_tensors:
++            if tuple(tensor.shape) != expected_shape:
++                raise RuntimeError(
++                    "grouped_n_contract requires PostAct shape "
++                    f"{expected_shape}, got {tuple(tensor.shape)}"
++                )
 @@ -1034,0 +1173 @@ def gemm_act(
 +    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
 @@ -1158,0 +1298 @@ def gemm_act(
