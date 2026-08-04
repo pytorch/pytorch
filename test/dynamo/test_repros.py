@@ -8664,6 +8664,8 @@ SavedForBackwardsAOTOutput(idx=5)""",
         def fn(inp, grid):
             return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
 
+        from torch._inductor.utils import run_and_get_code
+
         grid = torch.rand(2, 6, 7, 2) * 2 - 1
         for inp in (
             torch.randn(2, 3, 4, 5),
@@ -8671,9 +8673,13 @@ SavedForBackwardsAOTOutput(idx=5)""",
         ):
             expected = fn(inp, grid)
             torch._dynamo.reset()
-            out = torch.compile(fn, backend="inductor")(inp, grid)
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, (code,) = run_and_get_code(opt_fn, inp, grid)
             self.assertEqual(out, expected)
             self.assertEqual(out.stride(), expected.stride())
+            # fullgraph plus this keep the test from passing via an eager
+            # fallback, which would return the same values and strides.
+            self.assertIn("_grid_sampler_2d_cpu_fallback", code)
 
     def test_grid_sampler_2d_cpu_fallback_dynamic_shapes(self):
         # The meta kernels run check_grid_sampler_common/_2d, so their
