@@ -14,6 +14,7 @@ from torch.ao.quantization.quantize_fx import (
 )
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     TestCase,
     xfailIfS390X,
@@ -72,6 +73,8 @@ def _calculate_sparsity(tensor):
 # does not cause problems
 @skipIfNoFBGEMM
 class TestComposability(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
     # the quantized model works as expected
@@ -344,6 +347,8 @@ class TestFxComposability(TestCase):
     r"""This series of tests checks that various steps of the quantization and sparsity flow
     compose cleanly despite variation in sequencing.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @xfailIfS390X
     def test_q_prep_fx_before_s_prep(self):

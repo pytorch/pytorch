@@ -10,6 +10,7 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
 )
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TestCase,
@@ -43,6 +44,8 @@ class Model(nn.Module):
 
 
 class TestActivationSparsifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check_constructor(self, activation_sparsifier, model, defaults, sparse_config):
         """Helper function to check if the model, defaults and sparse_config are loaded correctly
         in the activation sparsifier

@@ -30,6 +30,7 @@ from torch.testing._internal.common_pruning import (
     SimpleLinear,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TestCase,
@@ -68,6 +69,8 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
 
 
 class TestSaliencyPruner(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float)
     def test_saliency_pruner_update_mask(self, device, dtype):
         """Test that we prune out the row with the lowest saliency (first row)"""
@@ -165,6 +168,8 @@ class TestSaliencyPruner(TestCase):
 
 
 class TestBaseStructuredSparsifier(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             module = config["module"]
@@ -989,6 +994,8 @@ class TestFPGMPruner(TestCase):
     Test case for the implementation of paper:
     `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     class SimpleConvFPGM(nn.Module):
         def __init__(self) -> None:

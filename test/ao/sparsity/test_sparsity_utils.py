@@ -18,7 +18,11 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     TwoLayerLinearModel,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 logging.basicConfig(
@@ -37,6 +41,8 @@ model_list = [
 
 
 class TestSparsityUtilFunctions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_module_to_fqn(self):
         """
         Tests that module_to_fqn works as expected when compared to known good
