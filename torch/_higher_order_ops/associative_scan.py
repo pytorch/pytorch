@@ -618,7 +618,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             5.2) Flip, scan left-to-right, flip back, and drop the last (padding) element
 
                 leaves_rev = [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])]
-                result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
+                result_rev = generic_associative_scan(g_ys_combine_fn_flat, leaves_rev)
                 g_ys = result_rev[1].flip([0])[:-1]
 
         6.) Scale with the instantaneous input gradients bwxs
@@ -681,9 +681,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         num_xs = ctx._num_xs
         num_additional_inputs = ctx._num_additional_inputs
 
-        # Extract the inputs to the forward path and outputs from the forward path.
-        # flat_args is xs + additional_inputs + outs, where additional_inputs preserves
-        # the original interleaved order and may contain non-tensor (int/SymInt) entries.
+        # Extract the inputs to the forward path and outputs from the forward path
         flat_args = saved_values(ctx)
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
@@ -700,9 +698,8 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # but we need it here in order to compute the correcte gradients
         xs_slices = first_slice_copy_with_grad(itertools.chain(xs, xs))
 
-        # Construct the operands from the forward. additional_inputs (tensors and
-        # non-tensor constants alike) are passed through unsliced; they are lifted,
-        # not stacked along the scan dim.
+        # Construct the operands from the forward, fw_operands
+        # and the operands for a single event t of the forward, fw_operands_slice
         fw_operands = (*xs, *additional_inputs)
         fw_operands_slice = (*xs_slices, *additional_inputs)
 
@@ -726,8 +723,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # vmap joint graph over scan dimension to compute the individual
         # gradients for each time slice ``t`` in parallel.
         # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
-        # The call below passes, in order: rolled outs (num_xs), xs (num_xs),
-        # additional_inputs (num_additional_inputs), dummy upstream grads (num_xs).
         # Only the per-timestep tensors are mapped over dim 0; additional_inputs are
         # lifted (not stacked along the scan dim), so they are broadcast via in_dim=None.
         in_dims = (
@@ -738,9 +733,8 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
 
         # create_bw_fn returns one grad per primal: 2*num_xs (for ys{t-1} and xs) plus
-        # one per additional_input, appended last. We only need the ys and xs grads, so
-        # drop the trailing additional_input grads here: they are not differentiated and
-        # are None for non-tensor lifted args, which vmap cannot stack under out_dims=0.
+        # one per additional_input, appended last. Drop the trailing additional_input grads
+        # as they are not differentiated.
         def combine_fn_bw_gm_xs(*args):
             return combine_fn_bw_gm(*args)[: 2 * num_xs]
 
@@ -776,13 +770,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
 
             # 5.2) Flip, scan left-to-right, flip back, and drop the last (padding)
-            # element to get g_ys. We call the raw associative_scan_op HOP (not
-            # generic_associative_scan) so this scan is Triton-lowerable under compiled
-            # autograd, mirroring the forward. In eager the backward runs with grad
-            # disabled, so the HOP dispatches CompositeExplicitAutograd ->
-            # generic_associative_scan, unchanged from before. g_ys_combine_fn_flat is
-            # pointwise with no additional_inputs, matching the forward's pointwise mode
-            # (the only mode that reaches this custom autograd path).
+            # element to get g_ys.
             result_rev = associative_scan_op(
                 g_ys_combine_fn_flat,
                 [bwys_pinit.flip([0]), gl_ys_pinit.flip([0])],
@@ -813,13 +801,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))
         ]
 
-        # Gradients for additional_inputs (lifted parameters) are not computed; the
-        # autograd entrypoint already rejects any that require grad. Non-tensor lifted
-        # args (e.g. shape SymInts) are handled positionally and get a None grad slot.
-        # TODO: the compile+dynamic-shape path that would surface interleaved SymInt
-        # additional_inputs is currently blocked earlier by the inductor associative_scan
-        # lowering (torch/_inductor/lowering.py, "unsupported lifted arguments"). If that
-        # restriction is lifted, this backward must be revisited to cover that path.
+        # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
 
 

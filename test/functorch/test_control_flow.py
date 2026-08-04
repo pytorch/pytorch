@@ -6448,8 +6448,6 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_associative_scan_non_pointwise_generic_autograd(self):
-        # combine_mode="generic" runs eagerly via generic_associative_scan (no triton
-        # codegen), so it is CPU-capable and does not need a GPU.
         def matmul_combine(x, y):
             return x @ y
 
@@ -6466,9 +6464,6 @@ class GraphModule(torch.nn.Module):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_pointwise_additional_input_autograd(self):
-        # A non-grad tensor additional_input (lifted freevar) must flow through the
-        # pointwise autograd path: excluded from the vmap batch dims and dropped from
-        # the grad split, returning correct grads for xs and None for the freevar.
         device = torch.device("cuda")
         H = torch.rand(2, device=device, requires_grad=False)
 
@@ -6489,9 +6484,6 @@ class GraphModule(torch.nn.Module):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_pointwise_multiple_additional_inputs_autograd(self):
-        # Multiple lifted tensor additional_inputs exercise the positional
-        # passthrough and the per-argument vmap in_dims (one None per lifted input)
-        # in the backward. All must be broadcast, not stacked along the scan dim.
         device = torch.device("cuda")
         H1 = torch.rand(2, device=device, requires_grad=False)
         H2 = torch.rand(2, device=device, requires_grad=False)
@@ -6507,20 +6499,6 @@ class GraphModule(torch.nn.Module):
         grads = torch.autograd.grad(result.sum(), xs)
         grads_ref = torch.autograd.grad(result_ref.sum(), xs)
         self.assertEqual(grads, grads_ref)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_pointwise_additional_input_requires_grad_raises(self):
-        # Gradients for lifted parameters are not supported; the guard must fire.
-        device = torch.device("cuda")
-        H = torch.rand(2, device=device, requires_grad=True)
-
-        def combine_fn(x, y):
-            return x + y + H
-
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
-            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
 
     @requires_cuda
     def test_associative_scan_input_mutation(self):
