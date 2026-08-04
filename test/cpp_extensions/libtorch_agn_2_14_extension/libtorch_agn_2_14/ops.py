@@ -22,16 +22,6 @@ def my_has_storage(t) -> bool:
     return torch.ops.libtorch_agn_2_14.my_has_storage.default(t)
 
 
-def my_permute(self, dims):
-    """Stable ``permute`` (build time 2.14+, runtime 2.10+)."""
-    return torch.ops.libtorch_agn_2_14.my_permute.default(self, dims)
-
-
-def my_view_dtype(self, dtype):
-    """Stable ``view.dtype`` (build time 2.14+, runtime 2.10+)."""
-    return torch.ops.libtorch_agn_2_14.my_view_dtype.default(self, dtype)
-
-
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

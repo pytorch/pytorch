@@ -1224,8 +1224,7 @@ inline torch::stable::Tensor bitwise_right_shift(
 /// Returns a view of the input tensor with its dimensions rearranged according
 /// to dims. The returned tensor shares the same underlying data with the input.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param dims The desired ordering of dimensions.
@@ -1246,8 +1245,7 @@ inline torch::stable::Tensor permute(
 /// Returns a view of the input tensor with the same data reinterpreted as the
 /// given dtype. This is a different overload than the shape-based view op.
 ///
-/// Minimum build-time version: PyTorch 2.14.
-/// Minimum runtime version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param dtype The dtype to reinterpret the data as.

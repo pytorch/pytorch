@@ -723,6 +723,16 @@ def my_bitwise_right_shift(self, other) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
 
 
+def my_permute(self, dims) -> Tensor:
+    """Stable permute."""
+    return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
+
+
+def my_view_dtype(self, dtype) -> Tensor:
+    """Stable view.dtype."""
+    return torch.ops.libtorch_agn_2_10.my_view_dtype.default(self, dtype)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

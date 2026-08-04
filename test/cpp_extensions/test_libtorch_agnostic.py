@@ -293,18 +293,18 @@ class TestLibtorchAgnostic(TestCase):
         other_1d = torch.randint(0, other_high, (4,), device=device, dtype=torch.int64)
         self.assertEqual(stable_op(a, other_1d), torch_op(a, other_1d))
 
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     def test_my_permute(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3, 4, device=device)
         result = libtorch_agnostic.ops.my_permute(t, [2, 0, 1])
         self.assertEqual(result, t.permute(2, 0, 1))
         self.assertEqual(result.data_ptr(), t.data_ptr())
 
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     def test_my_view_dtype(self, device):
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 4, device=device, dtype=torch.float32)
         result = libtorch_agnostic.ops.my_view_dtype(t, torch.int32)
