@@ -330,19 +330,21 @@ Tensor index_plumbing(const Tensor & self, const List<std::optional<Tensor>> & i
   }
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   std::vector<std::optional<Tensor>> indices_value;
+  indices_value.reserve(indices.size());
   std::vector<std::optional<int64_t>> indices_bdims;
-  for (const auto&& indRef : indices) {
-      std::optional<Tensor> ind = indRef;
-      std::optional<Tensor> index;
-      std::optional<int64_t> index_bdim;
-      if (ind.has_value()) {
-        std::tie(index, index_bdim) = unwrapTensorAtLevel(ind.value(), cur_level);
-      }
-    indices_value.push_back(index);
+  indices_bdims.reserve(indices.size());
+  for (std::optional<Tensor> index : indices) {
+    std::optional<int64_t> index_bdim;
+    if (index.has_value()) {
+      std::tie(index, index_bdim) =
+          unwrapTensorAtLevel(index.value(), cur_level);
+    }
+    indices_value.push_back(std::move(index));
     indices_bdims.push_back(index_bdim);
   }
   auto results = index_batch_rule(self_value, self_bdim, indices_value, indices_bdims);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  return makeBatched(
+      std::move(std::get<0>(results)), std::get<1>(results), cur_level);
 }
 
 namespace {
@@ -676,7 +678,8 @@ Tensor index_put_plumbing(const Tensor & self, const List<std::optional<Tensor>>
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
   auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  return makeBatched(
+      std::move(std::get<0>(results)), std::get<1>(results), cur_level);
 }
 
 namespace {
