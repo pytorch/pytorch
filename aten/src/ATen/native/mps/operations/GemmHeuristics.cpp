@@ -24,6 +24,8 @@ GemvConfig t2d(int nsimd, int kq) {
 // One profile for all GPU generations: sweep-fitted on M5 Pro and biased
 // toward oversubscription, since on unmeasured hardware extra simdgroups only
 // add reduction overhead while missing ones leave memory latency exposed.
+// nsimd_min and nsimd_max must match the built MB_GEMV_* kernels, since the
+// snap assumes contiguous powers of two.
 GemvTuning gemv_tuning(c10::ScalarType dt) {
   GemvTuning t{
       .vec = 2,

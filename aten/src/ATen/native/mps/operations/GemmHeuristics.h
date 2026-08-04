@@ -30,9 +30,9 @@ struct GemvTuning {
   int small_outlen; // at or below this, use t2d
   int t2d_kq; // t2d k-sublane count
   int scalar_cols_k; // K at or above this uses scalar columns, 0 to disable
-  int nt_nsimd_lo; // the two built gemv_nt nsimd variants
+  int nt_nsimd_lo;
   int nt_nsimd_hi;
-  int nt_vec; // largest built gemv_nt vec
+  int nt_vec;
 };
 
 GemvTuning gemv_tuning(c10::ScalarType dt);

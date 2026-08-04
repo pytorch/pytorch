@@ -251,17 +251,18 @@ void dispatch_gemv(const Tensor& A,
 
   GemvConfig config;
   if (idx64) {
-    // These operands are DRAM-bound, so use the fixed _i64 configurations.
+    // Offsets overflow int32: such operands are DRAM-bound, so skip the
+    // policy and use the fixed configs the _i64 variants are built at.
     config = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
   } else {
     config = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
   }
+  // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
+  // scalar-column standard kernel.
   auto normalized = normalize_gemv_config(config, dt, gemv_use_t, matrix_contiguous, align);
   if (normalized.has_value()) {
     config = *normalized;
   } else {
-    // T2D requires 16-byte loads from a contiguous matrix; misaligned or
-    // strided matrices use the standard kernel.
     config.kernel = GemvKernel::Standard;
     config.vec = matrix_contiguous ? 1 : 2;
   }
