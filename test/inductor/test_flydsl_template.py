@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -37,19 +39,80 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("import flydsl.expr as fx", imports)
         self.assertIsInstance(imports, str)
 
-    def test_runtime_available_checks_runtime_dependencies(self):
-        flydsl_utils.runtime_available.cache_clear()
-        self.addCleanup(flydsl_utils.runtime_available.cache_clear)
-        with (
-            mock.patch.object(torch.version, "hip", "test"),
-            mock.patch.object(flydsl_utils._cuda, "is_built", return_value=True),
-            mock.patch.object(
-                flydsl_utils,
-                "_flydsl_runtime_unavailable_reason",
-                return_value=None,
-            ),
+    def test_runtime_unavailable_reason(self):
+        with mock.patch.object(
+            flydsl_utils.importlib.util, "find_spec", return_value=None
         ):
-            self.assertTrue(flydsl_utils.runtime_available())
+            self.assertIn(
+                "missing optional dependency",
+                flydsl_utils._flydsl_runtime_unavailable_reason(),
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package_spec = SimpleNamespace(submodule_search_locations=[tmp])
+            with mock.patch.object(
+                flydsl_utils.importlib.util,
+                "find_spec",
+                return_value=package_spec,
+            ):
+                with mock.patch.object(
+                    flydsl_utils.importlib.machinery.PathFinder,
+                    "find_spec",
+                    return_value=None,
+                ):
+                    self.assertIn(
+                        "flydsl._mlir",
+                        flydsl_utils._flydsl_runtime_unavailable_reason(),
+                    )
+
+                with mock.patch.object(
+                    flydsl_utils.importlib.machinery.PathFinder,
+                    "find_spec",
+                    return_value=object(),
+                ):
+                    self.assertIn(
+                        "runtime shared library",
+                        flydsl_utils._flydsl_runtime_unavailable_reason(),
+                    )
+
+                    runtime_so = (
+                        Path(tmp) / "_mlir" / "_mlir_libs" / "libfly_jit_runtime.so"
+                    )
+                    runtime_so.parent.mkdir(parents=True)
+                    runtime_so.touch()
+                    ldd = SimpleNamespace(
+                        returncode=0,
+                        stdout="libdependency.so => not found",
+                        stderr="",
+                    )
+                    with (
+                        mock.patch.object(
+                            flydsl_utils.platform, "system", return_value="Linux"
+                        ),
+                        mock.patch.object(
+                            flydsl_utils.subprocess, "run", return_value=ldd
+                        ),
+                    ):
+                        self.assertIn(
+                            "unresolved",
+                            flydsl_utils._flydsl_runtime_unavailable_reason(),
+                        )
+
+    def test_unavailable_runtime_declines_choice(self):
+        template_name = f"flydsl_unavailable_test_{id(self)}"
+        self.addCleanup(FlyDSLTemplate.all_templates.pop, template_name, None)
+        with (
+            mock.patch.object(
+                FlyDSLTemplate, "_template_from_string", return_value=mock.Mock()
+            ),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=False),
+        ):
+            template = FlyDSLTemplate(name=template_name, source="template")
+            choices = []
+            result = template.maybe_append_choice(choices)
+
+        self.assertIsInstance(result, NotImplementedError)
+        self.assertEqual(choices, [])
 
     def test_gen_defines(self):
         kernel = FlyDSLTemplateKernel(
@@ -135,14 +198,16 @@ class TestFlyDSLTemplate(TestCase):
             FlyDSLTemplate.all_templates.pop(template_name, None)
 
     def test_shared_input_buffer_names_are_deduplicated(self):
-        shared_name = "shared"
+        shared_names = [bytearray(b"shared").decode() for _ in range(2)]
+        self.assertEqual(shared_names[0], shared_names[1])
+        self.assertIsNot(shared_names[0], shared_names[1])
         input_nodes = [mock.Mock(), mock.Mock()]
-        for input_node in input_nodes:
-            input_node.get_name.return_value = shared_name
+        for input_node, name in zip(input_nodes, shared_names):
+            input_node.get_name.return_value = name
 
         self.assertEqual(
             _ordered_unique_input_names(input_nodes),
-            (shared_name,),
+            ("shared",),
         )
 
     def test_scheduling_disables_fusion(self):
@@ -207,7 +272,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertIsNone(FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0))
 
     def test_precompile_metadata_requires_template_inputs(self):
-        scheduling = FlyDSLScheduling.__new__(FlyDSLScheduling)
+        scheduling = FlyDSLScheduling(scheduler=None)
         kernel = SimpleNamespace(_template_input_args=[])
         layout = SimpleNamespace(
             size=[1],
