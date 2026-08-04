@@ -45,6 +45,7 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
+    has_same_metadata,
     MetadataKey,
     to_fun,
     ViewMetaSequence,
@@ -633,6 +634,35 @@ from a multi-output view call"
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
                 base_idx = existing_out_idx
+            elif (
+                o._base is not None
+                and not is_traceable_wrapper_subclass(o)
+                and has_same_metadata(o, o._base)
+                and (
+                    id(o._base) in out_tensor_ids
+                    or id(o._base) in intermediate_base_tensor_id_to_output_idx
+                )
+            ):
+                # None of the differentiable-alias branches above fired, but o
+                # is a no-op view of another graph output. If we classify it as
+                # non_alias, the backend is free to collapse the view into its
+                # base and return the same tensor object for both outputs,
+                # while eager returns distinct objects. That identity
+                # difference is observable across graph breaks (e.g. an eager
+                # resize_() between two compiled regions corrupts the base).
+                # Regenerate the view at runtime like the differentiable
+                # aliasing cases above. Wrapper subclasses are excluded: their
+                # view_meta_sequence is not captured, and the as_strided
+                # fallback in gen_alias_from_base is not supported by e.g.
+                # DTensor, so they keep the old passthrough behavior.
+                # See https://github.com/pytorch/pytorch/issues/191449
+                maybe_existing_out_idx = out_tensor_ids.get(id(o._base))
+                if maybe_existing_out_idx is not None:
+                    output_type = OutputType.alias_of_intermediate_base_is_user_output
+                    base_idx = maybe_existing_out_idx
+                else:
+                    output_type = OutputType.alias_of_intermediate
+                    base_idx = intermediate_base_tensor_id_to_output_idx[id(o._base)]
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
