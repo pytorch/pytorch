@@ -23,10 +23,12 @@ from ...utils import can_use_tma
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
+    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     set_head_dim_values,
@@ -70,10 +72,19 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
     """
     force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
 
-    short_query_length = V.graph.sizevars.evaluate_expr(
+    # Decode eligibility is an optimization choice, not a user-visible contract,
+    # so every predicate below uses guard_or_false (case 2 of Note [guard_or_]:
+    # the program behaves equivalently whether we pick decode or the general
+    # kernel). guard_or_false returns the real result when ShapeEnv can prove or
+    # guard it, and conservatively returns False for an unprovable unbacked size.
+    # We deliberately do NOT use torch._check here: failing to prove eligibility
+    # must fall back to the general FlexAttention kernel, never impose a runtime
+    # constraint on the user's shapes. We also do NOT use guard_or_true: an
+    # unknown predicate should disable decode, not silently enable it.
+    short_query_length = V.graph.sizevars.guard_or_false(
         sympy.Lt(query.get_size()[-2], 128)
     )
-    non_zero_length = V.graph.sizevars.evaluate_expr(sympy.Gt(query.get_size()[-2], 0))
+    non_zero_length = V.graph.sizevars.guard_or_false(sympy.Gt(query.get_size()[-2], 0))
     static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
     static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
     if enable_gqa:
@@ -81,11 +92,11 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         # same kv head are handled by the same block. So it's hard to support different
         # kv num blocks for grouped query heads. We just fall back to main flex_attention
         # kernel where each query head is handled by a separate block.
-        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+        valid_block_mask_num_heads = V.graph.sizevars.guard_or_false(
             sympy.Eq(kv_indices.get_size()[1], 1)
         )
     else:
-        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+        valid_block_mask_num_heads = V.graph.sizevars.guard_or_false(
             sympy.Or(
                 sympy.Eq(kv_indices.get_size()[1], 1),
                 sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
@@ -151,7 +162,8 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
     else:
         num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
+    if not isinstance(bh, (int, sympy.Integer)):
+        raise AssertionError("B and H must be concrete integers")
     split_k = num_SM // bh * 2  # Each SM should at least get one block.
     # TODO: workload evening at runtime for splits fully masked out.
     # Before we have runtime workload evening, assign 2 splits per SM.
@@ -197,9 +209,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -209,12 +222,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         for k, v in kernel_options.items()
     }
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -429,13 +438,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    filtered_score_mod_buffers = [
-        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
-    ]
-    filtered_mask_mod_buffers = [
-        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Expr)
-    ]
-
     inputs_for_flex_decoding = (
         [
             query,
@@ -448,8 +450,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_num_blocks,
             full_kv_indices,
         ]
-        + filtered_score_mod_buffers
-        + filtered_mask_mod_buffers
+        + list(score_mod_other_buffers)
+        + list(mask_mod_other_buffers)
     )
 
     input_gen_fns = {
@@ -462,7 +464,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
-        inputs_for_flex_decoding,
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_flex_decoding if is_tensor_ir_node(x)],
         layout_acc,
         input_gen_fns=input_gen_fns,
     )

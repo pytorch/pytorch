@@ -9,6 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
 from .hints import (
+    InductorMeta,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
@@ -62,7 +63,7 @@ class CoordescTuner:
         is_mix_order_reduction=False,
         name="unknown",
         size_hints=None,
-        inductor_meta=None,
+        inductor_meta: InductorMeta | None = None,
         frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
@@ -71,12 +72,15 @@ class CoordescTuner:
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
-        assert not (self.is_mm and self.is_native_matmul)
+        if self.is_mm and self.is_native_matmul:
+            raise AssertionError("is_mm and is_native_matmul are mutually exclusive")
         self.is_mix_order_reduction = is_mix_order_reduction
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
-        self.inductor_meta = inductor_meta or {}
+        self.inductor_meta: InductorMeta = (
+            inductor_meta if inductor_meta is not None else {}
+        )
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
@@ -198,7 +202,8 @@ class CoordescTuner:
             # while NUM_STAGES=1 is worse than NUM_STAGES=3
             radius = max(radius, 2)
 
-        assert radius >= 1
+        if radius < 1:
+            raise AssertionError(f"radius must be >= 1, got {radius}")
 
         def update(cur_val, inc=True):
             if name in ["num_stages", "NUM_STAGES"]:
@@ -285,7 +290,10 @@ class CoordescTuner:
 
         configs = []
         for choice in itertools.product(*candidate_values_list):
-            assert len(choice) == len(effective_fields)
+            if len(choice) != len(effective_fields):
+                raise AssertionError(
+                    f"Expected {len(effective_fields)} values, got {len(choice)}"
+                )
             candidate = copy.deepcopy(config)
             for new_val, field in zip(choice, effective_fields):
                 set_field(candidate, field, new_val)
@@ -356,7 +364,8 @@ class CoordescTuner:
         iterating ``tunable_fields`` against arbitrary configs must
         filter empty fields up front; ``autotune`` does."""
         cur_val = get_field(config, field)
-        assert cur_val is not None, f"field {field!r} not present on config"
+        if cur_val is None:
+            raise AssertionError(f"field {field!r} not present on config")
         neighbours = []
         for next_val in self.get_neighbour_values(field, cur_val):
             candidate = copy.deepcopy(config)

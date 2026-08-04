@@ -289,6 +289,24 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
 
+    # For Clang, ask the compiler where it keeps libomp.so before falling back
+    # to the generic search. This avoids picking up GCC's libgomp (which lacks
+    # the __kmpc_* ABI) when libomp lives in a non-standard location (e.g.
+    # inside a ROCm venv SDK directory not in CMAKE_IMPLICIT_LINK_DIRECTORIES).
+    if (NOT OpenMP_libomp_LIBRARY AND CMAKE_${LANG}_COMPILER_ID MATCHES "Clang")
+      execute_process(
+        COMMAND "${CMAKE_${LANG}_COMPILER}" -print-file-name=libomp.so
+        OUTPUT_VARIABLE _omp_clang_lib
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if(_omp_clang_lib AND NOT _omp_clang_lib STREQUAL "libomp.so")
+        set(OpenMP_libomp_LIBRARY "${_omp_clang_lib}" CACHE STRING "libomp location for OpenMP")
+        mark_as_advanced(OpenMP_libomp_LIBRARY)
+      endif()
+      unset(_omp_clang_lib)
+    endif()
+
     if (NOT OpenMP_libomp_LIBRARY)
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
