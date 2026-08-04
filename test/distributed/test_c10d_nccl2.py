@@ -623,6 +623,45 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
             for group in groups:
                 dist.destroy_process_group(group)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_split_group_child_global_ranks(self) -> None:
+        # nccl2's split() copied everything into the child's options except the
+        # parent-global rank map, which FlightRecorderHook then falls back to
+        # identity ranks for -- so a child's recorded membership claimed world
+        # ranks instead of its own.
+        pg = dist.distributed_c10d._get_default_group()
+        # Bring the parent communicator up before splitting it.
+        dist.all_reduce(torch.ones(4, device=self.device))
+        half = self.world_size // 2
+        halves = (
+            list(range(half))
+            if self.rank < half
+            else list(range(half, self.world_size))
+        )
+        child = pg.split_group(halves, group_name=f"halves{halves}")
+        child_options = child._get_backend(self.device).options
+        self.assertEqual(child_options.global_ranks_in_group, halves)
+        if hasattr(child_options.config, "comm_name"):
+            # split() points config.commName at the group_name string for the
+            # ncclCommSplit call; storing that pointer left the child holding
+            # one that outlives its string.
+            self.assertIsNone(child_options.config.comm_name)
+
+        # Splitting the child again must map its ranks through the parent's map
+        # rather than treating them as world ranks.
+        mine = [halves.index(self.rank)]
+        grandchild = child.split_group(mine, group_name=f"single{self.rank}")
+        self.assertEqual(
+            grandchild._get_backend(self.device).options.global_ranks_in_group,
+            [self.rank],
+        )
+
+        t = torch.full((4,), float(self.rank), device=self.device)
+        dist.all_reduce(t, group=child)
+        expected = float(sum(halves))
+        self.assertEqual(t, torch.full_like(t, expected))
+
 
 _UNINITIALIZED_CUDA_SCRIPT = """\
 import torch
