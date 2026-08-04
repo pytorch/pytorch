@@ -671,6 +671,26 @@ def my_subtract(self, other, alpha=1.0) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_subtract.default(self, other, alpha)
 
 
+def my_bitwise_and(self, other) -> Tensor:
+    """Stable bitwise_and.Tensor."""
+    return torch.ops.libtorch_agn_2_10.my_bitwise_and.default(self, other)
+
+
+def my_bitwise_or(self, other) -> Tensor:
+    """Stable bitwise_or.Tensor."""
+    return torch.ops.libtorch_agn_2_10.my_bitwise_or.default(self, other)
+
+
+def my_bitwise_left_shift(self, other) -> Tensor:
+    """Stable bitwise_left_shift.Tensor."""
+    return torch.ops.libtorch_agn_2_10.my_bitwise_left_shift.default(self, other)
+
+
+def my_bitwise_right_shift(self, other) -> Tensor:
+    """Stable bitwise_right_shift.Tensor."""
+    return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

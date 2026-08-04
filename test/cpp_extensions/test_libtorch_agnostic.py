@@ -268,7 +268,7 @@ class TestLibtorchAgnostic(TestCase):
         # Sparse tensors do not own a contiguous storage.
         self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
-    @skipIfTorchVersionLessThan(2, 14)
+    @skipIfTorchVersionLessThan(2, 10)
     @parametrize(
         "torch_op,other_high",
         [
@@ -281,7 +281,7 @@ class TestLibtorchAgnostic(TestCase):
     )
     def test_my_bitwise_ops(self, device, torch_op, other_high):
         """Test bitwise_*.Tensor stable ops (same-shape + broadcasting)."""
-        import libtorch_agn_2_14 as libtorch_agnostic
+        import libtorch_agn_2_10 as libtorch_agnostic
 
         stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}")
 

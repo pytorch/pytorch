@@ -1135,8 +1135,6 @@ inline torch::stable::Tensor full(
   return torch::stable::Tensor(ret0);
 }
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
-
 /// Stable version of the bitwise_and.Tensor op.
 ///
 /// Computes the element-wise bitwise AND of self and other.
@@ -1220,8 +1218,6 @@ inline torch::stable::Tensor bitwise_right_shift(
       "aten::bitwise_right_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
-
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
