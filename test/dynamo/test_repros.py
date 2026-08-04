@@ -1281,7 +1281,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             log_det += torch.zeros(x.size(0), device="meta")
             return log_det
 
-        x = torch.randn(2, 4)
+        x = torch.randn(2, 4, device=device_type)
         eager_out = fn(x)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         compiled_out = compiled_fn(x)
@@ -1309,7 +1309,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/pytorch/issues/90552
     def test_intermediate_leaf_requires_grad(self):
         def f(x):
-            leaf = torch.ones(2, requires_grad=True)
+            leaf = torch.ones(2, device=x.device, requires_grad=True)
             return leaf, leaf * 2
 
         f_compiled = torch.compile(f, backend="aot_eager")
@@ -7720,8 +7720,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 )
                 return self.proj(context)
 
-        model = Model().eval()
-        input_seq = torch.arange(10, dtype=torch.long).view(5, 2)
+        model = Model().eval().to(device_type)
+        input_seq = torch.arange(10, dtype=torch.long, device=device_type).view(5, 2)
         input_lengths = torch.tensor([3, 5], dtype=torch.int64)
 
         expected = model(input_seq, input_lengths)

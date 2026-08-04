@@ -22,6 +22,11 @@ from torch.utils.checkpoint import (
 )
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -1246,7 +1251,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         dist.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
 
         try:
-            mesh = init_device_mesh("cpu", mesh_shape=(1,), mesh_dim_names=("dp",))
+            mesh = init_device_mesh(
+                device_type, mesh_shape=(1,), mesh_dim_names=("dp",)
+            )
 
             @torch.compile(dynamic=False, fullgraph=True)
             def compute_int_stuff(n):
@@ -1282,7 +1289,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             )
 
             x = DTensor.from_local(
-                torch.randn(4, 4, dtype=torch.float32, requires_grad=True),
+                torch.randn(
+                    4, 4, dtype=torch.float32, device=device_type, requires_grad=True
+                ),
                 mesh,
                 (Replicate(),),
             )

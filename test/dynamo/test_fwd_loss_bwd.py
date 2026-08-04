@@ -171,8 +171,8 @@ class <lambda>(torch.nn.Module):
 
     @skipIfCrossRef
     def test_backward_dict_inputs(self):
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4)
+        mod = torch.nn.Linear(4, 4).to(device_type)
+        x = torch.randn(2, 4, device=device_type)
 
         def fn(x):
             res = mod(x)

@@ -538,7 +538,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_itertools_compress_tensors(self):
         def fn():
             return itertools.compress(
-                [torch.tensor([0]), torch.tensor([1]), torch.tensor([2])], [1, 0, 1]
+                [
+                    torch.tensor([0], device=device_type),
+                    torch.tensor([1], device=device_type),
+                    torch.tensor([2], device=device_type),
+                ],
+                [1, 0, 1],
             )
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)

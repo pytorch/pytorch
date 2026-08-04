@@ -436,13 +436,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 return grad * 3
 
         def fn(w):
-            y = torch.ones(2, 2) @ w
+            y = torch.ones(2, 2, device=device_type) @ w
             TimesThreeInplace.apply(y)
             return y.sum()
 
         def grad_for(compiled):
             torch._dynamo.reset()
-            w = torch.eye(2, requires_grad=True)
+            w = torch.eye(2, device=device_type, requires_grad=True)
             f = torch.compile(fn, backend="eager", fullgraph=True) if compiled else fn
             loss = f(w)
             loss.backward()
@@ -1901,7 +1901,9 @@ class GraphModule(torch.nn.Module):
             return Foo.apply(x, x).sum()
 
         def check_fallback():
-            x = torch.tensor([0.7, -1.3, 2.1, 0.05, -0.5], requires_grad=True)
+            x = torch.tensor(
+                [0.7, -1.3, 2.1, 0.05, -0.5], device=device_type, requires_grad=True
+            )
 
             x_ref = x.detach().clone().requires_grad_(True)
             ref = fn(x_ref)
@@ -2588,7 +2590,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return MySin.apply(x, factor=6)
 
-        x = torch.tensor([0.812], requires_grad=True)
+        x = torch.tensor([0.812], device=device_type, requires_grad=True)
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
@@ -2619,7 +2621,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return MyScale.apply(x, factor=3)
 
-        x = torch.tensor([2.0], requires_grad=True)
+        x = torch.tensor([2.0], device=device_type, requires_grad=True)
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
