@@ -1226,6 +1226,50 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_world_pg_created_after_another_nccl_pg(self):
+        # Regression test: ProcessGroupNCCL::groupRanks() used to derive the
+        # identity rank mapping only when local_id_ == 0. local_id_ is a
+        # process-global counter over every ProcessGroupNCCL constructed in the
+        # process, so a default pg built after any other nccl pg (e.g. a
+        # stateless pg, one inherited across fork, or an earlier
+        # init_process_group that was destroyed) fell through to its empty
+        # global_ranks_in_group, and split() then indexed that empty vector and
+        # segfaulted on a null data pointer.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # (1) burn local_id_ == 0 on an unrelated nccl pg.
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.PrefixStore("prior", store),
+        )
+        dist.destroy_process_group()
+        # (2) the real default pg -> global_ranks_in_group empty.
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.PrefixStore("world", store),
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+
+        ranks = list(range(self.world_size))
+        ng = c10d.split_group(pg, [ranks])
+        self.assertIsNotNone(ng)
+        self.assertEqual(dist.get_process_group_ranks(ng), ranks)
+        self.assertEqual(ng._get_backend(device).options.global_ranks_in_group, ranks)
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        dist.broadcast(tensor, 0, group=ng)
+        self.assertEqual(tensor, torch.full((1,), 0))
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_mixed_backend(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
