@@ -2127,7 +2127,7 @@ test_torchtitan() {
     popd
   fi
 
-  pip_install helion --no-deps
+  pip_install helion
 
   pushd torchtitan
   pip_install -e .
