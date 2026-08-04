@@ -59,8 +59,9 @@ DeviceIndex XPUHooks::current_device() const {
 }
 
 void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {
-  // See Note [Synchronize Streams on Device].
-  c10::xpu::device_synchronize(device_index);
+  // Only the SYCL queues we have reserved will be synchronized, see Note
+  // [Synchronize Streams on Device].
+  c10::xpu::syncStreamsOnDevice(device_index);
 }
 
 Allocator* XPUHooks::getPinnedMemoryAllocator() const {

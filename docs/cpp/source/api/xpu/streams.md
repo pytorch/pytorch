@@ -46,5 +46,5 @@ stream.synchronize();
 
 ## Stream Synchronization
 
-```{doxygenfunction} c10::xpu::device_synchronize
+```{doxygenfunction} c10::xpu::syncStreamsOnDevice
 ```

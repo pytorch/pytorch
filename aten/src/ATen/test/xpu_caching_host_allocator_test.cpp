@@ -144,7 +144,7 @@ TEST(CachingHostAllocatorTest, testEmptyCache) {
   {
     auto pinned_tensor = at::empty(
         {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
-    c10::xpu::device_synchronize();
+    at::xpu::syncStreamsOnDevice();
   }
 
   at::getHostAllocator(at::kXPU)->empty_cache();
