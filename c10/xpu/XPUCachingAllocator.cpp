@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
