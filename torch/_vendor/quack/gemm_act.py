@@ -469,9 +469,12 @@ class GemmActMixin(ComposableEpiMixin):
                     if const_expr(arg_kind == 4):
                         scalar = scalars[scalar_arg_index]
                         scalar_arg_index += 1
-                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
-                        tRS_rScalar.fill(scalar[0])
-                        epilogue_aux_values.append(tRS_rScalar.load())
+                        if const_expr(self.grouped_n_contract_group == 1):
+                            tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
+                            tRS_rScalar.fill(scalar[0])
+                            epilogue_aux_values.append(tRS_rScalar.load())
+                        else:
+                            epilogue_aux_values.append(scalar[0])
                     else:
                         if const_expr(arg_kind == 1):
                             epilogue_aux = tRsTileAuxes[tile_arg_index]
@@ -482,11 +485,18 @@ class GemmActMixin(ComposableEpiMixin):
                         else:
                             epilogue_aux = tDrColVecs[col_arg_index]
                             col_arg_index += 1
-                        tRS_rEpilogueAux = cute.make_rmem_tensor_like(
-                            tRS_rD, epilogue_aux.element_type
-                        )
-                        tRS_rEpilogueAux.store(epilogue_aux.load())
-                        epilogue_aux_values.append(tRS_rEpilogueAux.load())
+                        if const_expr(
+                            self.grouped_n_contract_group != 1 and arg_kind == 3
+                        ):
+                            epilogue_aux_values.append(
+                                cute.filter_zeros(epilogue_aux).load()[0]
+                            )
+                        else:
+                            tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+                                tRS_rD, epilogue_aux.element_type
+                            )
+                            tRS_rEpilogueAux.store(epilogue_aux.load())
+                            epilogue_aux_values.append(tRS_rEpilogueAux.load())
             if const_expr(tDrLocalReduceValue is not None):
                 epilogue_aux_values.append(tDrLocalReduceValue.load())
             epilogue_result = params.tensor_epilogue_fn(
@@ -582,6 +592,9 @@ class GemmGroupedNContractMixin(GemmActMixin):
         Scalar("sr_seed", dtype=Int32),
         RowVecLoad("mRowVecBroadcast"),
         ColVecLoad("mColVecBroadcast"),
+        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
+        ScalarTupleLoad("mTensorEpilogueScalars"),
+        # TODO: Add row/tile captures after chunked N-sensitive loads are remapped.
         GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
     )
@@ -608,6 +621,8 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
         Scalar("sr_seed", dtype=Int32),
         RowVecLoad("mRowVecBroadcast"),
         ColVecLoad("mColVecBroadcast"),
+        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
+        ScalarTupleLoad("mTensorEpilogueScalars"),
         GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
     )
