@@ -18759,7 +18759,6 @@ def forward(self, x, y):
         self.assertEqual(result.shape, (1, 256, 64))
 
 
-
 class TestExportCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -18948,6 +18947,7 @@ def forward(self, x):
             export_out_v2 = gm(inp)
             eager_out_v2 = container_eager(inp)
             self.assertEqual(export_out_v2, eager_out_v2)
+
 
 class TestExportAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -19399,11 +19399,7 @@ def _clone_export_device_test_class(cls):
     return type(
         cls.__name__,
         cls.__bases__,
-        {
-            k: v
-            for k, v in cls.__dict__.items()
-            if k not in ("__dict__", "__weakref__")
-        },
+        {k: v for k, v in cls.__dict__.items() if k not in ("__dict__", "__weakref__")},
     )
 
 
