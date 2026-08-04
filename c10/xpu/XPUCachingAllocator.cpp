@@ -2345,7 +2345,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocators[device]->setNoSplit(std::move(mempool_id));
+    device_allocators[device]->setNoSplit(mempool_id);
   }
 
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
