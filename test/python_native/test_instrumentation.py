@@ -410,6 +410,15 @@ class TestTlparseOutput(TestCase):
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
 
+        # Own trace_log's handler list outright. _init_logs() (run by
+        # log_settings) installs LazyTraceHandler, which unregisters itself on
+        # its first emit -- and mutating the list mid-dispatch makes
+        # Logger.callHandlers skip the handler right after it, silently
+        # dropping the first record from ours.
+        self._saved_handlers = list(trace_log.handlers)
+        for h in self._saved_handlers:
+            trace_log.removeHandler(h)
+
         # Raw trace file in the on-disk format tlparse consumes, written via
         # the same TorchLogsFormatter(trace=True) that TORCH_TRACE installs.
         # NB: this handler must be registered BEFORE the capture handler --
@@ -437,6 +446,8 @@ class TestTlparseOutput(TestCase):
         self.raw_file.close()
         os.unlink(self.raw_file.name)
         trace_log.setLevel(self.old_level)
+        for h in self._saved_handlers:
+            trace_log.addHandler(h)
         self._log_settings.close()
         super().tearDown()
 
