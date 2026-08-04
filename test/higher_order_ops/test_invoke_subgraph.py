@@ -4187,11 +4187,10 @@ class GraphModule(torch.nn.Module):
             return x.sin() if isinstance(c, bool) else x.cos()
 
         x = torch.randn(8)
-        fns = (
+        for fn in (
             lambda x: gn(x, Mode.ADD) + gn(x, 1),
             lambda x: hn(x, True) + hn(x, 1),
-        )
-        for fn in fns:
+        ):
             torch._dynamo.reset()
             with self._count_speculate_calls() as count:
                 res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
@@ -4323,6 +4322,58 @@ class GraphModule(torch.nn.Module):
             _reuse_test_global = torch.tensor(10)
             res = torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(res, ref)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_attr_mutated_to_intermediate(self):
+        """A region reading an attribute set to a graph intermediate must retrace."""
+
+        class Holder:
+            def __init__(self):
+                self.t = torch.tensor(0.0)
+
+        holder = Holder()
+
+        @nested_compile_region
+        def gn(x):
+            return x + holder.t
+
+        def fn(x):
+            holder.t = x.sin()
+            return gn(x) + gn(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_container_item_mutated_to_intermediate(self):
+        """A region reading a list slot set to a graph intermediate must retrace.
+
+        Unlike test_subgraph_reuse_attr_mutated_to_intermediate, the list is
+        materialized before the region runs, so the region's read hits the
+        source-keyed VariableTracker cache instead of VariableBuilder.
+        """
+        global _reuse_test_global
+
+        @nested_compile_region
+        def gn(x):
+            return x + _reuse_test_global[0]
+
+        def fn(x):
+            _reuse_test_global[0] = x.sin()
+            return gn(x) + gn(x)
+
+        try:
+            _reuse_test_global = [torch.tensor(0.0)]
+            x = torch.randn(8)
+            ref = fn(x)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            self.assertEqual(count(), 2)
         finally:
             _reuse_test_global = None
 

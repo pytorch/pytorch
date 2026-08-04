@@ -859,6 +859,8 @@ def save_reuse_entry(
     subgraph_input_mapping = build_subgraph_input_mapping(
         tx, p_args, fingerprint.flat_vts
     )
+    if subgraph_input_mapping is None:
+        return
     single_tensor_output = isinstance(body_r, TensorVariable)
 
     # Count user-visible outputs from body_r. The graph may have additional
@@ -1081,7 +1083,7 @@ def build_subgraph_input_mapping(
     tx: "InstructionTranslatorBase",
     p_args: tuple[Any, ...],
     flat_vts: list[tuple[InputTag, VariableTracker]],
-) -> list[LiftedArgOrigin]:
+) -> list[LiftedArgOrigin] | None:
     """Build a mapping that records the origin of each lifted arg for a subgraph.
 
     On a cache hit, we stamp out a new invoke_subgraph call and need to
@@ -1092,6 +1094,9 @@ def build_subgraph_input_mapping(
     - LiftedCapturedSource: a captured variable (e.g. a weight or parameter)
     - LiftedSyntheticObject: a TorchScriptObject with a SyntheticLocalSource
     - LiftedBoundSymbol: a SymInt already bound as a graph input
+
+    Returns None if some lifted arg cannot be re-derived at a future call
+    site, meaning the subgraph is not reusable.
     """
     proxy_node_to_idx: dict[torch.fx.Node, int] = {}
     idx = 0
@@ -1126,11 +1131,18 @@ def build_subgraph_input_mapping(
                 subgraph_input_mapping.append(LiftedBoundSymbol(example.node.expr))
                 continue
             if source is None:
-                raise AssertionError(
-                    f"Freevar has no source: node.op={outer_proxy.node.op} "
-                    f"node.name={outer_proxy.node.name} -- this likely means a "
-                    f"function argument was not included in the proxy matching"
+                # A captured graph intermediate cannot be re-derived at the
+                # next call site, so the region is simply not reusable. This
+                # also backstops an under-recorded read: had the region's
+                # traced_sources named whatever produced this value, the
+                # mutation check would have rejected reuse earlier.
+                hc_log.debug(
+                    "subgraph_reuse: not eligible -- freevar has no source: "
+                    "node.op=%s node.name=%s",
+                    outer_proxy.node.op,
+                    outer_proxy.node.name,
                 )
+                return None
             if isinstance(source, SyntheticLocalSource):
                 ctor_info = tx.output.synthetic_source_ctor_info.get(source)
                 if ctor_info is not None:
