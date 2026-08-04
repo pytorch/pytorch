@@ -1,8 +1,8 @@
 #include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/xpu/MemPool.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGraph.h>
-#include <ATen/xpu/MemPool.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <cstddef>
