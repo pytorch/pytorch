@@ -584,44 +584,46 @@ __device__ __attribute__((flatten)) void c10_rocm_assert_one_shot(
   __builtin_trap();
 }
 
+template <unsigned N>
+__host__ __device__ inline void c10_rocm_kernel_assert(
+    const char* cond,
+    const char* file,
+    unsigned int line,
+    const char (&msg)[N]) {
 #if defined(__HIP_DEVICE_COMPILE__)
-#define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
-  do {                                                                       \
-    (void)cond;                                                              \
-    (void)file;                                                              \
-    (void)line;                                                              \
-    constexpr auto _c10_assert_msg =                                         \
-        c10_rocm_assert_concat(prefix, func, suffix);                        \
-    c10_rocm_assert_one_shot(_c10_assert_msg.data);                          \
-  } while (0)
+  (void)cond;
+  (void)file;
+  (void)line;
+  c10_rocm_assert_one_shot(msg);
 #else
-#define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
-  __assert_fail(cond, file, line, func)
+  (void)msg;
+  __assert_fail(cond, file, line, __func__);
 #endif
-#else
-#define C10_ROCM_KERNEL_ASSERT_INVOKE(cond, file, line, func, prefix, suffix) \
-  __assert_fail(cond, file, line, func)
-#endif
+}
 
 #define CUDA_KERNEL_ASSERT(cond)                        \
   if C10_UNLIKELY (!(cond)) {                           \
-    C10_ROCM_KERNEL_ASSERT_INVOKE(                      \
+    c10_rocm_kernel_assert(                             \
         #cond,                                          \
         __FILE__,                                       \
         static_cast<unsigned int>(__LINE__),            \
-        __func__,                                       \
-        __FILE__ ":" C10_STRINGIZE(__LINE__) ":",       \
-        ": Device-side assertion " #cond " failed.\n"); \
+        c10_rocm_assert_concat(                         \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ":",   \
+            __func__,                                   \
+            ": Device-side assertion `" #cond "` failed.\n") \
+            .data);                                     \
   }
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)         \
   if C10_UNLIKELY (!(cond)) {                     \
-    C10_ROCM_KERNEL_ASSERT_INVOKE(                \
+    c10_rocm_kernel_assert(                       \
         msg,                                      \
         __FILE__,                                 \
         static_cast<unsigned int>(__LINE__),      \
-        __func__,                                 \
-        __FILE__ ":" C10_STRINGIZE(__LINE__) ":", \
-        ": Device-side assertion failed.\n");     \
+        c10_rocm_assert_concat(                   \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ":", \
+            __func__,                             \
+            ": Device-side assertion failed.\n")  \
+            .data);                               \
   }
 #define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                         \
   if C10_UNLIKELY (!(cond)) {                                             \
@@ -637,14 +639,45 @@ __device__ __attribute__((flatten)) void c10_rocm_assert_one_shot(
         threadIdx.y,                                                    \
         threadIdx.z,                                                    \
         ##__VA_ARGS__); \
-    C10_ROCM_KERNEL_ASSERT_INVOKE(                                        \
+    c10_rocm_kernel_assert(                                               \
         #cond,                                                            \
         __FILE__,                                                         \
         static_cast<unsigned int>(__LINE__),                              \
-        __func__,                                                         \
-        __FILE__ ":" C10_STRINGIZE(__LINE__) ":",                         \
-        ": Device-side assertion " #cond " failed.\n");                   \
+        c10_rocm_assert_concat(                                           \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ":",                     \
+            __func__,                                                     \
+            ": Device-side assertion `" #cond "` failed.\n")             \
+            .data);                                                       \
   }
+#else
+#define CUDA_KERNEL_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
+  if (C10_UNLIKELY(!(cond))) {                                         \
+    __assert_fail(                                                     \
+        msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                        \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    printf(                                                            \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
+            "Assertion failed: `" #cond "`: " msg "\n",                \
+        __func__,                                                      \
+        blockIdx.x,                                                    \
+        blockIdx.y,                                                    \
+        blockIdx.z,                                                    \
+        threadIdx.x,                                                   \
+        threadIdx.y,                                                   \
+        threadIdx.z,                                                   \
+        ##__VA_ARGS__); \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#endif
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
