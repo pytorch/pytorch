@@ -27,7 +27,47 @@ index f6bbf7f..0fc8cc0 100644
 +
 @@ -120,0 +136 @@ class GemmActMixin(ComposableEpiMixin):
 +    grouped_n_contract_group = 1
-@@ -446,10 +461,0 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -426,9 +426,12 @@ class GemmActMixin(ComposableEpiMixin):
+                     if const_expr(arg_kind == 4):
+                         scalar = scalars[scalar_arg_index]
+                         scalar_arg_index += 1
+-                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
+-                        tRS_rScalar.fill(scalar[0])
+-                        epilogue_aux_values.append(tRS_rScalar.load())
++                        if const_expr(self.grouped_n_contract_group == 1):
++                            tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
++                            tRS_rScalar.fill(scalar[0])
++                            epilogue_aux_values.append(tRS_rScalar.load())
++                        else:
++                            epilogue_aux_values.append(scalar[0])
+                     else:
+                         if const_expr(arg_kind == 1):
+                             epilogue_aux = tRsTileAuxes[tile_arg_index]
+@@ -439,11 +442,18 @@ class GemmActMixin(ComposableEpiMixin):
+                         else:
+                             epilogue_aux = tDrColVecs[col_arg_index]
+                             col_arg_index += 1
+-                        tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+-                            tRS_rD, epilogue_aux.element_type
+-                        )
+-                        tRS_rEpilogueAux.store(epilogue_aux.load())
+-                        epilogue_aux_values.append(tRS_rEpilogueAux.load())
++                        if const_expr(
++                            self.grouped_n_contract_group != 1 and arg_kind == 3
++                        ):
++                            epilogue_aux_values.append(
++                                cute.filter_zeros(epilogue_aux).load()[0]
++                            )
++                        else:
++                            tRS_rEpilogueAux = cute.make_rmem_tensor_like(
++                                tRS_rD, epilogue_aux.element_type
++                            )
++                            tRS_rEpilogueAux.store(epilogue_aux.load())
++                            epilogue_aux_values.append(tRS_rEpilogueAux.load())
+             if const_expr(tDrLocalReduceValue is not None):
+                 epilogue_aux_values.append(tDrLocalReduceValue.load())
+             epilogue_result = params.tensor_epilogue_fn(
+@@ -446,10 +456,0 @@ class GemmActMixin(ComposableEpiMixin):
 -            elif const_expr(params.tensor_epilogue_returns_local_reduce):
 -                tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
 -                if const_expr(params.local_reduce_feeds_main):
@@ -57,7 +97,7 @@ index f6bbf7f..0fc8cc0 100644
 +                    result_dtype = main_result.element_type
 +                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
 +                tRS_rAuxOut.store(main_result)
-@@ -491,0 +508,57 @@ class GemmActSm120(GemmActMixin, GemmSm120):
+@@ -491,0 +508,62 @@ class GemmActSm120(GemmActMixin, GemmSm120):
 +def _grouped_n_contract_epi_tile(epi_tile, group):
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
@@ -86,6 +126,9 @@ index f6bbf7f..0fc8cc0 100644
 +        Scalar("sr_seed", dtype=Int32),
 +        RowVecLoad("mRowVecBroadcast"),
 +        ColVecLoad("mColVecBroadcast"),
++        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
++        ScalarTupleLoad("mTensorEpilogueScalars"),
++        # TODO: Add row/tile captures after chunked N-sensitive loads are remapped.
 +        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
 +    )
 +
@@ -111,6 +154,8 @@ index f6bbf7f..0fc8cc0 100644
 +        Scalar("sr_seed", dtype=Int32),
 +        RowVecLoad("mRowVecBroadcast"),
 +        ColVecLoad("mColVecBroadcast"),
++        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
++        ScalarTupleLoad("mTensorEpilogueScalars"),
 +        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
 +    )
 +

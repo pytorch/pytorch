@@ -3668,6 +3668,67 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @parametrize(
+        "case",
+        (
+            ("scalar_pre", "scalar", "pre", False),
+            ("scalar_post_chunked", "scalar", "post", True),
+            ("col_pre", "col", "pre", False),
+            ("col_post_chunked", "col", "post", True),
+            ("col_mixed", "col", "mixed", False),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_grouped_main_with_n_invariant_capture(self, case):
+        _, capture_kind, capture_use, chunked = case
+        m = k = n = 64
+
+        def epilogue(acc, capture):
+            value = acc.float()
+            if capture_use == "pre":
+                value = value * capture
+            if chunked:
+                lhs, rhs = value.chunk(2, dim=-1)
+            else:
+                lanes = value.view(m, n, 2)
+                lhs, rhs = lanes[..., 0], lanes[..., 1]
+            if capture_use == "post":
+                return ((lhs - rhs) * capture).to(acc.dtype)
+            if capture_use == "mixed":
+                return (lhs * capture - rhs).to(acc.dtype)
+            return (lhs - rhs).to(acc.dtype)
+
+        def fn(a, b, capture):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue(acc, capture),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        b = (
+            torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
+            if chunked
+            else torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+        )
+        capture_shape = (1, 1) if capture_kind == "scalar" else (m, 1)
+        capture = torch.randn(*capture_shape, device="cuda", dtype=torch.float32)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, capture
+        )
+
+        torch.testing.assert_close(
+            actual, epilogue(a @ b, capture), atol=0.2, rtol=0.05
+        )
+        FileCheck().check(f"epilogue_arg_kinds=('{capture_kind}',)").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10,
         "interleaved group 4 is currently validated only on SM100",
@@ -3675,32 +3736,35 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_grouped_main_output_group4(self):
         m, k, n, group = 64, 64, 64, 4
 
-        def epilogue(acc):
+        def epilogue(acc, scale, col):
             lanes = acc.float().view(m, n, group)
             return (
-                lanes[..., 0]
-                + 2 * lanes[..., 1]
-                + 3 * lanes[..., 2]
-                + 5 * lanes[..., 3]
+                (lanes[..., 0] - lanes[..., 1]) * scale
+                + lanes[..., 2] * col
+                - lanes[..., 3]
             ).to(acc.dtype)
 
-        def fn(a, b):
+        def fn(a, b, scale, col):
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                epilogue,
+                lambda acc: epilogue(acc, scale, col),
                 kernel_options={"backend": "QUACK"},
             )
 
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
         b = torch.randn(k, group * n, device="cuda", dtype=torch.float16)
+        scale = torch.randn(1, 1, device="cuda", dtype=torch.float32)
+        col = torch.randn(m, 1, device="cuda", dtype=torch.float32)
         actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale, col
         )
 
-        torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=5e-2)
+        torch.testing.assert_close(
+            actual, epilogue(a @ b, scale, col), atol=2e-1, rtol=5e-2
+        )
         self.assertEqual(actual.shape, (m, n))
-        FileCheck().check(
+        FileCheck().check("epilogue_arg_kinds=('scalar', 'col')").check(
             "FlexGemmGroupedMainOutputTransform(group=4, chunked=False)"
         ).check_not("extern_kernels.mm").run(code)
 
@@ -3712,20 +3776,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_grouped_n_main_output_dynamic_m(self, chunked):
         k = n = 64
 
-        def epilogue(acc):
+        def epilogue(acc, col):
             value = acc.float()
             if chunked:
                 gate, up = value.chunk(2, dim=-1)
             else:
                 lanes = value.view(-1, n, 2)
                 gate, up = lanes[..., 0], lanes[..., 1]
-            return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
+            return (torch.nn.functional.silu(gate) * up * col).to(acc.dtype)
 
-        def fn(a, b):
+        def fn(a, b, col):
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                epilogue,
+                lambda acc: epilogue(acc, col),
                 kernel_options={"backend": "QUACK"},
             )
 
@@ -3734,9 +3798,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
         for index, m in enumerate((64, 128)):
             a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+            col = torch.randn(m, 1, device="cuda", dtype=torch.float32)
             if index == 0:
                 torch._dynamo.mark_dynamic(a, 0)
-            torch.testing.assert_close(compiled(a, b), fn(a, b), atol=1e-1, rtol=1e-1)
+                torch._dynamo.mark_dynamic(col, 0)
+            torch.testing.assert_close(
+                compiled(a, b, col), epilogue(a @ b, col), atol=1e-1, rtol=1e-1
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4048,13 +4116,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             with self.assertRaisesRegex(InductorError, "group 2.*group 4"):
                 torch.compile(group_eight, backend="inductor", fullgraph=True)(a, b)
 
-        with self.subTest("capture"):
+        with self.subTest("n_varying_capture"):
             torch._dynamo.reset()
 
             def captured(a, b, scale):
                 def epilogue(acc):
-                    lanes = acc.view(m, n, 2)
-                    return (lanes[..., 0] - lanes[..., 1]) * scale
+                    lanes = (acc * scale).view(m, n, 2)
+                    return lanes[..., 0] - lanes[..., 1]
 
                 return flex_gemm(
                     torch.mm,
@@ -4064,8 +4132,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 )
 
             b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
-            scale = torch.randn(1, 1, device="cuda", dtype=torch.float16)
-            with self.assertRaisesRegex(InductorError, "physical accumulator layout"):
+            scale = torch.randn(1, 2 * n, device="cuda", dtype=torch.float16)
+            with self.assertRaisesRegex(InductorError, "numeric.*captured tensors"):
+                torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
+
+        with self.subTest("boolean_capture"):
+            torch._dynamo.reset()
+            b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+            scale = torch.ones(1, 1, device="cuda", dtype=torch.bool)
+            with self.assertRaisesRegex(InductorError, "numeric.*captured tensors"):
                 torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
 
         with self.subTest("chunked_contiguous_b"):
