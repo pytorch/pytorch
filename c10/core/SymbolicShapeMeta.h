@@ -56,6 +56,11 @@ class C10_API SymbolicShapeMeta {
     is_non_overlapping_and_dense_ = false;
   }
 
+  void refresh_materialized() {
+    available_.fetch_and(
+        ~(sizes_materialized_avail | strides_materialized_avail));
+  }
+
   int64_t dim() const {
     return static_cast<int64_t>(sizes_.size());
   }
