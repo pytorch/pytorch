@@ -420,7 +420,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertLessEqual(
                 comm_mode.get_total_counts(),
                 1,  # TODO: This should be 0!
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -508,7 +508,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -522,7 +522,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -777,12 +777,12 @@ class DistMathOpsTest(DTensorTestBase):
             # Verify gradient exists, has the right placement, and matches
             self.assertIsNotNone(
                 dist_x.grad,
-                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+                msg=lambda msg: f"{msg}\ntopk_dim={topk_dim}, shard_dim={shard_dim}",
             )
             self.assertEqual(
                 dist_x.grad.full_tensor(),
                 x.grad,
-                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+                msg=lambda msg: f"{msg}\ntopk_dim={topk_dim}, shard_dim={shard_dim}",
             )
             x.grad.zero_()
 
@@ -1192,6 +1192,95 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertEqual(output_dtensor.full_tensor(), output)
 
     @with_comms
+    def test_scan_ops_backward(self):
+        device_mesh = self.build_device_mesh()
+
+        for op, placements in itertools.product(
+            [torch.cumprod, torch.logcumsumexp],
+            [[Shard(0)], [Shard(1)], [Replicate()]],
+        ):
+            for dim in [0, 1]:
+                has_zero_cases = [False, True] if op is torch.cumprod else [False]
+                for has_zero in has_zero_cases:
+                    with self.subTest(
+                        op=op.__name__,
+                        placements=placements,
+                        dim=dim,
+                        has_zero=has_zero,
+                    ):
+                        x = torch.rand(12, 8, device=self.device_type).add_(0.1)
+                        if has_zero:
+                            x.select(dim, x.size(dim) // 2).zero_()
+                        x.requires_grad_()
+                        ref_out = op(x, dim=dim)
+                        ref_out.sum().backward()
+
+                        dist_x = distribute_tensor(
+                            x.detach().clone().requires_grad_(True),
+                            device_mesh,
+                            placements,
+                        )
+                        dist_out = op(dist_x, dim=dim)
+                        dist_out.sum().backward()
+
+                        self.assertEqual(dist_out.full_tensor(), ref_out)
+                        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    def test_cumprod_backward_higher_order(self):
+        device_mesh = self.build_device_mesh()
+        dim = 0
+        x = torch.rand(4, 3, device=self.device_type).add_(0.1)
+        x.select(dim, x.size(dim) // 2).zero_()
+        x.requires_grad_()
+
+        ref_out = torch.cumprod(x, dim=dim)
+        ref_grad = torch.autograd.grad(ref_out.sum(), x, create_graph=True)[0]
+        ref_grad.sum().backward()
+
+        dist_x = distribute_tensor(
+            x.detach().clone().requires_grad_(True),
+            device_mesh,
+            [Shard(0)],
+        )
+        dist_out = torch.cumprod(dist_x, dim=dim)
+        dist_grad = torch.autograd.grad(dist_out.sum(), dist_x, create_graph=True)[0]
+        dist_grad.full_tensor().sum().backward()
+
+        self.assertEqual(dist_out.full_tensor(), ref_out)
+        self.assertEqual(dist_grad.full_tensor(), ref_grad)
+        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    def test_masked_cumprod_backward(self):
+        device_mesh = self.build_device_mesh()
+        row_idx = torch.arange(12, device=self.device_type).unsqueeze(1)
+        col_idx = torch.arange(8, device=self.device_type).unsqueeze(0)
+        mask = (row_idx + col_idx) % 2 == 0
+
+        for placements, dim in itertools.product(
+            [[Shard(0)], [Shard(1)], [Replicate()]],
+            [0, 1],
+        ):
+            with self.subTest(placements=placements, dim=dim):
+                x = torch.rand(12, 8, device=self.device_type).add_(0.1)
+                x.requires_grad_()
+                ref_out = torch.masked.cumprod(x, mask=mask, dim=dim)
+                ref_out.sum().backward()
+
+                dist_x = distribute_tensor(
+                    x.detach().clone().requires_grad_(True),
+                    device_mesh,
+                    placements,
+                )
+                dist_mask = distribute_tensor(mask, device_mesh, [Replicate()])
+                dist_out = torch.masked.cumprod(dist_x, mask=dist_mask, dim=dim)
+                dist_out.sum().backward()
+
+                self.assertEqual(dist_out.full_tensor(), ref_out)
+                self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
     def test_scan_ops_with_indices(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -1212,6 +1301,32 @@ class DistMathOpsTest(DTensorTestBase):
                 else:
                     self.assertTrue(dt_values.placements[0].is_shard(shard_dim))
                 self.assertEqual(dt_values.full_tensor(), values)
+
+    @with_comms
+    def test_scan_ops_with_indices_backward(self):
+        device_mesh = self.build_device_mesh()
+
+        for op, placements in itertools.product(
+            [torch.cummax, torch.cummin],
+            [[Shard(0)], [Shard(1)], [Replicate()]],
+        ):
+            for dim in [0, 1]:
+                with self.subTest(op=op.__name__, placements=placements, dim=dim):
+                    x = torch.randn(12, 8, device=self.device_type, requires_grad=True)
+                    ref_values, ref_indices = op(x, dim=dim)
+                    ref_values.sum().backward()
+
+                    dist_x = distribute_tensor(
+                        x.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        placements,
+                    )
+                    dist_values, dist_indices = op(dist_x, dim=dim)
+                    dist_values.sum().backward()
+
+                    self.assertEqual(dist_values.full_tensor(), ref_values)
+                    self.assertEqual(dist_indices.full_tensor(), ref_indices)
+                    self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
     def test_median(self):
@@ -1638,7 +1753,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 allreduce_count,
                 expected_allreduce_count,
-                f"reduction='{reduction}': expected {expected_allreduce_count} "
+                lambda msg: f"{msg}\nreduction='{reduction}': expected {expected_allreduce_count} "
                 f"backward all-reduce(s), got {allreduce_count}. "
                 f"Full comm counts: {pformat(dict(comm_mode.get_comm_counts()))}",
             )
@@ -1791,7 +1906,7 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertEqual(
                         comm_mode.get_total_counts(),
                         0,
-                        f"Unexpected communication for "
+                        lambda msg: f"{msg}\nUnexpected communication for "
                         f"{kwargs['mode']} with {placements}",
                     )
 
