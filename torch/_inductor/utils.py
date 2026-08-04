@@ -1867,7 +1867,7 @@ def get_default_kpack(block_k: int = 16) -> int:
 
 # MFMA K-extent (kdim) for the CDNA "16x16" and "32x32" MMA families, keyed by
 # (element_byte_width, matrix_instr_nonkdim). Values from the gfx942/gfx950
-# V_MFMA_* ISA table. 
+# V_MFMA_* ISA table.
 _MFMA_KDIM = {
     # nonkdim == 16 : 16x16x{K}
     (4, 16): 4,  # f32      -> 16x16x4
