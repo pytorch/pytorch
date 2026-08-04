@@ -9,7 +9,7 @@ def fn(x, scale, shift):
 @torch.jit.script
 def recurrent(x, scale, shift):
     y = x
-    for i in range(100):
+    for _ in range(100):
         y = fn(y, scale, shift)
     return y
 
@@ -30,7 +30,7 @@ import torch
 @torch.jit.script
 def recurrent_scaleshift(x, scale, shift):
     y = x
-    for i in range(64):
+    for _ in range(64):
         y = scale * y + shift
     return y
 

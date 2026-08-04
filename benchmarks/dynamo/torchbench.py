@@ -41,7 +41,7 @@ def _reassign_parameters(model):
     # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
     # Since it is unusual thing to do, we just reassign them to parameters
     def state_dict_hook(module, destination, prefix, local_metadata):
-        for name, param in module.named_parameters():
+        for name, _param in module.named_parameters():
             if isinstance(destination[name], torch.Tensor) and not isinstance(
                 destination[name], torch.nn.Parameter
             ):
