@@ -12,6 +12,7 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+from torch._inductor.codegen.common import get_custom_backend_config_for_device
 
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
@@ -433,7 +434,6 @@ def patch_inductor_backend(
     Patch the inductor backend for a specific device.
     """
     from torch._inductor.codegen.common import (
-        get_custom_backend_config_for_device,
         get_custom_backend_pass_for_device,
         get_scheduling_for_device,
         get_wrapper_codegen_for_device,
