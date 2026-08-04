@@ -470,7 +470,6 @@ class TestSplitDevice(TestCase):
                 self.assertEqual(ordered.shape[0], 3)
                 self.assertEqual(ordered.shape[2], 5)
 
-instantiate_device_type_tests(TestSplit, globals())
 instantiate_device_type_tests(TestSplitDevice, globals())
 
 if __name__ == "__main__":
