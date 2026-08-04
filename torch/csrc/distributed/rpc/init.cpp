@@ -249,7 +249,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               R"(
                   Returns whether this ``RRef`` has been confirmed by the owner.
                   ``OwnerRRef`` always returns true, while ``UserRRef`` only
-                  returns true when the owner knowns about this ``UserRRef``.
+                  returns true when the owner knows about this ``UserRRef``.
               )")
           .def(
               // not releasing GIL here to avoid context switch on getters
