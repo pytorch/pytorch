@@ -17,8 +17,6 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/OpMathType.h>
 
-#include <optional>
-
 namespace at::cuda::blas {
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
@@ -132,10 +130,13 @@ bool gemm_and_bias(
     // two live in one function because everything around the operands -- the
     // reduction-scheme masks, SM carveout, alignment preferences and heuristic
     // selection -- is identical, and duplicating it drifts.
-    // beta_opt defaults to the bias convention: 0 with a bias, otherwise 1.
+    // c_ld is the leading dimension of C, which need not match result_ld: C and
+    // D are separate tensors and may be padded differently.
+    // beta is ignored when a bias is supplied, since the epilogue applies the
+    // bias and the GEMM accumulates with beta == 0.
     const C_Dtype* c_ptr = nullptr,
     int64_t c_ld = 0,
-    std::optional<at::opmath_type<Dtype>> beta_opt = std::nullopt);
+    at::opmath_type<Dtype> beta = 1);
 
 void int8_gemm(
     bool transpose_mat1,
