@@ -13,7 +13,8 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator> allocator,
     bool is_user_created,
-    bool use_on_oom)
+    bool use_on_oom,
+    bool no_split)
     : is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -23,15 +24,17 @@ MemPool::MemPool(
   device_ = c10::xpu::current_device();
   XPUCachingAllocator::createOrIncrefPool(device_, id_, std::move(allocator));
   if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet
-    TORCH_WARN(
-        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
+    XPUCachingAllocator::setUseOnOOM(device_, id_, true);
+  }
+  if (no_split) {
+    XPUCachingAllocator::setNoSplit(device_, id_);
   }
 }
 
 MemPool::~MemPool() {
   // No use_count() == 1 assertion: a pool shared with an XPUGraph has
   // use_count > 1 until the graph is reset.
+  XPUCachingAllocator::setUseOnOOM(device_, id_, false);
   XPUCachingAllocator::releasePool(device_, id_);
   c10::xpu::XPUCachingAllocator::emptyCache(id_); // release cached blocks
 }
