@@ -1340,9 +1340,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
 
   // TODO: we need to get rid of globalRanksInGroup eventually.
+  auto allRanks = groupRanks();
   std::vector<uint64_t> globalRanksInGroup;
   for (auto rank : ranks) {
-    globalRanksInGroup.emplace_back(groupRanks()[rank]);
+    globalRanksInGroup.emplace_back(allRanks[rank]);
   }
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
@@ -2667,9 +2668,9 @@ const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
   return globalStore_;
 }
 
-const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
+std::vector<uint64_t> ProcessGroupNCCL::groupRanks() const {
   if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
-    static std::vector<uint64_t> globalRanks(size_);
+    std::vector<uint64_t> globalRanks(size_);
     std::iota(globalRanks.begin(), globalRanks.end(), 0);
     return globalRanks;
   }
