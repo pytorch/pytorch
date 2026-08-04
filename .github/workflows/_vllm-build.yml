@@ -45,6 +45,8 @@ jobs:
         TORCH_CUDA_ARCH_LIST: ${{ inputs.torch_cuda_arch_list }}
         BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
         RUNNER: ${{ inputs.runner }}
+        PYTORCH_ROCM_ARCH: ${{ contains(inputs.build_environment, 'rocm') && 'gfx950' || '' }}
+        FORCE_CUDA: ${{ contains(inputs.build_environment, 'rocm') && '1' || '0' }}
     steps:
       - name: Install system dependencies
         run: |
@@ -106,8 +108,14 @@ jobs:
         run: |
           set -eux
 
+          BUILD_REQUIREMENTS=requirements/build/cuda.txt
+          if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+            export VLLM_TARGET_DEVICE=rocm
+            BUILD_REQUIREMENTS=requirements/build/rocm.txt
+          fi
+
           python use_existing_torch.py
-          pip install -r requirements/build/cuda.txt
+          pip install -r "${BUILD_REQUIREMENTS}"
 
           sccache --show-stats
           python setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
@@ -123,6 +131,11 @@ jobs:
         shell: bash
         run: |
           set -eux
+
+          if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+            echo "Skipping DeepGEMM for ROCm vLLM benchmark build"
+            exit 0
+          fi
 
           # The install_deepgemm script from vLLM only works with abs path
           DEEPGEMM_WHEEL_DIR=$(realpath ../../dist/deepgemm)
