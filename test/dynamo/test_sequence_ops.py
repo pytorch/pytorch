@@ -415,6 +415,20 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
                 for _ in d:
                     d.rotate(n)
 
+    # --- deque setattr (deque has no __dict__) ---
+
+    @make_dynamo_test
+    def test_deque_setattr_maxlen_readonly(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.maxlen = 10
+
+    @make_dynamo_test
+    def test_deque_setattr_unknown_attr(self):
+        d = collections.deque([1, 2, 3])
+        with self.assertRaises(AttributeError):
+            d.foo = 1
+
     # --- list re-init (list.__init__) ---
 
     @make_dynamo_test
@@ -1036,6 +1050,48 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
         lst = L([0, 0, 0])
         lst[0] = 5
         self.assertEqual(lst[0], 1005)
+
+    @make_dynamo_test
+    def test_subclass_list_override_new(self):
+        # list.__new__ ignores the initializer arg (PyType_GenericNew) and, when
+        # __new__ is overridden, list.__init__ ignores excess keyword args.
+        class L(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
+
+        lst = L([1, 2], newarg=3)
+        self.assertIs(type(lst), L)
+        self.assertEqual(list(lst), [1, 2])
+        self.assertEqual(lst.newarg, 3)
+
+    @make_dynamo_test
+    def test_subclass_list_inherited_new(self):
+        # __new__ override is inherited through an intermediate base; the kwarg
+        # tolerance still applies since B's tp_new is not list's.
+        class A(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
+
+        class B(A):
+            pass
+
+        lst = B([1, 2], newarg=3)
+        self.assertIs(type(lst), B)
+        self.assertEqual(list(lst), [1, 2])
+        self.assertEqual(lst.newarg, 3)
+
+    @make_dynamo_test
+    def test_subclass_list_no_new_rejects_init_kwargs(self):
+        # Without a __new__ override, list.__init__ still rejects keyword args.
+        class L(list):
+            pass
+
+        with self.assertRaises(TypeError):
+            L([1, 2], newarg=3)
 
     # -- mutation visibility --
 
