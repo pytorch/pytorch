@@ -632,7 +632,7 @@ class DDPOptimizer:
 
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
-            fake_mode = torch._subclasses.make_fake_mode()
+            fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
         submod_compiler = SubmodCompiler(
             split_gm, self.backend_compile_fn, fake_mode, **compiler_configs

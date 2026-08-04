@@ -344,30 +344,6 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
     return None
 
 
-def make_fake_mode(
-    *,
-    shape_env: Any = None,
-    allow_non_fake_inputs: bool = False,
-    allow_fallback_kernels: bool = True,
-    export: bool = False,
-    static_shapes: bool | None = None,
-    converter: FakeTensorConverter | None = None,
-) -> FakeTensorMode:
-    """FakeTensorMode factory. The single place mode construction lives, so call
-    sites don't duplicate it.
-    """
-    kwargs: dict[str, Any] = {}
-    if static_shapes is not None:
-        kwargs["static_shapes"] = static_shapes
-    return FakeTensorMode(
-        shape_env=shape_env,
-        allow_non_fake_inputs=allow_non_fake_inputs,
-        allow_fallback_kernels=allow_fallback_kernels,
-        export=export,
-        **kwargs,
-    )
-
-
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)

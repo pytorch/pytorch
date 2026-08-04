@@ -58,7 +58,6 @@ from torch._subclasses.fake_tensor import (
     get_plain_tensors,
     is_fake,
     is_fake_tensor,
-    make_fake_mode,
     maybe_get_fake_mode,
     unset_fake_temporarily,
 )
@@ -747,7 +746,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
 
             fake_tensor_mode = detect_fake_mode(val)
             if not fake_tensor_mode:
-                fake_tensor_mode = make_fake_mode(allow_fallback_kernels=True)
+                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 return torch.empty_strided(
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
@@ -2934,7 +2933,7 @@ class _MakefxTracer:
                     import torch._functorch.config as _config
 
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = make_fake_mode(
+                        fake_tensor_mode = FakeTensorMode(
                             allow_fallback_kernels=True,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=ShapeEnv(),
@@ -2963,7 +2962,7 @@ class _MakefxTracer:
                     import torch._functorch.config as _config
 
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = make_fake_mode(
+                        fake_tensor_mode = FakeTensorMode(
                             allow_fallback_kernels=False,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=shape_env,
