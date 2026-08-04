@@ -335,6 +335,46 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(result.data_ptr(), t.data_ptr())
 
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_index_select(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        t = torch.randn(3, 4, device=device)
+        index = torch.tensor([0, 2], device=device)
+        result = libtorch_agnostic.ops.my_index_select(t, 0, index)
+        self.assertEqual(result, torch.index_select(t, 0, index))
+
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_floor_divide(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        a = torch.randint(1, 20, (3, 4), device=device, dtype=torch.int64)
+        b = torch.randint(1, 5, (3, 4), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, b), torch.floor_divide(a, b)
+        )
+
+        # Test broadcasting
+        b_1d = torch.randint(1, 5, (4,), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, b_1d),
+            torch.floor_divide(a, b_1d),
+        )
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    def test_my_is_pinned(self, device):
+        import libtorch_agn_2_14 as libtorch_agnostic
+
+        t = torch.randn(2, 3, device=device)
+        self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
+
+        if not torch.cuda.is_available():
+            return
+
+        pinned = torch.randn(2, 3, device=device).pin_memory()
+        self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
