@@ -19,7 +19,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
 )
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
-from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
 
@@ -34,19 +33,6 @@ class FlexGemmEpilogueLocalReduceConfig:
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
     feeds_main: bool = False
-
-    @classmethod
-    def from_reduction_plan(
-        cls, reduction_plan: GemmReductionPlan | None, out_index: int | None
-    ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Bind the shared reduction plan to FlexGEMM's output index."""
-        if reduction_plan is None:
-            return None
-        return FlexGemmEpilogueLocalReduceConfig(
-            FlexGemmLocalReduceGeometry(reduction_plan.group, reduction_plan.axis),
-            out_index,
-            reduction_plan.feeds_main,
-        )
 
     @property
     def group(self) -> int:
