@@ -5214,6 +5214,11 @@ class GuardAccessor {
   // matches_dict_tag is used by the DictGetItemGuardAccessor to skip the guard
   // subtree on immutable dict getitems.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
+  virtual bool check_nopybind_actual_partial(
+      PyObject* obj,
+      bool matches_dict_tag = false) {
+    return check_nopybind(obj, matches_dict_tag);
+  }
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
@@ -5576,6 +5581,10 @@ class GuardManager {
                 ? GuardSubtreeEntryToken::make_for_source(value, _source)
                 : GuardSubtreeEntryToken::make(value),
             _source);
+        if (!this->check_leaf_guards_nopybind(value)) {
+          return false;
+        }
+        return this->check_accessors_nopybind<true>(value);
       }
     }
 
@@ -5583,7 +5592,7 @@ class GuardManager {
       return false;
     }
 
-    return this->check_accessors_nopybind(value);
+    return this->check_accessors_nopybind<false>(value);
   }
 
   bool check_dict_pointer_tags(PyObject* value) {
@@ -6042,7 +6051,7 @@ class GuardManager {
     return true;
   }
 
-  template <typename T>
+  template <bool RecordActualPartial = false, typename T>
   bool check_accessors_nopybind(T* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
@@ -6063,16 +6072,19 @@ class GuardManager {
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      if constexpr (std::is_same_v<T, PyObject>) {
+      bool accessor_result = false;
+      if constexpr (RecordActualPartial && std::is_same_v<T, PyObject>) {
         if (C10_UNLIKELY(
                 active_guard_actual_partial_supported != nullptr &&
                 is_self_local_source_path(accessor->get_source()) &&
                 !accessor->supports_actual_partial_subtree_memo(value))) {
           *active_guard_actual_partial_supported = false;
         }
+        accessor_result =
+            accessor->check_nopybind_actual_partial(value, matches_dict_tag);
+      } else {
+        accessor_result = accessor->check_nopybind(value, matches_dict_tag);
       }
-      const bool accessor_result =
-          accessor->check_nopybind(value, matches_dict_tag);
       if (!accessor_result) { // early exit
         _fail_count += 1;
         result = false;
@@ -6492,7 +6504,7 @@ class RootGuardManager : public GuardManager {
     });
 
     const bool accessor_result = skip_accessor_source == nullptr
-        ? GuardManager::check_accessors_nopybind(value)
+        ? GuardManager::check_accessors_nopybind<false>(value)
         : GuardManager::check_accessors_nopybind_skipping_source(
               value, *skip_accessor_source);
     if (!accessor_result) {
@@ -7548,17 +7560,13 @@ class GetAttrGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
-    if (x == nullptr) {
-      // Attribute absent, clear the exception and return false.
-      PyErr_Clear();
-      return false;
-    }
-    guard_actual_partial_record_instance_attr_binding(
-        obj, _attr_name, x, get_source(), true);
-    bool result = check_child_manager_nopybind(x);
-    Py_DECREF(x);
-    return result;
+    return check_nopybind_impl<false>(obj, matches_dict_tag);
+  }
+
+  bool check_nopybind_actual_partial(
+      PyObject* obj,
+      bool matches_dict_tag = false) override {
+    return check_nopybind_impl<true>(obj, matches_dict_tag);
   }
 
   bool supports_actual_partial_subtree_memo(PyObject*) const override {
@@ -7606,6 +7614,22 @@ class GetAttrGuardAccessor : public GuardAccessor {
   }
 
  private:
+  template <bool RecordActualPartial>
+  bool check_nopybind_impl(PyObject* obj, bool matches_dict_tag) {
+    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if constexpr (RecordActualPartial) {
+      guard_actual_partial_record_instance_attr_binding(
+          obj, _attr_name, x, get_source(), true);
+    }
+    bool result = check_child_manager_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
   PyObject* _attr_name{nullptr};
@@ -7635,17 +7659,13 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = PyObject_GenericGetAttr(obj, _attr_name); // new ref
-    if (x == nullptr) {
-      // Attribute absent, clear the exception and return false.
-      PyErr_Clear();
-      return false;
-    }
-    guard_actual_partial_record_instance_attr_binding(
-        obj, _attr_name, x, get_source(), false);
-    bool result = check_child_manager_nopybind(x);
-    Py_DECREF(x);
-    return result;
+    return check_nopybind_impl<false>(obj, matches_dict_tag);
+  }
+
+  bool check_nopybind_actual_partial(
+      PyObject* obj,
+      bool matches_dict_tag = false) override {
+    return check_nopybind_impl<true>(obj, matches_dict_tag);
   }
 
   bool supports_actual_partial_subtree_memo(PyObject*) const override {
@@ -7692,6 +7712,23 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
   }
 
  private:
+  template <bool RecordActualPartial>
+  bool check_nopybind_impl(PyObject* obj, bool matches_dict_tag) {
+    PyObject* x = PyObject_GenericGetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if constexpr (RecordActualPartial) {
+      guard_actual_partial_record_instance_attr_binding(
+          obj, _attr_name, x, get_source(), false);
+    }
+    bool result = check_child_manager_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
   PyObject* _attr_name{nullptr};
@@ -7719,24 +7756,13 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    // NOTE for future guard optimization developers - We tried saving the dict
-    // pointer and weakref of the original object to avoid calling
-    // PyObject_GenericGetDict on a fast path, but this did not lead any
-    // meaningful speedups because of 2 reasons
-    // 1) Once __dict__ is generated, accessing it the second time is fast.
-    // 2) Getting the object from weakref, from 3.13 onwards, requires
-    // Py_DECREF, which further eats into the benefit.
-    PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
-    if (x == nullptr) {
-      // Attribute absent, clear the exception and return false.
-      PyErr_Clear();
-      return false;
-    }
-    guard_actual_partial_record_generic_dict_binding(obj, x, get_source());
-    bool result = _guard_manager->check_nopybind(x);
-    Py_DECREF(x);
-    return result;
+    return check_nopybind_impl<false>(obj, matches_dict_tag);
+  }
 
+  bool check_nopybind_actual_partial(
+      PyObject* obj,
+      bool matches_dict_tag = false) override {
+    return check_nopybind_impl<true>(obj, matches_dict_tag);
   }
 
   bool supports_actual_partial_subtree_memo(PyObject*) const override {
@@ -7775,6 +7801,30 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
       const py::function& clone_filter_fn) override {
     return clone_common<GetGenericDictGuardAccessor>(
         cloned_root, clone_filter_fn);
+  }
+
+ private:
+  template <bool RecordActualPartial>
+  bool check_nopybind_impl(PyObject* obj, bool matches_dict_tag) {
+    // NOTE for future guard optimization developers - We tried saving the dict
+    // pointer and weakref of the original object to avoid calling
+    // PyObject_GenericGetDict on a fast path, but this did not lead any
+    // meaningful speedups because of 2 reasons
+    // 1) Once __dict__ is generated, accessing it the second time is fast.
+    // 2) Getting the object from weakref, from 3.13 onwards, requires
+    // Py_DECREF, which further eats into the benefit.
+    PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if constexpr (RecordActualPartial) {
+      guard_actual_partial_record_generic_dict_binding(obj, x, get_source());
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 };
 

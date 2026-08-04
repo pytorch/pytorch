@@ -3212,6 +3212,44 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             assert len(cache_entries) == 1, len(cache_entries)
             assert not cache_entries[0]._debug_fast_guard_enabled
 
+            class Holder:
+                def __init__(self, value):
+                    self.scale = torch.full((3,), value)
+                    self.bias = torch.full((3,), value + 1)
+
+            class OrdinaryAccessorModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holders = [Holder(float(i)) for i in range(32)]
+
+                def forward(self, x):
+                    result = x
+                    for holder in self.holders:
+                        result = (
+                            result
+                            + holder.scale
+                            + holder.__dict__["bias"]
+                        )
+                    return result
+
+            accessor_model = OrdinaryAccessorModel()
+            accessor_counter = CompileCounter()
+            accessor_compiled = torch.compile(
+                accessor_model, backend=accessor_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    accessor_compiled(x), accessor_model(x)
+                )
+            assert (
+                accessor_counter.frame_count == 1
+            ), accessor_counter.frame_count
+            accessor_entries = _debug_get_cache_entry_list(
+                OrdinaryAccessorModel.forward.__code__
+            )
+            assert len(accessor_entries) == 1, len(accessor_entries)
+            assert not accessor_entries[0]._debug_fast_guard_enabled
+
             class ObjectAliasModel(torch.nn.Module):
                 def forward(self, x, y):
                     if x is y:
