@@ -12,28 +12,11 @@
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
-#include <exception>
 #include <cstring>
+#include <exception>
 #include <set>
 
 namespace c10d::nccl2 {
-
-namespace {
-
-int getRootIndex(int rank, int numRanks, int numRoots) {
-  // Balance ranks across roots; only each group's first rank owns an ID.
-  const int remainder = numRanks % numRoots;
-  const int ranksPerRoot = numRanks / numRoots;
-  const int largerRootsLimit = remainder * (ranksPerRoot + 1);
-  if (rank < largerRootsLimit) {
-    return rank % (ranksPerRoot + 1) ? -1 : rank / (ranksPerRoot + 1);
-  }
-  return (rank - largerRootsLimit) % ranksPerRoot
-      ? -1
-      : ((rank - largerRootsLimit) / ranksPerRoot) + remainder;
-}
-
-} // namespace
 
 NCCLBootstrap::NCCLBootstrap(
     c10::intrusive_ptr<c10d::Store> store,
@@ -80,7 +63,7 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
         numIds == 1 ? keyPrefix : fmt::format("{}_{}", keyPrefix, index));
   }
 
-  const int rootIndex = getRootIndex(rank_, comm_size_, numIds);
+  const int rootIndex = detail::getRootIndex(rank_, comm_size_, numIds);
   if (rootIndex >= 0) {
     ncclUniqueId uniqueId;
     const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
