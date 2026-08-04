@@ -13,9 +13,11 @@
 #include <thread>
 #include <unordered_set>
 
+#include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -101,31 +103,14 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         << " was not finalized before destruction. "
         << "This may indicate a resource leak. Please call finalize() explicitly.";
 
-    // Signal shutdown to timeout watchdog thread to prevent it from accessing
-    // this object after destruction
-    shutdown_ = true;
+    // Stop the watchdog so it cannot access this object after destruction. It
+    // may be the caller (garbageCollect can pop a work item whose destruction
+    // releases the last reference to this comm), which stopWatchdog handles.
+    stopWatchdog();
 
-    // Wake up the timeout watchdog thread
-    {
-      std::lock_guard<std::mutex> lock(timeout_mutex_);
-      timeout_cv_.notify_all();
-    }
-
-    // Wait for timeout thread to finish. If we're being called from within
-    // the timeout thread itself (e.g., garbageCollect popped a work item whose
-    // destruction released the last shared_ptr to this comm), we must detach
-    // instead of join to avoid a deadlock.
-    if (timeout_thread_.joinable()) {
-      if (std::this_thread::get_id() != timeout_thread_.get_id()) {
-        timeout_thread_.join();
-      } else {
-        timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
-      }
-    }
-
-    // Abort the NCCL communicator since we can't do a clean finalization
-    // Note: We don't call the full abortNcclComm() to avoid potential abort()
-    // calls from abort_process_on_timeout_or_error_
+    // Abort the NCCL communicator since we can't do a clean finalization.
+    // Open-coded rather than abortNcclComm() so a failure cannot throw out of
+    // the destructor (abortNcclComm() throws on a failed or timed-out abort).
     if (nccl_comm_) {
       // Drop our symmetric-memory registration while nccl_comm_ is still valid
       // (it is nulled below, before detachMemoryHook runs).
@@ -167,6 +152,21 @@ void ProcessGroupNCCL::init(at::Device device) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
   }
 
+  // If deterministic mode is enabled, disable the NVLS algorithm in NCCL
+  // (which can lead to non-deterministic reductions). Mirrors the stock
+  // ProcessGroupNCCL. NCCL reads NCCL_ALGO when the communicator is created,
+  // so this must run before createNcclComm below. If the user already set
+  // NCCL_ALGO, leave it untouched.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    if (!c10::utils::get_env("NCCL_ALGO").has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
+  }
+
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
     auto bootstrap = std::make_unique<NCCLBootstrap>(
         store_,
@@ -203,11 +203,6 @@ void ProcessGroupNCCL::initNcclResources() {
 
   if (!dependency_event_) {
     dependency_event_.emplace(cudaEventDisableTiming);
-  }
-
-  if (!barrier_buffer_) {
-    barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
@@ -332,10 +327,24 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 }
 
 void ProcessGroupNCCL::abort() {
-  comm_state_ = CommState::ERROR;
+  // User-initiated (backend.abort() / _abort_process_group()): tear the
+  // communicator down and return. Never terminates the process, whatever
+  // TORCH_NCCL_ASYNC_ERROR_HANDLING says -- that gate only covers failures the
+  // watchdog detects on its own.
+  TC_LOG(INFO, this) << "abort() requested on rank " << rank_
+                     << "; aborting the NCCL communicator";
   if (options_c10d_->enable_reconfigure) {
+    comm_state_ = CommState::ERROR;
     revokeNcclComm();
   } else {
+    // Stop the watchdog before publishing the error: this failure is one the
+    // caller asked for, so it must not trigger a process abort, and there is no
+    // communicator left to watch either. Not done in reconfigurable mode, where
+    // the comm is revoked rather than destroyed and the watchdog is needed again
+    // after reconfigure(). The error is still published before the teardown, so
+    // work in flight reports it instead of completing.
+    stopWatchdog();
+    comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
 }
@@ -399,19 +408,10 @@ void ProcessGroupNCCL::finalize() {
   }
   init_state_ = InitializationState::FINALIZED;
 
-  // Signal shutdown to timeout watchdog
-  shutdown_ = true;
-
-  // Wake up the timeout watchdog thread
-  {
-    std::lock_guard<std::mutex> lock(timeout_mutex_);
-    timeout_cv_.notify_all();
-  }
-
-  // Wait for timeout thread to finish
-  if (timeout_thread_.joinable()) {
-    timeout_thread_.join();
-  }
+  // Stop the watchdog first: draining the work queue below may surface a
+  // timeout, which is a teardown result to report to the caller, not a reason
+  // to terminate the process.
+  stopWatchdog();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -429,6 +429,10 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
+    if (!nccl_comm_) {
+      throw std::runtime_error(
+          "NCCL communicator was aborted after a previous error");
+    }
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -483,14 +487,36 @@ void ProcessGroupNCCL::abortNcclComm() {
         "NCCL Abort failed");
     nccl_comm_ = nullptr;
   }
-  // Never abort the process in reconfigurable mode: callers fall back to
-  // revoke + throw so the failure can be handled by reconfiguring.
-  if (abort_process_on_timeout_or_error_ &&
-      !options_c10d_->enable_reconfigure) {
-    TC_LOG(ERROR, this) << "Aborting process due to timeout";
-    runAbortHooks();
-    ::abort();
+}
+
+void ProcessGroupNCCL::stopWatchdog() {
+  shutdown_ = true;
+  {
+    std::lock_guard<std::mutex> lock(timeout_mutex_);
+    timeout_cv_.notify_all();
   }
+  if (timeout_thread_.joinable()) {
+    // Joining from within the watchdog thread (the async-error path calls
+    // abort()) would deadlock.
+    if (std::this_thread::get_id() != timeout_thread_.get_id()) {
+      timeout_thread_.join();
+    } else {
+      timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
+    }
+  }
+}
+
+void ProcessGroupNCCL::abortProcess(const std::string& reason) {
+  // Never terminate the process in reconfigurable mode: callers fall back to
+  // revoke + throw so the failure can be handled by reconfiguring.
+  if (!abort_process_on_timeout_or_error_ ||
+      options_c10d_->enable_reconfigure) {
+    return;
+  }
+  TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
+                      << reason;
+  runAbortHooks();
+  ::abort();
 }
 
 void ProcessGroupNCCL::revokeNcclComm() {
@@ -1470,6 +1496,20 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
     std::chrono::milliseconds timeout) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
+
+  // Allocated here rather than in initNcclResources() so that merely creating a
+  // process group never touches the CUDA caching allocator. Eager init runs
+  // before anything has initialized CUDA (init_process_group(device_id=...) on
+  // a process that has made no torch.cuda call), and the allocator is brought
+  // up lazily, so allocating there tripped "Allocator not initialized for
+  // device N". lazyInitDevice() is what ATen's own allocating paths call, and
+  // is a no-op once CUDA is up.
+  if (!barrier_buffer_) {
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    c10::cuda::CUDAGuard gpuGuard(device_);
+    barrier_buffer_ =
+        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+  }
 
   TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
   c10::cuda::CUDAGuard device_guard(device_);
