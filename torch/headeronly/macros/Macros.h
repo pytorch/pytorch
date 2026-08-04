@@ -614,22 +614,22 @@ __host__ __device__ inline void c10_rocm_kernel_assert(
         __FILE__,                                            \
         static_cast<unsigned int>(__LINE__),                 \
         c10_rocm_assert_concat(                              \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ":",        \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
             __func__,                                        \
-            ": Device-side assertion `" #cond "` failed.\n") \
+            ": Device-side assertion `" #cond "' failed.\n") \
             .data);                                          \
   }
-#define CUDA_KERNEL_ASSERT_MSG(cond, msg)             \
-  if C10_UNLIKELY (!(cond)) {                         \
-    c10_rocm_kernel_assert(                           \
-        msg,                                          \
-        __FILE__,                                     \
-        static_cast<unsigned int>(__LINE__),          \
-        c10_rocm_assert_concat(                       \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ":", \
-            __func__,                                 \
-            ": Device-side assertion failed.\n")      \
-            .data);                                   \
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)              \
+  if C10_UNLIKELY (!(cond)) {                          \
+    c10_rocm_kernel_assert(                            \
+        msg,                                           \
+        __FILE__,                                      \
+        static_cast<unsigned int>(__LINE__),           \
+        c10_rocm_assert_concat(                        \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ", \
+            __func__,                                  \
+            ": Device-side assertion failed.\n")       \
+            .data);                                    \
   }
 #define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                         \
   if C10_UNLIKELY (!(cond)) {                                             \
@@ -650,9 +650,9 @@ __host__ __device__ inline void c10_rocm_kernel_assert(
         __FILE__,                                                         \
         static_cast<unsigned int>(__LINE__),                              \
         c10_rocm_assert_concat(                                           \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ":",                     \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",                    \
             __func__,                                                     \
-            ": Device-side assertion `" #cond "` failed.\n")              \
+            ": Device-side assertion `" #cond "' failed.\n")              \
             .data);                                                       \
   }
 #else
