@@ -3312,6 +3312,7 @@
 - func: _fused_rms_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor rstd, Tensor? weight, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     CUDA: _fused_rms_norm_backward_cuda
+    MPS: _fused_rms_norm_backward_mps
     XPU: _fused_rms_norm_backward_xpu
 
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor

@@ -27,10 +27,6 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
-#ifdef USE_MPS
-#include <c10/core/GradMode.h>
-#endif
-
 #include <array>
 #include <tuple>
 #include <vector>
@@ -352,16 +348,8 @@ Tensor rms_norm_symint(
   }
 
   #ifdef USE_MPS
-  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
-    const Tensor weight = weight_opt.value();
-    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
-
-    if (!(GradMode::is_enabled() && any_inputs_require_grad)) {
-      return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
-    }
-  }
-
-  if (input.device().type() == DeviceType::MPS){
+  // The fused MPS kernels always apply a weight.
+  if (input.device().type() == DeviceType::MPS && !weight.defined()) {
     return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
   }
   #endif
