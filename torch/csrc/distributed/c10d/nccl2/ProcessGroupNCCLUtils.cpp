@@ -570,7 +570,9 @@ void ProcessGroupNCCL::register_address(void* addr, size_t len) {
   registerAddressLocked(addr, len);
 }
 
-void ProcessGroupNCCL::deregister_address(void* addr, bool from_allocator_hook) {
+void ProcessGroupNCCL::deregister_address(
+    void* addr,
+    bool from_allocator_hook) {
   if (nccl_comm_ == nullptr) {
     return;
   }
