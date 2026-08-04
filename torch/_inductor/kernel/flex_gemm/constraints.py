@@ -131,8 +131,8 @@ FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
     "reductions, C, alpha/beta, or batched GEMMs yet"
 )
 FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR = (
-    "FlexGEMM grouped main outputs require captured tensors to map from the "
-    "physical accumulator layout to the contracted logical layout"
+    "FlexGEMM grouped main outputs currently support only numeric [1, 1] and "
+    "[M, 1] captured tensors"
 )
 FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
     "FlexGEMM concat-layout grouped-N outputs require B's output dimension to "
@@ -414,10 +414,10 @@ def flex_gemm_local_reduce_config_error(
 # SwiGLU-like pointwise combinations without claiming to support arbitrary slices,
 # permutations, expansions, or M-axis contraction.
 #
-# Captured tensors are not yet supported because QuACK loads them in the physical
-# accumulator layout, while expressions after lane selection use the contracted
-# logical layout. Supporting N-invariant captures still requires an explicit
-# physical-to-logical TensorSSA mapping rather than only relaxing validation.
+# Numeric ``[1, 1]`` and ``[M, 1]`` captures are N-invariant. QuACK loads their
+# one value per epilogue thread and lets generated pointwise code broadcast it in
+# either the physical or contracted layout. N-varying ``[1, N]`` and ``[M, N]``
+# captures need the same concat-to-interleave mapping as B for chunked outputs.
 @dataclasses.dataclass(frozen=True)
 class FlexGemmGroupedMainOutputTransform:
     """Describe the grouped-N contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
@@ -457,6 +457,11 @@ class FlexGemmGroupedMainOutputTransform:
             "FlexGEMM grouped main-output stores support group 2 on SM100 and "
             "SM110, plus interleaved group 4 on SM100"
         )
+
+
+def grouped_main_capture_supported(kind: str, is_boolean: bool) -> bool:
+    """Return whether grouped-main codegen can broadcast a captured tensor."""
+    return kind in ("scalar", "col") and not is_boolean
 
 
 def grouped_main_output_config_supported(config: Any, n: Any) -> bool:

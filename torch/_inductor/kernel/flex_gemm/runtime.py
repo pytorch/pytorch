@@ -15,6 +15,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
+    grouped_main_capture_supported,
     grouped_main_output_config_supported,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
@@ -531,8 +532,6 @@ def gemm_epilogue(
         main_transform.validate_quack(device_capacity[0])
         if main_transform.chunked and b.stride(-1) == 1:
             raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
-        if epilogue_args:
-            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
         if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0:
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
@@ -594,6 +593,11 @@ def gemm_epilogue(
     inferred_arg_kinds = resolve_epilogue_arg_kinds(
         a, b, epilogue_args, epilogue_arg_kinds
     )
+    if main_transform is not None and any(
+        not grouped_main_capture_supported(kind, arg.dtype is torch.bool)
+        for arg, kind in zip(epilogue_args, inferred_arg_kinds, strict=True)
+    ):
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
     for index, arg in enumerate(epilogue_args):
         check_matrix_major_layout(f"epilogue_args[{index}]", arg)
     row_args, col_args, tile_args, scalar_args = split_epilogue_args(
