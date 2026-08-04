@@ -1910,6 +1910,8 @@ class GraphModule(torch.nn.Module):
             s = torch.cuda.Stream()
             e0 = torch.cuda.Event()
             e1 = torch.cuda.Event()
+            # Order the side stream after the default-stream producers of the inputs.
+            s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
                 a = x @ w1
                 e0.record()
