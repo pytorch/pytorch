@@ -2361,10 +2361,10 @@ class NativeCachingAllocator : public XPUAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::shared_ptr<XPUAllocator> allocator_ptr) {
+      std::shared_ptr<XPUAllocator> allocator) {
     assertValidDevice(device);
     device_allocators[device]->createOrIncrefPool(
-        mempool_id, std::move(allocator_ptr));
+        mempool_id, std::move(allocator));
   }
 
   void beginAllocateToPool(
