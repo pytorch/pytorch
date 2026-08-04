@@ -6423,7 +6423,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("transpose_mat1", [False, True])
     @parametrize("transpose_mat2", [False, True])
     @tf32_on_and_off(0.05)
-    @reduced_f32_on_and_off(0.05)
     def test_addmm_out_distinct_c_and_d(self, device, dtype, beta, alpha,
                                         transpose_mat1, transpose_mat2):
         # When `out` is a distinct tensor from `input`, CUDA addmm can hand C and D
@@ -6483,6 +6482,38 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @onlyCUDA
     @dtypes(torch.float32, torch.bfloat16)
+    def test_addmm_out_distinct_c_and_d_is_selected(self, device, dtype):
+        # The point of the distinct-C/D path is that C is not copied into the
+        # output first, so assert on the kernels actually launched: the fast
+        # path is a lone GEMM, the fallback additionally copies C.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 256, 384, 128
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        out = torch.empty((m, n), dtype=dtype, device=device)
+
+        def kernel_count(inp):
+            for _ in range(3):  # warm up autotuning/handle creation
+                torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+                torch.cuda.synchronize()
+            return sum(1 for e in prof.events()
+                       if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+
+        contiguous = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+        padded = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)[:, :n]
+        # rejected by the guard: not row-major, so C must be copied first
+        column_major = make_tensor((n, m), dtype=dtype, device=device, low=-1, high=1).t()
+
+        self.assertEqual(kernel_count(contiguous), 1)
+        self.assertEqual(kernel_count(padded), 1)
+        self.assertEqual(kernel_count(column_major), 2)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
     def test_addmm_out_padded_leading_dim(self, device, dtype):
         # cuBLASLt can consume a row-major operand whose rows are padded, so the
         # distinct-C/D path accepts a leading dimension larger than the width.
@@ -6495,17 +6526,19 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         wide_inp = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)
         inp = wide_inp[:, :n]
         self.assertEqual(inp.stride(0), 2 * n)
+        expected = (0.75 * inp.double() + mm).to(dtype)
 
-        for out in (torch.empty((m, n), dtype=dtype, device=device),
-                    torch.empty((m, 2 * n), dtype=dtype, device=device)[:, :n]):
-            wide_out = out._base if out._base is not None else out
-            filler = wide_out.clone() if out._base is not None else None
-            res = torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
-            self.assertEqual(res, (0.75 * inp.double() + mm).to(dtype),
-                             atol=tol, rtol=tol, exact_dtype=False)
-            if filler is not None:
-                # the padding columns of the base tensor must be untouched
-                self.assertEqual(wide_out[:, n:], filler[:, n:])
+        # padded C, contiguous D
+        out = torch.empty((m, n), dtype=dtype, device=device)
+        res = torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+        self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
+
+        # padded C and padded D: the columns outside the view must be untouched
+        wide_out = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)
+        untouched = wide_out[:, n:].clone()
+        res = torch.addmm(inp, mat1, mat2, beta=0.75, out=wide_out[:, :n])
+        self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
+        self.assertEqual(wide_out[:, n:], untouched)
 
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,

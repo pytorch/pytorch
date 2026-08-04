@@ -125,13 +125,17 @@ bool gemm_and_bias(
     C_Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None,
-    // Pass a non-null c_ptr to compute D = alpha * A @ B + beta * C with C and
-    // D at distinct addresses, which avoids having to copy C into D first.
-    // c_ptr must be null when bias is used. beta defaults to the bias
-    // convention (0 when a bias is supplied, otherwise 1).
+    // Pass a non-null c_ptr to compute D = alpha * A @ B + beta * C with C and D
+    // at distinct addresses, which avoids having to copy C into D first.
+    // c_ptr and bias are mutually exclusive (asserted): a bias is applied by the
+    // epilogue with beta == 0, so there is no C operand to point elsewhere. The
+    // two live in one function because everything around the operands -- the
+    // reduction-scheme masks, SM carveout, alignment preferences and heuristic
+    // selection -- is identical, and duplicating it drifts.
+    // beta_opt defaults to the bias convention: 0 with a bias, otherwise 1.
     const C_Dtype* c_ptr = nullptr,
     int64_t c_ld = 0,
-    std::optional<at::opmath_type<Dtype>> beta_val = std::nullopt);
+    std::optional<at::opmath_type<Dtype>> beta_opt = std::nullopt);
 
 void int8_gemm(
     bool transpose_mat1,
