@@ -11887,6 +11887,14 @@ if __name__ == '__main__':
         self.assertTrue(has_cuda_assert or has_hip_assert,
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
+    @onlyCPU
+    def test_ctc_loss_out_of_bounds_target_error(self, device):
+        # Test for issue #191568
+        log_probs = torch.zeros(50, 1, 10, device=device)
+        targets = torch.tensor([2147483647], dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"target label out of range \[0, 10\)"):
+            F.ctc_loss(log_probs, targets, [1], [1], reduction='none')
+
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)

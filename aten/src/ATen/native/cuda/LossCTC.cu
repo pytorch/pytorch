@@ -43,7 +43,7 @@ namespace {
 // this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1])
 // so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
 // l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
-// - note that no bound-checking is done
+// - labels are bound-checked against num_labels by a device-side assert
 // - it is important to only call it with idx == 0 if the target length is 0
 // - __restrict__ impact to be measured, see
 //   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
