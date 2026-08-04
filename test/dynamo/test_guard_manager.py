@@ -2411,6 +2411,146 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
         """
         self._run_guard_lookup_memo_script(script)
 
+    def test_actual_partial_preserves_all_residual_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_source_groups(entry):
+                groups = {}
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    source = manager.get_source()
+                    for guard in manager.get_leaf_guards():
+                        if type(guard).__name__ in {
+                            "OBJECT_ALIASING",
+                            "NO_TENSOR_ALIASING",
+                        }:
+                            # Keep the pybind guard wrapper alive as the key.  The
+                            # same C++ relation guard is exposed as the same wrapper,
+                            # while retaining it prevents Python id reuse.
+                            groups.setdefault(guard, []).append(source)
+                    pending.extend(manager.get_child_managers())
+                return list(groups.values())
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.bias = 1.0
+
+                def forward(self, x, y):
+                    if x is y:
+                        return x + y + self.bias
+                    return x - y + self.bias
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            same = torch.ones(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(same, same), model(same, same))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entries) == 1, len(original_entries)
+            original_entry = original_entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            groups = relation_source_groups(original_entry)
+            assert any(
+                len(group) >= 2
+                and all(not source.startswith("L['self']") for source in group)
+                for group in groups
+            ), groups
+
+            different = torch.zeros_like(same)
+            torch.testing.assert_close(
+                compiled(same, different), model(same, different)
+            )
+            assert counter.frame_count == 2, counter.frame_count
+            assert len(_debug_get_cache_entry_list(Model.forward.__code__)) == 2
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(same, same), model(same, same))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_all_self_alias_relations(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            torch._dynamo.config.use_lamba_guard_for_object_aliasing = False
+
+            def relation_source_groups(entry):
+                groups = {}
+                pending = [entry.guard_manager.root]
+                while pending:
+                    manager = pending.pop()
+                    source = manager.get_source()
+                    for guard in manager.get_leaf_guards():
+                        if type(guard).__name__ in {
+                            "OBJECT_ALIASING",
+                            "NO_TENSOR_ALIASING",
+                        }:
+                            # Keep the pybind guard wrapper alive as the key.  The
+                            # same C++ relation guard is exposed as the same wrapper,
+                            # while retaining it prevents Python id reuse.
+                            groups.setdefault(guard, []).append(source)
+                    pending.extend(manager.get_child_managers())
+                return list(groups.values())
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    shared = torch.ones(2)
+                    self.register_buffer("left", shared)
+                    self.register_buffer("right", shared)
+
+                def forward(self, x):
+                    if self.left is self.right:
+                        return x + self.left + self.right
+                    return x + self.left - self.right
+
+            model = Model()
+            original_right = model.right
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(original_entries) == 1, len(original_entries)
+            original_entry = original_entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            groups = relation_source_groups(original_entry)
+            assert any(
+                len(group) >= 2
+                and all(source.startswith("L['self']") for source in group)
+                for group in groups
+            ), groups
+
+            model.right = torch.zeros(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert len(_debug_get_cache_entry_list(Model.forward.__code__)) == 2
+            assert original_entry._debug_fast_guard_enabled
+
+            model.right = original_right
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
     def test_actual_partial_preserves_dict_tagged_alias_relations(self):
         script = """
             import torch
@@ -2569,6 +2709,75 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             entries = _debug_get_cache_entry_list(Model.forward.__code__)
             assert len(entries) == 1, len(entries)
             assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_tensor_subclass(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            class TensorSubclass(torch.Tensor):
+                pass
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self._cached_tensor = torch.ones(2).as_subclass(TensorSubclass)
+
+                def forward(self, x):
+                    return self._cached_tensor + x
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(entries) == 1, len(entries)
+            assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_dimension_marking_descriptor(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+            from torch._dynamo.testing import CompileCounter
+
+            class MissingSentinel:
+                def __get__(self, instance, owner):
+                    raise AttributeError("sentinel remains absent")
+
+            torch.Tensor._has_dynamo_dim_marking = MissingSentinel()
+            try:
+                class Model(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self._cached_tensor = torch.ones(2)
+
+                    def forward(self, x):
+                        return self._cached_tensor + x
+
+                model = Model()
+                counter = CompileCounter()
+                compiled = torch.compile(
+                    model, backend=counter, fullgraph=True, dynamic=True
+                )
+                x = torch.zeros(2)
+                for _ in range(8):
+                    torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 1, counter.frame_count
+                entries = _debug_get_cache_entry_list(Model.forward.__code__)
+                assert len(entries) == 1, len(entries)
+                assert not entries[0]._debug_fast_guard_enabled
+            finally:
+                del torch.Tensor._has_dynamo_dim_marking
         """
         self._run_guard_lookup_memo_script(script)
 

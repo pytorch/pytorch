@@ -1129,8 +1129,7 @@ enum class GuardCrossSliceRelationKind : uint8_t {
 };
 
 struct GuardCrossSliceRelationPlan {
-  GuardCrossSliceRelationKind kind{
-      GuardCrossSliceRelationKind::ObjectAliasing};
+  GuardCrossSliceRelationKind kind{GuardCrossSliceRelationKind::ObjectAliasing};
   const void* guard{nullptr};
   size_t expected_operand_count{0};
   std::vector<py::object> stable_operands;
@@ -1538,8 +1537,7 @@ static bool guard_subtree_dimension_marking_absent_token_matches_current(
     PyErr_Clear();
     return false;
   }
-  const int contains =
-      PyDict_Contains(*dictptr, token.dimension_marking_key);
+  const int contains = PyDict_Contains(*dictptr, token.dimension_marking_key);
   if (contains < 0) {
     PyErr_Clear();
     return false;
@@ -1702,14 +1700,13 @@ static bool guard_last_success_add_type_proof(
     }
   }
   unsigned int version = 0;
-  if (!guard_subtree_ensure_absent_type_version(
-          type, lookup_key, version)) {
+  if (!guard_subtree_ensure_absent_type_version(type, lookup_key, version)) {
     PyErr_Clear();
     return false;
   }
   GuardSubtreeTypeProof proof;
-  proof.type = py::reinterpret_borrow<py::object>(
-      reinterpret_cast<PyObject*>(type));
+  proof.type =
+      py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(type));
   proof.lookup_key = py::reinterpret_borrow<py::object>(lookup_key);
   proof.version = version;
   proofs.push_back(std::move(proof));
@@ -1754,8 +1751,7 @@ static bool guard_last_success_build_partial_plan_tokens(
     std::vector<py::object>& retained_token_objects) {
   stability_tokens = partial_tokens;
   if (!guard_subtree_aliasing_tokens_have_reachability_proof(partial_tokens) ||
-      !guard_last_success_make_partial_hot_tokens(
-          partial_tokens, hot_tokens) ||
+      !guard_last_success_make_partial_hot_tokens(partial_tokens, hot_tokens) ||
       !guard_last_success_build_relation_plans(
           full_tokens, partial_tokens, relation_plans)) {
     return false;
@@ -1775,9 +1771,7 @@ static bool guard_last_success_build_partial_plan_tokens(
     if (token.kind ==
             GuardSubtreeProbeTokenKind::TensorDimensionMarkingAbsent &&
         !guard_last_success_add_type_proof(
-            token.type,
-            token.dimension_marking_key,
-            type_proofs)) {
+            token.type, token.dimension_marking_key, type_proofs)) {
       return false;
     }
   }
@@ -2232,8 +2226,7 @@ struct GuardSubtreeMemoRecorderScope {
   ~GuardSubtreeMemoRecorderScope() {
     active_guard_subtree_memo_recorder = previous;
     active_guard_subtree_memo_debug_paths = previous_debug_paths;
-    active_guard_actual_partial_supported =
-        previous_actual_partial_supported;
+    active_guard_actual_partial_supported = previous_actual_partial_supported;
     active_guard_subtree_memo_relax_global_dicts =
         previous_relax_global_dicts;
   }
@@ -3174,8 +3167,7 @@ class LeafGuard {
   virtual bool supports_subtree_memo() const {
     return true;
   }
-  virtual bool supports_actual_partial_subtree_memo(
-      PyObject* /*value*/) const {
+  virtual bool supports_actual_partial_subtree_memo(PyObject* /*value*/) const {
     return supports_subtree_memo();
   }
   virtual bool emits_subtree_memo_token() const {
@@ -4646,8 +4638,7 @@ class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
     return false;
   }
 
-  bool supports_actual_partial_subtree_memo(
-      PyObject* value) const override {
+  bool supports_actual_partial_subtree_memo(PyObject* value) const override {
     if (!_all_absent || !THPVariable_CheckExact(value) ||
         Py_TYPE(value)->tp_getattro != PyObject_GenericGetAttr) {
       return false;
@@ -4655,8 +4646,7 @@ class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
     // A type/MRO descriptor or custom attribute protocol can synthesize the
     // sentinel without touching the instance dict, so either forces the plan
     // to fail closed.
-    PyObject* descriptor =
-        _PyType_Lookup(Py_TYPE(value), has_marking_str());
+    PyObject* descriptor = _PyType_Lookup(Py_TYPE(value), has_marking_str());
     if (descriptor != nullptr) {
       return false;
     }
@@ -5677,8 +5667,7 @@ class GuardManager {
           const bool actual_partial_supported =
               guard->supports_actual_partial_subtree_memo(value);
           if (active_guard_actual_partial_supported != nullptr &&
-              is_self_local_source_path(_source) &&
-              !actual_partial_supported) {
+              is_self_local_source_path(_source) && !actual_partial_supported) {
             *active_guard_actual_partial_supported = false;
           }
           emit_subtree_memo_token = actual_partial_supported &&
@@ -6122,10 +6111,9 @@ class RootGuardManager : public GuardManager {
         *actual_partial_token_miss = true;
         return false;
       }
-      for (const auto& relation :
-           actual_partial_plan->cross_slice_relations) {
-        auto* guard = static_cast<RelationalGuard*>(
-            const_cast<void*>(relation.guard));
+      for (const auto& relation : actual_partial_plan->cross_slice_relations) {
+        auto* guard =
+            static_cast<RelationalGuard*>(const_cast<void*>(relation.guard));
         if (guard == nullptr ||
             !guard->preload_actual_partial_relation(relation)) {
           *actual_partial_token_miss = true;
@@ -6167,10 +6155,9 @@ class RootGuardManager : public GuardManager {
     }
 
     if constexpr (HasActualPartial) {
-      for (const auto& relation :
-           actual_partial_plan->cross_slice_relations) {
-        auto* guard = static_cast<RelationalGuard*>(
-            const_cast<void*>(relation.guard));
+      for (const auto& relation : actual_partial_plan->cross_slice_relations) {
+        auto* guard =
+            static_cast<RelationalGuard*>(const_cast<void*>(relation.guard));
         if (guard == nullptr ||
             !guard->actual_partial_relation_is_complete(relation)) {
           *actual_partial_token_miss = true;
@@ -9592,7 +9579,6 @@ bool run_root_guard_manager_with_last_success_receipt(
     state->actual_partial.disable();
     return true;
   }
-
 
   state->actual_partial.observe_successful_training_pass(
       entry_key,
