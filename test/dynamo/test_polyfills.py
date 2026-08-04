@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import heapq
+import itertools
+
 import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
@@ -235,6 +238,80 @@ class TestGroupTensorsByDeviceAndDtype(TestCase):
 
         # Verify there was tensor compute (op_count > 0 means tensor ops were traced)
         self.assertGreater(cnts.op_count, 0, "Expected tensor operations to be traced")
+
+
+class TestHeapqPolyfill(TestCase):
+    """heapq is polyfilled to a traceable pure-Python implementation
+    (torch/_dynamo/polyfills/heapq.py, registered via loader.py). Exercise the
+    public API under fullgraph=True so a regression that leaves the polyfill
+    unregistered -- heapq falling back to the skipped C _heapq -- resurfaces as
+    a graph break. merge() is intentionally omitted: it hits a separate, still
+    open VariableTracker gap (python_type() on the iterator's bound __next__)."""
+
+    def _check(self, fn):
+        x = torch.ones(3)
+        expected = fn(x)
+        got = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(got, expected)
+
+    def test_heapify_heappop(self):
+        def fn(x):
+            h = [3, 1, 4, 1, 5, 9, 2, 6]
+            heapq.heapify(h)
+            return x + heapq.heappop(h)
+
+        self._check(fn)
+
+    def test_heappush(self):
+        def fn(x):
+            h = []
+            for v in (3, 1, 4, 1, 5):
+                heapq.heappush(h, v)
+            return x + h[0]
+
+        self._check(fn)
+
+    def test_heappushpop_heapreplace(self):
+        def fn(x):
+            h = [1, 3, 5]
+            heapq.heapify(h)
+            a = heapq.heappushpop(h, 4)
+            b = heapq.heapreplace(h, 0)
+            return x + a + b
+
+        self._check(fn)
+
+    def test_nlargest_nsmallest(self):
+        def fn(x):
+            data = [5, 2, 8, 1, 9, 3]
+            return x + heapq.nlargest(2, data)[1] + heapq.nsmallest(2, data)[1]
+
+        self._check(fn)
+
+    def test_nlargest_nsmallest_key(self):
+        def fn(x):
+            data = [5, 2, 8, 1, 9, 3]
+            top = heapq.nlargest(2, data, key=lambda v: -v)
+            bot = heapq.nsmallest(2, data, key=lambda v: -v)
+            return x + top[0] + bot[0]
+
+        self._check(fn)
+
+    def test_tensor_payload_scalar_key(self):
+        # A tensor is fine as a heap *payload* when the ordering key is a python
+        # scalar and a unique counter breaks ties, so the tensors are never
+        # compared. (A tensor used as the comparison key is data-dependent and
+        # unsupported by design.)
+        def fn(x):
+            h = []
+            c = itertools.count()
+            heapq.heappush(h, (0.9, next(c), x + 1))
+            heapq.heappush(h, (0.2, next(c), x + 2))
+            heapq.heappush(h, (0.5, next(c), x + 3))
+            _, _, best = heapq.heappop(h)
+            return best
+
+        self._check(fn)
 
 
 if __name__ == "__main__":
