@@ -128,7 +128,11 @@ LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
 )
 FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs do not compose with aux outputs, local "
-    "reductions, captured tensors, C, alpha/beta, or batched GEMMs yet"
+    "reductions, C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR = (
+    "FlexGEMM grouped main outputs require captured tensors to map from the "
+    "physical accumulator layout to the contracted logical layout"
 )
 FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
     "FlexGEMM concat-layout grouped-N outputs require B's output dimension to "
@@ -416,9 +420,23 @@ def flex_gemm_local_reduce_config_error(
     )
 
 
+# NOTE [Non-shape-preserving FlexGEMM outputs]
+# FlexGEMM normally returns one value per physical GEMM accumulator. Grouped-N
+# contraction is the current exception: it exposes every physical N lane to the
+# ordinary FX epilogue, requires the main expression to consume the complete lane
+# set, and stores one logical value for each group. Interleaved lanes use
+# ``view(M, logical_N, group)``; chunked lanes use
+# ``view(M, group, logical_N)`` or ``split(logical_N, dim=-1)``. This covers
+# SwiGLU-like pointwise combinations without claiming to support arbitrary slices,
+# permutations, expansions, or M-axis contraction.
+#
+# Captured tensors are not yet supported because QuACK loads them in the physical
+# accumulator layout, while expressions after lane selection use the contracted
+# logical layout. Supporting N-invariant captures still requires an explicit
+# physical-to-logical TensorSSA mapping rather than only relaxing validation.
 @dataclasses.dataclass(frozen=True)
 class FlexGemmGroupedMainOutputTransform:
-    """Describe contraction of the innermost GEMM output dimension.
+    """Describe the grouped-N contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
 
     Attributes:
         group: Number of physical N values contracted into each logical output.
@@ -434,6 +452,7 @@ class FlexGemmGroupedMainOutputTransform:
 
     @property
     def concat_layout(self) -> tuple[str, ...]:
+        """Return the QuACK ABI tag that interleaves chunked B columns."""
         return ("B",) if self.chunked else ()
 
     def validate_quack(self, device_capacity: int) -> None:

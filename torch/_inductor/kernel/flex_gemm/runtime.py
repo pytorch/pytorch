@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
+    FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR,
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
     FlexGemmGroupedMainOutputTransform,
@@ -556,7 +557,9 @@ def gemm_epilogue(
         main_transform.validate_quack(device_capacity[0])
         if main_transform.chunked and b.stride(-1) == 1:
             raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
-        if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0 or epilogue_args:
+        if epilogue_args:
+            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
+        if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0:
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
