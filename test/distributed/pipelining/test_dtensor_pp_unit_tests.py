@@ -41,11 +41,10 @@ from torch.distributed.pipelining.microbatch import (
 )
 from torch.distributed.pipelining.stage import PipelineStage
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
@@ -66,7 +65,6 @@ backend = dist.get_default_backend_for_device(device_type)
 
 
 def _requires_multi_gpu(fn):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
     )
@@ -82,28 +80,43 @@ def _requires_multi_gpu(fn):
 # =============================================================================
 
 
-class TestDTensorPPUnitTests(MultiProcContinuousTest):
+class DTensorPPTestBase(MultiProcContinuousTest):
+    # instantiate_device_type_tests copies non-test members using getattr(). A
+    # classmethod defined on generic_test_class is copied already bound to that
+    # class and cannot see the generated class's device_type. Defining backend_str
+    # on this base leaves it inherited, so cls refers to the generated
+    # device-specific test class when called.
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        # MultiProcContinuousTest subprocesses run tests without calling
+        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
+        # "privateuse1" token; resolve it to the registered backend name.
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls._resolved_device_type())
+
+
+class TestDTensorPPUnitTests(DTensorPPTestBase):
     """Unit tests for DTensor PP metadata infrastructure.
 
     All tests live in a single class so the process group is initialized once
     rather than once per test category.
     """
 
-    @classmethod
-    def backend_str(cls) -> str:
-        return backend
-
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self._resolved_device_type(), self.rank)
 
     def init_pg(self):
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(self.device)
 
     # -----------------------------------------------------------------
     # Shared helpers
@@ -112,7 +125,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     def _make_mesh(self, dim_names=("tp",)):
         """Create a 1D device mesh spanning all ranks."""
         return init_device_mesh(
-            device_type, (self.world_size,), mesh_dim_names=dim_names
+            self._resolved_device_type(), (self.world_size,), mesh_dim_names=dim_names
         )
 
     def _make_dtensor(self, mesh, placements, shape=(8, 16), requires_grad=False):
@@ -795,6 +808,14 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
 # =============================================================================
 # Run Tests
 # =============================================================================
+
+instantiate_device_type_tests(
+    TestDTensorPPUnitTests,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
