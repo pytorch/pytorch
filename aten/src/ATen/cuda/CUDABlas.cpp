@@ -1629,8 +1629,8 @@ bool gemm_and_bias(
 #ifndef USE_ROCM
   uint32_t a_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(
-      c_ptr ? static_cast<const void*>(c_ptr) : static_cast<const void*>(result_ptr)));
+  uint32_t c_alignment =
+      detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr ? c_ptr : result_ptr));
   uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
@@ -1666,7 +1666,7 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      c_ptr ? static_cast<const void*>(c_ptr) : static_cast<const void*>(result_ptr),
+      c_ptr ? c_ptr : result_ptr,
       Cdesc.descriptor(),
       result_ptr,
       Ddesc_raw,
@@ -1681,12 +1681,6 @@ bool gemm_and_bias(
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
-    if (c_ptr) {
-      // Not worth warning about: the caller just copies C into D and runs the
-      // ordinary GEMM, which is what happened before this path existed. The
-      // result is unchanged and there is nothing for the user to act on.
-      return false;
-    }
     TORCH_WARN(
       "gemm_and_bias error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
