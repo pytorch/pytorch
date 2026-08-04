@@ -1079,7 +1079,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(f"cuda:{self.rank}"))
+        backend = dist.get_backend_impl(device=torch.device(f"cuda:{self.rank}"))
         w = pg.allreduce(torch.rand(10).cuda(self.rank))
         self.assertEqual(w._get_timeout(), timedelta(seconds=123))
         w.wait()
