@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -279,6 +280,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   c10::intrusive_ptr<::c10d::Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
+  // MemPool registration (::c10d::ProcessGroupNCCL::registerMemPool parity).
+  // Unlike the stock backend, plain ncclCommRegister of every private-pool
+  // segment already happens unconditionally through NCCLCachingAllocatorHook,
+  // so this only has to cover the segments the hook could not reach and -- for
+  // symm -- perform the collective NCCL_WIN_COLL_SYMMETRIC upgrade that the
+  // hook must not do from an allocator thread. Collective when symm is set:
+  // every rank must call it with the same pool contents, in the same order.
+  void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
+  void deregisterMemPool(at::cuda::MemPool* pool);
+
   // Caching-allocator segment registration (called by
   // NCCLCachingAllocatorHook, potentially from allocator threads).
   void register_address(void* addr, size_t len);
@@ -328,7 +339,19 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
+  // Tears the NCCL communicator down. This NEVER terminates the process --
+  // a user-initiated abort()/shutdown() must be survivable, matching
+  // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
+  // watchdog-detected timeout or async error follow it with abortProcess().
   void abortNcclComm();
+  // Terminates the process (after running the abort hooks) if
+  // TORCH_NCCL_ASYNC_ERROR_HANDLING asks for a tear-down and we are not in
+  // reconfigurable mode. `reason` is logged after "Aborting process on rank N
+  // due to ", so it must describe the actual trigger.
+  void abortProcess(const std::string& reason);
+  // Signals the watchdog thread to exit and reaps it. Detaches instead of
+  // joining when called from the watchdog thread itself.
+  void stopWatchdog();
   void revokeNcclComm();
 
   enum class CommState {
@@ -567,8 +590,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::mutex timeout_mutex_;
 
   bool is_high_priority_stream_{false};
-  bool abort_process_on_timeout_or_error_{true};
   std::string name_;
+
+  // Whether a watchdog-detected timeout or async error takes the process down,
+  // read from TORCH_NCCL_ASYNC_ERROR_HANDLING so both NCCL backends fail the
+  // same way. Only the tear-down half of the mode applies here: our watchdog
+  // deliberately leaves the communicator for the next collective to abort.
+  const bool abort_process_on_timeout_or_error_;
 
   c10::intrusive_ptr<Options> options_c10d_;
 
@@ -586,9 +614,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     size_t len{0};
   };
   std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
-  // Guards memoryRegistrationHandles_: register/deregister_address run on
-  // allocator threads while window ops look segments up on the main thread.
+  // Guards memoryRegistrationHandles_ and registeredMemPools_:
+  // register/deregister_address run on allocator threads while window ops look
+  // segments up on the main thread.
   std::mutex memory_registration_mutex_;
+  // MemPools passed to registerMemPool, so deregisterMemPool can reject a pool
+  // that was never registered (stock does the same via its global
+  // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
+  // own window handle, so teardown does not need to be told which mode to use.
+  std::set<c10::cuda::MempoolId_t> registeredMemPools_;
+  // Caller must hold memory_registration_mutex_ and have checked that `addr`
+  // is not already registered.
+  void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
   // base, folded in here).
