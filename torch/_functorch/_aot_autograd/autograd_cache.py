@@ -546,12 +546,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # dtype must be recorded even when autocast is disabled: in-graph
         # torch.autocast(dev) with dtype=None resolves via get_autocast_dtype
         # at call time, and GraphModule.__reduce__ strips node.meta, so that
-        # resolved dtype would otherwise be missing from the key.
+        # resolved dtype would otherwise be missing from the key. Dynamo's
+        # AutocastState::operator== also skips dtype when a device is disabled
+        # on both sides, so this key cannot delegate upward for disabled-device
+        # dtype -- it must record every device unconditionally.
         #
         # enabled must be recorded too: ambient-on vs ambient-off with the same
         # default dtype must not share a key (AOT tracing under ambient
-        # autocast bakes casts into the artifact). Matches the shape of
-        # _get_autocast_states() / Dynamo's AutocastState snapshot.
+        # autocast bakes casts into the artifact). Deliberately stricter than
+        # Dynamo's AutocastState comparison, which skips dtype for devices
+        # disabled on both sides -- that skip is what this dict must not do.
         self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
             device_type: (
                 torch.is_autocast_enabled(device_type),

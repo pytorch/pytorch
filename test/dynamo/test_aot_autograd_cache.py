@@ -3475,7 +3475,13 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_in_graph_autocast_ambient_dtype_distinguishes_cache(self):
         """Different ambient get_autocast_dtype values must not share a cache entry
-        for in-graph torch.autocast(dev) with no explicit dtype."""
+        for in-graph torch.autocast(dev) with no explicit dtype.
+
+        Clears Dynamo/codecache between ambient dtypes so this exercises the
+        AOTAutograd cache key (cross-process / cold Dynamo path). In-process
+        recompile when ambient dtype changes under a live compiled handle is a
+        separate Dynamo AutocastState guard issue, not covered here.
+        """
 
         def fn(x):
             with torch.autocast("cpu"):
@@ -3930,44 +3936,17 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config = self.default_config()
         self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
 
-    def test_enter_autocast_arg_shapes_cacheability(self):
-        # Cover arg shapes that real Dynamo tracing won't easily isolate:
-        # explicit dtype, dtype=None (ambient-resolved), enabled=False, nested.
-        def make_gm(enter_args):
-            graph = torch.fx.Graph()
-            x = graph.placeholder("x")
-            ctx = graph.call_function(
-                torch.amp.autocast_mode._enter_autocast,
-                enter_args,
-            )
-            y = graph.call_function(torch.ops.aten.mul.Tensor, (x, x))
-            graph.call_function(torch.amp.autocast_mode._exit_autocast, (ctx,))
-            graph.output(y)
-            return torch.fx.GraphModule({}, graph)
-
-        # Common spelling: explicit dtype, cache_enabled left as None.
-        check_cacheable(make_gm(("cpu", torch.bfloat16, True, None)))
-        # Explicit cache_enabled is also fine.
-        check_cacheable(make_gm(("cpu", torch.bfloat16, True, False)))
-        # enabled=False with pinned dtype is still determined by graph args.
-        check_cacheable(make_gm(("cpu", torch.float16, False, True)))
-        # dtype=None is safe: ambient dtype is in the AOTAutograd cache key.
-        check_cacheable(make_gm(("cpu", None, True, None)))
-
-        # Nested enter/exit with pinned dtypes.
+    def test_enter_exit_autocast_nodes_cacheable(self):
+        # check_node_safe only allowlists by node.target for these; arg shapes
+        # are not inspected. One representative graph is enough.
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
-        outer = graph.call_function(
+        ctx = graph.call_function(
             torch.amp.autocast_mode._enter_autocast,
             ("cpu", torch.bfloat16, True, None),
         )
-        inner = graph.call_function(
-            torch.amp.autocast_mode._enter_autocast,
-            ("cpu", torch.float16, True, None),
-        )
         y = graph.call_function(torch.ops.aten.mul.Tensor, (x, x))
-        graph.call_function(torch.amp.autocast_mode._exit_autocast, (inner,))
-        graph.call_function(torch.amp.autocast_mode._exit_autocast, (outer,))
+        graph.call_function(torch.amp.autocast_mode._exit_autocast, (ctx,))
         graph.output(y)
         check_cacheable(torch.fx.GraphModule({}, graph))
 
