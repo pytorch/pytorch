@@ -196,7 +196,7 @@ class TestUtils(TestCase):
         self.assertLess(
             ratio,
             25.0,
-            f"_get_param_to_fqns scaling ratio {ratio:.2f}x when 8x-ing "
+            lambda msg: f"{msg}\n_get_param_to_fqns scaling ratio {ratio:.2f}x when 8x-ing "
             f"model size (elapsed_n={elapsed_n:.4f}s, elapsed_8n={elapsed_8n:.4f}s), "
             f"expected <25x for O(N) but got ~64x indicating O(N^2) "
             f"(see https://github.com/pytorch/pytorch/issues/168329)",

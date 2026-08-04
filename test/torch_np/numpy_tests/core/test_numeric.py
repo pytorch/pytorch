@@ -1068,7 +1068,6 @@ class TestNonzeroAndCountNonzero(TestCase):
     def test_nonzero_onedim(self):
         x = np.array([1, 0, 2, -1, 0, 0, 8])
         assert_equal(np.count_nonzero(x), 4)
-        assert_equal(np.count_nonzero(x), 4)
         assert_equal(np.nonzero(x), ([0, 2, 3, 6],))
 
     def test_nonzero_onedim_differs(self):
