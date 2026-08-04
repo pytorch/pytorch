@@ -301,20 +301,31 @@ static void check_convert_from_float4_input(const Tensor& self) {
 
 Tensor _convert_to_float4_e2m1fn_x2_cpu(const Tensor& self) {
   check_convert_to_float4_input(self);
-  auto input = self.to(kFloat);
   auto out = at::empty_symint(
-      float4_e2m1fn_x2_packed_sizes(input),
-      input.options().dtype(kFloat4_e2m1fn_x2));
-  const float* in_ptr = input.const_data_ptr<float>();
+      float4_e2m1fn_x2_packed_sizes(self),
+      self.options().dtype(kFloat4_e2m1fn_x2));
   auto* out_ptr = reinterpret_cast<uint8_t*>(out.data_ptr());
   const int64_t n = out.numel();
-  at::parallel_for(
-      0, n, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-        for (const auto i : c10::irange(begin, end)) {
-          uint8_t lo = c10::detail::fp4e2m1_from_fp32_value(in_ptr[2 * i]);
-          uint8_t hi = c10::detail::fp4e2m1_from_fp32_value(in_ptr[2 * i + 1]);
-          out_ptr[i] = static_cast<uint8_t>((hi << 4) | lo);
-        }
+  // Read the low-precision input directly and narrow per element, rather than
+  // materializing a full float32 temp via self.to(kFloat); double is excluded
+  // by check_convert_to_float4_input above.
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      self.scalar_type(),
+      "_convert_to_float4_e2m1fn_x2_cpu",
+      [&] {
+        const scalar_t* in_ptr = self.const_data_ptr<scalar_t>();
+        at::parallel_for(
+            0, n, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+              for (const auto i : c10::irange(begin, end)) {
+                uint8_t lo = c10::detail::fp4e2m1_from_fp32_value(
+                    static_cast<float>(in_ptr[2 * i]));
+                uint8_t hi = c10::detail::fp4e2m1_from_fp32_value(
+                    static_cast<float>(in_ptr[2 * i + 1]));
+                out_ptr[i] = static_cast<uint8_t>((hi << 4) | lo);
+              }
+            });
       });
   return out;
 }
@@ -572,7 +583,12 @@ static inline Tensor to_impl(
     auto result = at::_convert_to_float4_e2m1fn_x2(self);
     if (!pin_memory.value_or(false) &&
         to_will_alias(
-            result, std::nullopt, layout, device, false, optional_memory_format)) {
+            result,
+            std::nullopt,
+            layout,
+            device,
+            false,
+            optional_memory_format)) {
       return result;
     }
     return at::_to_copy(
