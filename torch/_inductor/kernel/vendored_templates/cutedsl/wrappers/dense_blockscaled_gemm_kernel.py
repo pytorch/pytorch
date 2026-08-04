@@ -356,7 +356,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
             epilogue_inputs = epilogue.input_pack
             epilogue_inputs = tvm_ffi.convert(dataclasses.astuple(epilogue_inputs))
-            epilogue_outputs = tvm_ffi.convert(epilogue.outputs)
 
         reduction = args.local_reduce
         reduction_tensors = reduction.map_tensors(lambda value: value.runtime_tensor)
@@ -374,7 +373,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                 stream,
                 alpha,
                 epilogue_inputs,
-                epilogue_outputs,
                 local_reduce_out.runtime_tensor
                 if local_reduce_out is not None
                 else None,
@@ -404,7 +402,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             stream,
             alpha,
             epilogue_inputs,
-            epilogue_outputs,
             None,
             None,
         )
