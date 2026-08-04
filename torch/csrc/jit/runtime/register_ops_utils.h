@@ -116,7 +116,7 @@ static const double radToDeg = 180.0 / std::acos(-1.0);
 double degrees(double x);
 double radians(double x);
 
-// Convert an python index (which may be negative) into an index usable for a
+// Convert a python index (which may be negative) into an index usable for a
 // C++ container
 
 // Equivalent to list.at(idx)

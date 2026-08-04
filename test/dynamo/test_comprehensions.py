@@ -771,10 +771,199 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         for i in range(2):
             self.assertEqual(count_op(backend.graphs[i], operator.add), 3)
 
+    def test_reuse_name(self):
+        def fn(x):
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(5)]
+            return i, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_multiple(self):
+        def fn(x):
+            i, j, k = [(i + x, torch._dynamo.graph_break()) for i in range(3)]
+            return i, j, k, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_nonlocal(self):
+        i = 0
+
+        def fn(x):
+            nonlocal i
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return i, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(i, res[0])
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_reconstruct_cell(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i  # makes `i` a cellvar of fn
+
+            r = [(i + x, torch._dynamo.graph_break())[0] for i in range(2)]
+            return (r, g(), i)
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+
+    def test_store_nonlocal_lambda_capture(self):
+        # `i` is a fast local, a comprehension cell, and a free var at once;
+        # Dynamo cannot model two same-named cells and must fall back
+        # (gb_type "MAKE_CELL on a free variable name") rather than silently
+        # capture the wrong cell.
+        i = 0
+
+        def fn(x):
+            nonlocal i
+            i = [lambda: i for i in range(2)]
+            return [f() is i for f in i], x + 1
+
+        x = torch.randn(3, 3)
+        res = fn(x)
+        i = 0
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(res, opt_fn(x))
+
+        i = 0
+        torch._dynamo.reset()
+        full_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "MAKE_CELL on a free variable name"
+        ):
+            full_fn(x)
+
+    def test_locals_snapshot_colliding_cell(self):
+        # `i` is both a fast local and a free var, so it is registered in
+        # symbolic_cellvars; `unused` is never read, so it is pruned from
+        # symbolic_locals and must be rebuilt from f_locals on demand. Both
+        # paths of _call_frame_locals_snapshot run in one frame here.
+        for snapshot in (locals, vars):
+            with self.subTest(snapshot=snapshot.__name__):
+                i = 0
+
+                def fn(x, unused):
+                    nonlocal i
+                    i = [i + 1 for i in range(2)]
+                    return sorted(snapshot().items(), key=str), x + 1
+
+                x = torch.randn(3, 3)
+                res = fn(x, 7)
+                i = 0
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                self.assertEqual(res, opt_fn(x, 7))
+                self.assertEqual(i, [1, 2])
+
+    def test_locals_snapshot_cell_shadowed_by_itervar(self):
+        # Inside the comprehension the fast local `i` holds the iteration
+        # value while the cell still holds 100. They share a name but not a
+        # localsplus slot, and CPython reports the fast local, so the
+        # snapshot must let it shadow the cell.
+        i = 100
+
+        def fn(x):
+            nonlocal i
+            return [locals()["i"] for i in range(2)], x + 1
+
+        x = torch.randn(3, 3)
+        res = fn(x)
+        i = 100
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(res, opt_fn(x))
+
+    def test_store_global(self):
+        global _comprehension_global
+
+        def fn(x):
+            global _comprehension_global
+            _comprehension_global = [
+                (i + x, torch._dynamo.graph_break()) for i in range(2)
+            ]
+            return _comprehension_global, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(_comprehension_global, res[0])
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_attribute(self):
+        class C:
+            pass
+
+        def fn(x):
+            obj = C()
+            obj.vals = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return obj.vals, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_augmented_assign(self):
+        def fn(x):
+            acc = [x]
+            acc += [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return acc, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_comprehension_lambda_captures_outer_cellvar(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i  # makes `i` a cellvar of fn, not a freevar
+
+            fns = [lambda: i for i in range(3)]
+            return [h() for h in fns], g(), i, x + 1
+
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    def test_locals_snapshot_with_cell(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i
+
+            fns = [lambda: i for i in range(3)]
+            snap = dict(locals())
+            return snap["i"], g(), [h() for h in fns], x + 1
+
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
 
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_calls_with_comprehension_graph_break_nested_graph_breaks_true(
         self,
     ):
@@ -807,7 +996,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 3)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_result_var_name_collision(self):
         """Comprehension result_var in leaf frame shares a name with a root frame local."""
 
@@ -830,7 +1018,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_walrus(self):
         """Nested function with comprehension containing walrus operator."""
 
@@ -855,7 +1042,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_captured_var(self):
         """Nested function with comprehension capturing outer variable passed as parameter."""
 
@@ -881,7 +1067,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_triple_nested_function_comprehension(self):
         """Triple nested function calls (f->g->h->deepest) with comprehension in deepest."""
 
@@ -918,7 +1103,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 4)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_multiple_nested_comprehensions_in_different_functions(self):
         """Two sequential nested function calls each with comprehensions."""
 
@@ -950,7 +1134,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[2], operator.add), 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_outer_list_mutation(self):
         """Nested function with comprehension mutating outer list."""
 
@@ -976,7 +1159,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_list_comprehension_graph_break(self):
         """Nested version of test_list_comprehension_graph_break."""
 
@@ -1001,7 +1183,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_dict_comprehension_graph_break(self):
         """Nested version of test_dict_comprehension_graph_break."""
 
@@ -1026,7 +1207,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_list_comprehension_with_graph_break_function(self):
         """Nested version of test_list_comprehension_with_graph_break_function."""
 
@@ -1057,7 +1237,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.mul), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_multiple_comprehensions_one_break(self):
         """Nested version of test_multiple_comprehensions_one_break."""
 
@@ -1084,7 +1263,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_comprehension_inner_break(self):
         """Nested version of test_nested_comprehension_inner_break."""
 
@@ -1112,7 +1290,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_multi_iterator_comprehension_break(self):
         """Nested version of test_multi_iterator_comprehension_break."""
 
@@ -1141,7 +1318,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_discarded_comprehension_graph_break(self):
         """Nested version of test_discarded_comprehension_graph_break."""
 
@@ -1166,7 +1342,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_in_expression_graph_break(self):
         """Nested version of test_comprehension_in_expression_graph_break."""
 
@@ -1191,7 +1366,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_return_directly(self):
         """Nested version of test_comprehension_return_directly."""
 
@@ -1214,7 +1388,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_walrus_operator_in_comprehension(self):
         """Nested version of test_walrus_operator_in_comprehension."""
 
@@ -1239,7 +1412,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_walrus_operator_in_if_in_comprehension(self):
         """Nested version of test_walrus_operator_in_if_in_comprehension."""
 
@@ -1266,7 +1438,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_walrus_operator_in_comprehension_with_tensor(self):
         """Nested version of test_walrus_operator_in_comprehension_with_tensor."""
 
@@ -1295,7 +1466,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_multiple_walrus_operators_in_comprehension(self):
         """Nested version of test_multiple_walrus_operators_in_comprehension."""
 
@@ -1323,7 +1493,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_comprehension_with_walrus_operators(self):
         """Nested version of test_nested_comprehension_with_walrus_operators."""
 
@@ -1357,7 +1526,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_comprehension_with_captured_outer_variable(self):
         """Nested version of test_nested_comprehension_with_captured_outer_variable."""
 
@@ -1386,7 +1554,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_triple_nested_comprehension_with_walrus(self):
         """Nested version of test_triple_nested_comprehension_with_walrus."""
 
@@ -1421,7 +1588,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_dict_comprehension_with_walrus_and_captured(self):
         """Nested version of test_nested_dict_comprehension_with_walrus_and_captured."""
 
@@ -1454,7 +1620,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_outer_variable_read(self):
         """Nested version of test_comprehension_with_outer_variable_read."""
 
@@ -1482,7 +1647,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_outer_list_mutation(self):
         """Nested version of test_comprehension_with_outer_list_mutation."""
 
@@ -1512,7 +1676,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_outer_dict_mutation(self):
         """Nested version of test_comprehension_with_outer_dict_mutation."""
 
@@ -1542,7 +1705,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_outer_list_extend(self):
         """Nested version of test_comprehension_with_outer_list_extend."""
 
@@ -1572,7 +1734,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_outer_list_pop(self):
         """Nested version of test_comprehension_with_outer_list_pop."""
 
@@ -1603,7 +1764,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_global_variable(self):
         """Nested version of test_comprehension_with_global_variable."""
         global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
@@ -1634,7 +1794,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_closure_variable(self):
         """Nested version of test_comprehension_with_closure_variable."""
 
@@ -1669,7 +1828,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_with_closure_list_mutation(self):
         """Nested version of test_comprehension_with_closure_list_mutation."""
 
@@ -1706,7 +1864,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_multi_for_comprehension_graph_break(self):
         """Nested version of test_nested_multi_for_comprehension_graph_break."""
 
@@ -1735,7 +1892,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_multiple_comprehension_graph_breaks(self):
         """Nested version of test_multiple_comprehension_graph_breaks."""
 
@@ -1763,7 +1919,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_modifying_global_variable(self):
         """Nested version of test_comprehension_modifying_global_variable."""
         global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
@@ -1802,7 +1957,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_modifying_closure_variable(self):
         """Nested version of test_comprehension_modifying_closure_variable."""
 
@@ -1838,7 +1992,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_list_and_dict_comprehension_graph_breaks(self):
         """Nested version of test_list_and_dict_comprehension_graph_breaks."""
 
@@ -1866,7 +2019,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_nested_dict_in_list_comprehension_graph_break(self):
         """Nested version of test_nested_dict_in_list_comprehension_graph_break."""
 
@@ -1894,7 +2046,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_nonlocal_int_mutation(self):
         """Nonlocal int mutation around a comprehension graph break."""
 
@@ -1922,7 +2073,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_nonlocal_tensor_mutation(self):
         """Nonlocal tensor mutation around a comprehension graph break."""
 
@@ -1950,7 +2100,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_nonlocal_different_varnames(self):
         """Inner function uses different variable names than root function."""
 
@@ -1979,7 +2128,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 3)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_nonlocal_tensor_different_varnames(self):
         """Inner function uses different variable names than root function (tensor variant)."""
 
@@ -2008,7 +2156,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_captured_tensor(self):
         """Comprehension in inlined function captures a tensor from the inlined function."""
 
@@ -2030,7 +2177,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_name_shadowing(self):
         """Root and leaf frames have variables with the same name."""
 
