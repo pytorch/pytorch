@@ -169,16 +169,17 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   const auto device = c10::DeviceIndex(0);
   sycl::queue* stream_queue = &c10::xpu::getCurrentXPUStream(device).queue();
   auto filter = [stream_queue](sycl::queue* q) { return q == stream_queue; };
+  auto orig_fraction = c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
 
   // Use a fixed user-created pool id that won't collide with any MemPool
   // created by other tests.
   const c10::MempoolId_t pool_id{0, 99999};
   c10::xpu::XPUCachingAllocator::createOrIncrefPool(device, pool_id);
 
-  // Step 1: pre-fill the OOM pool cache with a 2 MB block.
-  const size_t _2mb = 2 * 1024 * 1024;
+  // Step 1: pre-fill the OOM pool cache with a 20 MB block.
+  const size_t _20mb = 20 * 1024 * 1024;
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
-  void* oom_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_2mb);
+  void* oom_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_20mb);
   c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
   c10::xpu::XPUCachingAllocator::raw_delete(oom_ptr);
 
@@ -189,14 +190,14 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   // device allocations, forcing the allocator into try_mempool_fallback.
   c10::xpu::XPUCachingAllocator::setMemoryFraction(1e-9, device);
 
-  // Step 4: so this must be served by the OOM pool's cached 2 MB block.
-  const size_t _1mb = 1 * 1024 * 1024;
-  void* ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_1mb);
+  // Step 4: so this must be served by the OOM pool's cached 20 MB block.
+  const size_t _10mb = 10 * 1024 * 1024;
+  void* ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   EXPECT_NE(ptr, nullptr)
       << "Allocation should have succeeded via OOM pool fallback";
 
   // Step 5: restore a permissive fraction before cleanup.
-  c10::xpu::XPUCachingAllocator::setMemoryFraction(1.0, device);
+  c10::xpu::XPUCachingAllocator::setMemoryFraction(orig_fraction, device);
 
   c10::xpu::XPUCachingAllocator::raw_delete(ptr);
   c10::xpu::XPUCachingAllocator::setUseOnOOM(device, pool_id, false);
