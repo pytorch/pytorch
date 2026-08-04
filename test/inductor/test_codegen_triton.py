@@ -569,6 +569,20 @@ def helper(x):
                 sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
             )
 
+    def test_signature_of_complex_dtypes(self):
+        """complex dtypes should produce correct Triton pointer signatures via _type_of."""
+        expected = {
+            torch.complex32: "*c32",
+            torch.complex64: "*c64",
+            torch.complex128: "*c128",
+        }
+        for dtype, expected_sig in expected.items():
+            arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
+            sig = triton_utils.signature_of(arg, size_dtype=None)
+            self.assertEqual(
+                sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
+            )
+
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
     def test_fp8_dtype_support_matrix(self):
         self.assertFalse(

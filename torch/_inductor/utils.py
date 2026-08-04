@@ -601,6 +601,9 @@ def _type_of(key: torch.dtype | None) -> str:
         "uint16": "u16",
         "uint32": "u32",
         "uint64": "u64",
+        "complex32": "c32",
+        "complex64": "c64",
+        "complex128": "c128",
     }
     # reinterpret can create triton type
     tys.update({v: v for v in list(tys.values())})
