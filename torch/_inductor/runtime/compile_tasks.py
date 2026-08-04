@@ -155,7 +155,7 @@ def _worker_compile_pycodecache_kernel(
     _precompile entry point. Compiled artifacts are persisted to disk cache so
     the parent process can load them without recompilation.
 
-    Used by both CuteDSL and NV Universal GEMM backends.
+    Used by CuteDSL, FlyDSL, and NV Universal GEMM backends.
     """
     _apply_subprocess_env_and_clear_caches(extra_env)
 
