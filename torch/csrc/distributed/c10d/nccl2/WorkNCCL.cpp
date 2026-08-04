@@ -10,6 +10,8 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 
+#include <thread>
+
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
@@ -26,10 +28,13 @@ WorkNCCL::WorkNCCL(
       comm_(comm),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
+      work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
+  future_work_result_ =
+      c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
 }
 
 WorkNCCL::WorkNCCL(
@@ -41,10 +46,13 @@ WorkNCCL::WorkNCCL(
       comm_(comm),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
+      work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
+  future_work_result_ =
+      c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
 }
 
 WorkNCCL::~WorkNCCL() {
@@ -91,56 +99,99 @@ void WorkNCCL::recordEnd() {
   }
 }
 
-WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
-  if (status() == WorkStatus::COMPLETED || status() == WorkStatus::ERROR ||
-      status() == WorkStatus::TIMEDOUT) {
+bool WorkNCCL::setTerminalStatus(WorkStatus terminal_status) {
+  TORCH_INTERNAL_ASSERT(
+      terminal_status == WorkStatus::COMPLETED ||
+      terminal_status == WorkStatus::TIMEDOUT ||
+      terminal_status == WorkStatus::ERROR);
+
+  std::lock_guard<std::mutex> lock(terminal_status_mutex_);
+  WorkStatus current = status();
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
+      current == WorkStatus::ERROR) {
+    return false;
+  }
+
+  WorkResult result = WorkResult::SUCCESS;
+  std::exception_ptr exception;
+  if (terminal_status == WorkStatus::TIMEDOUT) {
+    result = WorkResult::TIMEOUT;
+    exception = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation timed out"));
+  } else if (terminal_status == WorkStatus::ERROR) {
+    result = WorkResult::COMM_ERROR;
+    exception = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+  }
+  finish(std::move(exception));
+  status_.store(terminal_status, std::memory_order_release);
+  future_work_result_->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
+  return true;
+}
+
+WorkNCCL::WorkStatus WorkNCCL::checkStatus(
+    std::optional<std::chrono::milliseconds> timeout) {
+  WorkStatus current = status();
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::ERROR ||
+      current == WorkStatus::TIMEDOUT) {
+    return current;
+  }
+
+  auto comm_error = comm_->getError();
+  if (comm_error == ErrorType::TIMEOUT) {
+    setTerminalStatus(WorkStatus::TIMEDOUT);
+    return status();
+  }
+  if (comm_error != ErrorType::SUCCESS) {
+    setTerminalStatus(WorkStatus::ERROR);
     return status();
   }
 
-  if (!start_completed_time_.has_value()) {
+  if (current == WorkStatus::NOT_STARTED) {
     try {
       if (start_event_->query()) {
-        start_completed_time_ = std::chrono::steady_clock::now();
-        setStatus(WorkStatus::INPROGRESS);
+        WorkStatus expected = WorkStatus::NOT_STARTED;
+        status_.compare_exchange_strong(
+            expected, WorkStatus::INPROGRESS, std::memory_order_relaxed);
       }
     } catch (const std::exception& e) {
       TC_LOG(ERROR, comm_) << "CUDA error during start event query: "
                            << e.what();
-      setStatus(WorkStatus::ERROR);
+      setTerminalStatus(WorkStatus::ERROR);
     }
   }
-  if (status() == WorkStatus::NOT_STARTED || status() == WorkStatus::ERROR) {
+  if (status() == WorkStatus::ERROR) {
     return status();
   }
 
-  bool end_completed = false;
-  try {
-    end_completed = end_event_->query();
-  } catch (const std::exception& e) {
-    TC_LOG(ERROR, comm_) << "CUDA error during end event query: " << e.what();
-    setStatus(WorkStatus::ERROR);
-    return status();
+  if (status() == WorkStatus::INPROGRESS) {
+    try {
+      if (end_event_->query()) {
+        setTerminalStatus(WorkStatus::COMPLETED);
+        return status();
+      }
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, comm_) << "CUDA error during end event query: " << e.what();
+      setTerminalStatus(WorkStatus::ERROR);
+      return status();
+    }
   }
 
-  if (end_completed) {
-    setStatus(WorkStatus::COMPLETED);
-  } else {
-    auto current_time = std::chrono::steady_clock::now();
-    auto elapsed_milliseconds =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            current_time - start_completed_time_.value());
-
-    if (elapsed_milliseconds > timeout_ms_) {
-      TC_LOG(ERROR, comm_) << "Operation timed out after "
-                           << elapsed_milliseconds.count() << " ms";
-      setStatus(WorkStatus::TIMEDOUT);
-    }
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - work_start_time_);
+  auto work_timeout = timeout.value_or(timeout_ms_);
+  if (elapsed >= work_timeout) {
+    TC_LOG(ERROR, comm_) << "Operation timed out after " << elapsed.count()
+                         << " ms";
+    setTerminalStatus(WorkStatus::TIMEDOUT);
   }
   return status();
 }
 
 bool WorkNCCL::isCompleted() {
-  return checkStatus() == WorkStatus::COMPLETED;
+  WorkStatus current = checkStatus();
+  return current == WorkStatus::COMPLETED || current == WorkStatus::ERROR ||
+      current == WorkStatus::TIMEDOUT;
 }
 
 bool WorkNCCL::isSuccess() const {
@@ -187,11 +238,36 @@ void WorkNCCL::synchronizeInternal() {
   inputTensor_.reset();
 }
 
-bool WorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
-  // Unlike c10d's default wait(), this does not block the CPU: for CUDA work it
-  // is sufficient (and matches upstream torchcomms) to order the current stream
-  // after the collective. The timeout arg is honored by the watchdog, not here.
+bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
   synchronize();
+
+  auto current_stream =
+      at::cuda::getCurrentCUDAStream(comm_->getDevice().index());
+  if (timeout == kNoTimeout &&
+      c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
+    WorkStatus current = status();
+    if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
+      std::rethrow_exception(exception());
+    }
+    return true;
+  }
+
+  if (timeout != kNoTimeout) {
+    while (true) {
+      WorkStatus current = checkStatus(timeout);
+      if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
+          current == WorkStatus::ERROR) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  WorkStatus current =
+      timeout == kNoTimeout ? checkStatus() : checkStatus(timeout);
+  if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
+    std::rethrow_exception(exception());
+  }
   return true;
 }
 
@@ -252,6 +328,11 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
     future_->markCompleted(c10::IValue(outputs_));
   }
   return future_;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFutureResult() {
+  checkStatus();
+  return future_work_result_;
 }
 
 } // namespace c10d::nccl2
