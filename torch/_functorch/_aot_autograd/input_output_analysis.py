@@ -24,7 +24,6 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
-from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -195,6 +194,11 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -244,24 +248,14 @@ def create_synthetic_base_metadata(
                 else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
-        is_input_replaced_by_synthetic_base_view = (
-            o.base_idx is not None
-            and new_base_idx is not None
-            and isinstance(synthetic_base_info_for_output, tuple)
-            and (
-                outer_args[o.base_idx]._base is not None
-                or not has_same_metadata(
-                    outer_args[o.base_idx], inner_args[new_base_idx]
-                )
-            )
+        # If the original input was merged into a synthetic base, then an
+        # output that was literally that input is now a view of the base.
+        input_merged = o.base_idx is not None and isinstance(
+            synthetic_base_info[o.base_idx], tuple
         )
-        # If OutputType.is_input is remapped to another base, including a
-        # synthetic base replacing the original input view, the output must be
-        # regenerated as an alias of that base.
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input
-            and (o.base_idx != new_base_idx or is_input_replaced_by_synthetic_base_view)
+            if o.output_type == OutputType.is_input and input_merged
             else o.output_type
         )
         existing_output_infos.append(
