@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest.mock import patch
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -20,6 +22,24 @@ if os.getenv("CIRCLECI"):
 
 
 class EtcdServerTest(unittest.TestCase):
+    @patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))],
+    )
+    @patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+        side_effect=OSError("socket failed"),
+    )
+    def test_find_free_port_socket_creation_failure(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+            find_free_port()
+
+        mock_socket.assert_called_once_with(
+            socket.AF_INET, socket.SOCK_STREAM, 0
+        )
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
