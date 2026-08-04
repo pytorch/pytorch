@@ -2397,7 +2397,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocators[device]->setNoSplit(std::move(mempool_id));
+    device_allocators[device]->setNoSplit(mempool_id);
   }
 
   void setUseOnOOM(
@@ -2405,7 +2405,7 @@ class NativeCachingAllocator : public XPUAllocator {
       MempoolId_t mempool_id,
       bool use_on_oom) {
     assertValidDevice(device);
-    device_allocators[device]->setUseOnOOM(std::move(mempool_id), use_on_oom);
+    device_allocators[device]->setUseOnOOM(mempool_id, use_on_oom);
   }
 
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
