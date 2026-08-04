@@ -608,8 +608,22 @@ def is_cpu_isa_compatible(host_isa: str, artifact_isa: str) -> bool:
     For example, a host with AVX512 (or AVX512_VNNI, AMX_TILE) capability can run
     artifacts compiled for AVX2. However, a host with AVX2 cannot run artifacts
     compiled for AVX512.
+
+    The sentinel string ``"INVALID_VEC_ISA"`` (emitted by ``InvalidVecISA.__str__``)
+    is handled specially:
+    - An artifact built with no vectorisation (INVALID_VEC_ISA) runs correctly on
+      any host, so the function always returns True.
+    - A host that reports INVALID_VEC_ISA (e.g. no C++ compiler available at load
+      time, so ``valid_vec_isa_list`` dry-compiles nothing) is *unknown*, not known-
+      incapable; returning True avoids spurious warnings on capable hardware that
+      simply lacks a toolchain at inference time.
     """
+    _INVALID = "invalid_vec_isa"
+
     if not artifact_isa or not host_isa:
+        return True
+
+    if artifact_isa.lower() == _INVALID or host_isa.lower() == _INVALID:
         return True
 
     host_tokens = set(host_isa.lower().split())
@@ -620,26 +634,23 @@ def is_cpu_isa_compatible(host_isa: str, artifact_isa: str) -> bool:
 
     expanded_host_tokens = set(host_tokens)
 
-    # Alias mappings
+    # neon/asimd are two names for the same ARMv8 SIMD extension.
     if "neon" in host_tokens or "asimd" in host_tokens:
         expanded_host_tokens.update({"neon", "asimd"})
 
-    # x86 SIMD hierarchy
-    if any(t in host_tokens for t in ("amx_tile", "avx512_vnni", "avx512")):
+    # x86 SIMD hierarchy: VecISA.__str__ already chains tokens cumulatively
+    # (VecAMX.__str__ == "avx512 avx512_vnni amx_tile"), so a host string from
+    # pick_vec_isa() already contains all implied tokens.  The expansion below
+    # is still needed for strings sourced from AOTI_CPU_ISA metadata (which
+    # stores only the highest-capability token).
+    if "avx512" in host_tokens or "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
         expanded_host_tokens.add("avx2")
-
-    if any(t in host_tokens for t in ("amx_tile", "avx512_vnni")):
+    if "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
         expanded_host_tokens.add("avx512")
-
     if "amx_tile" in host_tokens:
         expanded_host_tokens.add("avx512_vnni")
 
-    # ARM hierarchy
-    if any(t.startswith("sve") for t in host_tokens):
-        expanded_host_tokens.update({"neon", "asimd"})
-
     return artifact_tokens.issubset(expanded_host_tokens)
-
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content

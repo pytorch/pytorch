@@ -169,14 +169,21 @@ class TestAOTIPackageDeviceValidation(TestCase):
     def test_is_cpu_isa_compatible(self):
         from torch._inductor.cpu_vec_isa import is_cpu_isa_compatible
 
+        # Normal superset cases
         self.assertTrue(is_cpu_isa_compatible("AVX512 AVX512_VNNI", "AVX2"))
         self.assertTrue(is_cpu_isa_compatible("AVX512", "AVX2"))
         self.assertTrue(is_cpu_isa_compatible("AVX2", "AVX2"))
         self.assertTrue(is_cpu_isa_compatible("ASIMD", "NEON"))
-        self.assertTrue(is_cpu_isa_compatible("SVE", "ASIMD"))
 
+        # INVALID_VEC_ISA sentinel: scalar artifact runs anywhere
+        self.assertTrue(is_cpu_isa_compatible("AVX512", "INVALID_VEC_ISA"))
+        # INVALID_VEC_ISA sentinel: unknown host (e.g. no compiler at load time)
+        self.assertTrue(is_cpu_isa_compatible("INVALID_VEC_ISA", "AVX2"))
+        # Both INVALID_VEC_ISA
+        self.assertTrue(is_cpu_isa_compatible("INVALID_VEC_ISA", "INVALID_VEC_ISA"))
+
+        # Incompatible cases
         self.assertFalse(is_cpu_isa_compatible("AVX2", "AVX512"))
-        self.assertFalse(is_cpu_isa_compatible("AVX2", "SVE"))
 
     def test_aoti_load_cpu_isa_compatibility_warning(self):
         class FakeAOTIModelPackageLoader:
