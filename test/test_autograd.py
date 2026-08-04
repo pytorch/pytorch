@@ -17878,6 +17878,81 @@ class TestAutogradMultipleDispatch(TestCase):
                 self.assertEqual(x.grad, expected)
 
 
+@skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
+class TestFunctionAssertMessages(TestCase):
+    # THPFunction_assert forwards to a printf-style formatter. Regression tests
+    # that the dynamic content (offending type name / index) is not silently
+    # dropped from the error message.
+    def _apply(self, forward_fn):
+        class F(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return forward_fn(ctx, x)
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        return F.apply(torch.randn(2, requires_grad=True))
+
+    def test_dirty_tensors_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_dirty_element_reports_index_and_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"argument 0 is of type .*str"):
+            self._apply(fwd)
+
+    def test_to_save_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.to_save = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_non_differentiable_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_non_differentiable_element_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but got .*str"):
+            self._apply(fwd)
+
+    def test_saved_for_forward_not_tuple_reports_type(self):
+        class F(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.saved_for_forward = "notatuple"
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            F.apply(torch.randn(2, requires_grad=True))
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
