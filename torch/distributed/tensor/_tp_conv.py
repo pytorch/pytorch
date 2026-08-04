@@ -246,6 +246,42 @@ def tp_convolution_backward(
         return local_results
 
 
+def _scaled_local_conv_groups(
+    weight: object,
+    local_weight: object,
+    groups: object,
+) -> object:
+    """Local ``groups`` for a channel-sharded (depthwise) conv shard.
+
+    The conv sharding strategies (see ``_ops/_conv_ops.py``) shard channels only
+    for depthwise conv (``groups == in_channels == out_channels``); each shard
+    then holds a slice of the out-channels and its local conv must run with a
+    matching ``groups``. Strategies decide placements only, so the local
+    ``groups`` arg is rescaled here. For any other conv the weight stays
+    replicated (local == global out-channels) and ``groups`` is returned
+    unchanged.
+    """
+    if not (
+        isinstance(groups, int) and groups > 1 and isinstance(weight, dtensor.DTensor)
+    ):
+        return groups
+    global_out_channels = cast(dtensor.DTensor, weight).shape[0]
+    local_out_channels = cast(torch.Tensor, local_weight).shape[0]
+    if local_out_channels == global_out_channels:
+        return groups
+    # Even sharding is required so each shard's local groups is an integer.
+    # DTensor's shardability check should guarantee this, so a violation
+    # indicates an internal bug rather than bad user input.
+    scaled_groups = groups * local_out_channels
+    if scaled_groups % global_out_channels != 0:
+        raise AssertionError(
+            "channel-sharded conv groups must divide evenly across shards: "
+            f"groups={groups}, local_out_channels={local_out_channels}, "
+            f"global_out_channels={global_out_channels}."
+        )
+    return scaled_groups // global_out_channels
+
+
 def convolution_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -263,10 +299,15 @@ def convolution_handler(
     if not isinstance(output_spec, dtensor.DTensorSpec):
         raise AssertionError
 
+    local_args = list(op_info.local_args)
+    # convolution args: [input, weight, bias, ..., groups(8), ...]. Rescale the
+    # local ``groups`` for a channel-sharded depthwise conv (no-op otherwise).
+    local_args[8] = _scaled_local_conv_groups(args[1], local_args[1], local_args[8])
+
     # local propagation
     local_results = tp_convolution(
         op_call,
-        tuple(op_info.local_args),
+        tuple(local_args),
         op_info.local_kwargs,
         output_spec.dim_map,
     )
@@ -301,10 +342,16 @@ def convolution_backward_handler(
     if not isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec):
         raise AssertionError
 
+    local_args = list(op_info.local_args)
+    # convolution_backward args: [grad_output, input, weight, ..., groups(9), ...].
+    # Rescale the local ``groups`` for a channel-sharded depthwise conv, mirroring
+    # convolution_handler (no-op otherwise). args[2] is the (global) weight DTensor.
+    local_args[9] = _scaled_local_conv_groups(args[2], local_args[2], local_args[9])
+
     # local propagation
     local_results = tp_convolution_backward(
         op_call,
-        tuple(op_info.local_args),
+        tuple(local_args),
         op_info.local_kwargs,
         op_info.flat_args_schema[0].dim_map,
     )

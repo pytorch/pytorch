@@ -15,7 +15,12 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import register_prop_rule
-from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.distributed.tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -166,7 +171,13 @@ def convolution_single_dim_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Tensor inputs are TensorMetas in single-dim strategies (see
+    # register_single_dim_strategy docs).
+    input_meta = args_schema[0]
+    weight_meta = args_schema[1]
     bias_meta = args_schema[2]
+    groups = args_schema[8]
+
     # [output, input, weight, (bias)]
     rule: list[Placement | _ShardingPlaceholder] = [
         _ShardingPlaceholder(0),  # output
@@ -175,7 +186,29 @@ def convolution_single_dim_strategy(
     ]
     if bias_meta is not None:
         rule.append(Replicate())  # bias
-    return [rule]
+    strategies = [rule]
+
+    # Depthwise conv (groups == in_channels == out_channels): each channel is
+    # an independent group, so input channels, weight out-channels, and output
+    # channels can all be sharded together with no cross-channel communication.
+    # The per-shard ``groups`` value is scaled at runtime in
+    # ``_tp_conv.convolution_handler`` (strategies decide placements only).
+    if (
+        isinstance(groups, int)
+        and groups > 1
+        and groups == input_meta.shape[1]
+        and groups == weight_meta.shape[0]
+    ):
+        channel_rule: list[Placement | _ShardingPlaceholder] = [
+            Shard(1),  # output: channel dim
+            Shard(1),  # input: channel dim
+            Shard(0),  # weight: out-channel dim
+        ]
+        if bias_meta is not None:
+            channel_rule.append(Shard(0))  # bias: per out-channel
+        strategies.append(channel_rule)
+
+    return strategies
 
 
 @register_single_dim_strategy(
@@ -187,7 +220,10 @@ def convolution_backward_single_dim_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    input_meta = args_schema[1]
+    weight_meta = args_schema[2]
     bias_sizes = args_schema[3]
+    groups = args_schema[9]
     has_bias = bias_sizes is not None
     # outputs: [grad_input, grad_weight, grad_bias]
     # inputs: [grad_output, input, weight]
@@ -199,4 +235,28 @@ def convolution_backward_single_dim_strategy(
         _ShardingPlaceholder(0),  # input
         Replicate(),  # weight
     ]
-    return [rule]
+    strategies = [rule]
+
+    # Depthwise conv (groups == in_channels == out_channels): channels are
+    # independent groups, so a channel-sharded backward computes each shard's
+    # grads locally (mirrors the forward rule in convolution_single_dim_strategy).
+    # grad_weight/grad_bias are Shard(0) per out-channel -- no cross-rank sum, so
+    # they are not Partial. The per-shard ``groups`` is scaled at runtime in
+    # ``_tp_conv.convolution_backward_handler``.
+    if (
+        isinstance(groups, int)
+        and groups > 1
+        and groups == input_meta.shape[1]
+        and groups == weight_meta.shape[0]
+    ):
+        channel_rule: list[Placement | _ShardingPlaceholder | None] = [
+            Shard(1),  # grad_input: channel dim
+            Shard(0),  # grad_weight: out-channel dim
+            Shard(0) if has_bias else None,  # grad_bias: per out-channel
+            Shard(1),  # grad_output: channel dim
+            Shard(1),  # input: channel dim
+            Shard(0),  # weight: out-channel dim
+        ]
+        strategies.append(channel_rule)
+
+    return strategies

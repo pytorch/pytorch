@@ -43,6 +43,21 @@ def _conv_fn(
         module.register_parameter(name, dist_param)
 
 
+def _depthwise_channel_conv_fn(
+    name: str,
+    module: nn.Module,
+    device_mesh: DeviceMesh,
+) -> None:
+    # Shard depthwise-conv params on the out-channel dim: weight is
+    # (out_channels, 1, *kernel) and bias is (out_channels,), both Shard(0).
+    for name, param in module.named_parameters():
+        dist_param = torch.nn.Parameter(
+            distribute_tensor(param, device_mesh, [Shard(0)])
+        )
+        name = "_".join(name.split("."))
+        module.register_parameter(name, dist_param)
+
+
 class DistConvolutionOpsTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -393,6 +408,49 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_tf32_off
     @with_comms
     @skip_if_lt_x_gpu(2)
+    def test_conv1d_channel_shard(self):
+        # Depthwise Conv1d (groups == channels) sharded on the channel dim: each
+        # group is independent, so the forward runs locally with no comm and the
+        # output stays Shard(1). Exercises the depthwise channel rule in
+        # convolution_single_dim_strategy plus the groups scaling in
+        # convolution_handler.
+        device_mesh = self.build_device_mesh()
+
+        channels = 8
+        model = nn.Conv1d(
+            channels, channels, kernel_size=4, padding=0, groups=channels
+        ).to(self.device_type)
+        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = distribute_module(model, device_mesh, _depthwise_channel_conv_fn)
+
+        x = torch.randn(2, channels, 16, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_dt = distribute_tensor(x, device_mesh, [Shard(1)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            out_dt = model(x_dt)
+        # Channel-sharded depthwise conv needs no communication in the forward.
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertTrue(out_dt.placements[0].is_shard(1))
+
+        out_ref = model_ref(x_ref)
+        self.assertEqual(out_dt.full_tensor(), out_ref)
+
+        # Backward is also channel-local: grads stay channel-sharded with no comm.
+        grad = torch.randn_like(out_ref)
+        grad_dt = distribute_tensor(grad, device_mesh, [Shard(1)])
+        with comm_mode:
+            out_dt.backward(grad_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertTrue(x_dt.grad.placements[0].is_shard(1))
+
+        out_ref.backward(grad)
+        self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
+
+    @with_tf32_off
+    @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_conv3d_batch_shard(self):
         device_mesh = self.build_device_mesh()
 
@@ -437,6 +495,7 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
         "test_conv2d_no_bias_backward",
         "test_conv2d_module_no_bias",
         "test_conv1d_batch_shard",
+        "test_conv1d_channel_shard",
         "test_conv3d_batch_shard",
     ],
 )
