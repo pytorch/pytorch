@@ -46,6 +46,7 @@ DTYPE_TO_METAL = {
     torch.int32: "int",
     torch.int64: "long",
     torch.uint8: "uchar",
+    torch.uint16: "ushort",
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",

@@ -204,6 +204,15 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.eye(64),), check_lowp=False)
 
+    def test_eye_uint16_index(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/191942
+        def fn(x):
+            return torch.eye(x.shape[-1], dtype=x.dtype, device=x.device)
+
+        x = torch.zeros(10, 256, device=self.device)
+        compiled = torch.compile(fn)
+        self.assertEqual(compiled(x), fn(x))
+
     def test_reduced_max(self):
         # inductor test do not validate that max of say 16K half elements can be computed
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
