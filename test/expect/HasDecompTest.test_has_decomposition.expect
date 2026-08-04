@@ -53,10 +53,12 @@ aten::_conj_physical
 aten::_conj_physical.out
 aten::_conv_depthwise2d
 aten::_conv_depthwise2d.out
+aten::_convert_from_float4_e2m1fn_x2
 aten::_convert_indices_from_coo_to_csr
 aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
+aten::_convert_to_float4_e2m1fn_x2
 aten::_convert_weight_to_int4pack
 aten::_convert_weight_to_int4pack_for_cpu
 aten::_convolution

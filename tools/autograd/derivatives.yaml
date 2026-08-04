@@ -288,6 +288,22 @@
   self: angle_backward(grad, self)
   result: handle_r_to_c(result.scalar_type(), angle_backward(self_t.conj(), self_p).conj())
 
+# We explicitly do not support differentiability of casting to fp4, because:
+# 1. numerically, all known prod-quality quantization recipes define
+#    a custom backward for the scaling + cast operation together, using
+#    autograd here will be a footgun
+# 2. even if someone wanted (1), to properly support autograd we need to define
+#    `add` to make grad accumulation work, and adding fp4 numbers with the
+#    output in fp4 is not numerically useful due to the format's small range
+- name: _convert_to_float4_e2m1fn_x2(Tensor self) -> Tensor
+  output_differentiability: [False]
+
+# Casting from fp4 back to a float dtype is non-differentiable for the same
+# reason: a backward would need to accumulate gradients into the fp4 tensor,
+# which requires fp4 `add` (see above).
+- name: _convert_from_float4_e2m1fn_x2(Tensor self) -> Tensor
+  output_differentiability: [False]
+
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
 - name: any(Tensor self) -> Tensor
