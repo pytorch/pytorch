@@ -13,8 +13,8 @@ from torch._inductor.fx_passes.pre_grad import (
     transpose_matmul,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import HardwareClassification
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
