@@ -530,6 +530,15 @@ def _should_pad(
         if torch._inductor.config.force_shape_pad:
             return True
 
+        # Small-K/N mm is lowered to a fused pointwise kernel in tuned_mm.
+        # Leave these shapes unpadded and let the pointwise lowering handle them.
+        from ..kernel.mm_common import _use_small_mm_pointwise
+
+        if op is torch.ops.aten.mm and _use_small_mm_pointwise(
+            m, k, n, mat1.device.type, statically_known_true=statically_known_true
+        ):
+            return False
+
         # Resolve symbolic dims to concrete hints for heuristic checks below.
         # These are performance decisions, not correctness — optimization_hint is safe.
         m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
