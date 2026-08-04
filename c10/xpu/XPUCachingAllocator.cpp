@@ -543,6 +543,9 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
+  // tracks which pools should not split a segment.
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
   // Deferred because querying event status are illegal during graph recording.
   // The owning graph pool is handled in endAllocateToPool; any remaining
@@ -1223,6 +1226,9 @@ class DeviceCachingAllocator {
   }
 
   bool should_split(const Block* block, size_t size) {
+    if (no_split_pools.count(block->pool->owner_MempoolId())) {
+      return false;
+    }
     size_t remaining = block->size - size;
     if (block->pool->is_small ||
         AcceleratorAllocatorConfig::use_expandable_segments()) {
@@ -1833,6 +1839,12 @@ class DeviceCachingAllocator {
     create_or_incref_pool(mempool_id, allocator);
   }
 
+  void setNoSplit(MempoolId_t mempool_id) {
+    // Choose if this pool should not split a segment
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    no_split_pools.insert(mempool_id);
+  }
+
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     auto it = graph_pools.find(mempool_id);
@@ -2331,6 +2343,11 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->releasePool(std::move(mempool_id));
   }
 
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocators[device]->setNoSplit(std::move(mempool_id));
+  }
+
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
@@ -2429,68 +2446,12 @@ void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
 }
 
+void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  return native_allocator.setNoSplit(device, mempool_id);
+}
+
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
-
-namespace c10::xpu {
-
-// uid_ is incremented when a user creates a MemPool,
-//
-// uuid_ is incremented when XPUGraph creates a MemPool
-// as a result of a user not providing a pool.
-
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
-
-MemPool::MemPool(
-    XPUCachingAllocator::XPUAllocator* allocator,
-    bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
-  device_ = c10::xpu::current_device();
-  XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
-  if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet
-    TORCH_WARN(
-        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
-  }
-}
-
-MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
-  XPUCachingAllocator::releasePool(device_, id_);
-  c10::xpu::XPUCachingAllocator::emptyCache(id_); // release cached blocks
-}
-
-MempoolId_t MemPool::id() {
-  return id_;
-}
-
-XPUCachingAllocator::XPUAllocator* MemPool::allocator() {
-  return allocator_;
-}
-
-int MemPool::use_count() {
-  return XPUCachingAllocator::getPoolUseCount(device_, id_);
-}
-
-c10::DeviceIndex MemPool::device() {
-  return device_;
-}
-
-MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
-}
-
-} // namespace c10::xpu
