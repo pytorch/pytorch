@@ -17,6 +17,8 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/OpMathType.h>
 
+#include <optional>
+
 namespace at::cuda::blas {
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
@@ -122,26 +124,14 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
-
-template <typename Dtype, typename C_Dtype = Dtype>
-bool gemm_with_distinct_c_and_d(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<Dtype> alpha_val,
-    const Dtype* mat1_ptr,
-    int64_t mat1_ld,
-    const Dtype* mat2_ptr,
-    int64_t mat2_ld,
-    at::opmath_type<Dtype> beta_val,
-    const C_Dtype* c_ptr,
-    int64_t c_ld,
-    C_Dtype* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None,
+    // Pass a non-null c_ptr to compute D = alpha * A @ B + beta * C with C and
+    // D at distinct addresses, which avoids having to copy C into D first.
+    // c_ptr must be null when bias is used. beta defaults to the bias
+    // convention (0 when a bias is supplied, otherwise 1).
+    const C_Dtype* c_ptr = nullptr,
+    int64_t c_ld = 0,
+    std::optional<at::opmath_type<Dtype>> beta_val = std::nullopt);
 
 void int8_gemm(
     bool transpose_mat1,
