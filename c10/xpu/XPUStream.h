@@ -201,11 +201,10 @@ C10_XPU_API void setCurrentXPUStream(XPUStream stream);
 C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
 
 /**
- * Wait for all commands previously submitted to any SYCL queue on the device to
- * complete.
+ * Wait for all SYCL queues reserved in the stream pools on the device to
+ * complete. Prefer c10::xpu::device_synchronize (c10/xpu/XPUFunctions.h),
+ * which uses a true device-wide wait when the SYCL runtime supports it.
  */
-C10_XPU_API void device_synchronize(DeviceIndex device = -1);
-
 C10_DEPRECATED_MESSAGE(
     "c10::xpu::syncStreamsOnDevice is deprecated. Please use c10::xpu::device_synchronize instead.")
 C10_XPU_API void syncStreamsOnDevice(DeviceIndex device = -1);

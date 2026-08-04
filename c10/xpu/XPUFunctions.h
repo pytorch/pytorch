@@ -32,6 +32,12 @@ C10_XPU_API void get_device_properties(
 
 C10_XPU_API DeviceIndex get_device_idx_from_pointer(void* ptr);
 
+/**
+ * Wait for all commands previously submitted to any SYCL queue on the device to
+ * complete.
+ */
+C10_XPU_API void device_synchronize(DeviceIndex device = -1);
+
 static inline void check_device_index(DeviceIndex device_index) {
   TORCH_CHECK(
       device_index >= 0 && device_index < c10::xpu::device_count(),
