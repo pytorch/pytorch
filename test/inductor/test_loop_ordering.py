@@ -1066,6 +1066,10 @@ class LoopOrderingTest(TestCase):
 
         with (
             torch.no_grad(),
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                return_value=3_350,
+            ),
             self._record_reindexing_memory_decisions() as decisions,
         ):
             self.do_acc_test(mod, x, residual)
@@ -1076,7 +1080,8 @@ class LoopOrderingTest(TestCase):
                 and selection is not None
                 and selection.memory.uncoalesced > 0
                 for origins, reject, selection in decisions
-            )
+            ),
+            decisions,
         )
 
     @inductor_config.patch("triton.coalesce_tiling_analysis", True)
