@@ -90,12 +90,6 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiGetVersion.restype = ctypes.c_int
     lib.cuptiActivityFlushAll.argtypes = [ctypes.c_uint32]
     lib.cuptiActivityFlushAll.restype = ctypes.c_int
-    lib.cuptiActivityGetNumDroppedRecords.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    lib.cuptiActivityGetNumDroppedRecords.restype = ctypes.c_int
     lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
     lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
     lib.cuptiGetResultString.argtypes = [
@@ -120,6 +114,14 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     if hasattr(lib, "cuptiUnsubscribe"):
         lib.cuptiUnsubscribe.argtypes = [ctypes.c_void_p]
         lib.cuptiUnsubscribe.restype = ctypes.c_int
+    if hasattr(lib, "cuptiActivityGetNumDroppedRecords_v2"):
+        lib.cuptiActivityGetNumDroppedRecords_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_void_p,  # CUcontext context
+            ctypes.c_uint32,  # uint32_t streamId
+            ctypes.POINTER(ctypes.c_size_t),  # size_t* dropped
+        ]
+        lib.cuptiActivityGetNumDroppedRecords_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiActivitySetAttribute_v2"):
         lib.cuptiActivitySetAttribute_v2.argtypes = [
             ctypes.c_void_p,
@@ -403,10 +405,24 @@ class _PyLibCupti:
         flush race that corrupts the HES heap and freezes the decode worker."""
         self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
 
-    def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
+    def activity_get_num_dropped_records(
+        self, sub_handle: int, ctx: int, stream_id: int
+    ) -> int:
+        """Dropped-record count for the subscription.
+
+        Must use the ``_v2`` (subscriber-scoped) entry point: the monitor enables and
+        registers through the subscriber-scope API, and CUPTI refuses to mix scopes --
+        the global ``cuptiActivityGetNumDroppedRecords`` returns
+        CUPTI_ERROR_NOT_COMPATIBLE for every call once a subscriber is in use. That
+        failure is otherwise invisible (the count is best-effort, so a bad status just
+        yields 0) while CUPTI logs an internal error per call.
+        """
         dropped = ctypes.c_size_t()
-        rc = self._lib.cuptiActivityGetNumDroppedRecords(
-            ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
+        rc = self._lib.cuptiActivityGetNumDroppedRecords_v2(
+            ctypes.c_void_p(sub_handle),
+            ctypes.c_void_p(ctx),
+            ctypes.c_uint32(stream_id),
+            ctypes.byref(dropped),
         )
         return dropped.value if rc == CUPTI_SUCCESS else 0
 
