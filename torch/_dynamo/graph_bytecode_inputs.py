@@ -32,6 +32,14 @@ def stash_graph_created_object(obj: Any) -> Any:
 
 CURRENT_STREAM_INDEX = 0
 
+# Indices in index_to_bytecode_constructor that were auto-registered without a
+# corresponding use in the graph -- currently just the ambient current stream,
+# which SymbolicStreamState registers on any accelerator even for graphs that
+# never touch streams. Unlike every other registered object (registered because
+# it is genuinely consumed), an unreferenced ambient object does not require the
+# per-call pre-graph reconstruction. See OutputGraph.compile_and_call_fx_graph.
+ambient_user_object_indices: set[int] = set()
+
 
 def set_external_object_by_index(index: int, value: Any) -> None:
     """Update an entry in the external object registry at runtime."""
@@ -59,6 +67,7 @@ def store_user_object_weakrefs(*args: Any) -> None:
 def reset_user_object_tracking() -> None:
     index_to_bytecode_constructor.clear()
     index_to_external_object_weakref.clear()
+    ambient_user_object_indices.clear()
     keep_alive.clear()
 
 
