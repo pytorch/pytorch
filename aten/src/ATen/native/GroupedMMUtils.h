@@ -50,7 +50,7 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
 
 // Compute the size and stride of a grouped-gemm output. Strides match the
 // layout `create_grouped_gemm_output_tensor` allocates: on CUDA the last dim
-// is padded to a 16-byte-aligned stride for TMA transfers; on ROCm the
+// is padded to a 16-byte-aligned stride for TMA transfers; on ROCm and XPU the
 // returned stride vector is empty, denoting default contiguous strides (the
 // allocator uses at::empty/at::zeros there). Shared by the eager allocator and
 // the structured TORCH_META_FUNC so the shape/stride math stays single-sourced.
@@ -104,17 +104,16 @@ c10::ScalarType out_dtype
   auto [out_size, out_stride] =
       compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype);
 
-  #ifndef USE_ROCM
+  #if defined (USE_CUDA)
   return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
-#elif defined(USE_ROCM)
+  #elif defined (USE_ROCM)
   // For ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or small K
   // groups correctly. When K=0, the mathematically correct result is zeros,
   // but CK kernel may not write to the output region.
   if (mat_a.dim() == 2 && mat_b.dim() == 2) {
     return at::zeros(out_size, mat_a.options().dtype(out_dtype));
   }
-#endif
-// ROCm non-2D-2D, and other backends: standard contiguous allocation.
+  #endif
   return at::empty(out_size, mat_a.options().dtype(out_dtype));
 }
 

@@ -895,7 +895,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else []))
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, device):
+    @parametrize("use_out", [False, True])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:

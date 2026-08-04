@@ -23,6 +23,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -373,20 +374,26 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4>
 
 } // anonymous namespace
 
-Tensor _scaled_grouped_mm_xpu_v2(
-    const Tensor& mat_a,
-    const Tensor& mat_b,
-    ArrayRef<Tensor> scale_a,
-    IntArrayRef scale_recipe_a,
-    IntArrayRef swizzle_a,
-    ArrayRef<Tensor> scale_b,
-    IntArrayRef scale_recipe_b,
-    IntArrayRef swizzle_b,
-    const std::optional<Tensor>& offs,
-    const std::optional<Tensor>& bias,
-    const std::optional<c10::ScalarType> out_dtype,
-    IntArrayRef contraction_dim,
-    bool use_fast_accum) {
+// V2: Grouped scaled matrix multiply. Shape inference + output allocation and
+// recipe-independent input validation run in
+// TORCH_META_FUNC(_scaled_grouped_mm_v2); this impl handles strides/dtype
+// validation that needs device context, the per-recipe scale-shape checks, and
+// kernel dispatch.
+TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
+(const Tensor& mat_a,
+ const Tensor& mat_b,
+ const at::ITensorListRef& scale_a_list,
+ IntArrayRef scale_recipe_a,
+ IntArrayRef swizzle_a,
+ const at::ITensorListRef& scale_b_list,
+ IntArrayRef scale_recipe_b,
+ IntArrayRef swizzle_b,
+ at::OptionalTensorRef offs,
+ at::OptionalTensorRef bias,
+ std::optional<c10::ScalarType> out_dtype,
+ IntArrayRef contraction_dim,
+ bool use_fast_accum,
+ const Tensor& out) {
   TORCH_CHECK_VALUE(
       !check_valid_strides_and_return_transposed(mat_a),
       "Expected mat1 to not be transposed");
@@ -394,69 +401,18 @@ Tensor _scaled_grouped_mm_xpu_v2(
       check_valid_strides_and_return_transposed(mat_b),
       "Expected mat2 to be transposed");
   TORCH_CHECK_VALUE(
-      mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
-  TORCH_CHECK_VALUE(
-      mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
-  const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
-
-  if (!a_is_2d || !b_is_2d) {
-    if (!contraction_dim.empty()) {
-      const int dim_a = contraction_dim[0],
-                dim_b = mat_b.size(contraction_dim[1]);
-      TORCH_CHECK_VALUE(
-          mat_a.size(dim_a) == mat_b.size(dim_b),
-          "Contraction dimensions (",
-          dim_a,
-          ",",
-          dim_b,
-          ") of mat_a and mat_b must match, got: ",
-          mat_a.size(dim_a),
-          " and ",
-          mat_b.size(dim_b));
-      // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(
-          dim_a == -1 && dim_b == -2,
-          "Currently contraction dims must be (-1, -2) only");
-    } else {
-      TORCH_CHECK_VALUE(
-          mat_a.size(-1) == mat_b.size(-2),
-          "contraction dimension of mat_a and mat_b must match");
-    }
-  }
-  TORCH_CHECK_VALUE(
-      mat_a.size(-1) % 16 == 0,
-      "Expected trailing dimension of mat_a to be divisible by 16 ",
-      "but got mat1 shape: (",
-      mat_a.sizes(),
-      ").");
-  TORCH_CHECK_VALUE(
-      mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
-      "Expected mat_b shape to be divisible by 16 ",
-      "but got mat_b shape: (",
-      mat_b.sizes(),
-      ").");
-
-  TORCH_CHECK_VALUE(
-      (a_is_2d && !b_is_2d),
+      (mat_a.dim() == 2 && mat_b.dim() == 3),
       "Only 2d x 3d with offsets is supported for XPU scaled_grouped_mm for now");
-  TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
-  TORCH_CHECK_VALUE(
-      offs.has_value() == (a_is_2d || b_is_2d),
-      "Have to provide offsets if there is a 2d matrix");
 
-  if (offs.has_value()) {
-    TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
-    TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
-  }
+  // Materialize the scale lists so the existing acceptance helpers (which take
+  // ArrayRef<Tensor>) work unchanged.
+  std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a);
+  ArrayRef<Tensor> scale_b_ref(scale_b);
 
-  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
-  TORCH_CHECK_VALUE(
-      out_dtype_ == kBFloat16,
-      "Only bf16 high precision output types are supported for grouped gemm");
-
-  Tensor out =
-      create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  // The output has already been sized by the structured-op meta function.
+  Tensor& out_mut = const_cast<Tensor&>(out);
 
   // Conversion of implicitly-defined enums to explicit
   auto swizzle_a_enum = convert_int_to_enum<SwizzleType>(swizzle_a);
@@ -473,21 +429,14 @@ Tensor _scaled_grouped_mm_xpu_v2(
   // concrete_impl) tuples.
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
   auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
-  for (const auto& fn_entry : scale_grouped_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(
-        mat_a.scalar_type(),
-        scale_recipe_a_enum,
-        scale_a,
-        mat_b.scalar_type(),
-        scale_recipe_b_enum,
-        scale_b);
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      break;
-    }
-  }
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_grouped_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a_ref,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b_ref);
   TORCH_CHECK_VALUE(
       gemm_impl != ScaledGemmImplementation::NONE,
       "No gemm implementation was found");
@@ -540,10 +489,10 @@ Tensor _scaled_grouped_mm_xpu_v2(
       scale_b[0],
       scale_recipe_a_enum[0],
       scale_recipe_b_enum[0],
-      offs.value(),
-      out,
+      *offs,
+      out_mut,
       alpha);
-  return out;
+  return;
 }
 
 Tensor _grouped_mm_xpu(
