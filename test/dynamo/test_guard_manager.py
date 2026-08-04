@@ -3177,6 +3177,252 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
         """
         self._run_guard_lookup_memo_script(script)
 
+    def test_actual_partial_retains_exact_list_items(self):
+        script = """
+            import gc
+            import weakref
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [torch.ones(2)]
+
+                def forward(self, x):
+                    return x + self.values[0] + len(self.values)
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            original_value = model.values[0]
+            original_ref = weakref.ref(original_value)
+            model.values[0] = torch.full((2,), 4, dtype=torch.int64)
+            del original_value
+            gc.collect()
+            assert original_ref() is not None
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            model.values[0] = original_ref()
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_bounds_unstable_and_large_list_training(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class UnstableListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object()]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            unstable_model = UnstableListModel()
+            unstable_counter = CompileCounter()
+            unstable_compiled = torch.compile(
+                unstable_model, backend=unstable_counter, fullgraph=True
+            )
+            x = torch.zeros(2)
+            torch.testing.assert_close(
+                unstable_compiled(x), unstable_model(x)
+            )
+            unstable_model.values[0] = object()
+            torch.testing.assert_close(
+                unstable_compiled(x), unstable_model(x)
+            )
+            for _ in range(8):
+                unstable_model.values[0] = object()
+                torch.testing.assert_close(
+                    unstable_compiled(x), unstable_model(x)
+                )
+            assert unstable_counter.frame_count == 1, unstable_counter.frame_count
+            unstable_entry = _only_cache_entry(
+                UnstableListModel.forward.__code__
+            )
+
+            # Once the changing signature exhausts its training budget, later
+            # stable calls stay on the original guard path instead of resuming
+            # unbounded recording and eventually enabling a plan.
+            for _ in range(8):
+                torch.testing.assert_close(
+                    unstable_compiled(x), unstable_model(x)
+                )
+            assert unstable_counter.frame_count == 1, unstable_counter.frame_count
+            assert not unstable_entry._debug_fast_guard_enabled
+
+            class BoundaryListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object()]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            boundary_model = BoundaryListModel()
+            boundary_counter = CompileCounter()
+            boundary_compiled = torch.compile(
+                boundary_model, backend=boundary_counter, fullgraph=True
+            )
+            torch.testing.assert_close(boundary_compiled(x), boundary_model(x))
+            boundary_model.values[0] = object()
+            torch.testing.assert_close(boundary_compiled(x), boundary_model(x))
+            for _ in range(7):
+                boundary_model.values[0] = object()
+                torch.testing.assert_close(
+                    boundary_compiled(x), boundary_model(x)
+                )
+            for _ in range(3):
+                torch.testing.assert_close(
+                    boundary_compiled(x), boundary_model(x)
+                )
+            assert boundary_counter.frame_count == 1, boundary_counter.frame_count
+            boundary_entry = _only_cache_entry(
+                BoundaryListModel.forward.__code__
+            )
+            assert boundary_entry._debug_fast_guard_enabled
+
+            class OversizedListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.values = [object() for _ in range(4097)]
+
+                def forward(self, x):
+                    return x + len(self.values)
+
+            oversized_model = OversizedListModel()
+            oversized_counter = CompileCounter()
+            oversized_compiled = torch.compile(
+                oversized_model, backend=oversized_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    oversized_compiled(x), oversized_model(x)
+                )
+            assert oversized_counter.frame_count == 1, oversized_counter.frame_count
+            oversized_entry = _only_cache_entry(
+                OversizedListModel.forward.__code__
+            )
+            assert not oversized_entry._debug_fast_guard_enabled
+
+            class AggregateWithinBudgetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    marker = object()
+                    self.groups = tuple(
+                        [marker] * 4096 for _ in range(16)
+                    )
+
+                def forward(self, x):
+                    return x + sum(len(group) for group in self.groups)
+
+            within_model = AggregateWithinBudgetModel()
+            within_counter = CompileCounter()
+            within_compiled = torch.compile(
+                within_model, backend=within_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(
+                    within_compiled(x), within_model(x)
+                )
+            assert within_counter.frame_count == 1, within_counter.frame_count
+            within_entry = _only_cache_entry(
+                AggregateWithinBudgetModel.forward.__code__
+            )
+            assert within_entry._debug_fast_guard_enabled
+
+            class AggregateOverBudgetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    marker = object()
+                    self.groups = tuple(
+                        [marker] * 4096 for _ in range(17)
+                    )
+
+                def forward(self, x):
+                    return x + sum(len(group) for group in self.groups)
+
+            over_model = AggregateOverBudgetModel()
+            over_counter = CompileCounter()
+            over_compiled = torch.compile(
+                over_model, backend=over_counter, fullgraph=True
+            )
+            for _ in range(8):
+                torch.testing.assert_close(over_compiled(x), over_model(x))
+            assert over_counter.frame_count == 1, over_counter.frame_count
+            over_entry = _only_cache_entry(
+                AggregateOverBudgetModel.forward.__code__
+            )
+            assert not over_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_preserves_local_state_transitions(self):
+        script = """
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("scale", torch.ones(2))
+
+                def forward(self, x):
+                    state = 0
+                    if torch.is_grad_enabled():
+                        state += 1
+                    if torch.is_inference_mode_enabled():
+                        state += 2
+                    if torch.is_autocast_enabled("cpu"):
+                        state += 4
+                    return x + self.scale + state
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.zeros(2)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+            original_entry = _only_cache_entry(Model.forward.__code__)
+            assert original_entry._debug_fast_guard_enabled
+
+            with torch.no_grad():
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            with torch.inference_mode():
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            with torch.autocast("cpu"):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 4, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
     def test_guard_lookup_memo_defaults_off(self):
         script = """
             import torch
