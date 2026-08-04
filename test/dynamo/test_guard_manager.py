@@ -2235,6 +2235,18 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             "        )\n"
             "        pending.extend(manager.get_child_managers())\n"
             "    return leaves, accessors\n"
+            "from torch._dynamo.testing import CompileCounter\n"
+            "def _warm_model(model, enabled=True):\n"
+            "    counter = CompileCounter()\n"
+            "    compiled = torch.compile(model, backend=counter, fullgraph=True)\n"
+            "    x = torch.zeros(2)\n"
+            "    expected = model(x)\n"
+            "    for _ in range(8):\n"
+            "        torch.testing.assert_close(compiled(x), expected)\n"
+            "    assert counter.frame_count == 1, counter.frame_count\n"
+            "    entry = _only_cache_entry(type(model).forward.__code__)\n"
+            "    assert entry._debug_fast_guard_enabled is enabled\n"
+            "    return compiled, counter, entry, x\n"
         )
         subprocess.run(
             [sys.executable, "-c", prefix + textwrap.dedent(script)],
@@ -3420,6 +3432,241 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             torch.testing.assert_close(compiled(x), model(x))
             assert counter.frame_count == 4, counter.frame_count
             assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_static_module_attr_binding(self):
+        script = """
+            import types
+
+            namespace = types.ModuleType("fastguard_static_module")
+            original = torch.ones(2)
+            namespace.scale = original
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            namespace.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            namespace.scale = original
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            dynamic_values = [torch.ones(2)]
+            dynamic_namespace = types.ModuleType("fastguard_dynamic_module")
+
+            def module_getattr(name):
+                if name == "scale":
+                    return dynamic_values[0]
+                raise AttributeError(name)
+
+            dynamic_namespace.__getattr__ = module_getattr
+
+            class DynamicModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = dynamic_namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            dynamic_model = DynamicModel()
+            _warm_model(dynamic_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_static_type_attr_binding(self):
+        script = """
+            original = torch.ones(2)
+
+            class Namespace:
+                scale = original
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = Namespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            Namespace.scale = torch.full((2,), 3.0)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            Namespace.scale = original
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class Descriptor:
+                def __init__(self):
+                    self.value = torch.ones(2)
+
+                def __get__(self, obj, owner):
+                    return self.value
+
+            class DynamicNamespace:
+                scale = Descriptor()
+
+            class DynamicModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.namespace = DynamicNamespace
+
+                def forward(self, x):
+                    return self.namespace.scale + x
+
+            dynamic_model = DynamicModel()
+            _warm_model(dynamic_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_type_method_binding(self):
+        script = """
+            import types
+
+            class Model(torch.nn.Module):
+                def helper(self, x):
+                    return x + 1
+
+                def forward(self, x):
+                    return self.helper(x)
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+
+            def replacement(self, value):
+                return value + 4
+
+            model.helper = types.MethodType(replacement, model)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            del model.helper
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            original_helper = Model.helper
+            Model.helper = replacement
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 3, counter.frame_count
+            finally:
+                Model.helper = original_helper
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 3, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class ClassMethodModel(torch.nn.Module):
+                @classmethod
+                def helper(cls, value):
+                    return value + 1
+
+                def forward(self, value):
+                    return self.helper(value)
+
+            class_method_model = ClassMethodModel()
+            _warm_model(class_method_model, enabled=False)
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_function_code_binding(self):
+        script = """
+            def helper(value):
+                return value + 1
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.helper = helper
+
+                def forward(self, x):
+                    return self.helper(x)
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+            _, accessors = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "CodeGuardAccessor" and source.startswith("L['self']")
+                for source, kind in accessors
+            ), accessors
+            original_code = helper.__code__
+
+            def replacement(value):
+                return value + 4
+
+            helper.__code__ = replacement.__code__
+            try:
+                torch.testing.assert_close(compiled(x), model(x))
+                assert counter.frame_count == 2, counter.frame_count
+            finally:
+                helper.__code__ = original_code
+
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_exact_set_equals_token(self):
+        script = """
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = {1, 2}
+
+                def forward(self, x):
+                    if self.mode == {1, 2}:
+                        return x + 1
+                    return x - 1
+
+            model = Model()
+            compiled, counter, original_entry, x = _warm_model(model)
+            leaves, _ = _guard_tree_shapes(original_entry)
+            assert any(
+                kind == "EQUALS_MATCH" and source.startswith("L['self']")
+                for source, kind in leaves
+            ), leaves
+            model.mode.add(3)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+
+            model.mode.remove(3)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+
+            class FancySet(set):
+                pass
+
+            class FancySetModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mode = FancySet({1, 2})
+
+                def forward(self, value):
+                    if self.mode == {1, 2}:
+                        return value + 1
+                    return value - 1
+
+            fancy_model = FancySetModel()
+            _warm_model(fancy_model, enabled=False)
         """
         self._run_guard_lookup_memo_script(script)
 

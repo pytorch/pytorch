@@ -154,6 +154,7 @@ enum class GuardSubtreeProbeTokenKind : uint8_t {
   BoundMethod,
   FrameGlobals,
   TensorDimensionMarkingAbsent,
+  ExactSetEquals,
 };
 
 constexpr size_t kGuardLastSuccessActualMaxTokens = 65536;
@@ -1093,6 +1094,25 @@ static bool guard_subtree_type_version_is_valid(PyTypeObject* type) {
 #endif
 }
 
+static bool guard_subtree_ensure_type_version(
+    PyTypeObject* type,
+    PyObject* lookup_key) {
+  if (type == nullptr || lookup_key == nullptr) {
+    return false;
+  }
+  (void)_PyType_Lookup(type, lookup_key);
+  if (PyErr_Occurred()) {
+    PyErr_Clear();
+    return false;
+  }
+#if PY_VERSION_HEX >= 0x030C0000
+  if (PyUnstable_Type_AssignVersionTag(type) == 0) {
+    return false;
+  }
+#endif
+  return guard_subtree_type_version_is_valid(type);
+}
+
 static bool guard_actual_partial_uses_default_getattribute(PyTypeObject* type) {
   return type != nullptr && type->tp_getattr == nullptr &&
       type->tp_getattro == PyObject_GenericGetAttr;
@@ -1151,6 +1171,10 @@ struct GuardSubtreeTypeProof {
 enum class GuardActualPartialAccessorRecordKind : uint8_t {
   GenericDictBinding,
   InstanceAttrBinding,
+  TypeMethodBinding,
+  StaticModuleAttrBinding,
+  StaticTypeAttrBinding,
+  CodeAccessor,
 };
 
 struct GuardActualPartialAccessorRecord {
@@ -1163,6 +1187,7 @@ struct GuardActualPartialAccessorRecord {
   py::object owner_dict;
   PyTypeObject* owner_type{nullptr};
   bool requires_default_getattribute{false};
+  bool owner_has_dict_slot{false};
 };
 
 struct GuardSubtreeGenericDictOwnerProof {
@@ -1201,6 +1226,65 @@ struct GuardSubtreeInstanceAttrOwnerProof {
     return dictptr != nullptr && *dictptr == dict.ptr() &&
         PyDict_CheckExact(*dictptr) &&
         PyDict_GetItem(*dictptr, key.ptr()) == expected.ptr();
+  }
+};
+
+struct GuardSubtreeCodeAccessorProof {
+  py::object function;
+  py::object code;
+
+  bool matches_current() const {
+    if (!PyFunction_Check(function.ptr())) {
+      return false;
+    }
+    PyObject* current_code = PyFunction_GetCode(function.ptr());
+    if (current_code == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return current_code == code.ptr();
+  }
+};
+
+struct GuardSubtreeTypeMethodProof {
+  py::object owner;
+  PyObject* owner_ptr{nullptr};
+  py::object key;
+  py::object expected;
+  py::object dict;
+  PyTypeObject* owner_type{nullptr};
+  bool owner_is_self{false};
+  bool owner_has_dict_slot{false};
+  unsigned int version{0};
+
+  bool matches_or_refreshes_current(PyObject* current_self) {
+    PyObject* current_owner = owner_is_self ? current_self : owner.ptr();
+    if (current_owner == nullptr || Py_TYPE(current_owner) != owner_type) {
+      return false;
+    }
+    PyObject** dictptr = _PyObject_GetDictPtr(current_owner);
+    if ((dictptr != nullptr) != owner_has_dict_slot) {
+      return false;
+    }
+    if (dictptr != nullptr &&
+        (dict.ptr() == nullptr
+             ? *dictptr != nullptr
+             : *dictptr != dict.ptr() || !PyDict_CheckExact(*dictptr) ||
+                 PyDict_GetItem(*dictptr, key.ptr()) != nullptr)) {
+      return false;
+    }
+    if (guard_subtree_type_version_is_valid(owner_type) &&
+        owner_type->tp_version_tag == version) {
+      return guard_actual_partial_uses_default_getattribute(owner_type);
+    }
+    if (!guard_actual_partial_uses_default_getattribute(owner_type) ||
+        _PyType_Lookup(owner_type, key.ptr()) != expected.ptr() ||
+        !guard_subtree_ensure_type_version(owner_type, key.ptr())) {
+      PyErr_Clear();
+      return false;
+    }
+    version = owner_type->tp_version_tag;
+    return true;
   }
 };
 
@@ -1245,6 +1329,7 @@ struct GuardSubtreeEntryToken {
   PyTypeObject* bound_c_method_class{nullptr};
   int bound_c_method_flags{0};
   PyObject* dimension_marking_key{nullptr};
+  PyObject* expected_value{nullptr};
 
   static GuardSubtreeEntryToken make(PyObject* obj) {
     GuardSubtreeEntryToken token;
@@ -1415,6 +1500,18 @@ struct GuardSubtreeEntryToken {
     return token;
   }
 
+  static GuardSubtreeEntryToken make_exact_set_equals(
+      PyObject* obj,
+      PyObject* expected) {
+    GuardSubtreeEntryToken token;
+    token.object = obj;
+    token.type = Py_TYPE(obj);
+    token.kind = GuardSubtreeProbeTokenKind::ExactSetEquals;
+    token.expected_value = expected;
+    token.size = PySet_GET_SIZE(expected);
+    return token;
+  }
+
   bool matches_tensor_current(const LocalState* state) const {
     if (state == nullptr) {
       return false;
@@ -1517,6 +1614,9 @@ struct GuardSubtreeEntryToken {
     }
     if (kind == GuardSubtreeProbeTokenKind::TensorDimensionMarkingAbsent) {
       return dimension_marking_key == other.dimension_marking_key;
+    }
+    if (kind == GuardSubtreeProbeTokenKind::ExactSetEquals) {
+      return expected_value == other.expected_value && size == other.size;
     }
     return version == other.version && size == other.size &&
         list_items == other.list_items;
@@ -1848,6 +1948,8 @@ static bool guard_last_success_retain_token_objects(
         for (PyObject* item : token.list_items) {
           retain(item);
         }
+      } else if (token.kind == GuardSubtreeProbeTokenKind::ExactSetEquals) {
+        retain(token.expected_value);
       }
     }
   }
@@ -1927,20 +2029,54 @@ static bool guard_last_success_build_accessor_proofs(
       continue;
     }
 
+    const bool instance_binding = record.kind ==
+        GuardActualPartialAccessorRecordKind::InstanceAttrBinding;
+    const bool module_binding = record.kind ==
+        GuardActualPartialAccessorRecordKind::StaticModuleAttrBinding;
+    const bool type_binding = record.kind ==
+        GuardActualPartialAccessorRecordKind::StaticTypeAttrBinding;
+    if (!instance_binding && !module_binding && !type_binding) {
+      continue;
+    }
+
     if (record.key.ptr() == nullptr || record.resolved.ptr() == nullptr ||
         record.owner_dict.ptr() == nullptr ||
         !PyUnicode_Check(record.key.ptr()) ||
         !PyDict_CheckExact(record.owner_dict.ptr()) ||
         PyDict_GetItem(record.owner_dict.ptr(), record.key.ptr()) !=
-            record.resolved.ptr() ||
-        _PyType_Lookup(record.owner_type, record.key.ptr()) != nullptr ||
-        !guard_last_success_add_type_proof(
-            record.owner_type,
-            record.key.ptr(),
-            record.requires_default_getattribute,
-            type_proofs)) {
+            record.resolved.ptr()) {
       PyErr_Clear();
       return false;
+    }
+    if (instance_binding) {
+      if (_PyType_Lookup(record.owner_type, record.key.ptr()) != nullptr ||
+          !guard_last_success_add_type_proof(
+              record.owner_type,
+              record.key.ptr(),
+              record.requires_default_getattribute,
+              type_proofs)) {
+        PyErr_Clear();
+        return false;
+      }
+    } else {
+      PyTypeObject* expected_owner_type =
+          module_binding ? &PyModule_Type : &PyType_Type;
+      PyObject* metatype_attr =
+          _PyType_Lookup(expected_owner_type, record.key.ptr());
+      PyObject** dictptr = _PyObject_GetDictPtr(record.owner_ptr);
+      const bool exact_owner = module_binding
+          ? PyModule_CheckExact(record.owner_ptr)
+          : PyType_Check(record.owner_ptr) &&
+              Py_TYPE(record.owner_ptr) == &PyType_Type;
+      if (PyErr_Occurred() || !exact_owner ||
+          record.owner_type != expected_owner_type || dictptr == nullptr ||
+          *dictptr != record.owner_dict.ptr() ||
+          (metatype_attr != nullptr && PyDescr_IsData(metatype_attr)) ||
+          (type_binding &&
+           Py_TYPE(record.resolved.ptr())->tp_descr_get != nullptr)) {
+        PyErr_Clear();
+        return false;
+      }
     }
     GuardSubtreeInstanceAttrOwnerProof proof;
     proof.owner_is_self = record.owner_ptr == current_self;
@@ -2003,6 +2139,8 @@ struct GuardLastSuccessPartialPlan {
     type_proofs.clear();
     generic_dict_owner_proofs.clear();
     instance_attr_owner_proofs.clear();
+    type_method_proofs.clear();
+    code_accessor_proofs.clear();
     cross_slice_relations.clear();
     retained_token_objects.clear();
   }
@@ -2031,6 +2169,8 @@ struct GuardLastSuccessPartialPlan {
           new_generic_dict_owner_proofs,
       std::vector<GuardSubtreeInstanceAttrOwnerProof>&&
           new_instance_attr_owner_proofs,
+      std::vector<GuardSubtreeTypeMethodProof>&& new_type_method_proofs,
+      std::vector<GuardSubtreeCodeAccessorProof>&& new_code_accessor_proofs,
       std::vector<GuardCrossSliceRelationPlan>&& new_cross_slice_relations,
       std::vector<py::object>&& new_retained_token_objects) {
     const bool same_entry =
@@ -2061,6 +2201,8 @@ struct GuardLastSuccessPartialPlan {
     type_proofs = std::move(new_type_proofs);
     generic_dict_owner_proofs = std::move(new_generic_dict_owner_proofs);
     instance_attr_owner_proofs = std::move(new_instance_attr_owner_proofs);
+    type_method_proofs = std::move(new_type_method_proofs);
+    code_accessor_proofs = std::move(new_code_accessor_proofs);
     cross_slice_relations = std::move(new_cross_slice_relations);
     retained_token_objects = std::move(new_retained_token_objects);
     if (state != GuardLastSuccessPartialPlanState::Enabled &&
@@ -2086,6 +2228,8 @@ struct GuardLastSuccessPartialPlan {
   std::vector<GuardSubtreeTypeProof> type_proofs;
   std::vector<GuardSubtreeGenericDictOwnerProof> generic_dict_owner_proofs;
   std::vector<GuardSubtreeInstanceAttrOwnerProof> instance_attr_owner_proofs;
+  std::vector<GuardSubtreeTypeMethodProof> type_method_proofs;
+  std::vector<GuardSubtreeCodeAccessorProof> code_accessor_proofs;
   std::vector<GuardCrossSliceRelationPlan> cross_slice_relations;
   std::vector<py::object> retained_token_objects;
 };
@@ -2097,6 +2241,8 @@ struct GuardLastSuccessReceipt {
 
   GuardLastSuccessPartialPlan actual_partial;
 };
+
+static bool py_equals(PyObject* a, PyObject* b, bool false_on_error);
 
 static bool guard_subtree_exact_list_token_matches_current(
     const GuardSubtreeEntryToken& token,
@@ -2120,6 +2266,117 @@ static bool guard_subtree_exact_list_token_matches_current(
   return true;
 }
 
+static bool guard_last_success_build_type_method_proofs(
+    const std::vector<GuardActualPartialAccessorRecord>& records,
+    PyObject* current_self,
+    std::vector<GuardSubtreeTypeMethodProof>& proofs) {
+  proofs.clear();
+  for (const auto& record : records) {
+    if (record.kind !=
+        GuardActualPartialAccessorRecordKind::TypeMethodBinding) {
+      continue;
+    }
+    if (record.owner_ptr == nullptr || record.key.ptr() == nullptr ||
+        record.resolved.ptr() == nullptr || record.owner_type == nullptr ||
+        Py_TYPE(record.owner_ptr) != record.owner_type ||
+        !guard_actual_partial_uses_default_getattribute(record.owner_type) ||
+        !PyFunction_Check(record.resolved.ptr()) ||
+        _PyType_Lookup(record.owner_type, record.key.ptr()) !=
+            record.resolved.ptr() ||
+        !guard_subtree_ensure_type_version(
+            record.owner_type, record.key.ptr())) {
+      PyErr_Clear();
+      return false;
+    }
+
+    PyObject** dictptr = _PyObject_GetDictPtr(record.owner_ptr);
+    if ((dictptr != nullptr) != record.owner_has_dict_slot ||
+        (dictptr != nullptr && record.owner_dict.ptr() == nullptr &&
+         *dictptr != nullptr) ||
+        (record.owner_dict.ptr() != nullptr &&
+         (dictptr == nullptr || *dictptr != record.owner_dict.ptr() ||
+          !PyDict_CheckExact(*dictptr) ||
+          PyDict_GetItem(*dictptr, record.key.ptr()) != nullptr))) {
+      return false;
+    }
+
+    bool seen = false;
+    for (const auto& proof : proofs) {
+      if (proof.owner_ptr == record.owner_ptr &&
+          proof.key.ptr() == record.key.ptr()) {
+        seen = true;
+        if (proof.expected.ptr() != record.resolved.ptr() ||
+            proof.owner_type != record.owner_type ||
+            proof.dict.ptr() != record.owner_dict.ptr() ||
+            proof.owner_has_dict_slot != record.owner_has_dict_slot) {
+          return false;
+        }
+        break;
+      }
+    }
+    if (!seen) {
+      GuardSubtreeTypeMethodProof proof;
+      proof.owner = record.owner;
+      proof.owner_ptr = record.owner_ptr;
+      proof.key = record.key;
+      proof.expected = record.resolved;
+      proof.dict = record.owner_dict;
+      proof.owner_type = record.owner_type;
+      proof.owner_has_dict_slot = record.owner_has_dict_slot;
+      proof.version = record.owner_type->tp_version_tag;
+      if (record.owner_ptr == current_self) {
+        proof.owner = py::object();
+        proof.owner_is_self = true;
+      }
+      proofs.push_back(std::move(proof));
+    }
+  }
+  return true;
+}
+
+static bool guard_last_success_build_code_accessor_proofs(
+    const std::vector<GuardActualPartialAccessorRecord>& records,
+    std::vector<GuardSubtreeCodeAccessorProof>& proofs) {
+  proofs.clear();
+  std::unordered_map<PyObject*, size_t> proof_index_by_function;
+  proof_index_by_function.reserve(records.size());
+  for (const auto& record : records) {
+    if (record.kind != GuardActualPartialAccessorRecordKind::CodeAccessor) {
+      continue;
+    }
+    if (record.owner_ptr == nullptr || record.resolved.ptr() == nullptr ||
+        !PyFunction_Check(record.owner_ptr) ||
+        PyFunction_GetCode(record.owner_ptr) != record.resolved.ptr()) {
+      PyErr_Clear();
+      return false;
+    }
+    const auto existing = proof_index_by_function.find(record.owner_ptr);
+    if (existing != proof_index_by_function.end()) {
+      if (proofs[existing->second].code.ptr() != record.resolved.ptr()) {
+        return false;
+      }
+      continue;
+    }
+    GuardSubtreeCodeAccessorProof proof;
+    proof.function = record.owner;
+    proof.code = record.resolved;
+    proof_index_by_function.emplace(record.owner_ptr, proofs.size());
+    proofs.push_back(std::move(proof));
+  }
+  return true;
+}
+
+static bool guard_subtree_exact_set_equals_token_matches_current(
+    const GuardSubtreeEntryToken& token) {
+  if (token.object == nullptr || Py_TYPE(token.object) != token.type ||
+      !PySet_CheckExact(token.object) || token.expected_value == nullptr ||
+      !PySet_CheckExact(token.expected_value) ||
+      PySet_GET_SIZE(token.expected_value) != token.size) {
+    return false;
+  }
+  return py_equals(token.object, token.expected_value, /*false_on_error=*/true);
+}
+
 static bool guard_subtree_memo_tokens_match(
     const std::vector<GuardSubtreeEntryToken>& tokens,
     PyObject* root_value,
@@ -2136,6 +2393,12 @@ static bool guard_subtree_memo_tokens_match(
         GuardSubtreeProbeTokenKind::TensorDimensionMarkingAbsent) {
       if (!guard_subtree_dimension_marking_absent_token_matches_current(
               token)) {
+        return false;
+      }
+      continue;
+    }
+    if (token.kind == GuardSubtreeProbeTokenKind::ExactSetEquals) {
+      if (!guard_subtree_exact_set_equals_token_matches_current(token)) {
         return false;
       }
       continue;
@@ -2305,6 +2568,8 @@ struct GuardLastSuccessPartialPlanBuild {
   std::vector<GuardSubtreeTypeProof> type_proofs;
   std::vector<GuardSubtreeGenericDictOwnerProof> generic_dict_owner_proofs;
   std::vector<GuardSubtreeInstanceAttrOwnerProof> instance_attr_owner_proofs;
+  std::vector<GuardSubtreeTypeMethodProof> type_method_proofs;
+  std::vector<GuardSubtreeCodeAccessorProof> code_accessor_proofs;
   std::vector<GuardCrossSliceRelationPlan> cross_slice_relations;
   std::vector<py::object> retained_token_objects;
 };
@@ -2361,11 +2626,15 @@ static bool guard_last_success_prepare_actual_partial(
     return false;
   }
   return guard_last_success_build_accessor_proofs(
-      accessor_records,
-      current_self,
-      build.type_proofs,
-      build.generic_dict_owner_proofs,
-      build.instance_attr_owner_proofs);
+             accessor_records,
+             current_self,
+             build.type_proofs,
+             build.generic_dict_owner_proofs,
+             build.instance_attr_owner_proofs) &&
+      guard_last_success_build_type_method_proofs(
+             accessor_records, current_self, build.type_method_proofs) &&
+      guard_last_success_build_code_accessor_proofs(
+             accessor_records, build.code_accessor_proofs);
 }
 
 static bool guard_last_success_actual_partial_tokens_match(
@@ -2406,6 +2675,16 @@ static bool guard_last_success_actual_partial_tokens_match(
   }
   for (auto& proof : plan.type_proofs) {
     if (!proof.matches_or_refreshes_current()) {
+      return false;
+    }
+  }
+  for (auto& proof : plan.type_method_proofs) {
+    if (!proof.matches_or_refreshes_current(current_self)) {
+      return false;
+    }
+  }
+  for (const auto& proof : plan.code_accessor_proofs) {
+    if (!proof.matches_current()) {
       return false;
     }
   }
@@ -2474,30 +2753,104 @@ static void guard_actual_partial_record_instance_attr_binding(
     return;
   }
   if (owner == nullptr || key == nullptr || expected == nullptr ||
-      !PyUnicode_Check(key) ||
-      (require_default_getattribute &&
-       !guard_actual_partial_uses_default_getattribute(Py_TYPE(owner)))) {
+      !PyUnicode_Check(key)) {
     guard_actual_partial_mark_unsupported();
     return;
   }
+
+  GuardActualPartialAccessorRecord record;
+  record.owner = py::reinterpret_borrow<py::object>(owner);
+  record.owner_ptr = owner;
+  record.key = py::reinterpret_borrow<py::object>(key);
+  record.resolved = py::reinterpret_borrow<py::object>(expected);
+  record.owner_type = Py_TYPE(owner);
+
+  const bool default_getattribute = !require_default_getattribute ||
+      guard_actual_partial_uses_default_getattribute(record.owner_type);
   PyObject** dictptr = _PyObject_GetDictPtr(owner);
-  if (dictptr == nullptr || *dictptr == nullptr ||
-      !PyDict_CheckExact(*dictptr) ||
-      PyDict_GetItem(*dictptr, key) != expected ||
-      _PyType_Lookup(Py_TYPE(owner), key) != nullptr) {
+  PyObject* type_attr = _PyType_Lookup(record.owner_type, key);
+  if (PyErr_Occurred()) {
+    PyErr_Clear();
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  const bool exact_owner_dict =
+      dictptr != nullptr && *dictptr != nullptr && PyDict_CheckExact(*dictptr);
+  record.owner_has_dict_slot = dictptr != nullptr;
+  if (exact_owner_dict) {
+    record.owner_dict = py::reinterpret_borrow<py::object>(*dictptr);
+  }
+
+  const bool direct_instance_binding = default_getattribute &&
+      exact_owner_dict && PyDict_GetItem(*dictptr, key) == expected &&
+      type_attr == nullptr;
+  const bool type_method_binding = default_getattribute &&
+      type_attr != nullptr && PyFunction_Check(type_attr) &&
+      PyMethod_Check(expected) && PyMethod_GET_SELF(expected) == owner &&
+      PyMethod_GET_FUNCTION(expected) == type_attr &&
+      (dictptr == nullptr || *dictptr == nullptr ||
+       (exact_owner_dict && PyDict_GetItem(*dictptr, key) == nullptr));
+  const bool static_module_binding = require_default_getattribute &&
+      !default_getattribute && PyModule_CheckExact(owner) &&
+      record.owner_type == &PyModule_Type && exact_owner_dict &&
+      PyDict_GetItem(*dictptr, key) == expected &&
+      (type_attr == nullptr || !PyDescr_IsData(type_attr));
+  const bool static_type_binding = require_default_getattribute &&
+      !default_getattribute && PyType_Check(owner) &&
+      Py_TYPE(owner) == &PyType_Type && record.owner_type == &PyType_Type &&
+      exact_owner_dict && PyDict_GetItem(*dictptr, key) == expected &&
+      (type_attr == nullptr || !PyDescr_IsData(type_attr)) &&
+      Py_TYPE(expected)->tp_descr_get == nullptr;
+
+  if (direct_instance_binding) {
+    record.kind = GuardActualPartialAccessorRecordKind::InstanceAttrBinding;
+    record.requires_default_getattribute = require_default_getattribute;
+  } else if (
+      type_method_binding &&
+      guard_subtree_ensure_type_version(record.owner_type, key)) {
+    record.kind = GuardActualPartialAccessorRecordKind::TypeMethodBinding;
+    record.resolved = py::reinterpret_borrow<py::object>(type_attr);
+  } else if (static_module_binding) {
+    record.kind = GuardActualPartialAccessorRecordKind::StaticModuleAttrBinding;
+  } else if (static_type_binding) {
+    record.kind = GuardActualPartialAccessorRecordKind::StaticTypeAttrBinding;
+  } else {
+    PyErr_Clear();
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  active_guard_actual_partial_accessor_records->push_back(std::move(record));
+}
+
+static void guard_actual_partial_record_code_accessor(
+    PyObject* parent,
+    const std::string& source) {
+  if (!is_self_local_source_path(source) ||
+      !guard_actual_partial_can_record_accessor()) {
+    return;
+  }
+  PyObject* function = parent;
+  if (PyMethod_Check(parent)) {
+    function = PyMethod_GET_FUNCTION(parent);
+  } else if (PyInstanceMethod_Check(parent)) {
+    function = PyInstanceMethod_GET_FUNCTION(parent);
+  }
+  if (!PyFunction_Check(function)) {
+    guard_actual_partial_mark_unsupported();
+    return;
+  }
+  PyObject* code = PyFunction_GetCode(function);
+  if (code == nullptr) {
     PyErr_Clear();
     guard_actual_partial_mark_unsupported();
     return;
   }
   GuardActualPartialAccessorRecord record;
-  record.kind = GuardActualPartialAccessorRecordKind::InstanceAttrBinding;
-  record.owner = py::reinterpret_borrow<py::object>(owner);
-  record.owner_ptr = owner;
-  record.key = py::reinterpret_borrow<py::object>(key);
-  record.resolved = py::reinterpret_borrow<py::object>(expected);
-  record.owner_dict = py::reinterpret_borrow<py::object>(*dictptr);
-  record.owner_type = Py_TYPE(owner);
-  record.requires_default_getattribute = require_default_getattribute;
+  record.kind = GuardActualPartialAccessorRecordKind::CodeAccessor;
+  record.owner = py::reinterpret_borrow<py::object>(function);
+  record.owner_ptr = function;
+  record.resolved = py::reinterpret_borrow<py::object>(code);
+  record.owner_type = Py_TYPE(function);
   active_guard_actual_partial_accessor_records->push_back(std::move(record));
 }
 
@@ -3823,7 +4176,28 @@ class EQUALS_MATCH : public LeafGuard {
 
   bool supports_actual_partial_subtree_memo(PyObject* value) const override {
     return _actual_partial_safe_constant ||
-        guard_actual_partial_is_deeply_immutable(value);
+        guard_actual_partial_is_deeply_immutable(value) ||
+        (PySet_CheckExact(_value.ptr()) && PySet_CheckExact(value));
+  }
+
+  bool emits_actual_partial_subtree_memo_token() const override {
+    return PySet_CheckExact(_value.ptr());
+  }
+
+  bool append_actual_partial_subtree_memo_token(
+      PyObject* value,
+      std::vector<GuardSubtreeEntryToken>* tokens) override {
+    if (!check_nopybind(value)) {
+      return false;
+    }
+    if (!PySet_CheckExact(value) || !PySet_CheckExact(_value.ptr())) {
+      return true;
+    }
+    append_guard_subtree_memo_token(
+        tokens,
+        GuardSubtreeEntryToken::make_exact_set_equals(value, _value.ptr()),
+        "<EQUALS_EXACT_SET>");
+    return true;
   }
 
  private:
@@ -8983,6 +9357,9 @@ class GlobalsGuardAccessor : public GuardAccessor {
  */
 class TypeGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject* parent) const override {
+    return parent != nullptr;
+  }
 
   // name = __type_accessor__, a unique string used as attribute name.
   TypeGuardAccessor(
@@ -9454,6 +9831,19 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
  */
 class CodeGuardAccessor : public GuardAccessor {
  public:
+  bool supports_actual_partial_subtree_memo(PyObject* parent) const override {
+    if (parent == nullptr) {
+      return false;
+    }
+    PyObject* function = parent;
+    if (PyMethod_Check(parent)) {
+      function = PyMethod_GET_FUNCTION(parent);
+    } else if (PyInstanceMethod_Check(parent)) {
+      function = PyInstanceMethod_GET_FUNCTION(parent);
+    }
+    return PyFunction_Check(function);
+  }
+
   // name = __type_mro_accessor__, a unique string used as attribute name.
   CodeGuardAccessor(
 
@@ -9485,6 +9875,13 @@ class CodeGuardAccessor : public GuardAccessor {
       return false;
     }
     return _guard_manager->check_nopybind(x);
+  }
+
+  bool check_nopybind_actual_partial(
+      PyObject* obj,
+      bool matches_dict_tag = false) override {
+    guard_actual_partial_record_code_accessor(obj, get_source());
+    return check_nopybind(obj, matches_dict_tag);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -10126,6 +10523,8 @@ bool run_root_guard_manager_with_last_success_receipt(
       std::move(build.type_proofs),
       std::move(build.generic_dict_owner_proofs),
       std::move(build.instance_attr_owner_proofs),
+      std::move(build.type_method_proofs),
+      std::move(build.code_accessor_proofs),
       std::move(build.cross_slice_relations),
       std::move(build.retained_token_objects));
   return true;
