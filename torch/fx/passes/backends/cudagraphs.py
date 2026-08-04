@@ -54,7 +54,7 @@ def partition_cudagraphs(
     """
     Partition an FX graph into sub-GraphModules that can be validly run under
     CUDA graphs.  For a subgraph to be runnable under CUDA, all of the operations
-    must involve CUDA tensors only/
+    must involve CUDA tensors only.
     """
 
     FakeTensorProp(gm).propagate(*inputs)

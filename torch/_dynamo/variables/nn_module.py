@@ -21,6 +21,7 @@ parameter access, hooks, and other nn.Module behaviors while maintaining proper 
 of module state.
 """
 
+import collections
 import functools
 import inspect
 import itertools
@@ -96,7 +97,7 @@ def initialize_lazy_module(
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    if hasattr(mod, "_initialize_hook"):
+    if inspect.getattr_static(mod, "_initialize_hook", None) is not None:
 
         def convert_to_fake(x: Any) -> Any:
             if is_namedtuple(x):
@@ -1402,14 +1403,21 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    if self.source:
-                        hooks_source = AttrSource(self.source, name)
+                    hooks_source = (
+                        AttrSource(self.source, name) if self.source else None
+                    )
+                    if hooks_source:
                         install_guard(
                             hooks_source.make_guard(
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({}, user_cls=type(hooks_dict))
+                    hooks_vt_cls = (
+                        variables.OrderedDictVariable
+                        if isinstance(hooks_dict, collections.OrderedDict)
+                        else variables.ConstDictVariable
+                    )
+                    return hooks_vt_cls({}, source=hooks_source)
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1450,9 +1458,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return variables.NNModuleHooksDictVariable(
-                result, type(hooks_dict), source=hooks_dict_source
-            )
+            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(

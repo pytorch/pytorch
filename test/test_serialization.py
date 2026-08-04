@@ -729,7 +729,7 @@ class SerializationMixin:
         msg = 'filelike serialization with {}'
 
         b = torch.load(data)
-        self.assertTrue(torch.equal(tensor, b), msg.format(desc))
+        self.assertTrue(torch.equal(tensor, b), lambda _m: f"{_m}\n" + (msg.format(desc)))
 
     def test_serialization_filelike_missing_attrs(self):
         # Test edge cases where filelike objects are missing attributes.
@@ -923,7 +923,7 @@ class TestBothSerialization(TestCase):
         with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
-            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
+            self.assertTrue(len(w) == 0, msg=lambda msg: f"{msg}\nExpected no warnings but got {[str(x) for x in w]}")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
