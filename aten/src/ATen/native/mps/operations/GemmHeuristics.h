@@ -35,9 +35,6 @@ struct GemvTuning {
   int nt_vec; // largest built gemv_nt vec
 };
 
-// Single source of truth for the built MB_GEMV_* kernel matrix in
-// LinearAlgebra.metal; the heuristic picks derive from it. nsimd ranges
-// assume contiguous powers of two.
 GemvTuning gemv_tuning(c10::ScalarType dt);
 
 // One shape-based launch heuristic shared by every GPU generation; only the

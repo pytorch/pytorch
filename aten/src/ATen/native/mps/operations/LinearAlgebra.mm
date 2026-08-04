@@ -138,7 +138,7 @@ std::optional<GemvConfig> normalize_gemv_config(GemvConfig config,
   return GemvPolicy::clamp_vec(config, align);
 }
 
-std::string gemv_kernel_name(const std::string& dt_str,
+std::string gemv_kernel_name(c10::ScalarType dt,
                              GemvConfig config,
                              GemmEpilogue epi,
                              bool use_t,
@@ -146,6 +146,7 @@ std::string gemv_kernel_name(const std::string& dt_str,
                              bool idx64,
                              int64_t vec_xs,
                              int64_t vec_offset) {
+  const auto dt_str = scalarToMetalTypeString(dt);
   const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
   // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
   const bool xc = !use_t && config.vec > 1 && vec_xs == 1 && (vec_offset % config.vec) == 0;
@@ -162,8 +163,7 @@ std::string gemv_kernel_name(const std::string& dt_str,
       "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, xc ? "xc" : "xs", matrix_str, idx_str);
 }
 
-GemvLaunch prepare_gemv_launch(const std::string& dt_str,
-                               c10::ScalarType dt,
+GemvLaunch prepare_gemv_launch(c10::ScalarType dt,
                                GemvConfig config,
                                GemmEpilogue epi,
                                bool use_t,
@@ -173,7 +173,7 @@ GemvLaunch prepare_gemv_launch(const std::string& dt_str,
                                int64_t vec_xs,
                                int64_t vec_offset) {
   const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
-  auto kernel = gemv_kernel_name(dt_str, config, epi, use_t, matrix_contiguous, idx64, vec_xs, vec_offset);
+  auto kernel = gemv_kernel_name(dt, config, epi, use_t, matrix_contiguous, idx64, vec_xs, vec_offset);
   const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
   const int64_t rows_per_tg = use_t2d ? (c10::metal::simdgroup_size / config.kq) * t2d_vec
       : use_t                         ? c10::metal::simdgroup_size * config.vec
@@ -217,7 +217,6 @@ void dispatch_gemv(const Tensor& A,
                    int64_t outlen,
                    bool idx64) {
   const auto dt = out.scalar_type();
-  const std::string dt_str = scalarToMetalTypeString(out);
   constexpr int64_t r = 0, c = 1;
   const auto K = A.size(1);
 
@@ -269,7 +268,7 @@ void dispatch_gemv(const Tensor& A,
 
   auto stream = getCurrentMPSStream();
   const auto launch =
-      prepare_gemv_launch(dt_str, dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
+      prepare_gemv_launch(dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       encode_gemv_launch(stream, launch, matrix.tensor, vvec, out, dims, expanded_bias, alpha_beta);
