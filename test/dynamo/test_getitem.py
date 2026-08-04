@@ -13,6 +13,7 @@ CPython behavioral gaps.
 
 import collections
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -1304,6 +1305,70 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
                 base,
                 lambda msg: f"{msg}\n{cls.__name__} must override sq_item_impl",
             )
+
+    # tests for python_qualified_name (exposed via __iter__ error messages in python 3.15+)
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "test_mod"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "test_mod.GetItemTests.test_qualname_custom_mod.<locals>.IterNoNext.__iter__() must return an iterator, not test_mod.GetItemTests.test_qualname_custom_mod.<locals>.IterNoNext",
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod_builtins(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "builtins"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "GetItemTests.test_qualname_custom_mod_builtins.<locals>.IterNoNext.__iter__() must return an iterator, not GetItemTests.test_qualname_custom_mod_builtins.<locals>.IterNoNext",
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod_main(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "__main__"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "GetItemTests.test_qualname_custom_mod_main.<locals>.IterNoNext.__iter__() must return an iterator, not GetItemTests.test_qualname_custom_mod_main.<locals>.IterNoNext",
+        )
 
 
 class SetDelItemTests(torch._dynamo.test_case.TestCase):
