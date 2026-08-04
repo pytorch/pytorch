@@ -112,12 +112,19 @@ index 25ba6db..dc3cb57 100644
 +        local_reduce_output_layout: cutlass.Constexpr[Optional[Callable]] = None
 @@ -224,0 +267 @@ class GemmActMixin(ComposableEpiMixin):
 +        d["local_reduce_output_layout"] = args.local_reduce_output_layout
-@@ -542,0 +586 @@ class GemmGroupedNContractMixin(GemmActMixin):
+@@ -542,3 +586,4 @@ class GemmGroupedNContractMixin(GemmActMixin):
+         ScalarTupleLoad("mTensorEpilogueScalars"),
+         # TODO: Add row/tile captures after chunked N-sensitive loads are remapped.
 +        GroupedLocalReduce("mLocalReduce"),
-@@ -567,0 +612 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
+         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
+@@ -567,2 +612,3 @@ class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
+         ScalarTupleLoad("mTensorEpilogueScalars"),
 +        GroupedLocalReduce("mLocalReduce"),
-@@ -736,0 +782 @@ def _compile_gemm_act(
+         TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
+@@ -736,2 +782,3 @@ def _compile_gemm_act(
+     local_reduce_axis,
 +    local_reduce_output_layout,
+     local_reduce_stride_divisibility,
 @@ -851 +897,5 @@ def _compile_gemm_act(
 -    if local_reduce_dtype is not None and local_reduce_axis == 0:
 +    if local_reduce_output_layout is not None:
