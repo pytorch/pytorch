@@ -604,6 +604,10 @@ install_free_tensors_for_export = True
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 
+# Enable the experimental last-success guard lookup plan. This value is sampled
+# once when an ExtraState is created.
+enable_guard_lookup_memo: bool = False
+
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False

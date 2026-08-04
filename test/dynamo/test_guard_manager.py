@@ -4,7 +4,9 @@ import functools
 import gc
 import inspect
 import os
+import subprocess
 import sys
+import textwrap
 import unittest
 import weakref
 from unittest import mock
@@ -2177,6 +2179,103 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
         self.assertFalse(handler.eval_fn({"x": 1, "y": 2, "z": 3}, expected))
+
+
+class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
+    @staticmethod
+    def _run_guard_lookup_memo_script(script):
+        prefix = (
+            "import torch; "
+            "torch._dynamo.config.enable_guard_lookup_memo = True\n"
+        )
+        subprocess.run(
+            [sys.executable, "-c", prefix + textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            check=True,
+        )
+
+    def test_actual_partial_preserves_module_and_residual_guards(self):
+        script = """
+            import torch
+            from torch._dynamo.testing import CompileCounter
+
+            global_bias = torch.tensor(3.0)
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("scale", torch.tensor(2.0))
+                    self.offsets = [1.0]
+
+                def forward(self, x):
+                    return x * self.scale + self.offsets[0] + global_bias
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(
+                model, backend=counter, fullgraph=True, dynamic=True
+            )
+
+            x = torch.ones(4)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            model.scale = torch.tensor(4.0)
+            torch.testing.assert_close(compiled(x), model(x))
+
+            model.scale.resize_(4).fill_(6.0)
+            torch.testing.assert_close(compiled(x), model(x))
+
+            model.offsets[0] = 5.0
+            torch.testing.assert_close(compiled(x), model(x))
+
+            global_bias = torch.tensor(7.0)
+            torch.testing.assert_close(compiled(x), model(x))
+
+            model.scale = torch.tensor(6.0)
+            x = torch.ones(9)
+            torch.testing.assert_close(compiled(x), model(x))
+
+            def alias_sensitive(a, b):
+                return a + b if a is b else a - b
+
+            compiled_alias = torch.compile(
+                alias_sensitive, backend="eager", fullgraph=True
+            )
+            a = torch.ones(4)
+            b = torch.full((4,), 2.0)
+            torch.testing.assert_close(compiled_alias(a, a), alias_sensitive(a, a))
+            torch.testing.assert_close(compiled_alias(a, b), alias_sensitive(a, b))
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_guard_lookup_memo_defaults_off(self):
+        script = """
+            import torch
+            from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+            assert torch._dynamo.config.enable_guard_lookup_memo is False
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            compiled = torch.compile(model, backend="eager", fullgraph=True)
+            x = torch.ones(3)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+
+            cache_entries = _debug_get_cache_entry_list(Model.forward.__code__)
+            assert len(cache_entries) == 1, len(cache_entries)
+            assert not cache_entries[0]._debug_fast_guard_enabled
+        """
+        subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=os.getcwd(),
+            check=True,
+        )
 
 
 if __name__ == "__main__":

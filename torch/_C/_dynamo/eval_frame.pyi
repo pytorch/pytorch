@@ -33,6 +33,7 @@ class _CacheEntry:
     guard_manager: GuardManagerWrapper
     backend: Callable
     isolate_recompiles_id: int
+    _debug_fast_guard_enabled: bool
 
 class _PrecompileEntry:
     guard_manager: GuardManagerWrapper

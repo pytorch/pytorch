@@ -68,6 +68,8 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // has_any_cache_entries)
   size_t total_cache_entry_count{0};
+  // Sampled once when this ExtraState is created.
+  bool guard_lookup_memo_enabled{false};
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   // Actions to apply to all frames with this code object (non-isolated)
@@ -77,6 +79,10 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
 
   ExtraState(PyCodeObject* orig_code_arg);
+  ExtraState(const ExtraState&) = delete;
+  ExtraState(ExtraState&&) = delete;
+  ExtraState& operator=(const ExtraState&) = delete;
+  ExtraState& operator=(ExtraState&&) = delete;
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
   bool has_any_cache_entries() const;
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);

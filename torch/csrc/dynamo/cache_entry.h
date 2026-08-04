@@ -52,6 +52,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* root_mgr{nullptr};
   // diff guard root guard manager if exists
   void* diff_guard_root_mgr{nullptr};
+  // Per-entry storage for the last-success actual-partial guard plan.
+  void* last_success_receipt{nullptr};
   // backend used to create this cache entry
   py::object backend;
   // Reference to owning ExtraState
@@ -63,11 +65,14 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
 
-  CacheEntry(const py::handle& guarded_code, PyObject* backend);
-  CacheEntry(const CacheEntry&) = default;
-  CacheEntry(CacheEntry&&) = default;
-  CacheEntry& operator=(const CacheEntry&) = default;
-  CacheEntry& operator=(CacheEntry&&) = default;
+  CacheEntry(
+      const py::handle& guarded_code,
+      PyObject* backend,
+      bool enable_guard_lookup_memo);
+  CacheEntry(const CacheEntry&) = delete;
+  CacheEntry(CacheEntry&&) = delete;
+  CacheEntry& operator=(const CacheEntry&) = delete;
+  CacheEntry& operator=(CacheEntry&&) = delete;
   ~CacheEntry();
 
   void invalidate(py::object deleted_guard_manager);

@@ -19,12 +19,18 @@
 namespace {
 // Short-term fix for: https://github.com/pytorch/pytorch/issues/166926
 bool use_lru = true;
+
+bool enable_guard_lookup_memo() {
+  py::object config_module = py::module_::import("torch._dynamo.config");
+  return config_module.attr("enable_guard_lookup_memo").cast<bool>();
+}
 } // namespace
 
 Py_ssize_t extra_index = -1;
 
 ExtraState::ExtraState(PyCodeObject* orig_code_arg)
-    : orig_code(orig_code_arg) {}
+    : orig_code(orig_code_arg),
+      guard_lookup_memo_enabled(enable_guard_lookup_memo()) {}
 
 std::list<CacheEntry>& ExtraState::cache_entry_list(
     int64_t isolate_recompiles_id) {
@@ -220,8 +226,15 @@ static CacheEntry* lookup_in_list(
               torch::dynamo::run_root_guard_manager(
                       cache_entry.diff_guard_root_mgr, f_locals);
         } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
+          valid = cache_entry.last_success_receipt == nullptr
+              ? torch::dynamo::run_root_guard_manager(
+                    cache_entry.root_mgr, f_locals)
+              : torch::dynamo::run_root_guard_manager_with_last_success_receipt(
+                    cache_entry.last_success_receipt,
+                    &cache_entry,
+                    cache_entry.root_mgr,
+                    f_locals,
+                    /*is_skip_guard_eval_unsafe=*/false);
         }
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
@@ -385,10 +398,12 @@ CacheEntry* create_cache_entry(
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
-    entries.emplace_front(guarded_code, backend);
+    entries.emplace_front(
+        guarded_code, backend, extra_state->guard_lookup_memo_enabled);
     new_iter = entries.begin();
   } else {
-    entries.emplace_back(guarded_code, backend);
+    entries.emplace_back(
+        guarded_code, backend, extra_state->guard_lookup_memo_enabled);
     new_iter = std::prev(entries.end());
   }
   new_iter->_owner = extra_state;
