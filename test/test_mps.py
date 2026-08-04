@@ -368,6 +368,16 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(grads[1][:2], make_tensor([4.0, 8.0]))
         self.assertEqual(found_inf.item(), 1.0)
 
+    def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("mps")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("mps"), torch.is_autocast_enabled())
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("mps"), torch.is_autocast_enabled())
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
@@ -10398,6 +10408,19 @@ class TestMPS(TestCaseMPS):
         x[positions] = True
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("N", [4095, 4097])
+    def test_fused_rms_norm_weight_multiply_in_fp32(self, dtype, N):
+        # Values on either side of 4096 exercise the single-row and looped kernels.
+        # Keep x*inv*weight in fp32 and cast once, like the CPU composite
+        # (#147203). Compare the half path to the same fused kernel run in fp32.
+        x = torch.randn(2, N, dtype=dtype, device="mps")
+        w = (torch.randn(N, dtype=torch.float32, device="mps") * 8).to(dtype)
+        with torch.inference_mode():
+            y = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)[0]
+            ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
+        self.assertEqual(y, ref, atol=0, rtol=0)
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
