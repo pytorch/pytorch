@@ -7216,6 +7216,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # requires cooperative-grid launches to avoid hanging.
             triton_meta["launch_cooperative_grid"] = True
 
+        if torch._inductor.config.triton.enable_auto_tma_fusion:
+            triton_meta["auto_tma"] = True
+
         # Skip memory optimization for forward of the training loop where we expect
         # every new node will increase the peak memory and our greedy approach would
         # introduce a lot of unnecessary cpu copies.
