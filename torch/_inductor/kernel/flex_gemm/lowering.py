@@ -36,6 +36,7 @@ from .constraints import (
     flex_gemm_local_reduce_config_error,
     flex_gemm_output_config_supported,
     FlexGemmGroupedMainOutputTransform,
+    grouped_main_capture_supported,
     grouped_main_output_config_supported,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
@@ -555,8 +556,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         and gemm_args[mat2_index].get_stride()[-1] == 1
     ):
         raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
-    if main_transform is not None and epilogue_args:
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, physical_output_size
     )
@@ -627,6 +626,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
         gemm_op, epilogue_input_nodes, physical_output_size
     )
+    if main_transform is not None and any(
+        not grouped_main_capture_supported(kind, arg.get_dtype() is torch.bool)
+        for arg, kind in zip(epilogue_input_nodes, epilogue_arg_kinds, strict=True)
+    ):
+        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
     log_flex_gemm_artifact(
         "lowering_plan",
         lambda: format_flex_gemm_lowering_plan(
