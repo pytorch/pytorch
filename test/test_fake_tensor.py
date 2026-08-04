@@ -2720,7 +2720,8 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(y_refake.storage_offset(), y.storage_offset())
         self.assertEqual(y_refake.real_tensor, y)
 
-    def test_functional_tensor_reuses_symbolic_storage_size(self):
+    @parametrize("use_view", (False, True))
+    def test_functional_tensor_reuses_symbolic_storage_size(self, use_view):
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             FunctionalTensorMode,
@@ -2736,6 +2737,10 @@ class FakeTensorConverterTest(TestCase):
                 constraint_sizes=[None, None],
             ),
         )
+
+        if use_view:
+            with fake_mode:
+                x = aten.slice.Tensor(x, 1, 2, 6)
 
         with FunctionalTensorMode():
             functional = FunctionalTensor.to_functional(x)
@@ -2891,6 +2896,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(g_eager.dtype, g_traced.dtype)
 
 
+instantiate_parametrized_tests(FakeTensorConverterTest)
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
 
 
