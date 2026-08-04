@@ -606,7 +606,9 @@ __host__ __device__ inline void c10_rocm_kernel_assert(
   __assert_fail(cond, file, line, __func__);
 #endif
 }
+#endif // defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
 
+#if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
 #define CUDA_KERNEL_ASSERT(cond)                             \
   if C10_UNLIKELY (!(cond)) {                                \
     c10_rocm_kernel_assert(                                  \
@@ -625,7 +627,7 @@ __host__ __device__ inline void c10_rocm_kernel_assert(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif
+#endif // defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
