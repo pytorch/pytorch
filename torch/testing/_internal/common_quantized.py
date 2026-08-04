@@ -254,9 +254,10 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
       fp4: bits 0-3 empty and bits 4-7 in fp4_e2m1 encoding
       fp6: bits 0-1 empty and bits 2-7 in fp6_e2m3 or fp6_e3m2 encoding
 
-    Note: there are no special values (NaN, inf) support in this code. Values
-    outside the representable range of Floatx after rounding are clamped to the
-    maximum Floatx magnitude (sign is preserved).
+    Note: Floatx has no inf/NaN encoding. Values outside the representable range
+    after rounding, as well as inf, are clamped to the maximum Floatx magnitude
+    (sign is preserved). NaN clamps to the positive maximum magnitude, matching
+    the hardware fp4 convert intrinsic.
 
     Code below is an adaptation of https://fburl.com/code/ciwofcg4
 
@@ -311,8 +312,14 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
     x = x.view(torch.float)
 
     # rewrite saturate/denorm/norm branches without explicit data dependent
-    # control flow, to be more compiler friendly
-    saturate_mask = x >= max_normal
+    # control flow, to be more compiler friendly.
+    # The negated comparison is what catches NaN (all NaN comparisons are
+    # false): Floatx has no inf/NaN encoding, so inf/overflow and NaN alike
+    # saturate to the max magnitude, matching the OCP MX spec overflow rule.
+    # inf/overflow keep their sign; NaN clamps to the positive max magnitude
+    # (implementation-defined) to match the hardware fp4 convert intrinsic.
+    saturate_mask = torch.logical_not(x < max_normal)
+    nan_mask = torch.isnan(x)
     denormal_mask = torch.logical_and(torch.logical_not(saturate_mask), x < min_normal)
     normal_mask = torch.logical_not(torch.logical_or(saturate_mask, denormal_mask))
 
@@ -359,6 +366,8 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
     # doesn't have an uint32 dtype, we mask out these bits to get just the
     # f4 sign bit
     sign_lp = sign_lp & sign_mask
+    # NaN clamps to the positive max magnitude, so drop its sign.
+    sign_lp = torch.where(nan_mask, torch.zeros_like(sign_lp), sign_lp)
     x = x | sign_lp
 
     return x.to(torch.uint8)
