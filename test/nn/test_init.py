@@ -9,8 +9,12 @@ from operator import mul
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize as parametrize_test,
     run_tests,
     skipIfNoLapack,
@@ -46,6 +50,8 @@ ALL_INIT_FNS = [
 
 
 class TestNNInit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         random.seed(123)
@@ -570,7 +576,9 @@ class TestNNInit(TestCase):
             fn()
 
 
-class TestNNInitDeviceType(TestCase):
+class TestNNInitDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @torch._dynamo.disable
     def _is_trunc_normal(self, tensor, mean, std, a, b):
         z_samples = (tensor.view(-1) - mean) / std
@@ -582,10 +590,7 @@ class TestNNInitDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @parametrize_test("dims", [1, 2, 4])
-    @parametrize_test(
-        "dtype",
-        [torch.float32, torch.float64],
-    )
+    @dtypes(torch.float32, torch.float64)
     def test_trunc_normal_all_dtypes(self, device, dims, dtype):
         size = [random.randint(30, 50) for _ in range(dims)]
         input_tensor = torch.zeros(size, dtype=dtype, device=device)
@@ -615,10 +620,7 @@ class TestNNInitDeviceType(TestCase):
     # Reduced-precision KS test uses fixed wide params to avoid random
     # intervals too narrow for the type's representable value count.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @parametrize_test(
-        "dtype",
-        [torch.float16, torch.bfloat16],
-    )
+    @dtypes(torch.float16, torch.bfloat16)
     def test_trunc_normal_low_precision(self, device, dtype):
         n = 10000
         mean, std, a, b = 0.0, 1.0, -2.0, 2.0
@@ -640,10 +642,7 @@ class TestNNInitDeviceType(TestCase):
 
     # Test that trunc_normal_ behaves well for narrow interval compared to std.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @parametrize_test(
-        "dtype",
-        [torch.float32, torch.float64, torch.float16, torch.bfloat16],
-    )
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
     def test_trunc_normal_narrow_interval(self, device, dtype):
         n = 10000
         mean, std, a, b = -3.0, 1.0, -0.5, 0.5
@@ -705,10 +704,7 @@ class TestNNInitDeviceType(TestCase):
         )
 
     # Sanity check that we don't round to the boundary by mistake.
-    @parametrize_test(
-        "dtype",
-        [torch.float32, torch.float64, torch.float16, torch.bfloat16],
-    )
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
     def test_trunc_normal_no_boundary_values_small_std(self, device, dtype):
         t = torch.empty(10000, dtype=dtype, device=device)
         init.trunc_normal_(t, mean=0.0, std=0.1, a=-2.0, b=2.0)
@@ -745,7 +741,7 @@ class TestNNInitDeviceType(TestCase):
         self._run_init_test(device, zero_element=True)
 
 
-instantiate_device_type_tests(TestNNInitDeviceType, globals())
+instantiate_device_type_tests(TestNNInitDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
