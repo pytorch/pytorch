@@ -569,6 +569,12 @@ def _grouped_n_contract4_epi_tile_fn(gemm, epi_tile):
 
 
 class GemmGroupedNContractMixin(GemmActMixin):
+    """Store the contracted logical main through PostAct while leaving D unused.
+
+    TODO: Move this specialization behind a stable provider-extension boundary
+    so Inductor can own it beside the generated epilogue.
+    """
+
     grouped_n_contract_group = 2
     _epi_ops = (
         Scalar("alpha"),
@@ -1123,6 +1129,20 @@ def gemm_act(
         tensor.stride(-1) != 1 for tensor in postact_tensors
     ):
         raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
+    if main_output_transform_group is not None:
+        physical_n = B.shape[-2]
+        if physical_n % main_output_transform_group != 0:
+            raise RuntimeError(
+                f"grouped_n_contract physical N={physical_n} must be divisible by "
+                f"group={main_output_transform_group}"
+            )
+        expected_shape = (*A.shape[:-1], physical_n // main_output_transform_group)
+        for tensor in postact_tensors:
+            if tuple(tensor.shape) != expected_shape:
+                raise RuntimeError(
+                    "grouped_n_contract requires PostAct shape "
+                    f"{expected_shape}, got {tuple(tensor.shape)}"
+                )
     varlen_m = cu_seqlens_m is not None
     gather_A = A_idx is not None
     if varlen_m:

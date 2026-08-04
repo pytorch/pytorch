@@ -50,11 +50,7 @@ from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import (
-    guard_int,
-    has_guarding_hint,
-    optimization_hint,
-)
+from torch.fx.experimental.symbolic_shapes import guard_int, has_guarding_hint
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -111,45 +107,17 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
         return "((1, None, None), 1, 1)"
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmStructuralInt:
-    """Hold a backed structural hint until its accepted match installs a guard.
-
-    Unbacked values have no stable specialization contract and are rejected by
-    ``from_value`` rather than guessed during analysis or code generation.
-    """
-
-    value: int
-    symbolic: torch.SymInt | None = None
-
-    @classmethod
-    def from_value(cls, value: Any) -> "FlexGemmStructuralInt | None":
-        """Return a guard-free structural hint, or None for unsupported values."""
-        if isinstance(value, torch.fx.Node):
-            value = value.meta.get("val")
-        if isinstance(value, torch.SymInt):
-            if not has_guarding_hint(value):
-                return None
-            return cls(optimization_hint(value), value)
-        return cls(value) if isinstance(value, int) else None
-
-    def guard(self) -> None:
-        """Install the specialization guard after the semantic match is accepted."""
-        if self.symbolic is not None and guard_int(self.symbolic) != self.value:
-            raise AssertionError("FlexGEMM structural hint changed before commit")
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmGroupedLayoutMatch:
-    """Pair a grouped TensorSSA geometry with its deferred shape guards."""
-
-    layout: FlexGemmLocalReduceGeometry
-    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
-
-    def commit_guards(self) -> None:
-        """Install structural guards after analysis makes this layout active."""
-        for structural in self.structural_values:
-            structural.guard()
+def guarded_int(value: Any) -> int | None:
+    """Return an integer after guarding backed symbolic values."""
+    if isinstance(value, torch.fx.Node):
+        value = value.meta.get("val")
+    if isinstance(value, torch.SymInt):
+        if not has_guarding_hint(value):
+            return None
+        # TODO: Defer speculative guards if they become a meaningful source of
+        # recompilation.
+        return guard_int(value)
+    return value if isinstance(value, int) else None
 
 
 def _is_inferred_reshape_dim(value: Any) -> bool:
@@ -157,21 +125,29 @@ def _is_inferred_reshape_dim(value: Any) -> bool:
     return isinstance(value, int) and value == -1
 
 
-def _grouped_reshape_group_hint(
+def _guard_grouped_reshape_group(
     shape: tuple[Any, ...], source_shape: tuple[Any, ...]
-) -> tuple[tuple[Any, ...], FlexGemmStructuralInt | None]:
-    """Resolve a backed group hint without guarding a rejected reshape."""
+) -> tuple[Any, ...]:
+    """Specialize a backed group dimension used to recognize a grouped reshape."""
     if len(shape) != 3:
-        return shape, None
+        return shape
     for group_index, kept_index in ((-1, 0), (-2, -1)):
         if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
             continue
-        structural = FlexGemmStructuralInt.from_value(shape[group_index])
-        if structural is not None and structural.symbolic is not None:
+        group_value = shape[group_index]
+        symbolic = (
+            group_value.meta.get("val")
+            if isinstance(group_value, torch.fx.Node)
+            else group_value
+        )
+        if not isinstance(symbolic, torch.SymInt):
+            continue
+        group = guarded_int(group_value)
+        if group is not None:
             result = list(shape)
-            result[group_index] = structural.value
-            return tuple(result), structural
-    return shape, None
+            result[group_index] = group
+            return tuple(result)
+    return shape
 
 
 def _syntactic_grouped_tensor_layout(
@@ -241,8 +217,8 @@ def _grouped_layout_matches_source_shape(
 
 def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
-) -> FlexGemmGroupedLayoutMatch | None:
-    """Recognize grouped M/N geometry without guarding backed dimensions."""
+) -> FlexGemmLocalReduceGeometry | None:
+    """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
         return None
@@ -251,7 +227,7 @@ def grouped_tensor_layout(
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
-            shape, structural_group = _grouped_reshape_group_hint(shape, source_shape)
+            shape = _guard_grouped_reshape_group(shape, source_shape)
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
@@ -261,15 +237,11 @@ def grouped_tensor_layout(
                     candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
-                    structural_values = (
-                        () if structural_group is None else (structural_group,)
-                    )
-                    return FlexGemmGroupedLayoutMatch(layout, structural_values)
+                    return layout
             if _syntactic_grouped_tensor_layout(shape) is not None:
                 raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
             return None
-    layout = _syntactic_grouped_tensor_layout(shape)
-    return None if layout is None else FlexGemmGroupedLayoutMatch(layout)
+    return _syntactic_grouped_tensor_layout(shape)
 
 
 def _cute_op_name(target: Any) -> str | None:
