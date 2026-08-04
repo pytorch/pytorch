@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 import torch
+from torch._inductor import config
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -66,6 +67,30 @@ class MPSBasicTests(TestCase):
 
     def test_tanh(self):
         self.common(lambda x: x.tanh(), (torch.rand(1024),))
+
+    @config.patch(use_fast_math=True)
+    def test_exp_fast_math(self):
+        special = torch.tensor(
+            [
+                float("-inf"),
+                float("inf"),
+                float("nan"),
+                -104.0,
+                -103.972084,
+                88.72283,
+                89.0,
+                -0.0,
+                0.0,
+            ],
+            device="mps",
+        )
+        x = torch.cat((torch.linspace(-80, 80, 10001, device="mps"), special))
+
+        @torch.compile
+        def fn(x):
+            return x.exp()
+
+        self.assertEqual(fn(x), x.exp(), rtol=5e-6, atol=0, equal_nan=True)
 
     def test_tanh_large_values(self):
         # Test that tanh handles large values correctly (should saturate to ±1)
@@ -391,6 +416,25 @@ class MPSBasicTestsAOTI(TestCase):
             src_code = cpp.read()
             # Verify metal::precise::tanh is used (not clamped version)
             FileCheck().check("metal::precise::tanh").run(src_code)
+
+    def _get_exp_codegen(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.exp()
+
+        example_inputs = (torch.randn(1024, device="mps"),)
+        ep = torch.export.export(Model(), example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            return cpp.read()
+
+    def test_exp_codegen(self):
+        FileCheck().check("metal::precise::exp").run(self._get_exp_codegen())
+
+    @config.patch(use_fast_math=True)
+    def test_exp_fast_math_codegen(self):
+        FileCheck().check("metal::fast::exp").run(self._get_exp_codegen())
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):

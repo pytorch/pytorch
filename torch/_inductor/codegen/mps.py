@@ -19,6 +19,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .. import config
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
@@ -321,6 +322,8 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
+        if config.use_fast_math:
+            return f"metal::fast::exp({x})"
         return f"metal::precise::exp({x})"
 
     @staticmethod
