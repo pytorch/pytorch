@@ -601,18 +601,18 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     torch.device("cuda")
                 )
 
-    def test_grouped_main_output_device_validation(self):
+    def test_output_contraction_device_validation(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
 
-        group_2 = FlexGemmGroupedMainOutputTransform(2)
-        group_4 = FlexGemmGroupedMainOutputTransform(4)
+        group_2 = FlexGemmOutputContraction(2)
+        group_4 = FlexGemmOutputContraction(4)
         for capability in (10, 11):
             group_2.validate_quack(capability)
         group_4.validate_quack(10)
         with self.assertRaisesRegex(NotImplementedError, "interleaved group 4"):
-            FlexGemmGroupedMainOutputTransform(4, chunked=True).validate_quack(10)
+            FlexGemmOutputContraction(4, chunked=True).validate_quack(10)
         with self.assertRaisesRegex(NotImplementedError, "group 4 on SM100"):
             group_4.validate_quack(11)
         with self.assertRaisesRegex(NotImplementedError, "not yet supported on SM120"):
@@ -623,7 +623,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             group_4.validate_quack(9)
 
     @skipIfNoCuteDSL
-    def test_quack_grouped_main_output_device_validation(self):
+    def test_quack_grouped_n_contract_device_validation(self):
         from torch._vendor.quack.gemm_act import validate_grouped_n_contract_device
 
         validate_grouped_n_contract_device(2, (10, 0))
@@ -637,9 +637,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             validate_grouped_n_contract_device(2, (9, 0))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    def test_runtime_grouped_main_rejects_unsafe_explicit_config(self):
+    def test_runtime_output_contraction_rejects_unsafe_explicit_config(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeOutputPlan,
@@ -662,15 +662,17 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "torch._inductor.heuristics.template.flex_gemm.gemm_config_from_key",
                 return_value=config,
             ),
-            self.assertRaisesRegex(NotImplementedError, "incompatible with grouped"),
+            self.assertRaisesRegex(
+                NotImplementedError, "incompatible with output contraction"
+            ),
         ):
             gemm_epilogue(
                 torch.randn(4, 8, device="cuda"),
                 torch.randn(8, 16, device="cuda"),
                 lambda acc: acc,
-                "unsafe_grouped_main_config",
+                "unsafe_output_contraction_config",
                 output_plan=FlexGemmRuntimeOutputPlan(
-                    main_transform=FlexGemmGroupedMainOutputTransform(2)
+                    output_contraction=FlexGemmOutputContraction(2)
                 ),
                 config_key=(("swap_ab", True),),
                 expected_ndim=2,
@@ -678,9 +680,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    def test_runtime_grouped_main_selects_safe_default_config(self):
+    def test_runtime_output_contraction_selects_safe_default_config(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeOutputPlan,
@@ -714,20 +716,20 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 torch.randn(4, 8, device="cuda"),
                 torch.randn(8, 16, device="cuda"),
                 lambda acc: acc,
-                "safe_grouped_main_config",
+                "safe_output_contraction_config",
                 output_plan=FlexGemmRuntimeOutputPlan(
-                    main_transform=FlexGemmGroupedMainOutputTransform(2)
+                    output_contraction=FlexGemmOutputContraction(2)
                 ),
                 device_capacity_override=(10, 0),
             )
         self.assertIs(dispatch.call_args.kwargs["config"], safe)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    def test_runtime_grouped_main_validates_local_reduce_config(self):
+    def test_runtime_output_contraction_validates_local_reduce_config(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
             FlexGemmLocalReduceCallbacks,
             FlexGemmLocalReduceGeometry,
+            FlexGemmOutputContraction,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
@@ -760,7 +762,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "torch._inductor.heuristics.template.flex_gemm.gemm_config_from_key",
                 return_value=config,
             ),
-            self.assertRaisesRegex(NotImplementedError, "incompatible with grouped"),
+            self.assertRaisesRegex(
+                NotImplementedError, "incompatible with output contraction"
+            ),
         ):
             gemm_epilogue(
                 torch.randn(256, 64, device="cuda"),
@@ -769,7 +773,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "unsafe_grouped_local_reduce_config",
                 output_plan=FlexGemmRuntimeOutputPlan(
                     local_reduce=local_reduce,
-                    main_transform=FlexGemmGroupedMainOutputTransform(2),
+                    output_contraction=FlexGemmOutputContraction(2),
                 ),
                 config_key=(("tile_m", 256),),
                 device_capacity_override=(10, 0),
@@ -1930,8 +1934,8 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
     def test_runtime_output_plan_rejects_chunked_grouped_reduction(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
             FlexGemmLocalReduceGeometry,
+            FlexGemmOutputContraction,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
@@ -1944,11 +1948,11 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(NotImplementedError, "concat layout permutes"):
             FlexGemmRuntimeOutputPlan(
                 local_reduce=local_reduce,
-                main_transform=FlexGemmGroupedMainOutputTransform(2, chunked=True),
+                output_contraction=FlexGemmOutputContraction(2, chunked=True),
             )
         FlexGemmRuntimeOutputPlan(
             local_reduce=local_reduce,
-            main_transform=FlexGemmGroupedMainOutputTransform(2),
+            output_contraction=FlexGemmOutputContraction(2),
         )
 
     def test_output_plan_rejects_invalid_state(self):
@@ -2572,8 +2576,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         file_check = file_check.check_not("epilogue_source=")
         file_check.check_not("from quack").check_not("import quack").run(code)
 
-    def assertGroupedMainRejected(self, a, b, epilogue, error):
-        """Assert that a grouped-main epilogue is rejected during compilation."""
+    def assertOutputContractionRejected(self, a, b, epilogue, error):
+        """Assert that an output contraction is rejected during compilation."""
         torch._dynamo.reset()
         with self.assertRaisesRegex(InductorError, error):
             torch.compile(
@@ -3582,7 +3586,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         self.assertIn("outputs:\n  main: relu: shape=(4, 64)", analysis_report)
         self.assertIn("auxiliary: (none)", analysis_report)
-        self.assertIn("main_transform: none", analysis_report)
+        self.assertIn("output_contraction: none", analysis_report)
         self.assertIn("value: sum_1", analysis_report)
         self.assertIn("dataflow: view -> sum(dim=[-1], keepdim=False)", analysis_report)
         self.assertIn("geometry: axis=N, group=32", analysis_report)
@@ -3595,7 +3599,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("sum_1: NormalizedReduction", analysis_details)
         self.assertIn("grouped_layouts:\n  view:", analysis_details)
         self.assertIn("local_reduce_matches:\n  sum_1:", analysis_details)
-        self.assertIn("grouped_select_indices:\n  (none)", analysis_details)
+        self.assertIn("output_contraction_select_indices:\n  (none)", analysis_details)
         self.assertIn("tile_m: 256", config_report)
         self.assertIn("tile_k: auto", config_report)
         self.assertIn("cluster_m: 2", config_report)
@@ -3617,7 +3621,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
         self.assertIn(" ===== ANALYSIS DETAILS =====", records.output[0])
 
-    def test_grouped_main_debug_report(self):
+    def test_output_contraction_debug_report(self):
         from torch._inductor.kernel.flex_gemm.debug import (
             format_flex_gemm_analysis,
             format_flex_gemm_analysis_details,
@@ -3638,13 +3642,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertIn(
-            "main_transform: grouped-N, group=2, layout=interleaved",
+            "output_contraction: N-axis, group=2, layout=interleaved",
             format_flex_gemm_analysis(analysis),
         )
         details = format_flex_gemm_analysis_details(analysis)
         self.assertIn("NormalizedSelect", details)
-        self.assertIn("grouped_select_indices:", details)
-        self.assertNotIn("grouped_select_indices:\n  (none)", details)
+        self.assertIn("output_contraction_select_indices:", details)
+        self.assertNotIn("output_contraction_select_indices:\n  (none)", details)
 
     def test_nvfp4_pack_debug_report(self):
         from torch._inductor.kernel.flex_gemm.debug import (
@@ -3780,9 +3784,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("candidate 0:", verbose_report)
 
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
 
         with self.assertRaisesRegex(
             NotImplementedError, "grouped reshape must split exactly"
@@ -3791,9 +3793,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @parametrize("unbacked_dim", (1, 2))
     def test_grouped_layout_rejects_unbacked_structural_dimensions(self, unbacked_dim):
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape = [4, -1, 2]
@@ -3802,9 +3802,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     def test_grouped_layout_guards_backed_group_before_rejection(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
@@ -3814,11 +3812,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIsNone(grouped_tensor_layout((4, 5, group), (4, 8)))
         self.assertEqual(len(shape_env.guards), 1)
 
-    def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
+    def test_output_contraction_plan_only_mutates_analysis_on_match(self):
         """Rejected recognitions must not leak grouped layouts."""
         from torch._dynamo.source import ConstantSource
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
@@ -3837,10 +3835,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             halves = acc.chunk(2, dim=-1)
             return torch.nn.functional.silu(halves[0]) * halves[1]
 
-        chunked_transform = FlexGemmGroupedMainOutputTransform(group=2, chunked=True)
-        for body, expected_transform in (
+        chunked_contraction = FlexGemmOutputContraction(group=2, chunked=True)
+        for body, expected_contraction in (
             (swap_halves_plus_acc, None),
-            (silu_mul_halves, chunked_transform),
+            (silu_mul_halves, chunked_contraction),
         ):
             with self.subTest(body=body.__name__):
                 graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
@@ -3861,13 +3859,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     if node.target is torch.ops.aten.split.Tensor
                 ]
                 self.assertTrue(split_nodes)
-                self.assertEqual(analysis.outputs.main_transform, expected_transform)
+                self.assertEqual(
+                    analysis.outputs.output_contraction, expected_contraction
+                )
                 registered = [
                     node
                     for node in split_nodes
                     if node in analysis.local_reduce.grouped_tensors
                 ]
-                self.assertEqual(registered, split_nodes if expected_transform else [])
+                self.assertEqual(
+                    registered, split_nodes if expected_contraction else []
+                )
                 self.assertEqual(len(shape_env.guards), 1)
 
     def test_incomplete_grouped_selects_are_rejected(self):
@@ -3877,7 +3879,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        def duplicate_grouped_lane(a, b):
+        def duplicate_group_value(a, b):
             grouped = torch.mm(a, b).view(4, 4, 4)
             return torch.cat(
                 (
@@ -3889,10 +3891,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 dim=-1,
             )
 
-        graph_module = make_fx(duplicate_grouped_lane)(
+        graph_module = make_fx(duplicate_group_value)(
             torch.randn(4, 8), torch.randn(8, 16)
         )
-        with self.assertRaisesRegex(NotImplementedError, "complete grouped main"):
+        with self.assertRaisesRegex(NotImplementedError, "complete output contraction"):
             analyze_flex_gemm_epilogue(
                 graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
             )
@@ -3931,7 +3933,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         self.assertEqual(len(shape_env.guards), 1)
 
-    def test_grouped_main_output_does_not_contract_other_axes(self):
+    def test_output_contraction_does_not_contract_other_axes(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
@@ -3955,10 +3957,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 analysis = analyze_flex_gemm_epilogue(
                     graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
                 )
-                self.assertIsNone(analysis.outputs.main_transform)
+                self.assertIsNone(analysis.outputs.output_contraction)
 
     @skipIfNoCuteDSL
-    def test_grouped_main_output_validates_output_layout_and_shape(self):
+    def test_output_contraction_validates_output_layout_and_shape(self):
         from torch._vendor.quack.gemm_act import gemm_act
 
         def run(b, out, group):
@@ -4043,7 +4045,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     @parametrize(
         "operation,tuned",
         (
@@ -4053,17 +4055,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("silu_mul", True),
         ),
     )
-    def test_mm_grouped_n_main_output_compiled_matches_reference(
-        self, operation, tuned
-    ):
+    def test_mm_output_contraction_compiled_matches_reference(self, operation, tuned):
         m, k, n, group = 64, 64, 64, 2
 
         def epilogue(acc):
-            lanes = acc.float().view(m, n, group)
+            grouped_values = acc.float().view(m, n, group)
             if operation == "sub":
-                gate, up = lanes.select(-1, 0), lanes.select(-1, 1)
+                gate, up = grouped_values.select(-1, 0), grouped_values.select(-1, 1)
             else:
-                gate, up = lanes[..., 0], lanes[..., 1]
+                gate, up = grouped_values[..., 0], grouped_values[..., 1]
             match operation:
                 case "silu_mul":
                     return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
@@ -4099,20 +4099,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         else:
             torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check_not(
             "activation="
         ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_main_output_non_aligned_logical_n(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_non_aligned_logical_n(self):
         m, k, n = 64, 64, 68
 
         def epilogue(acc):
-            lanes = acc.float().view(m, n, 2)
-            return (lanes[..., 0] - lanes[..., 1]).to(acc.dtype)
+            grouped_values = acc.float().view(m, n, 2)
+            return (grouped_values[..., 0] - grouped_values[..., 1]).to(acc.dtype)
 
         def fn(a, b):
             return flex_gemm(
@@ -4130,14 +4130,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, epilogue(a @ b), atol=1e-1, rtol=1e-1)
         self.assertEqual(actual.shape, (m, n))
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check_not(
             "extern_kernels.mm"
         ).run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     @parametrize(
         "case",
         (
@@ -4147,7 +4147,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_grouped_main_with_n_invariant_capture(self, case):
+    def test_mm_output_contraction_with_n_invariant_capture(self, case):
         _, capture_kind, capture_use, chunked = case
         m = k = n = 64
 
@@ -4158,8 +4158,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             if chunked:
                 lhs, rhs = value.chunk(2, dim=-1)
             else:
-                lanes = value.view(m, n, 2)
-                lhs, rhs = lanes[..., 0], lanes[..., 1]
+                grouped_values = value.view(m, n, 2)
+                lhs, rhs = grouped_values[..., 0], grouped_values[..., 1]
             if capture_use == "scalar_expr":
                 return ((lhs - rhs) * (capture + 1.0)).to(acc.dtype)
             if capture_use == "col_expr":
@@ -4200,15 +4200,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10,
         "interleaved group 4 is currently validated only on SM100",
     )
-    def test_mm_grouped_main_output_group4(self):
+    def test_mm_output_contraction_group4(self):
         m, k, n, group = 64, 64, 64, 4
 
         def epilogue(acc, scale, col):
-            lanes = acc.float().view(m, n, group)
+            grouped_values = acc.float().view(m, n, group)
             return (
-                (lanes[..., 0] - lanes[..., 1]) * scale
-                + lanes[..., 2] * col
-                - lanes[..., 3]
+                (grouped_values[..., 0] - grouped_values[..., 1]) * scale
+                + grouped_values[..., 2] * col
+                - grouped_values[..., 3]
             ).to(acc.dtype)
 
         def fn(a, b, scale, col):
@@ -4232,14 +4232,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         self.assertEqual(actual.shape, (m, n))
         FileCheck().check("epilogue_arg_kinds=('scalar', 'col')").check(
-            "FlexGemmGroupedMainOutputTransform(group=4, chunked=False)"
+            "FlexGemmOutputContraction(group=4, chunked=False)"
         ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_main_with_local_reduce_output(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_with_local_reduce_output(self):
         m = n = k = 256
         reduce_group = 16
         config = {
@@ -4278,14 +4278,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.5)
         self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
         FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
-            "FlexGemmGroupedMainOutputTransform(group=2"
+            "FlexGemmOutputContraction(group=2"
         ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_chunked_grouped_main_rejects_returned_grouped_reduction(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_chunked_output_contraction_rejects_returned_grouped_reduction(self):
         m, k, physical_n, group = 128, 64, 256, 32
 
         def epilogue_fn(acc):
@@ -4306,16 +4306,16 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         b = torch.randn(physical_n, k, device="cuda", dtype=torch.bfloat16).t()
         with self.assertRaisesRegex(
             InductorError,
-            "concat-layout grouped main outputs do not compose with grouped reductions",
+            "concat-layout output contractions do not compose with grouped reductions",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     @parametrize("chunked", (False, True))
-    def test_mm_grouped_n_main_output_dynamic_m(self, chunked):
+    def test_mm_output_contraction_dynamic_m(self, chunked):
         k = n = 64
 
         def epilogue(acc, col):
@@ -4323,8 +4323,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             if chunked:
                 gate, up = value.chunk(2, dim=-1)
             else:
-                lanes = value.view(-1, n, 2)
-                gate, up = lanes[..., 0], lanes[..., 1]
+                grouped_values = value.view(-1, n, 2)
+                gate, up = grouped_values[..., 0], grouped_values[..., 1]
             return (torch.nn.functional.silu(gate) * up * col).to(acc.dtype)
 
         def fn(a, b, col):
@@ -4351,9 +4351,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     @parametrize("chunked", (False, True))
-    def test_mm_grouped_n_main_output_partial_n_tile(self, chunked):
+    def test_mm_output_contraction_partial_n_tile(self, chunked):
         m = k = 64
         n = 80
 
@@ -4362,8 +4362,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             if chunked:
                 lhs, rhs = value.chunk(2, dim=-1)
             else:
-                lanes = value.view(m, n, 2)
-                lhs, rhs = lanes[..., 0], lanes[..., 1]
+                grouped_values = value.view(m, n, 2)
+                lhs, rhs = grouped_values[..., 0], grouped_values[..., 1]
             return (lhs - rhs).to(acc.dtype)
 
         def fn(a, b):
@@ -4387,20 +4387,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
         torch.testing.assert_close(actual, epilogue(a @ b), atol=0.2, rtol=0.05)
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check(
             "('tile_n', 128)"
         ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_n_main_output_concat_layout(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_concat_layout(self):
         m, k, n = 64, 64, 64
 
         def epilogue(acc):
-            lanes = acc.float().view(m, 2, n)
-            gate, up = lanes.select(-2, -1), lanes.select(-2, -2)
+            grouped_values = acc.float().view(m, 2, n)
+            gate, up = grouped_values.select(-2, -1), grouped_values.select(-2, -2)
             return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
 
         def fn(a, b):
@@ -4418,20 +4418,20 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check(
             "chunked=True"
         ).check_not("activation=").check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_n_main_output_specializes_split_size(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_specializes_split_size(self):
         m = k = split_size = 64
 
         def epilogue(acc):
-            lanes = acc.float().split(split_size, dim=-1)
-            return (lanes[0] - lanes[1]).to(acc.dtype)
+            grouped_values = acc.float().split(split_size, dim=-1)
+            return (grouped_values[0] - grouped_values[1]).to(acc.dtype)
 
         def fn(a, b):
             return flex_gemm(
@@ -4448,25 +4448,27 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
         torch.testing.assert_close(actual, epilogue(a @ b), atol=0.2, rtol=0.05)
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check(
             "chunked=True"
         ).check_not("extern_kernels.mm").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_n_main_output_supports_clustered_m_configs(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_supports_clustered_m_configs(self):
         from torch._vendor.quack.gemm_config import GemmConfig
 
         m, k, n, group = 256, 64, 128, 2
         tile_m = 256
 
         def epilogue(acc, col):
-            lanes = acc.float().view(m, n, group)
-            return (torch.nn.functional.silu(lanes[..., 0]) * lanes[..., 1] * col).to(
-                acc.dtype
-            )
+            grouped_values = acc.float().view(m, n, group)
+            return (
+                torch.nn.functional.silu(grouped_values[..., 0])
+                * grouped_values[..., 1]
+                * col
+            ).to(acc.dtype)
 
         config = dataclasses.asdict(
             GemmConfig(
@@ -4501,53 +4503,55 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             k,
         )
         FileCheck().check("epilogue_arg_kinds=('col',)").check(
-            "FlexGemmGroupedMainOutputTransform(group=2"
+            "FlexGemmOutputContraction(group=2"
         ).check(f"('tile_m', {tile_m})").check("('cluster_m', 2)").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_grouped_n_main_output_filters_unsafe_configs(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_output_contraction_filters_unsafe_configs(self):
         from torch._inductor.heuristics.template.flex_gemm import (
             candidate_gemm_configs_for_device,
             gemm_config_from_key,
             gemm_config_key,
         )
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
-            grouped_main_output_config_supported,
+            FlexGemmOutputContraction,
+            output_contraction_config_supported,
         )
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_config_keys
 
         device = torch.device("cuda")
         candidates = candidate_gemm_configs_for_device(device)
-        transform = FlexGemmGroupedMainOutputTransform(group=2)
+        contraction = FlexGemmOutputContraction(group=2)
         configs = tuple(
             gemm_config_from_key(key)
             for key in flex_gemm_config_keys(
-                device, 64, 128, (), tuned=True, main_transform=transform
+                device, 64, 128, (), tuned=True, output_contraction=contraction
             )
         )
         self.assertTrue(configs)
         self.assertTrue(
-            all(grouped_main_output_config_supported(config, 128) for config in configs)
+            all(output_contraction_config_supported(config, 128) for config in configs)
         )
 
         unsafe = next(
             config
             for config in candidates
             if not config.swap_ab
-            and not grouped_main_output_config_supported(config, 128)
+            and not output_contraction_config_supported(config, 128)
         )
-        with self.assertRaisesRegex(NotImplementedError, "incompatible with grouped"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "incompatible with the output contraction"
+        ):
             flex_gemm_config_keys(
                 device,
                 64,
                 128,
                 (),
                 tuned=True,
-                main_transform=transform,
+                output_contraction=contraction,
                 explicit_config=dict(gemm_config_key(unsafe)),
             )
         swap = next(config for config in candidates if config.swap_ab)
@@ -4558,23 +4562,23 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 128,
                 (),
                 tuned=True,
-                main_transform=transform,
+                output_contraction=contraction,
                 explicit_config=dict(gemm_config_key(swap)),
             )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_n_main_output_rejects_unsupported_composition(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_rejects_unsupported_composition(self):
         m = k = n = 64
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
 
         def group_eight(acc):
-            lanes = acc.view(m, n, 8)
-            return sum(lanes[..., index] for index in range(8))
+            grouped_values = acc.view(m, n, 8)
+            return sum(grouped_values[..., index] for index in range(8))
 
-        self.assertGroupedMainRejected(
+        self.assertOutputContractionRejected(
             a,
             torch.randn(k, 8 * n, device="cuda", dtype=torch.float16),
             group_eight,
@@ -4584,21 +4588,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         scale = torch.randn(1, 2 * n, device="cuda", dtype=torch.float16)
 
         def n_varying_capture(acc):
-            lanes = (acc * scale).view(m, n, 2)
-            return lanes[..., 0] - lanes[..., 1]
+            grouped_values = (acc * scale).view(m, n, 2)
+            return grouped_values[..., 0] - grouped_values[..., 1]
 
         b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
-        self.assertGroupedMainRejected(
+        self.assertOutputContractionRejected(
             a, b, n_varying_capture, "numeric.*captured tensors"
         )
 
         boolean_scale = torch.ones(1, 1, device="cuda", dtype=torch.bool)
 
         def boolean_capture(acc):
-            lanes = (acc * boolean_scale).view(m, n, 2)
-            return lanes[..., 0] - lanes[..., 1]
+            grouped_values = (acc * boolean_scale).view(m, n, 2)
+            return grouped_values[..., 0] - grouped_values[..., 1]
 
-        self.assertGroupedMainRejected(
+        self.assertOutputContractionRejected(
             a, b, boolean_capture, "numeric.*captured tensors"
         )
 
@@ -4606,29 +4610,29 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             gate, up = acc.chunk(2, dim=-1)
             return gate - up
 
-        self.assertGroupedMainRejected(a, b, chunked, "non-contiguous")
+        self.assertOutputContractionRejected(a, b, chunked, "non-contiguous")
 
         def dynamic_n(acc):
-            lanes = acc.view(m, -1, 2)
-            return lanes[..., 0] - lanes[..., 1]
+            grouped_values = acc.view(m, -1, 2)
+            return grouped_values[..., 0] - grouped_values[..., 1]
 
         dynamic_b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
         torch._dynamo.mark_dynamic(dynamic_b, 1)
-        self.assertGroupedMainRejected(
+        self.assertOutputContractionRejected(
             a, dynamic_b, dynamic_n, "statically known physical N"
         )
 
         def auxiliary(acc):
-            lanes = acc.view(m, n, 2)
-            return lanes[..., 0] - lanes[..., 1], acc
+            grouped_values = acc.view(m, n, 2)
+            return grouped_values[..., 0] - grouped_values[..., 1], acc
 
-        self.assertGroupedMainRejected(a, b, auxiliary, "do not compose")
+        self.assertOutputContractionRejected(a, b, auxiliary, "do not compose")
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_chunked_grouped_main_rejects_grouped_reduction(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_chunked_output_contraction_rejects_grouped_reduction(self):
         m, k, physical_n, group = 128, 64, 256, 32
 
         def epilogue_fn(acc):
@@ -4651,7 +4655,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         b = torch.randn(physical_n, k, device="cuda", dtype=torch.bfloat16).t()
         with self.assertRaisesRegex(
             InductorError,
-            "concat-layout grouped main outputs do not compose with grouped reductions",
+            "concat-layout output contractions do not compose with grouped reductions",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
@@ -5057,7 +5061,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     def test_mm_nvfp4_pack_matches_reference(self):
         m = n = 128
         k = 64
@@ -5481,8 +5485,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
-    def test_mm_grouped_main_with_blocked_local_reduce_output(self):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    def test_mm_output_contraction_with_blocked_local_reduce_output(self):
         m = n = k = 256
         reduce_group = 16
         config = {
@@ -5524,9 +5528,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         FileCheck().check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
-        ).check("FlexGemmGroupedMainOutputTransform(group=2").check_not(
-            "extern_kernels.mm"
-        ).run(code)
+        ).check("FlexGemmOutputContraction(group=2").check_not("extern_kernels.mm").run(
+            code
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5896,7 +5900,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @unittest.skipIf(SM120OrLater, "grouped-N main outputs are not supported on SM120")
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
     def test_mm_nvfp4_quant_blocked_output_feeds_scaled_mm(self):
         m = hidden = output = k = 256
         group = 16
@@ -5973,9 +5977,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertNotIn("triton_poi_fused", code)
         FileCheck().check("nvfp4_pack_intrinsic").check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
-        ).check("FlexGemmGroupedMainOutputTransform(group=2").check(
-            "_scaled_mm_v2"
-        ).run(code)
+        ).check("FlexGemmOutputContraction(group=2").check("_scaled_mm_v2").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
