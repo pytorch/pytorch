@@ -6,6 +6,7 @@
 
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -212,15 +213,67 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
   }
 }
 
+void ProcessGroupNCCL::dumpFlightRecorderOnFailure(const char* reason) {
+  static const bool dump_on_timeout =
+      ::c10d::getCvarBool(::c10d::TORCH_NCCL_DUMP_ON_TIMEOUT, true);
+  if (!dump_on_timeout) {
+    return;
+  }
+  // At most one dump per process. A failure is observed by every process group
+  // sharing the fabric, by the watchdog and by the next synchronous
+  // collective, and every dump targets the same file, so the later ones would
+  // only overwrite the snapshot closest to the failure. Same role as
+  // ::c10d::ProcessGroupNCCL's shouldDump_ CAS.
+  //
+  // The loser of the race waits on the mutex instead of returning right away:
+  // the watchdog thread is usually the one that detects the failure, while the
+  // thread that runs ::abort() is the next synchronous collective on the main
+  // thread. Letting that one run ahead would terminate the process with the
+  // trace half written, which is exactly the post-mortem this exists to
+  // produce. The wait is bounded -- the dump only queries events, it never
+  // synchronizes on the device.
+  static std::mutex dump_mutex;
+  static bool dumped = false;
+  std::lock_guard<std::mutex> lock(dump_mutex);
+  if (dumped) {
+    return;
+  }
+  // One shot whatever the outcome: retrying a dump that already failed once
+  // would just repeat itself on every watchdog tick.
+  dumped = true;
+  TC_LOG(ERROR, this) << "Dumping Flight Recorder trace on " << reason;
+  try {
+    // includeStackTraces=false: symbolizing a traceback may take the GIL, and
+    // this runs either on the timeout watchdog thread or on a rank that is
+    // about to ::abort(), where blocking on the GIL would lose the very
+    // post-mortem we are writing. Stock ProcessGroupNCCL disables stack traces
+    // on its abort path for the same reason.
+    if (!::c10d::try_dump_fr_trace_file(
+            /*includeCollectives=*/true,
+            /*includeStackTraces=*/false,
+            ::c10d::getCvarBool(::c10d::TORCH_INCLUDE_ONLY_ACTIVE, false))) {
+      // No FlightRecorderHook was attached (a mixed cpu:gloo,cuda:nccl2 group
+      // skips it) or the recorder is off, so there is nothing to write.
+      TC_LOG(ERROR, this) << "Flight Recorder has no trace to dump.";
+    }
+  } catch (const std::exception& e) {
+    TC_LOG(ERROR, this) << "Flight Recorder dump failed: " << e.what();
+  } catch (...) {
+    TC_LOG(ERROR, this) << "Flight Recorder dump failed.";
+  }
+}
+
 void ProcessGroupNCCL::checkWorkQueue() {
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
+      dumpFlightRecorderOnFailure("collective timeout");
       break;
     case WorkNCCL::WorkStatus::ERROR:
       comm_state_ = CommState::ERROR;
+      dumpFlightRecorderOnFailure("collective error");
       break;
     default:
       // For COMPLETED, NOT_STARTED, and INPROGRESS, no state change needed
@@ -289,6 +342,9 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;
+          // Detected here rather than through the work queue, so it needs its
+          // own dump; abort() below tears the communicator down.
+          dumpFlightRecorderOnFailure("nccl async error");
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
                                 << ": " << ncclGetErrorString(asyncErr);
