@@ -95,8 +95,8 @@ class TestFlyDSLRuntimeProbe(TestCase):
     """The import-free probe the eager gate and Inductor both rely on.
 
     It must never import flydsl -- test_no_dsl_imports_after_import_torch in
-    test_native_dsl_ops.py enforces that end to end; these cases pin the two
-    reasons it can decline.
+    test_native_dsl_ops.py enforces that end to end; these cases pin every
+    reason it can decline.
     """
 
     # Both names are bound at import time (``from ... import x as _x``), so
@@ -137,6 +137,40 @@ class TestFlyDSLRuntimeProbe(TestCase):
         package, mlir = self._with_specs(spec, mlir_spec=object())
         with package, mlir:
             self.assertIsNone(flydsl_utils._flydsl_runtime_unavailable_reason())
+
+    # A raising probe has to read as "unavailable", not propagate: this runs
+    # under `import torch`, so anything that escapes here breaks the import
+    # rather than falling back to aten. find_spec raises ValueError when
+    # `flydsl` is in sys.modules without a usable __spec__ -- a test stub or a
+    # namespace shim looks like that.
+    @parametrize("error", (ValueError("no spec"), ModuleNotFoundError("flydsl")))
+    def test_unusable_package_spec_reads_as_missing(self, error):
+        with patch.object(flydsl_utils, "_find_spec", side_effect=error):
+            self.assertIn(
+                "missing optional dependency `flydsl`",
+                flydsl_utils._flydsl_runtime_unavailable_reason(),
+            )
+
+    def test_unusable_search_location_reads_as_missing_mlir(self):
+        # A bad entry in submodule_search_locations reaches a path entry
+        # finder, which can raise for the same reason.
+        spec = SimpleNamespace(submodule_search_locations=["/nonexistent"])
+
+        def raising_find_spec(*args, **kwargs):
+            raise ValueError("bad path entry")
+
+        with (
+            patch.object(flydsl_utils, "_find_spec", return_value=spec),
+            patch.object(
+                flydsl_utils,
+                "_PathFinder",
+                SimpleNamespace(find_spec=raising_find_spec),
+            ),
+        ):
+            self.assertIn(
+                "flydsl._mlir",
+                flydsl_utils._flydsl_runtime_unavailable_reason(),
+            )
 
 
 class TestFlyDSLVersionGate(TestCase):
@@ -209,6 +243,7 @@ class TestFlyDSLVersionGate(TestCase):
 
 
 instantiate_parametrized_tests(TestFlyDSLArchResolution)
+instantiate_parametrized_tests(TestFlyDSLRuntimeProbe)
 instantiate_parametrized_tests(TestFlyDSLVersionGate)
 
 

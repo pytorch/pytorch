@@ -37,15 +37,26 @@ _FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
-    flydsl_spec = _find_spec("flydsl")
+    # find_spec raises ValueError when `flydsl` sits in sys.modules without a
+    # usable __spec__. This runs during `import torch`, so an unusable install
+    # has to read as "unavailable" rather than escape as an exception.
+    try:
+        flydsl_spec = _find_spec("flydsl")
+    except (ImportError, ValueError):
+        flydsl_spec = None
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:
         return "missing optional dependency `flydsl`"
 
     # Looking up ``flydsl._mlir`` directly imports the parent package. Search
     # the package paths instead so ``import torch`` remains fork-safe and lazy.
-    mlir_spec = _PathFinder.find_spec(
-        "_mlir", list(flydsl_spec.submodule_search_locations)
-    )
+    # A bad entry in submodule_search_locations reaches a path entry finder,
+    # which can raise for the same reason.
+    try:
+        mlir_spec = _PathFinder.find_spec(
+            "_mlir", list(flydsl_spec.submodule_search_locations)
+        )
+    except (ImportError, ValueError):
+        mlir_spec = None
     if mlir_spec is None:
         return "missing optional dependency `flydsl._mlir` (runtime is not built)"
     return None
