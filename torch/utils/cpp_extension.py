@@ -1611,11 +1611,13 @@ def CUDAExtension(name, sources, *args, **kwargs):
             s_abs = os.path.abspath(source)
             hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
                               hipify_result[s_abs].hipified_path is not None) else s_abs)
+            # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
+            # *never* absolute paths
             try:
                 hip_path = os.path.relpath(hipified_s_abs, build_dir)
             except ValueError:
-                # Windows: relpath fails across drives (e.g. B: build, C: inputs).
-                hip_path = os.path.abspath(hipified_s_abs)
+                # Cross-drive on Windows: no relative path exists; fall back to absolute (#91797).
+                hip_path = hipified_s_abs
             hipified_sources.add(hip_path)
 
         sources = list(hipified_sources)
