@@ -261,6 +261,29 @@ size_t ReadyQueue::size() const {
   return heap_.size();
 }
 
+void ReadyQueue::drain_completed() {
+  std::vector<NodeTask> live;
+  std::vector<NodeTask> dropped;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    live.reserve(heap_.size());
+    while (!heap_.empty()) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      auto task = std::move(const_cast<NodeTask&>(heap_.top()));
+      heap_.pop();
+      auto graph_task = task.base_.lock();
+      bool completed = !task.isShutdownTask_ &&
+          (!graph_task || graph_task->future_result_->completed());
+      (completed ? dropped : live).push_back(std::move(task));
+    }
+    for (auto& task : live) {
+      heap_.push(std::move(task));
+    }
+  }
+  // `dropped` destructs here, releasing InputBuffer grad tensors outside the
+  // lock.
+}
+
 auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
@@ -1507,6 +1530,10 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     lock.unlock();
     thread_main(graph_task);
     TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+    // If the graph_task errored out, tasks that were queued but never popped
+    // would otherwise keep their grad tensors alive until the next backward
+    // call on this thread pops them.
+    local_ready_queue->drain_completed();
     // reset the worker_device after the completion of the graph_task, this is
     // so that the initial state of the engine remains the same across every
     // backward() or grad() call, we don't need to reset local_ready_queue as we
