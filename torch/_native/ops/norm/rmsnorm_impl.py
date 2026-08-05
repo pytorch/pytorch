@@ -11,7 +11,7 @@ import math
 import torch
 
 from ... import cutedsl_utils as cu
-from .norms import _required_align_bytes
+from .norms import _const_data_ptr, _required_align_bytes
 
 
 def _is_supported(input: torch.Tensor) -> bool:
@@ -92,7 +92,7 @@ def _misaligned_clone_unprofitable(t: torch.Tensor, n: int) -> bool:
     # way, which always lands on an aligned fresh buffer.
     if not t.is_contiguous():
         return False
-    if t.data_ptr() % _required_align_bytes(t, n) == 0:
+    if _const_data_ptr(t) % _required_align_bytes(t, n) == 0:
         return False
     return t.numel() < _MISALIGNED_MIN_NUMEL
 
@@ -158,14 +158,6 @@ def _fused_rms_norm_cond(
     # measured; fall through to aten until we do.
     if weight is not None and not weight.is_contiguous():
         return False
-    # The override reshapes + makes contiguous, which materializes a COW input.
-    # Match the bmm_outer_product cond (triton_impl.py:46) and fall through to
-    # aten so composite-compliance tests don't flag spurious materialization.
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(input):
-        return False
-    if weight is not None and is_cow(weight):
-        return False
     return True
 
 
@@ -215,10 +207,6 @@ def _fused_rms_norm_backward_cond(
         return False
     if weight is not None and not weight.is_contiguous():
         return False
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    for t in (grad_out, input, rstd, weight):
-        if t is not None and is_cow(t):
-            return False
     return True
 
 

@@ -37,11 +37,12 @@ from .ir import ComputedBuffer, Pointwise
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
+    from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
     from .tiling_utils import CoalesceVarAnalysis
@@ -131,6 +132,7 @@ PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=True)
+_REINDEXING_FUSION_LAUNCH_OVERHEAD_NS = 1_000
 
 
 @dataclasses.dataclass
@@ -2531,6 +2533,7 @@ class SchedulerNode(BaseSchedulerNode):
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
 
+        self._before_loop_state_mutation()
         self._body = self._body.expand_dimension_for_pointwise_node(
             dimension, new_range
         )
@@ -3137,18 +3140,23 @@ class FusedMixOrderReductions(FusedSchedulerNode):
     def fuse_with(self, other: BaseSchedulerNode, *, dry_run: bool = False):
         device = self.node1.get_device()
         backend = self.scheduler.get_backend(device)
+        loop_tracker = _LoopMutationTracker.create((self, other)) if dry_run else None
 
         if isinstance(other, FusedMixOrderReductions):
             fused_node1 = backend.fuse(self.node1, other.node1, dry_run=dry_run)
             fused_node2 = backend.fuse(self.node2, other.node2, dry_run=dry_run)
-            return FusedMixOrderReductions(fused_node1, fused_node2)
+            fused = FusedMixOrderReductions(fused_node1, fused_node2)
         else:
             if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
                 fused_node = backend.fuse(self.node1, other, dry_run=dry_run)
-                return FusedMixOrderReductions(fused_node, self.node2)
+                fused = FusedMixOrderReductions(fused_node, self.node2)
             else:
                 fused_node = backend.fuse(self.node2, other, dry_run=dry_run)
-                return FusedMixOrderReductions(self.node1, fused_node)
+                fused = FusedMixOrderReductions(self.node1, fused_node)
+
+        if loop_tracker is not None:
+            loop_tracker.finish(rollback=True)
+        return fused
 
 
 class FusedNestedReductions(FusedSchedulerNode):
@@ -4201,6 +4209,17 @@ def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return node2 if is_epilogue_fusion(node1, node2) else node1
 
 
+def _iter_loop_state_nodes(
+    nodes: Iterable[BaseSchedulerNode],
+) -> Iterator[SchedulerNode | FusedSchedulerNode]:
+    for node in nodes:
+        if isinstance(node, FusedSchedulerNode):
+            yield from _iter_loop_state_nodes(node.snodes)
+            yield node
+        elif isinstance(node, SchedulerNode):
+            yield node
+
+
 @dataclasses.dataclass
 class _LoopStateSnapshot:
     """Captured loop state for a set of scheduler nodes, restorable on rollback.
@@ -4221,8 +4240,11 @@ class _LoopStateSnapshot:
     def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopStateSnapshot:
         """Capture scheduler-node boundaries and their mutable leaf loop state."""
         snapshot = cls()
-        for node in nodes:
-            snapshot.snapshot_node(node)
+        for node in _iter_loop_state_nodes(nodes):
+            if isinstance(node, FusedSchedulerNode):
+                snapshot._snapshot_fused_node(node)
+            else:
+                snapshot._snapshot_scheduler_node(node)
         return snapshot
 
     def _snapshot_scheduler_node(self, sn: SchedulerNode) -> None:
@@ -4236,14 +4258,6 @@ class _LoopStateSnapshot:
         if node in self.fused_node_groups:
             raise AssertionError(f"fused node {node} already snapshotted")
         self.fused_node_groups[node] = node.group
-
-    def snapshot_node(self, node: BaseSchedulerNode) -> None:
-        """Capture a scheduler node boundary and all mutable leaf loop state."""
-        if isinstance(node, FusedSchedulerNode):
-            self._snapshot_fused_node(node)
-        for sn in node.get_nodes():
-            if isinstance(sn, SchedulerNode):
-                self._snapshot_scheduler_node(sn)
 
     def restore(self) -> None:
         """Restore all captured loop state and fused-node group metadata."""
@@ -4264,18 +4278,19 @@ class _LoopMutationTracker:
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
 
-    The first active tracker for a SchedulerNode leaf owns that leaf's
-    listener. Recursive can_fuse() calls reuse the outer listener instead of
-    installing nested listeners, so the captured state is the original state at
-    the outermost decision boundary.
+    Recursive can_fuse() calls chain their listeners so each scope captures its
+    own decision boundary while the outer scope still sees nested mutations.
 
-    Usage: call finish(commit=True) to keep mutations, or finish(commit=False)
-    to restore the original state. If no mutation occurred, finish() is a no-op.
+    Use finish(rollback=False) to keep mutations or finish(rollback=True) to
+    restore the original state. If no mutation occurred, finish() is a no-op.
     """
 
     nodes: tuple[BaseSchedulerNode, ...]
     watched_nodes: OrderedSet[SchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
+    )
+    previous_listeners: dict[SchedulerNode, Callable[[SchedulerNode], None] | None] = (
+        dataclasses.field(default_factory=dict)
     )
     state: _LoopStateSnapshot | None = None
 
@@ -4284,17 +4299,16 @@ class _LoopMutationTracker:
         """Create a rollback scope and watch mutable leaf scheduler nodes."""
         seen = OrderedSet(nodes)
         tracker = cls(nodes=tuple(seen))
-        for node in seen:
-            for sn in node.get_nodes():
-                if isinstance(sn, SchedulerNode):
-                    tracker.watch(sn)
+        for node in _iter_loop_state_nodes(seen):
+            if isinstance(node, SchedulerNode):
+                tracker.watch(node)
         return tracker
 
     def watch(self, sn: SchedulerNode) -> None:
         """Install this scope as the mutation listener for a leaf node."""
-        if sn._loop_mutation_listener is not None:
-            # A recursive can_fuse() is already covered by an outer scope.
+        if sn in self.watched_nodes:
             return
+        self.previous_listeners[sn] = sn._loop_mutation_listener
         self.watched_nodes.add(sn)
         sn._loop_mutation_listener = self.track
 
@@ -4302,6 +4316,8 @@ class _LoopMutationTracker:
         """Lazily snapshot candidate roots when the first mutation occurs."""
         if sn not in self.watched_nodes:
             raise AssertionError(f"scheduler node {sn} is not being watched")
+        if previous := self.previous_listeners[sn]:
+            previous(sn)
         if self.state is not None:
             # Keep the original pre-mutation snapshot for the whole scope.
             return
@@ -4314,7 +4330,7 @@ class _LoopMutationTracker:
     def finish(self, *, rollback: bool) -> None:
         """Detach listeners and restore captured state if rolling back."""
         for sn in self.watched_nodes:
-            sn._loop_mutation_listener = None
+            sn._loop_mutation_listener = self.previous_listeners[sn]
         if not rollback or self.state is None:
             return
         self.state.restore()
@@ -6346,17 +6362,19 @@ class Scheduler:
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
     ):
+        loop_tracker = _LoopMutationTracker.create((node1, node2))
+        can_fuse = self._can_fuse_impl(node1, node2)
         if (
-            self.can_fuse(node1, node2)
-            and not self.will_fusion_create_cycle(node1, node2)
-            and speedup_fn()
+            not can_fuse
+            or self.will_fusion_create_cycle(node1, node2)
+            or not speedup_fn()
         ):
-            return (
-                self._fuse_two_nodes_memory_checked(node1, node2, fused_nodes)
-                is not None
-            )
+            loop_tracker.finish(rollback=True)
+            return False
 
-        return False
+        fused = self._fuse_two_nodes_memory_checked(node1, node2, fused_nodes)
+        loop_tracker.finish(rollback=fused is None)
+        return fused is not None
 
     def _evaluate_pending_template_fusions(
         self,
@@ -6476,16 +6494,12 @@ class Scheduler:
                 if self.get_fused_node(node_key2) is not node_key2:
                     raise AssertionError("expected node_key2 to be its own fused node")
 
-                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
-                    continue
-
-                if (
-                    self._fuse_two_nodes_memory_checked(
-                        node_key1, node_key2, fused_nodes
-                    )
-                    is None
-                ):
-                    continue
+                self.fuse_if_speedup(
+                    node_key1,
+                    node_key2,
+                    is_speedup,
+                    fused_nodes,
+                )
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -6501,16 +6515,22 @@ class Scheduler:
             ):
                 continue
 
-            if self.can_fuse(
-                node1, node2, is_reorder_round
-            ) and not self.will_fusion_create_cycle(node1, node2):
+            loop_tracker = _LoopMutationTracker.create((node1, node2))
+            can_fuse = self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=is_reorder_round,
+            )
+            if can_fuse and not self.will_fusion_create_cycle(node1, node2):
                 rejected, _ = self._check_fusion_memory(
                     self._fusion_memory_context, node1, node2
                 )
                 if rejected:
+                    loop_tracker.finish(rollback=True)
                     continue
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
+                    loop_tracker.finish(rollback=True)
                     pending_fusion = PendingFusion(
                         callable_fn=fusion_res.callable_fn,
                         node1=node1,
@@ -6536,9 +6556,13 @@ class Scheduler:
                     continue
 
                 if not fusion_res.should_fuse:
+                    loop_tracker.finish(rollback=True)
                     continue
 
-                self._fuse_two_nodes_memory_checked(node1, node2, fused_nodes)
+                fused = self._fuse_two_nodes_memory_checked(node1, node2, fused_nodes)
+                loop_tracker.finish(rollback=fused is None)
+            else:
+                loop_tracker.finish(rollback=True)
 
     def _finish_pending_fusions(
         self,
@@ -8097,6 +8121,93 @@ class Scheduler:
 
         return self.score_fusion_memory(node1, node2) if reordered else -1
 
+    def _selected_tiling_memory(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> MemoryCoalescing | None:
+        """Memory accessed by these nodes codegened as one kernel, or None.
+
+        None means the coalescing cost is unknown - either the analysis does not
+        apply, or the tiling was forced or fell back and so was never scored.
+        """
+        from .codegen.simd import SIMDScheduling
+        from .tiling_utils import analyze_memory_coalescing_for_nodes
+
+        if (
+            not nodes
+            or not config.triton.coalesce_tiling_analysis
+            or config.triton.prefer_nd_tiling
+            or any(node.is_foreach() for node in nodes)
+        ):
+            return None
+
+        snodes = [subnode for node in nodes for subnode in node.get_nodes()]
+        if not snodes or not all(isinstance(node, SchedulerNode) for node in snodes):
+            return None
+
+        if any(node.is_cpu() for node in snodes):
+            return None
+
+        analysis = analyze_memory_coalescing_for_nodes(snodes)
+        if analysis is None:
+            return None
+
+        reduction = max(snodes, key=lambda node: int(node.is_reduction()))
+        _, (numel, rnumel) = reduction.group
+        return SIMDScheduling.select_tiling_with_memory(
+            snodes, numel, rnumel, analysis
+        ).memory
+
+    def _reindexing_regresses_memory_coalescing(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        unfused_memory: tuple[MemoryCoalescing, ...] | None,
+    ) -> bool:
+        """Did reindexing make the fused kernel's memory access worse?
+
+        `unfused_memory` is measured before reindexing, so this compares the two
+        original kernels against the single reindexed one.
+        """
+        if unfused_memory is None:
+            return False
+        fused_memory = self._selected_tiling_memory([node1, node2])
+        if fused_memory is None:
+            return False
+
+        # The fused analysis omits removable intermediates, so saved
+        # materialization traffic offsets coalescing regressions here.
+        unfused_cost = sum(memory.weighted_cost() for memory in unfused_memory)
+        fused_cost = fused_memory.weighted_cost()
+        try:
+            dram_gbps = get_gpu_dram_gbps()
+            valid_dram_gbps = math.isfinite(dram_gbps) and dram_gbps > 0
+        except Exception:
+            dram_gbps = 0
+            valid_dram_gbps = False
+        if valid_dram_gbps:
+            # GB/s is numerically bytes/ns, so division converts the
+            # byte-equivalent costs to estimated time in nanoseconds.
+            unfused_time_ns = (
+                unfused_cost / dram_gbps + _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS
+            )
+            fused_time_ns = fused_cost / dram_gbps
+            regresses = fused_time_ns > unfused_time_ns
+        else:
+            regresses = fused_cost > unfused_cost
+        if regresses:
+            loop_ordering_log.debug(
+                "rejecting reindex of %s and %s: unfused memory %s (cost=%d), "
+                "fused memory %s (cost=%d)",
+                node1.get_name(),
+                node2.get_name(),
+                unfused_memory,
+                unfused_cost,
+                fused_memory,
+                fused_cost,
+            )
+            return True
+        return False
+
     def _try_reindex_pointwise_for_reduction(
         self,
         node1: BaseSchedulerNode,
@@ -8114,6 +8225,9 @@ class Scheduler:
         # Keep this consistent with shared_data_after_reordering_loop(): CPU
         # reindexing is not validated yet.
         if node1.is_cpu() or node2.is_cpu():
+            return False
+
+        if node1.is_foreach() or node2.is_foreach():
             return False
 
         if node1.is_reduction() and not node2.is_reduction():
@@ -8153,6 +8267,13 @@ class Scheduler:
         if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
             return False
 
+        # Measure each node's memory access before mutating any loops, so the
+        # coalescing guard below can compare against the un-reindexed kernels.
+        unfused_memory: tuple[MemoryCoalescing, ...] | None = None
+        memory = tuple(self._selected_tiling_memory([node]) for node in (node1, node2))
+        if all(m is not None for m in memory):
+            unfused_memory = typing.cast("tuple[MemoryCoalescing, ...]", memory)
+
         # Local rollback is still needed even with _LoopMutationTracker: this
         # helper is also used by shared_data_after_reordering_loop(), where a
         # failed reindex attempt returns -1 and the caller may keep evaluating
@@ -8177,6 +8298,14 @@ class Scheduler:
             for name in common_names
         )
         if not has_benefit:
+            rollback_snapshot.restore()
+            return False
+
+        # TODO: Measure fused memory first so coalesced fusions skip per-node analysis.
+        # Reindexing the pointwise onto the reduction's split can make its own
+        # accesses uncoalesced. Undo the reindex when that costs more than the
+        # traffic saved by fusing.
+        if self._reindexing_regresses_memory_coalescing(node1, node2, unfused_memory):
             rollback_snapshot.restore()
             return False
 
@@ -8520,6 +8649,10 @@ class Scheduler:
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
+        if node1.is_template() and self.get_backend(
+            node1.get_device()
+        ).can_fuse_reduction_epilogue(node1, node2):
+            return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
@@ -8694,9 +8827,13 @@ class Scheduler:
             atomic_add_mutation_epilogue = _can_fuse_atomic_add_template_epilogue(
                 node1, node2
             )
+            backend = self.get_backend(node1.get_device())
             if (
                 (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
-                or node2.is_reduction()
+                or (
+                    node2.is_reduction()
+                    and not backend.can_fuse_reduction_epilogue(node1, node2)
+                )
                 or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
@@ -8733,17 +8870,6 @@ class Scheduler:
             index_equivalent_dep_names=index_equivalent_dep_names,
         )
 
-        if (
-            can_reorder
-            and shared_data_score < config.score_fusion_memory_threshold
-            and (
-                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
-            )
-        ):
-            new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
-            if new_shared_data_score >= 0:
-                shared_data_score = new_shared_data_score
-
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
@@ -8754,6 +8880,17 @@ class Scheduler:
                 node2,
                 index_equivalent_dep_names=index_equivalent_dep_names,
             )
+
+        if (
+            can_reorder
+            and shared_data_score < config.score_fusion_memory_threshold
+            and (
+                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
+            )
+        ):
+            new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
+            if new_shared_data_score >= 0:
+                shared_data_score = new_shared_data_score
 
         if (
             config.loop_index_inversion_in_fusion
@@ -10975,6 +11112,11 @@ class BaseScheduling:  # noqa: docstring_linter
         Check whether node1 and node2 can be horizontally fused or not.
         """
         raise NotImplementedError
+
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return False
 
     def can_fuse_multi_outputs_template(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
