@@ -16,11 +16,8 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import with_tf32_off
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
+from torch.testing._internal.common_distributed import run_subtests
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -333,8 +330,14 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_tf32_off
     @with_comms
-    @parametrize("conv_dim", [1, 2, 3], name_fn=lambda conv_dim: f"conv{conv_dim}d")
-    def test_convolution_last_dim_shard(self, conv_dim):
+    def test_convolution_last_dim_shard(self):
+        run_subtests(
+            self,
+            {"conv_dim": [1, 2, 3]},
+            self._test_convolution_last_dim_shard,
+        )
+
+    def _test_convolution_last_dim_shard(self, conv_dim):
         device_mesh = self.build_device_mesh()
         conv_cls = (nn.Conv1d, nn.Conv2d, nn.Conv3d)[conv_dim - 1]
         spatial_shape = (8,) * (conv_dim - 1) + (16,)
@@ -467,7 +470,6 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
 
 
-instantiate_parametrized_tests(DistConvolutionOpsTest)
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
     # Send / recv ops are not supported
