@@ -200,7 +200,12 @@ def test_flydsl_loader_main(value, stream):
                 RuntimeError, "Could not find FlyDSL main kernel function"
             ):
                 AsyncCompile()._load_kernel_wrapper(
-                    "FlyDSL", "missing", "main", Mock, "key", "path"
+                    "missing",
+                    "main",
+                    Mock,
+                    "key",
+                    "path",
+                    backend_name="FlyDSL",
                 )
 
     def test_flydsl_clears_stale_worker_cache_env(self):
