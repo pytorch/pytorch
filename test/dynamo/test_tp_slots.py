@@ -20,7 +20,6 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.variables.object_protocol import type_has_dict
 
 
 class TestTypeSlots(TestCase):
@@ -322,68 +321,6 @@ class TestTypeSlots(TestCase):
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
                 lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
-
-
-class TestTypeHasDict(TestCase):
-    """Test suite for instance __dict__ detection (type_has_dict)."""
-
-    def test_builtin_bases_have_no_dict(self):
-        for t in [object, int, float, str, bytes, tuple, list, dict, set]:
-            self.assertFalse(type_has_dict(t), f"{t.__name__} should have no dict")
-
-    def test_slots_class_has_no_dict(self):
-        class SlotsCls:
-            __slots__ = ("a",)
-
-        self.assertFalse(type_has_dict(SlotsCls))
-
-    def test_python_class_has_dict(self):
-        class PyCls:
-            pass
-
-        self.assertTrue(type_has_dict(PyCls))
-
-    def test_c_base_subclass_has_dict(self):
-        # Subclassing a C base in Python gives instances a __dict__.
-        class MyBytes(bytes):
-            pass
-
-        self.assertTrue(type_has_dict(MyBytes))
-
-    def test_legacy_dictoffset_has_dict(self):
-        # BaseException carries a __dict__ via nonzero tp_dictoffset.
-        self.assertTrue(type_has_dict(BaseException))
-
-
-class TestTypeCacheRetention(TestCase):
-    """Type-keyed caches in the object protocol must not strongly retain the
-    type. A strong ref keeps a locally-defined class alive, and with it
-    anything the class's methods close over (tensors, modules, parameters) --
-    a memory leak (see test_misc.test_parameter_free / _outside_linear_module_free).
-    """
-
-    def _retains_type(self, populate):
-        import gc
-        import weakref
-
-        class Local:
-            pass
-
-        ref = weakref.ref(Local)
-        populate(Local)
-        del Local
-        gc.collect()
-        return ref() is not None
-
-    def test_tp_type_no_type_retention(self):
-        from torch._dynamo.variables.base import _tp_type
-
-        self.assertFalse(self._retains_type(_tp_type))
-
-    def test_flags_from_ml_flags_no_type_retention(self):
-        from torch._dynamo.variables.base import _flags_from_ml_flags
-
-        self.assertFalse(self._retains_type(lambda t: _flags_from_ml_flags(t, "foo")))
 
 
 if __name__ == "__main__":
