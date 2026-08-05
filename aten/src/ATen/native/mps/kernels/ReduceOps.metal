@@ -2190,8 +2190,9 @@ kernel void arg_reduction_outer_p1(
 }
 
 // Split-K pass 1 for inner_size below a threadgroup row (outer_size == 1):
-// all TG_SIZE threads stay busy by folding TG_SIZE / inner_size dim rows at
-// a time, combining across rows through threadgroup memory. Partials laid
+// the threadgroup folds row_step dim rows at a time, combining across rows
+// through threadgroup memory. The host dispatches row_step * inner_size
+// threads so each thread stays pinned to one inner column. Partials laid
 // out [inner_size, num_segs], values in opmath_t precision.
 template <
     template <typename> class OpFn,
@@ -2218,6 +2219,7 @@ kernel void arg_reduction_narrow_p1(
   const uint r1 = min(r0 + seg_rows, dim_size);
   const uint col = tid % inner_size;
   const uint row_step = TG_SIZE / inner_size;
+  const uint active = row_step * inner_size;
 
   TA best_val = Op::identity();
   uint32_t best_idx = r0 + tid / inner_size;
@@ -2236,7 +2238,7 @@ kernel void arg_reduction_narrow_p1(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   if (tid < inner_size) {
-    for (uint t = tid + inner_size; t < TG_SIZE; t += inner_size) {
+    for (uint t = tid + inner_size; t < active; t += inner_size) {
       if (arg_replace<OpFn>(
               shared_vals[t], shared_idxs[t], best_val, best_idx)) {
         best_val = shared_vals[t];

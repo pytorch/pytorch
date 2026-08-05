@@ -874,8 +874,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
     mtl_setArgs(ce, in, vals, idxs, sizes_s);
-    [ce dispatchThreads:MTLSizeMake(NARROW_TG_SIZE, num_segs, 1)
-        threadsPerThreadgroup:MTLSizeMake(NARROW_TG_SIZE, 1, 1)];
+    const auto active = (NARROW_TG_SIZE / inner_size) * inner_size;
+    [ce dispatchThreads:MTLSizeMake(active, num_segs, 1) threadsPerThreadgroup:MTLSizeMake(active, 1, 1)];
     getMPSProfiler().endProfileKernel(ps);
   };
   auto encode_arg_inner_p1 = [&](const Tensor& in,
@@ -971,9 +971,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
       const auto natural_tgs = outer_size * c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
       if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
         // inner_size below a threadgroup row: the narrow pass-1 layout
-        // keeps a full threadgroup busy; it needs inner_size to divide the
-        // threadgroup evenly.
-        if (inner_size < OUTER_TG_WIDTH && NARROW_TG_SIZE % inner_size == 0u) {
+        // keeps a full threadgroup busy.
+        if (inner_size < OUTER_TG_WIDTH) {
           const auto num_segs = std::clamp<uint32_t>(
               (static_cast<int64_t>(dim_size) * inner_size) / NARROW_SPLIT_ELEMS_PER_TG, 2u, SPLIT_MAX_SEGS);
           auto val_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(partial_dtype));
