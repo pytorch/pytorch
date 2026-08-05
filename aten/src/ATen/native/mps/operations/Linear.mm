@@ -145,9 +145,14 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&
         !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) && is_macos_at_least(MacOSVersion::MACOS_26_0) &&
         !is_macos_at_least(MacOSVersion::MACOS_27_0);
-    const bool add_bias_after = is_bias_defined && decompose_bias;
+    // linear's leading dims are a fake batch (weight is shared), so a >2D input is one 2D GEMM.
+    // Passing it as a batched NDArray instead triggers a 2^16 batch-index wraparound (#189495) and
+    // a small-batch GEMV perf cliff (#189847); flatten to 2D (a free view here) to avoid both.
+    // A multi-dim bias cannot be flattened, so run the bias-free kernel there and add the bias afterwards.
+    const bool needs_flatten = input.dim() > 2;
+    const bool add_bias_after = is_bias_defined && (decompose_bias || (needs_flatten && bias.dim() > 1));
     const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
-    if (input.dim() > 2 && (!kernel_bias.defined() || kernel_bias.dim() <= 1)) {
+    if (needs_flatten) {
       auto input2d = input.flatten(0, -2);
       auto output2d = output.flatten(0, -2);
       _mps_linear_nograph(input2d, weight, kernel_bias, output2d);

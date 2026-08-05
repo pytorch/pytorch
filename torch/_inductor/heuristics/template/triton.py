@@ -2228,7 +2228,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # usable selection, so restrict origami to fully static problems and let
         # symbolic shapes fall through to the regular config generator below.
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
-        if origami is not None and not mnk_static:
+        if (
+            origami is not None
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
@@ -2728,8 +2732,10 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
-        # dp=2 splits a 256-row tile into two 128-row MMA partitions
-        if template_kwargs.get("DATA_PARTITION_FACTOR", 1) == 2 and block_m != 256:
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        if dp == 2 and block_m not in (128, 256):
             return False
         return True
 
@@ -2769,7 +2775,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                                         data_partition_factor=data_partition_factor,
                                         separate_epilogue_store=separate_epilogue_store,
                                         warp_specialize=True,
-                                        flatten=True,
+                                        flatten=False,
                                     )
                                 )
         return configs

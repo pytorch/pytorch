@@ -32,6 +32,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
@@ -63,9 +64,46 @@ if platform == "darwin":
 else:
     LOOPBACK = "lo"
 
-torch.backends.cuda.matmul.allow_tf32 = False
+
+_PRIOR_FP32_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_PRECISION
+    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
+    # exact original; writing allow_tf32 back can't reproduce the "none" default.
+    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def tearDownModule():
+    global _PRIOR_FP32_PRECISION
+    if _PRIOR_FP32_PRECISION is not None:
+        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _PRIOR_FP32_PRECISION = None
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+class MultiProcContinuousSkipTest(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "gloo"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cpu"
+
+    def test_1_worker_skip(self) -> None:
+        self.skipTest("skip from worker")
+
+    def test_2_worker_continues_after_skip(self) -> None:
+        tensor = torch.tensor(self.rank + 1)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, 3)
 
 
 def gpus_for_rank(world_size):
@@ -217,6 +255,7 @@ class BackendEntryPointTest(TestCase):
         )
         self._custom_backend_attrs = {
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
+            "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
         }
 
     def tearDown(self):
@@ -318,6 +357,148 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("gloo", looked_up)
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+    @parametrize("use_nccl2", [False, True])
+    def test_nccl_backend_registration(self, use_nccl2):
+        with unittest.mock.patch.dict(os.environ):
+            if use_nccl2:
+                os.environ["TORCH_DIST_USE_NCCL2"] = "1"
+            else:
+                os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            c10d._register_builtin_nccl_backend()
+
+        expected_creator = (
+            c10d._create_nccl2_process_group
+            if use_nccl2
+            else c10d._create_nccl_process_group
+        )
+        self.assertIs(
+            dist.Backend._plugins["NCCL"].creator_fn,
+            expected_creator,
+        )
+        self.assertEqual(
+            dist.Backend.backend_type_map["nccl"],
+            dist.ProcessGroup.BackendType.NCCL,
+        )
+
+    def test_nccl_legacy_backend_registration(self):
+        c10d._register_builtin_nccl_legacy_backend()
+
+        self.assertIs(
+            dist.Backend._plugins["NCCL-LEGACY"].creator_fn,
+            c10d._create_nccl_process_group,
+        )
+        self.assertEqual(dist.Backend.backend_capability["nccl-legacy"], ["cuda"])
+        self.assertEqual(
+            dist.Backend.backend_type_map["nccl-legacy"],
+            dist.ProcessGroup.BackendType.CUSTOM,
+        )
+
+
+instantiate_parametrized_tests(BackendEntryPointTest)
+
+
+class DefaultBackendTypeTest(TestCase):
+    """Cover ``_get_default_backend_type_for_backend_config``.
+
+    A multi-backend group registers one backend per device, but ``ProcessGroup``
+    holds a single default ``BackendType``. If that default names a type no
+    device registered, ``ProcessGroup::getDefaultBackend()`` raises "Could not
+    find the default backend type N" on the first ``pg.rank()``.
+    """
+
+    @staticmethod
+    def _registrable_backend_types(backend_config):
+        """The BackendTypes ``_new_process_group_helper`` would register."""
+        return {
+            dist.Backend.backend_type_map.get(
+                str(backend), dist.ProcessGroup.BackendType.CUSTOM
+            )
+            for backend in backend_config.device_backend_map.values()
+        }
+
+    @parametrize(
+        "backend_str",
+        [
+            "cpu:gloo",
+            "cpu:gloo,cuda:nccl",
+            "cpu:gloo,xpu:xccl",
+            "cuda:nccl",
+            "xpu:xccl",
+            "cuda:ucc",
+            "cpu:gloo,cuda:ucc",
+        ],
+    )
+    @parametrize("accelerator", [None, "cuda", "xpu"])
+    def test_default_backend_type_is_always_registrable(self, backend_str, accelerator):
+        """The default type must never name a backend that no device registers,
+        regardless of which accelerator the host reports."""
+        acc_device = torch.device(accelerator) if accelerator else None
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator", return_value=acc_device
+        ):
+            backend_config = dist.BackendConfig(backend_str)
+            self.assertIn(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                self._registrable_backend_types(backend_config),
+                f"default backend type is not registered for {backend_str!r} "
+                f"with accelerator {accelerator!r}",
+            )
+
+    @parametrize(
+        "backend_str, accelerator, expected_type",
+        [
+            # A mixed host+accelerator group defaults to the accelerator
+            # backend so ProcessGroup::barrier() stays on the accelerator.
+            ("cpu:gloo,xpu:xccl", "xpu", "XCCL"),
+            ("cpu:gloo,cuda:nccl", "cuda", "NCCL"),
+            # Accelerator-only groups must not fall back to a gloo backend that
+            # was never registered.
+            ("xpu:xccl", "xpu", "XCCL"),
+            ("cuda:ucc", "cuda", "UCC"),
+            # No device for the reported accelerator: any non-host device still
+            # outranks cpu.
+            ("cpu:gloo,xpu:xccl", "cuda", "XCCL"),
+            ("cpu:gloo,xpu:xccl", None, "XCCL"),
+            # Host-only groups are unambiguous.
+            ("cpu:gloo", "cuda", "GLOO"),
+        ],
+    )
+    def test_default_backend_type_prefers_accelerator_backend(
+        self, backend_str, accelerator, expected_type
+    ):
+        acc_device = torch.device(accelerator) if accelerator else None
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator", return_value=acc_device
+        ):
+            backend_config = dist.BackendConfig(backend_str)
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                getattr(dist.ProcessGroup.BackendType, expected_type),
+            )
+
+    def test_default_backend_type_honors_bound_device_id(self):
+        """An explicit ``device_id=`` outranks the reported accelerator."""
+        with unittest.mock.patch(
+            "torch.accelerator.current_accelerator",
+            return_value=torch.device("cuda"),
+        ):
+            backend_config = dist.BackendConfig("cpu:gloo,xpu:xccl,cuda:nccl")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(
+                    backend_config, torch.device("xpu:0")
+                ),
+                dist.ProcessGroup.BackendType.XCCL,
+            )
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(
+                    backend_config, torch.device("cpu")
+                ),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+
+
+instantiate_parametrized_tests(DefaultBackendTypeTest)
 
 
 class Net(nn.Module):
@@ -1574,8 +1755,9 @@ class AbstractLargeCommTest:
         self.assertIn(rank, ranks_in)
         self.assertNotIn(rank, ranks_out)
 
-        self.assertIsNone(
-            dist.new_group(ranks=ranks_out, use_local_synchronization=True)
+        self.assertIs(
+            dist.new_group(ranks=ranks_out, use_local_synchronization=True),
+            dist.GroupMember.NON_GROUP_MEMBER,
         )
 
         new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import logging
-from typing import Any
 from typing_extensions import override
 
 import torch
@@ -13,12 +12,14 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplate,
     CuteDSLTemplateCaller,
 )
+from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
 )
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
 
@@ -35,14 +36,16 @@ class FlexGemmEpilogueLocalReduceConfig:
     feeds_main: bool = False
 
     @classmethod
-    def from_output_plan(
-        cls, local_reduce: Any | None, out_index: int | None
+    def from_reduction_plan(
+        cls, reduction_plan: GemmReductionPlan | None, out_index: int | None
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Translate lowering's output-consumer plan into template metadata."""
-        if local_reduce is None:
+        """Bind the shared reduction plan to FlexGEMM's output index."""
+        if reduction_plan is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry, out_index, local_reduce.feeds_main
+            FlexGemmLocalReduceGeometry(reduction_plan.group, reduction_plan.axis),
+            out_index,
+            reduction_plan.feeds_main,
         )
 
     @property
@@ -68,7 +71,6 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
-        out_dtype: Optional dtype requested for the main GEMM output.
         quack_config_key: Lossless key for the selected QuACK GEMM config.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
@@ -81,8 +83,7 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
-    out_dtype: Any | None = None
-    quack_config_key: tuple[Any, ...] | None = None
+    quack_config_key: GemmConfigKey
     epilogue_arg_indices: tuple[int, ...] = ()
     epilogue_arg_kinds: tuple[str, ...] = ()
     aux_out_indices: tuple[int, ...] = ()
@@ -132,8 +133,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             "device_capacity_override=device_capacity_override, "
             "quack_cache_dir=quack_cache_dir"
         )
-        if config.quack_config_key is not None:
-            call_kwargs += f", config_key={tuple(config.quack_config_key)!r}"
+        call_kwargs += f", config_key={config.quack_config_key!r}"
 
         output_name = self.get_output()
 
@@ -204,16 +204,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         self, input_args: list[str], config: FlexGemmEpilogueConfig
     ) -> tuple[list[str], str]:
         """Return positional GEMM operands and scalar/bias kwargs for runtime dispatch."""
-        out_dtype = (
-            "" if config.out_dtype is None else f", out_dtype={config.out_dtype!r}"
-        )
         op = config.gemm_op
         call_args = [input_args[op.mat1_index], input_args[op.mat2_index]]
         if op.bias_index is None:
-            return call_args, out_dtype
+            return call_args, ""
         return call_args, (
             f", C={input_args[op.bias_index]}, alpha={config.alpha!r}, beta={config.beta!r}"
-            f"{out_dtype}"
         )
 
     def _local_reduce_callbacks(self, epilogue_name: str) -> str:

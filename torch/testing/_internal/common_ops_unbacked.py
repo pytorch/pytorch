@@ -169,8 +169,6 @@ ops_dde_xfail = {
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.nll_loss"),
     xfail("nn.functional.pad", "circular"),
-    xfail("nn.functional.pad", "replicate"),
-    xfail("nn.functional.pad", "replicate_negative"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
