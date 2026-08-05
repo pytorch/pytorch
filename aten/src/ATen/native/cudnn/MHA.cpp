@@ -282,19 +282,20 @@ void setAlignmentIfSupported(T& attributes, int64_t alignment) {
   }
 }
 
-constexpr int64_t kPageTableAlignment = alignof(int32_t);
+constexpr int64_t kInt32Alignment = alignof(int32_t);
 // Frontend versions without set_alignment hardcode 16-byte descriptors.
-constexpr int64_t kLegacyPageTableAlignment = 16;
-constexpr int64_t kRequiredPageTableAlignment =
-    HasSetAlignment<fe::graph::Tensor_attributes> ? kPageTableAlignment
-                                                  : kLegacyPageTableAlignment;
+constexpr int64_t kLegacyTensorAlignment = 16;
+constexpr int64_t kRequiredInt32Alignment =
+    HasSetAlignment<fe::graph::Tensor_attributes> ? kInt32Alignment
+                                                  : kLegacyTensorAlignment;
 
-void checkPageTableAlignment(const Tensor& table) {
-  const auto address = reinterpret_cast<uintptr_t>(table.const_data_ptr());
+void checkInt32Alignment(const Tensor& tensor, const char* name) {
+  const auto address = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
   TORCH_CHECK(
-      address % kRequiredPageTableAlignment == 0,
-      "block_table data pointer must be aligned to ",
-      kRequiredPageTableAlignment,
+      address % kRequiredInt32Alignment == 0,
+      name,
+      " data pointer must be aligned to ",
+      kRequiredInt32Alignment,
       " bytes for the selected cuDNN Frontend");
 }
 
@@ -835,20 +836,18 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
                             .set_data_type(fe::DataType_t::FLOAT));
-  auto SEQ_LEN_Q_ =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_uid(SEQ_LEN_Q)
-                            .set_name("Seq_q")
-                            .set_dim({b, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_data_type(fe::DataType_t::INT32));
-  auto SEQ_LEN_KV_ =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_uid(SEQ_LEN_KV)
-                            .set_name("Seq_kv")
-                            .set_dim({b, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_data_type(fe::DataType_t::INT32));
+  auto sequence_length_tensor = [&](UIDS uid, const char* name) {
+    auto attributes = fe::graph::Tensor_attributes();
+    attributes.set_uid(uid)
+        .set_name(name)
+        .set_dim({b, 1, 1, 1})
+        .set_stride({1, 1, 1, 1})
+        .set_data_type(fe::DataType_t::INT32);
+    setAlignmentIfSupported(attributes, kInt32Alignment);
+    return mha_graph->tensor(attributes);
+  };
+  auto SEQ_LEN_Q_ = sequence_length_tensor(SEQ_LEN_Q, "Seq_q");
+  auto SEQ_LEN_KV_ = sequence_length_tensor(SEQ_LEN_KV, "Seq_kv");
 
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
@@ -915,7 +914,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
           .set_dim({b, 1, table_size, 1})
           .set_stride({table.stride(0), 1, table.stride(1), 1})
           .set_data_type(fe::DataType_t::INT32);
-      setAlignmentIfSupported(attributes, kPageTableAlignment);
+      setAlignmentIfSupported(attributes, kInt32Alignment);
       return mha_graph->tensor(attributes);
     };
     // K and V share the same block table.
@@ -1637,8 +1636,11 @@ void run_cudnn_SDP_fprop_nestedtensor(
   TORCH_INTERNAL_ASSERT(
       !is_paged || seqused_k.has_value(),
       "paged cuDNN attention requires seqused_k");
+  if (seqused_k.has_value()) {
+    checkInt32Alignment(seqused_k.value(), "seqused_k");
+  }
   if (is_paged) {
-    checkPageTableAlignment(page_table.value());
+    checkInt32Alignment(page_table.value(), "block_table");
   }
 
   if (!o.defined()) {
