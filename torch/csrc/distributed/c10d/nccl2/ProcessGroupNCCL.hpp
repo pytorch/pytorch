@@ -237,6 +237,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -512,6 +513,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
+  applyEphemeralTimeout(std::chrono::milliseconds timeout);
+  void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
   void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
@@ -571,6 +575,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  std::mutex ephemeral_timeout_mutex_;
+  std::chrono::milliseconds ephemeral_timeout_active_{0};
+  std::chrono::milliseconds ephemeral_timeout_inflight_{0};
 
   // Identifies the current communicator generation in the reconfigure regime;
   // -1 until the first reconfigure(). Baked into the reconfigure handle so

@@ -4,6 +4,7 @@
 
 import os
 import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -104,6 +105,34 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             tensor.view(torch.uint8),
             torch.ones(4, dtype=torch.uint8, device=self.device),
         )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ephemeral_timeout(self) -> None:
+        dist.set_timeout(timedelta(seconds=3))
+
+        existing_work = dist.all_reduce(
+            torch.ones(4, device=self.device), async_op=True
+        )
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
+        self.assertEqual(existing_work.timeout, timedelta(seconds=3))
+
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        self.assertEqual(work.timeout, timedelta(seconds=13))
+        existing_work.wait()
+        work.wait()
+        torch.cuda.synchronize(self.device)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            work = dist.all_reduce(tensor, async_op=True)
+            if work.timeout == timedelta(seconds=3):
+                work.wait()
+                return
+            work.wait()
+            time.sleep(0.1)
+        self.fail("ephemeral timeout was not reset after collective completion")
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
