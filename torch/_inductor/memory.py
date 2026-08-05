@@ -18,7 +18,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -226,13 +226,15 @@ def compute_size_for_scheduler_buffer(
 def assign_memory_planning_info_for_scheduler_buffers(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
+    sched_buf_to_size: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """
     For each SchedulerBuffer, assign its size info and successor nodes.
     A buffer's successor nodes determines when a buffer can be freed.
     """
     # get buffer sizes
-    sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
+    if sched_buf_to_size is None:
+        sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
 
     # get buffer's successor nodes for memory lifetime (excludes is_fake WeakDeps)
     # and for ordering (includes all deps)
@@ -510,7 +512,13 @@ def estimate_region_peak_memory(
     step_of: Callable[[BaseSchedulerNode], int],
     graph_outputs: OrderedSet[str],
     cur_memory: int = 0,
-) -> int:
+    last_use_step_cache: dict[int, int | None] | None = None,
+    known_last_use_steps: dict[int, int | None] | None = None,
+    node_outputs: Mapping[BaseSchedulerNode, Sequence[SchedulerBuffer]] | None = None,
+    node_steps: dict[BaseSchedulerNode, int] | None = None,
+    max_peak: int | None = None,
+    return_live_memory: bool = True,
+) -> tuple[int, list[int], list[int]]:
     """Peak memory inside `[region_start, region_end]` for the
     hypothetical post-reorder schedule.
 
@@ -518,46 +526,85 @@ def estimate_region_peak_memory(
     each node: alloc = sum of `size_alloc` over its outputs; free =
     sum of `size_free` over `pred_buffers` whose proposed last
     consumer is this node. Then accumulates per step starting from
-    `cur_memory` (live bytes at the window boundary) and returns
-    the maximum live bytes.
+    `cur_memory` (live bytes at the window boundary) and returns the maximum
+    live bytes.
+
+    Candidate overrides in `last_use_step_cache` take precedence over
+    context-wide `known_last_use_steps`. If `max_peak` is exceeded, returns
+    immediately with empty live-memory vectors.
+
+    If `return_live_memory` is True, also returns live-before/live-after vectors
+    for the simulated region. If False, returns empty live-memory vectors after
+    computing the peak.
     """
     R = region_end - region_start + 1
-    region = [SNodeMemory(0, 0) for _ in range(R)]
+    allocs = [0] * R
+    frees = [0] * R
+    if last_use_step_cache is None:
+        last_use_step_cache = {}
+
+    def last_use_step(buffer) -> int | None:
+        key = id(buffer)
+        if key not in last_use_step_cache:
+            if known_last_use_steps is not None and key in known_last_use_steps:
+                last_use_step_cache[key] = known_last_use_steps[key]
+            else:
+                last_step = None
+                for n in buffer.succ_nodes:
+                    step = step_of(n)
+                    if last_step is None or step > last_step:
+                        last_step = step
+                last_use_step_cache[key] = last_step
+        return last_use_step_cache[key]
 
     for node in nodes_in_window:
-        s = step_of(node)
-        slot = s - region_start
+        step = node_steps[node] if node_steps is not None else step_of(node)
+        slot = step - region_start
         if not (0 <= slot < R):
             raise AssertionError(f"expected 0 <= slot < {R}, got {slot}")
 
-        for buf in node.get_outputs():
+        outputs = node_outputs[node] if node_outputs is not None else node.get_outputs()
+        for buf in outputs:
             bi = buf.mpi_buffer
-            region[slot].size_alloc += bi.size_alloc
-            name = buf.get_name()
-            if name in graph_outputs:
-                continue
-            succ_steps = [step_of(n) for n in bi.succ_nodes]
-            if not succ_steps:
-                region[slot].size_free += bi.size_free
+            allocs[slot] += bi.size_alloc
+            if buf.get_name() not in graph_outputs and last_use_step(bi) is None:
+                frees[slot] += bi.size_free
 
-        for pb in node.mpi_node.pred_buffers:
-            name = pb.get_name()
-            if name in graph_outputs:
+        for pred_buf in node.mpi_node.pred_buffers:
+            if pred_buf.get_name() in graph_outputs:
                 continue
-            succ_steps = [step_of(n) for n in pb.mpi_buffer.succ_nodes]
-            if not succ_steps:
+            last_step = last_use_step(pred_buf.mpi_buffer)
+            if last_step is None:
                 raise AssertionError("expected non-empty succ_steps")
-            if max(succ_steps) == s:
-                region[slot].size_free += pb.mpi_buffer.size_free
+            if last_step == step:
+                frees[slot] += pred_buf.mpi_buffer.size_free
 
     cur = cur_memory
     peak = cur
-    for af in region:
-        cur += af.size_alloc
+    if max_peak is not None and peak > max_peak:
+        return peak, [], []
+    for i in range(R):
+        cur += allocs[i]
         if cur > peak:
             peak = cur
-        cur -= af.size_free
-    return peak
+        if max_peak is not None and peak > max_peak:
+            return peak, [], []
+        cur -= frees[i]
+
+    if not return_live_memory:
+        return peak, [], []
+
+    cur = cur_memory
+    region_live_before = [0] * (R + 1)
+    region_live_after = [0] * R
+    for i in range(R):
+        region_live_before[i] = cur
+        cur += allocs[i]
+        # Match peak_memory_from_buf_info_list: frees apply at the next step.
+        region_live_after[i] = cur
+        cur -= frees[i]
+    region_live_before[R] = cur
+    return peak, region_live_before, region_live_after
 
 
 @dataclasses.dataclass

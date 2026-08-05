@@ -5232,9 +5232,15 @@ class CppScheduling(BaseScheduling):
         _, (vars2, _) = node2.group
         return vars1 == vars2
 
-    def fuse(self, node1, node2):
+    def fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        dry_run: bool = False,
+    ) -> FusedSchedulerNode:
         if node1.is_foreach() or node2.is_foreach():
-            return ForeachKernelSchedulerNode.fuse(node1, node2)
+            return ForeachKernelSchedulerNode.fuse(node1, node2, dry_run=dry_run)
         elif node1.is_template():
             if node2.is_template():
                 raise AssertionError("expected not node2.is_template()")
@@ -5244,14 +5250,22 @@ class CppScheduling(BaseScheduling):
                 self._why_fuse_nodes(node1, node2)
                 == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
             ):
-                if not (self._align_compatible_range_nodes(node1, node2)):
-                    raise AssertionError(
-                        (
-                            node1.group,
-                            node2.group,
+                snapshots = []
+                if dry_run:
+                    snapshots = self._snapshot_node_loop_states(node1)
+                    snapshots.extend(self._snapshot_node_loop_states(node2))
+                try:
+                    if not (self._align_compatible_range_nodes(node1, node2)):
+                        raise AssertionError(
+                            (
+                                node1.group,
+                                node2.group,
+                            )
                         )
-                    )
-                return FusedSchedulerNode.fuse(node1, node2)
+                    return FusedSchedulerNode.fuse(node1, node2)
+                finally:
+                    for node, state in reversed(snapshots):
+                        node.restore_loop_state(state)
             elif self.can_fuse_vertical_outer_loop(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
                     node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
