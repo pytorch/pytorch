@@ -21,13 +21,13 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 )
 from torch._inductor.kernel import gemm_epilogue_analysis as _epilogue_analysis
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
+    FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
-    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_AUX_TENSORSSA_ERROR,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
@@ -45,7 +45,6 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _local_reduce_store_arg,
     FlexGemmPhysicalReduction,
     GroupedTensorSSALayout,
-    guarded_int,
     is_shape_preserving_pointwise_node,
     lower_full_scalar,
     lower_getitem,
@@ -73,7 +72,10 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    guarded_int,
+    statically_known_shape_equal,
+)
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -88,46 +90,15 @@ FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputPlan(_epilogue_analysis.GemmOutputPlan):
-    """Extend the shared GEMM output plan with a FlexGEMM main transform."""
+    """Extend the shared GEMM output plan with an output contraction."""
 
-    main_transform: FlexGemmGroupedMainOutputTransform | None = None
+    output_contraction: FlexGemmOutputContraction | None = None
 
 
 FlexGemmCuteDSLKernel = GemmEpilogueCuteDSLKernel
 
 
-class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
-    """Keep grouped-main scalar expressions scalar during FlexGEMM emission."""
-
-    @staticmethod
-    def where(condition: Any, a: Any, b: Any) -> Any:
-        if any(
-            GemmEpilogueCuteDSLOpOverrides._is_tensor_like(value)
-            for value in (condition, a, b)
-        ):
-            return GemmEpilogueCuteDSLOpOverrides.where(condition, a, b)
-        result_expr = (
-            f"({GemmEpilogueCuteDSLOpOverrides._as_expr(a)} if "
-            f"{GemmEpilogueCuteDSLOpOverrides._as_expr(condition)} else "
-            f"{GemmEpilogueCuteDSLOpOverrides._as_expr(b)})"
-        )
-        cse_vars = tuple(
-            GemmEpilogueCuteDSLOpOverrides._get_cse_var(value)
-            for value in (a, b, condition)
-        )
-        if all(value is None for value in cse_vars):
-            return result_expr
-        dtype, bounds = GemmEpilogueCuteDSLOpOverrides._extract_dtype_and_bounds(
-            a, b, condition
-        )
-        result = V.kernel.cse.generate(
-            V.kernel.body,
-            result_expr,
-            bounds=bounds,
-            dtype=dtype if dtype is not None else torch.int32,
-        )
-        result.is_scalar_expr = True
-        return result
+FlexGemmCuteDSLOpOverrides = GemmEpilogueCuteDSLOpOverrides
 
 
 def tuple_output_plan(
@@ -209,31 +180,47 @@ def output_plan(
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedMainLaneMatch:
-    """Describe one grouped-main spelling before complete validation."""
+class OutputContractionUse:
+    """Describe one supported use of grouped GEMM values in the main output."""
 
     source: torch.fx.Node
     group: int
     chunked: bool
-    indices: tuple[int, ...]
+    group_indices: tuple[int, ...]
     layout_node: torch.fx.Node | None = None
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedMainOutputMatch:
-    """Hold one complete grouped-main match until analysis commits it."""
+class OutputContractionPlan:
+    """Stage one complete output contraction until analysis commits it."""
 
-    transform: FlexGemmGroupedMainOutputTransform
+    contraction: FlexGemmOutputContraction
     select_indices: dict[torch.fx.Node, int]
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry]
 
+    def commit(
+        self,
+        outputs: FlexGemmOutputPlan,
+        local_reduce: FlexGemmLocalReduceAnalysis,
+    ) -> FlexGemmOutputPlan:
+        """Validate composition and install this output contraction."""
+        if outputs.aux_outputs or outputs.local_reduce is not None:
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+        if self.contraction.chunked and any(
+            local_reduce.graph.depends_on(outputs.output, reduced)
+            for reduced in local_reduce.matches
+        ):
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR)
+        local_reduce.grouped_tensors.update(self.grouped_tensors)
+        return dataclasses.replace(outputs, output_contraction=self.contraction)
 
-def canonical_grouped_main_source(
+
+def canonical_output_contraction_source(
     node: torch.fx.Node,
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> torch.fx.Node:
-    """Find one lane's GEMM provenance through single-input pointwise wrappers."""
+    """Find one contraction use's GEMM provenance through pointwise wrappers."""
     while node is not gemm and is_shape_preserving_pointwise_node(node):
         inputs = [
             arg
@@ -246,13 +233,13 @@ def canonical_grouped_main_source(
     return node
 
 
-def match_grouped_main_lane(
+def match_output_contraction_use(
     node: torch.fx.Node,
     gemm: torch.fx.Node,
     gemm_shape: tuple[Any, ...] | None,
     local_reduce: FlexGemmLocalReduceAnalysis,
-) -> GroupedMainLaneMatch | None:
-    """Match one grouped-N split/getitem or view/select lane."""
+) -> OutputContractionUse | None:
+    """Match one supported use of grouped GEMM values in the main output."""
     if gemm_shape is None:
         return None
     normalized = local_reduce.graph.normalized_nodes.get(node)
@@ -278,11 +265,11 @@ def match_grouped_main_lane(
         group = shape[-1] // split_size
         if group <= 1:
             return None
-        return GroupedMainLaneMatch(
+        return OutputContractionUse(
             source=split_normalized.source,
             group=group,
             chunked=True,
-            indices=(normalized.index,),
+            group_indices=(normalized.index,),
             layout_node=split,
         )
 
@@ -319,23 +306,23 @@ def match_grouped_main_lane(
         layout_node = None
     else:
         return None
-    return GroupedMainLaneMatch(
+    return OutputContractionUse(
         source=view_normalized.source,
         group=group,
         chunked=chunked,
-        indices=(index,),
+        group_indices=(index,),
         layout_node=layout_node,
     )
 
 
-def collect_grouped_main_lanes(
+def collect_output_contraction_uses(
     output: torch.fx.Node,
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
-) -> list[tuple[torch.fx.Node, GroupedMainLaneMatch]] | None:
-    """Collect grouped lane leaves without mutating analysis state."""
+) -> list[tuple[torch.fx.Node, OutputContractionUse]] | None:
+    """Collect contraction uses without mutating analysis state."""
     gemm_shape = tensor_meta_shape(gemm)
-    lanes: list[tuple[torch.fx.Node, GroupedMainLaneMatch]] = []
+    uses: list[tuple[torch.fx.Node, OutputContractionUse]] = []
     seen: OrderedSet[torch.fx.Node] = OrderedSet()
     stack: list[Any] = [output]
     while stack:
@@ -343,9 +330,9 @@ def collect_grouped_main_lanes(
         if not isinstance(node, torch.fx.Node) or node in seen:
             continue
         seen.add(node)
-        match = match_grouped_main_lane(node, gemm, gemm_shape, local_reduce)
+        match = match_output_contraction_use(node, gemm, gemm_shape, local_reduce)
         if match is not None:
-            lanes.append((node, match))
+            uses.append((node, match))
             continue
         if node is gemm or (
             node in local_reduce.grouped_tensors
@@ -353,42 +340,42 @@ def collect_grouped_main_lanes(
         ):
             return None
         stack.extend(reversed(tuple(iter_fx_node_inputs((node.args, node.kwargs)))))
-    return lanes or None
+    return uses or None
 
 
-def grouped_main_output_match(
+def build_output_contraction_plan(
     output: torch.fx.Node,
     gemm: torch.fx.Node,
     local_reduce: FlexGemmLocalReduceAnalysis,
-) -> GroupedMainOutputMatch | None:
-    """Validate a complete grouped main output and stage its node plans."""
-    collected = collect_grouped_main_lanes(output, gemm, local_reduce)
+) -> OutputContractionPlan | None:
+    """Build a plan when all grouped GEMM values form one output contraction."""
+    collected = collect_output_contraction_uses(output, gemm, local_reduce)
     if collected is None:
         return None
     first = collected[0][1]
-    source = canonical_grouped_main_source(first.source, gemm, local_reduce)
-    indices: OrderedSet[int] = OrderedSet()
+    source = canonical_output_contraction_source(first.source, gemm, local_reduce)
+    group_indices: OrderedSet[int] = OrderedSet()
     select_indices: dict[torch.fx.Node, int] = {}
     grouped_tensors: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = {}
     for node, match in collected:
         if (
-            canonical_grouped_main_source(match.source, gemm, local_reduce)
+            canonical_output_contraction_source(match.source, gemm, local_reduce)
             is not source
             or match.group != first.group
             or match.chunked != first.chunked
         ):
             return None
-        for index in match.indices:
+        for index in match.group_indices:
             if not -first.group <= index < first.group:
                 return None
-            indices.add(index % first.group)
+            group_indices.add(index % first.group)
         if isinstance(local_reduce.graph.normalized_nodes.get(node), NormalizedSelect):
-            select_indices[node] = match.indices[0] % first.group
+            select_indices[node] = match.group_indices[0] % first.group
         if match.layout_node is not None:
             grouped_tensors[match.layout_node] = FlexGemmLocalReduceGeometry(
                 group=match.group, axis=1
             )
-    if indices != OrderedSet(range(first.group)):
+    if group_indices != OrderedSet(range(first.group)):
         return None
     gemm_meta = gemm.meta.get("val")
     output_meta = output.meta.get("val")
@@ -396,12 +383,38 @@ def grouped_main_output_match(
         return None
     expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // first.group)
     if not statically_known_shape_equal(output_meta.shape, expected_shape):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
-    return GroupedMainOutputMatch(
-        FlexGemmGroupedMainOutputTransform(group=first.group, chunked=first.chunked),
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
+    return OutputContractionPlan(
+        FlexGemmOutputContraction(group=first.group, chunked=first.chunked),
         select_indices,
         grouped_tensors,
     )
+
+
+def validate_shape_preserving_main_output(
+    outputs: FlexGemmOutputPlan,
+    gemm: torch.fx.Node,
+    local_reduce: FlexGemmLocalReduceAnalysis,
+) -> None:
+    """Reject incomplete grouped selects and other shape-changing main outputs."""
+    # TODO: Consider DCE before analysis if dead grouped selects become common.
+    if any(
+        isinstance(normalized, NormalizedSelect)
+        and normalized.source in local_reduce.grouped_tensors
+        and local_reduce.grouped_tensors[normalized.source].axis == 1
+        for normalized in local_reduce.graph.normalized_nodes.values()
+    ):
+        raise NotImplementedError(
+            "FlexGEMM grouped selects must form a complete output contraction"
+        )
+    output_shape = tensor_meta_shape(outputs.output)
+    gemm_shape = tensor_meta_shape(gemm)
+    if (
+        output_shape is None
+        or gemm_shape is None
+        or not statically_known_shape_equal(output_shape, gemm_shape)
+    ):
+        raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -412,13 +425,13 @@ class FlexGemmEpilogueAnalysis:
         gemm: The validated GEMM node shared by lowering and emission.
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
-        grouped_select_indices: Select indices committed after grouped validation.
+        output_contraction_select_indices: Select indices committed by the contraction plan.
     """
 
     gemm: torch.fx.Node
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
-    grouped_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
+    output_contraction_select_indices: dict[torch.fx.Node, int] = dataclasses.field(
         default_factory=dict
     )
 
@@ -429,41 +442,16 @@ class FlexGemmEpilogueAnalysis:
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
         outputs = output_plan(graph_module, local_reduce)
-        grouped_main = grouped_main_output_match(outputs.output, gemm, local_reduce)
-        grouped_select_indices: dict[torch.fx.Node, int] = {}
-        if grouped_main is not None:
-            if outputs.aux_outputs or outputs.local_reduce is not None:
-                raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
-            if grouped_main.transform.chunked and any(
-                local_reduce.graph.depends_on(outputs.output, reduced)
-                for reduced in local_reduce.matches
-            ):
-                raise NotImplementedError(FLEX_GEMM_CHUNKED_GROUPED_REDUCE_ERROR)
-            local_reduce.grouped_tensors.update(grouped_main.grouped_tensors)
-            grouped_select_indices = grouped_main.select_indices
-            outputs = dataclasses.replace(
-                outputs, main_transform=grouped_main.transform
-            )
+        contraction_plan = build_output_contraction_plan(
+            outputs.output, gemm, local_reduce
+        )
+        if contraction_plan is None:
+            validate_shape_preserving_main_output(outputs, gemm, local_reduce)
+            output_contraction_select_indices = {}
         else:
-            # TODO: Consider DCE before analysis if dead grouped selects become common.
-            if any(
-                isinstance(normalized, NormalizedSelect)
-                and normalized.source in local_reduce.grouped_tensors
-                and local_reduce.grouped_tensors[normalized.source].axis == 1
-                for normalized in local_reduce.graph.normalized_nodes.values()
-            ):
-                raise NotImplementedError(
-                    "FlexGEMM grouped selects must form a complete grouped main output"
-                )
-            output_shape = tensor_meta_shape(outputs.output)
-            gemm_shape = tensor_meta_shape(gemm)
-            if (
-                output_shape is None
-                or gemm_shape is None
-                or not statically_known_shape_equal(output_shape, gemm_shape)
-            ):
-                raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
-        return cls(gemm, outputs, local_reduce, grouped_select_indices)
+            outputs = contraction_plan.commit(outputs, local_reduce)
+            output_contraction_select_indices = contraction_plan.select_indices
+        return cls(gemm, outputs, local_reduce, output_contraction_select_indices)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -473,10 +461,10 @@ class FlexGemmEpilogueAnalysis:
         )
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
-        if self.outputs.main_transform is not None:
+        if self.outputs.output_contraction is not None:
             geometries.add(
                 FlexGemmLocalReduceGeometry(
-                    group=self.outputs.main_transform.group,
+                    group=self.outputs.output_contraction.group,
                     axis=1,
                 )
             )
@@ -571,7 +559,9 @@ class FlexGemmEpilogueEmitter:
         self.gemm = analysis.gemm
         self.graph = analysis.local_reduce.graph
         self.outputs = analysis.outputs
-        self.grouped_select_indices = analysis.grouped_select_indices
+        self.output_contraction_select_indices = (
+            analysis.output_contraction_select_indices
+        )
         self.kernel = FlexGemmCuteDSLKernel()
         self.env: dict[torch.fx.Node, Any] = {
             self.gemm: CuteDSLCSEVariable(
@@ -626,7 +616,7 @@ class FlexGemmEpilogueEmitter:
                 ValueRanges.unknown(),
                 dtype=physical_dtype,
                 shape=(1,),
-                is_scalar_expr=self.outputs.main_transform is not None,
+                is_scalar_expr=self.outputs.output_contraction is not None,
             )
             if logical_dtype != physical_dtype:
                 self.env[node] = FlexGemmCuteDSLOpOverrides.to_dtype(
@@ -732,7 +722,7 @@ class FlexGemmEpilogueEmitter:
                     self.env[node] = lowered
                     return
             case NormalizedSelect():
-                index = self.grouped_select_indices.get(node)
+                index = self.output_contraction_select_indices.get(node)
                 if index is not None:
                     self.env[node] = lower_grouped_n_select(
                         normalized, index, self.env, self.kernel
