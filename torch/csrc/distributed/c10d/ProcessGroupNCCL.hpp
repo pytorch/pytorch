@@ -954,6 +954,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
   uint64_t getCommSplitCounter() const;
 
+  // Return the internal CUDA stream that this process group's NCCL kernels run
+  // on for the current CUDA device. Async collectives (async_op=True) are
+  // enqueued on this stream. Requires the communicator to already be
+  // initialized (i.e. after the first collective on this process group).
+  c10::Stream getCommStream();
+
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;

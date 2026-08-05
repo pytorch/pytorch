@@ -3322,6 +3322,18 @@ int64_t ProcessGroupNCCL::getCommPtr() {
   return commPtr;
 }
 
+c10::Stream ProcessGroupNCCL::getCommStream() {
+  // Get the comm stream for the current CUDA device.
+  auto device = at::Device(at::kCUDA, at::cuda::current_device());
+  std::string deviceKey = getKeyFromDevice(device);
+  auto ncclComm = getNCCLComm(deviceKey);
+  TORCH_CHECK(
+      ncclComm != nullptr,
+      "NCCL communicator not initialized. Run a collective on this process "
+      "group before querying its comm stream.");
+  return ncclStreams_.at(deviceKey).unwrap();
+}
+
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     const std::string& deviceKey) {
   std::lock_guard<std::mutex> lock(mutex_);

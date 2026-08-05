@@ -3781,6 +3781,42 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 check the readiness of the communicator before launching any
                 collectives into the communicator.
             )")
+          // Returns the (id, device_index, device_type) triple rather than a
+          // Stream object, mirroring _cuda_getCurrentStream: Python
+          // reconstructs the exact same pooled stream via torch.cuda.Stream(...)
+          // (no new stream is created). This keeps CUDA-Python object
+          // construction out of this backend-agnostic c10d binding, which also
+          // compiles for non-CUDA builds.
+          .def(
+              "_get_comm_stream_info",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+                auto stream = self->getCommStream();
+                return py::make_tuple(
+                    stream.id(),
+                    stream.device_index(),
+                    static_cast<int64_t>(stream.device_type()));
+              },
+              R"(
+            Get (stream_id, device_index, device_type) for the internal CUDA
+            stream that this process group's NCCL kernels run on for the current
+            device. Async collectives (``async_op=True``) are enqueued on this
+            stream. Reconstruct a ``torch.cuda.Stream`` from the tuple::
+
+                sid, didx, dtype = pg._get_comm_stream_info()
+                comm_stream = torch.cuda.Stream(
+                    stream_id=sid, device_index=didx, device_type=dtype)
+
+            Requires the communicator to be initialized (run a collective on
+            this process group first).
+
+            .. warning ::
+                Unsafe to use. This stream is owned and managed by
+                ProcessGroupNCCL. Work you enqueue on it directly is not
+                monitored by the watchdog, and gating on it manually bypasses
+                the tensor stashing that ``Work.wait()`` performs for caching
+                allocator safety, which can lead to use-after-free of collective
+                tensors. Prefer ``async_op=True`` + ``Work.wait()``.
+            )")
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
