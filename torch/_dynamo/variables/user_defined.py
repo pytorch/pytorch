@@ -65,7 +65,6 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
-    EphemeralSource,
     GetItemSource,
     RandomValueSource,
     TypeDictSource,
@@ -111,7 +110,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .dicts import ConstDictVariable, pydict_check
+from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
 from .object_protocol import (
     _resolve_descriptor_get,
@@ -225,6 +224,23 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     return ctx in f_ctxs
 
 
+def is_generic_ctx_manager_cls(cls: type) -> bool:
+    # A class is wrapped/entered as a GenericContextWrappingVariable only when
+    # its __enter__/__exit__ are plain Python-function methods: GCWV.enter/exit
+    # take `.__func__`, which only a regular bound method has. getattr_static
+    # (not getattr) inspects the raw descriptor, so staticmethod/classmethod
+    # descriptors and C-level slots (threading.Lock, file objects) are rejected
+    # -- those fall back to UserDefinedObjectVariable and cleanly graph-break on
+    # `with` instead of raising. Used at both wrap sites (VariableBuilder for
+    # sourced objects and SideEffects.get_variable_cls for in-trace ones) so a
+    # ctx manager wraps identically however it is encountered.
+    return (
+        inspect.isfunction(inspect.getattr_static(cls, "__enter__", None))
+        and inspect.isfunction(inspect.getattr_static(cls, "__exit__", None))
+        and not is_forbidden_context_manager(cls)
+    )
+
+
 def is_cython_function(obj: object) -> bool:
     return (
         callable(obj)
@@ -297,6 +313,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # this case, we don't want to allow mutation in the class because there
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
+
+    def get_value_for_setattr(self) -> object | None:
+        mod = getattr(self.value, "__module__", None) or ""
+        if mod == "torch" or mod.startswith(("torch.", "torch_")):
+            return None
+        return self.value
 
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
@@ -1057,6 +1079,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
+            if self.value is collections.OrderedDict:
+                # Exact OrderedDict: represent as a bare OrderedDictVariable,
+                # mirroring dict.__new__(dict) -> ConstDictVariable.
+                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
             # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
             # extra args — only the type arg matters.  Pass init_args=[] for
             # those so reconstruction emits base_cls.__new__(cls) without
@@ -1595,6 +1621,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
         if self.source:
             install_guard(
                 self.source.make_guard(
@@ -2100,10 +2129,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(None)
         source = self.get_source_by_walking_mro(tx, name) if self.source else None
 
-        if isinstance(
+        # C slot wrapper / C method as a dunder: no Python body to trace.
+        # pybind11 exposes methods as CPython instancemethods wrapping a builtin
+        # function (e.g. ScriptDict.__repr__); those are equally untraceable,
+        # detected by a __func__ that is not a Python function.
+        is_c_special_method = isinstance(
             type_attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
-        ):
-            # C slot wrapper / C method as a dunder: no Python body to trace.
+        ) or (
+            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            and not isinstance(getattr(type_attr, "__func__", None), types.FunctionType)
+        )
+        if is_c_special_method:
             if not (
                 self._base_vt is not None
                 and self._base_methods is not None
@@ -4460,7 +4496,14 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 raise AssertionError(
                     "dict_vt must be constructed by builder.py when source is present"
                 )
-            self._base_vt = ConstDictVariable(
+            # OrderedDict subclasses need an OrderedDict-backed store so
+            # move_to_end / popitem(last=) delegate correctly.
+            base_cls = (
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
+            )
+            self._base_vt = base_cls(
                 {},
                 mutation_type=ValueMutationNew(),
             )
@@ -4601,181 +4644,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 raise AssertionError("_base_vt must not be None for dict repr")
             return self._base_vt.repr_impl(tx)
         return super().repr_impl(tx)
-
-
-# TODO: move to dicts.py alongside ConstDictVariable and DefaultDictVariable.
-# Currently blocked by circular imports (dicts.py ↔ user_defined.py).
-class OrderedDictVariable(UserDefinedDictVariable):
-    """
-    Represents collections.OrderedDict instances.
-
-    CPython has both a pure-Python implementation:
-    https://github.com/python/cpython/blob/v3.13.0/Lib/collections/__init__.py#L86-L339
-    and a C accelerator that replaces it at runtime:
-    https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
-
-    The C accelerator is always active, so methods like move_to_end and
-    popitem are C-level method_descriptors, not Python functions.
-
-    Dict storage is delegated to _base_vt (a ConstDictVariable) via
-    UserDefinedDictVariable.
-    """
-
-    def __init__(
-        self,
-        value: object,
-        dict_vt: "ConstDictVariable | None" = None,
-        **kwargs: Any,
-    ) -> None:
-        if dict_vt is None:
-            from .dicts import OrderedItemsDictVariable
-
-            dict_vt = OrderedItemsDictVariable(
-                {},
-                mutation_type=ValueMutationNew(),
-            )
-        super().__init__(value, dict_vt=dict_vt, **kwargs)
-
-    def is_python_constant(self) -> bool:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in is_python_constant")
-        return self._base_vt.is_python_constant()
-
-    def as_python_constant(self) -> Any:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in as_python_constant")
-        return collections.OrderedDict(self._base_vt.as_python_constant())
-
-    @staticmethod
-    def _ordered_dict_repr(items: Sequence[tuple[str, str]]) -> str:
-        if not items:
-            return "OrderedDict()"
-        if sys.version_info >= (3, 12):
-            return (
-                "OrderedDict({"
-                + ", ".join(f"{key}: {value}" for key, value in items)
-                + "})"
-            )
-        return (
-            "OrderedDict(["
-            + ", ".join(f"({key}, {value})" for key, value in items)
-            + "])"
-        )
-
-    def debug_repr(self) -> str:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for OrderedDict repr")
-        base_vt = cast(ConstDictVariable, self._base_vt)
-        items = [
-            (key.vt.debug_repr(), value.debug_repr())
-            for key, value in base_vt.items.items()
-        ]
-        return self._ordered_dict_repr(items)
-
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
-        # uses dict-style formatting.
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for OrderedDict repr")
-        base_vt = cast(ConstDictVariable, self._base_vt)
-        items = [
-            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
-            for key, value in base_vt.items.items()
-        ]
-        return VariableTracker.build(tx, self._ordered_dict_repr(items))
-
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327C5-L339
-        if not issubclass(other.python_type(), dict):
-            return variables.ConstantVariable.create(NotImplemented)
-
-        if reverse:
-            new = VariableTracker.build(
-                tx, self.value.__class__, source=EphemeralSource()
-            ).call_function(tx, [other], {})
-            new.call_method(tx, "update", [self], {})
-        else:
-            new = self.call_method(tx, "copy", [], {})
-            new.call_method(tx, "update", [other], {})
-        return new
-
-    def nb_inplace_or_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L323-L325
-        self.call_method(tx, "update", [other], {})
-        return self
-
-    def mp_ass_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # value=None signals __delitem__ (CPython NULL sentinel).
-        attr = "__delitem__" if value is None else "__setitem__"
-        method = self._maybe_get_baseclass_method(attr)
-        if method in self._base_methods:
-            if self._base_vt is None:
-                raise AssertionError(
-                    "_base_vt must not be None in mp_ass_subscript_impl"
-                )
-            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
-        return super().mp_ass_subscript_impl(tx, key, value)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .constant import ConstantVariable
-        from .dicts import HashableTracker
-
-        # OrderedDict-exclusive C methods that ConstDictVariable doesn't handle.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
-        if name == "move_to_end":
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in move_to_end")
-            self._base_vt.install_dict_keys_match_guard()  # type: ignore[union-attr]
-            tx.output.side_effects.mutation(self._base_vt)
-            if args[0] not in self._base_vt:  # type: ignore[operator]
-                raise_observed_exception(KeyError, tx)
-
-            last = True
-            if len(args) == 2 and args[0].is_python_constant():
-                last = args[1].as_python_constant()
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs["last"].as_python_constant()
-
-            key = HashableTracker(args[0])
-            self._base_vt.items.move_to_end(key, last=last)  # type: ignore[union-attr]
-            return ConstantVariable.create(None)
-        elif name == "popitem":
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in popitem")
-            if not self._base_vt.items:  # type: ignore[union-attr]
-                raise_observed_exception(
-                    KeyError, tx, args=["popitem(): dictionary is empty"]
-                )
-
-            last = True
-            if len(args) == 1 and args[0].is_python_constant():
-                last = args[0].as_python_constant()
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs["last"].as_python_constant()
-
-            k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
-            self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
-            tx.output.side_effects.mutation(self._base_vt)
-            return variables.TupleVariable([k.vt, v])
-        return super().call_method(tx, name, args, kwargs)
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.
