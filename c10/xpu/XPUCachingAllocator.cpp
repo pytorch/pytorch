@@ -1255,13 +1255,16 @@ class DeviceCachingAllocator {
       size_t size,
       sycl::queue* queue,
       c10::DeviceIndex device_idx,
-      size_t alloc_size,
-      DeviceStats& device_stats) {
+      size_t alloc_size) {
     bool block_found = false;
     // if already trying to use a mempool, then just oom
     bool active_pool = params.pool->owner_PrivatePool;
     if (!active_pool) {
-      for (MempoolId_t mempool_id : use_on_oom_pools) {
+      // Copy the set to avoid iterator invalidation: releasePool (called below)
+      // erases from use_on_oom_pools.
+      std::vector<MempoolId_t> pools(
+          use_on_oom_pools.begin(), use_on_oom_pools.end());
+      for (MempoolId_t mempool_id : pools) {
         auto tid = std::this_thread::get_id();
         auto filter = [tid](sycl::queue*) {
           return std::this_thread::get_id() == tid;
@@ -1512,8 +1515,7 @@ class DeviceCachingAllocator {
           // these operations may free memory whose address is baked into the
           // graph, causing replay to access invalid memory.
           (C10_LIKELY(!is_capture_context()) &&
-           (try_mempool_fallback(
-                params, size, &queue, device, alloc_size, stats) ||
+           (try_mempool_fallback(params, size, &queue, device, alloc_size) ||
             (release_cached_blocks(context, {0, 0}) &&
              alloc_block(params, true, context))));
     }
@@ -1884,13 +1886,14 @@ class DeviceCachingAllocator {
   }
 
   void setNoSplit(MempoolId_t mempool_id) {
-    // Choose if this pool should not split a segment
+    // Choose if this pool should not split a segment. Also cleared by
+    // releasePool.
     std::lock_guard<std::recursive_mutex> lock(mutex);
     no_split_pools.insert(mempool_id);
   }
 
   void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
-    // Choose if this pool should be used on OOM
+    // Enable or disable used on OOM for this pool. Also cleared by releasePool.
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (use_on_oom) {
       use_on_oom_pools.insert(mempool_id);
@@ -2029,6 +2032,7 @@ class DeviceCachingAllocator {
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
     }
+    no_split_pools.erase(mempool_id);
   }
 };
 
