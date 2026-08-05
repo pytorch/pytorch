@@ -52,21 +52,33 @@ from typing import NamedTuple
 
 LINTER_CODE = "TEST_LINTER"
 HW_CLASSIFICATION_ATTR = "hw_classification"  # class attribute name to check
-HW_CLASSIFICATION_ENUM_CLASS = (
-    "HardwareClassification"  # enum class the attribute must reference
+INSTANTIATE_FN_NAME = (
+    "instantiate_device_type_tests"  # function name to check for test instantiation
 )
-INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
 
-GENERIC = "GENERIC"
-ACCELERATOR = "ACCELERATOR"
-CPU = "CPU"
-CUDA = "CUDA"
-MPS = "MPS"
-XPU = "XPU"
+_KWARG_UNKNOWN = object()  # sentinel: kwarg present but not a literal
 
 
-# Files in this allowlist are temporarily excluded from hw_classification checks
-ALLOWLIST_PATH = Path(__file__).resolve().parent / "hw_classification_allowlist.json"
+# Values mirror `torch.testing._internal.common_device_type.HardwareClassification`.
+# Defined locally to avoid importing test infrastructure into the linter.
+class HardwareClassification(Enum):
+    GENERIC = "GENERIC"
+    ACCELERATOR = "ACCELERATOR"
+    CPU = "CPU"
+    CUDA = "CUDA"
+    MPS = "MPS"
+    XPU = "XPU"
+
+
+DEVICE_SPECIFIC_CLASSIFICATIONS = {
+    HardwareClassification.CPU,
+    HardwareClassification.CUDA,
+    HardwareClassification.MPS,
+    HardwareClassification.XPU,
+}
+
+# Files in this allowlist are temporarily excluded from test linter checks
+ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
 
 
 def _load_allowlist() -> set[str]:
@@ -99,12 +111,11 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-_error_msg = partial(
+error_msg = partial(
     LintMessage,
     char=None,
     code=LINTER_CODE,
     severity=LintSeverity.ERROR,
-    name=f"[{HW_CLASSIFICATION_ATTR}]",
     original=None,
     replacement=None,
 )
@@ -130,41 +141,49 @@ def _is_test_class(node: ast.ClassDef) -> bool:
     return False
 
 
-def _find_hw_classification_assignment(
+def _get_hw_classification(
     node: ast.ClassDef,
-) -> ast.Assign | ast.AnnAssign | None:
-    """Find the class-level ``hw_classification`` assignment node, if present."""
+) -> HardwareClassification | None:
+    """Return the `HardwareClassification` enum member declared on *node*.
+
+    Only accepts the exact forms::
+
+        hw_classification = HardwareClassification.<MEMBER>
+        hw_classification: HardwareClassification = HardwareClassification.<MEMBER>
+
+    Returns `None` if the attribute is absent or does not match one of the
+    supported forms.
+    """
     for stmt in node.body:
+        targets: list[ast.expr]
+        value: ast.expr | None
+
         if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
-                if isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR:
-                    return stmt
-        if isinstance(stmt, ast.AnnAssign):
-            if (
-                isinstance(stmt.target, ast.Name)
-                and stmt.target.id == HW_CLASSIFICATION_ATTR
-            ):
-                return stmt
-    return None
+            targets = stmt.targets
+            value = stmt.value
+        elif isinstance(stmt, ast.AnnAssign):
+            targets = [stmt.target]
+            value = stmt.value
+        else:
+            continue
 
+        if not any(
+            isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR
+            for target in targets
+        ):
+            continue
 
-def _extract_hw_classification_value(assign_node: ast.AST) -> str | None:
-    """Return the hardware classification name if the assignment uses a valid enum value."""
-    value = None
-    if isinstance(assign_node, ast.Assign):
-        value = assign_node.value
-    elif isinstance(assign_node, ast.AnnAssign) and assign_node.value is not None:
-        value = assign_node.value
+        if (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id == HardwareClassification.__name__
+        ):
+            try:
+                return HardwareClassification[value.attr]
+            except KeyError:
+                return None
 
-    if value is None:
         return None
-
-    if (
-        isinstance(value, ast.Attribute)
-        and isinstance(value.value, ast.Name)
-        and value.value.id == HW_CLASSIFICATION_ENUM_CLASS
-    ):
-        return value.attr
 
     return None
 
@@ -184,51 +203,65 @@ def _get_instantiation_call(tree: ast.Module, class_name: str) -> ast.Call | Non
     return None
 
 
-def _get_call_kwarg_value(call: ast.Call | None, param_name: str) -> list[str] | None:
-    """Return the value list of *param_name* from the call, or None if absent or empty."""
+def _get_call_kwarg_value(
+    call: ast.Call | None, param_name: str
+) -> list[str] | None | object:
+    """Return statically known string list value of a keyword argument.
+
+    Returns:
+        - None: keyword argument is absent.
+        - list[str]: keyword argument is a statically known string list.
+        - _KWARG_UNKNOWN: keyword argument exists but cannot be statically resolved.
+    """
     if call is None:
         return None
-    kw = None
+
     for kw_item in call.keywords:
-        if kw_item.arg == param_name:
-            kw = kw_item
-            break
-    if kw is None:
-        return None
+        if kw_item.arg != param_name:
+            continue
 
-    node = kw.value
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return [node.value]
-    if not isinstance(node, (ast.List, ast.Tuple)):
-        return None
+        node = kw_item.value
 
-    result = [
-        elt.value
-        for elt in node.elts
-        if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-    ]
-    return result if result else None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+
+        if isinstance(node, (ast.List, ast.Tuple)):
+            result = [
+                elt.value
+                for elt in node.elts
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            ]
+
+            # list contains non-string or empty
+            if len(result) != len(node.elts):
+                return _KWARG_UNKNOWN
+            return result
+
+        return _KWARG_UNKNOWN
+
+    return None
+
+
+@dataclass
+class InstantiationContext:
+    """Context for an ``instantiate_device_type_tests`` call."""
+
+    call: ast.Call
+    only_for: list[str] | None | object = None
+    except_for: list[str] | None | object = None
 
 
 @dataclass
 class RuleContext:
-    """Context passed to each rule function during classification checks."""
+    """Context passed to each rule function during test class linter checks."""
 
     filename: str
     rel_path: str
-    tree: ast.Module  # AST of the entire Python file.
-    class_node: ast.ClassDef  # AST node of the test class being checked.
-    classification: str  # Hardware classification of the test class.
-
-    # instantiate_device_type_tests call information
-    instantiation_call: ast.Call | None = (
-        None  # AST call node for instantiate_device_type_tests, if present.
-    )
-    only_for: list[str] | None = None
-    except_for: list[str] | None = None
-
-    # test_* method AST nodes
+    tree: ast.Module
+    class_node: ast.ClassDef
+    classification: HardwareClassification
     test_methods: list[ast.FunctionDef] = field(default_factory=list)
+    instantiation: InstantiationContext | None = None
 
     @classmethod
     def from_node(
@@ -237,42 +270,48 @@ class RuleContext:
         rel_path: str,
         class_node: ast.ClassDef,
         tree: ast.Module,
-        classification: str,
+        classification: HardwareClassification,
     ) -> RuleContext:
-        call = _get_instantiation_call(tree, class_node.name)
         test_methods = [
             stmt
             for stmt in class_node.body
             if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_")
         ]
+
+        instantiation = None
+        call = _get_instantiation_call(tree, class_node.name)
+        if call is not None:
+            instantiation = InstantiationContext(
+                call=call,
+                only_for=_get_call_kwarg_value(call, "only_for"),
+                except_for=_get_call_kwarg_value(call, "except_for"),
+            )
         return cls(
             filename=filename,
             rel_path=rel_path,
-            class_node=class_node,
             tree=tree,
+            class_node=class_node,
             classification=classification,
-            instantiation_call=call,
-            only_for=_get_call_kwarg_value(call, "only_for"),
-            except_for=_get_call_kwarg_value(call, "except_for"),
             test_methods=test_methods,
+            instantiation=instantiation,
         )
 
 
 RuleFunc = Callable[[RuleContext], list[LintMessage]]
-rules: dict[str, list[RuleFunc]] = {}
+rules: dict[HardwareClassification, list[RuleFunc]] = {}
 
 
-def _register(*groups: str) -> Callable[[RuleFunc], RuleFunc]:
+def _register(*groups: HardwareClassification) -> Callable[[RuleFunc], RuleFunc]:
     """Decorator: register a rule function into one or more classification groups.
 
     Example::
 
-        @_register(ACCELERATOR)
-        def check_method_params(ctx): ...
+        @_register(HardwareClassification.ACCELERATOR)
+        def _check_no_only_for(ctx): ...
 
 
-        @_register(GENERIC, CPU, CUDA)
-        def check_no_device_param(ctx): ...
+        @_register(HardwareClassification.GENERIC)
+        def _check_no_device_param(ctx): ...
     """
 
     def decorator(fn: RuleFunc) -> RuleFunc:
@@ -295,10 +334,11 @@ def _check_device_param(ctx: RuleContext, *, required: bool) -> list[LintMessage
             continue
         action = "must accept" if required else "must not accept"
         messages.append(
-            _error_msg(
+            error_msg(
+                name="[device_param]",
                 path=ctx.filename,
                 line=stmt.lineno,
-                description=f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                description=f"{ctx.classification.value} test method '{ctx.class_node.name}.{stmt.name}' "
                 f"{action} a 'device' or 'devices' parameter.",
             )
         )
@@ -311,15 +351,16 @@ def _check_instantiation(
     required: bool,
 ) -> list[LintMessage]:
     """Validate test class instantiation through `instantiate_device_type_tests`."""
-    is_instantiated = ctx.instantiation_call is not None
+    is_instantiated = ctx.instantiation is not None
     if is_instantiated == required:
         return []
     action = "must be" if required else "must not be"
     return [
-        _error_msg(
+        error_msg(
+            name="[instantiation]",
             path=ctx.filename,
             line=ctx.class_node.lineno,
-            description=f"{ctx.classification} class '{ctx.class_node.name}' {action} "
+            description=f"{ctx.classification.value} class '{ctx.class_node.name}' {action} "
             f"instantiated via 'instantiate_device_type_tests'.",
         )
     ]
@@ -330,12 +371,12 @@ def _check_instantiation(
 # ---------------------------------------------------------------------------
 
 
-@_register(GENERIC)
+@_register(HardwareClassification.GENERIC)
 def _check_must_not_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=False)
 
 
-@_register(GENERIC)
+@_register(HardwareClassification.GENERIC)
 def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=False)
 
@@ -345,17 +386,17 @@ def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
 # ---------------------------------------------------------------------------
 
 
-@_register(ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
 
-@_register(ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
 
-@_register(ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
     """ACCELERATOR classes: test methods must not use only* decorators except onlyAccelerator."""
     messages: list[LintMessage] = []
@@ -372,28 +413,30 @@ def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
                 and name != "onlyAccelerator"
             ):
                 messages.append(
-                    _error_msg(
+                    error_msg(
+                        name="[decorator]",
                         path=ctx.filename,
                         line=stmt.lineno,
-                        description=f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                        description=f"{ctx.classification.value} test method '{ctx.class_node.name}.{stmt.name}' "
                         f"must not use '@{name}' decorators except onlyAccelerator",
                     )
                 )
     return messages
 
 
-@_register(ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR)
 def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
     """ACCELERATOR classes: instantiate_device_type_tests must not use only_for.
 
     Use except_for for a blacklist approach instead.
     """
-    if ctx.instantiation_call is not None and ctx.only_for is not None:
+    if ctx.instantiation is not None and ctx.instantiation.only_for is not None:
         return [
-            _error_msg(
+            error_msg(
+                name="[only_for]",
                 path=ctx.filename,
-                line=ctx.instantiation_call.lineno,
-                description=f"{ctx.classification} class '{ctx.class_node.name}' "
+                line=ctx.instantiation.call.lineno,
+                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
                 f"must not use only_for in instantiate_device_type_tests. "
                 f"Use except_for instead (blacklist approach).",
             )
@@ -406,56 +449,62 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
 # ---------------------------------------------------------------------------
 
 
-@_register(CPU, CUDA, MPS, XPU)
+@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
 
-@_register(CPU, CUDA, MPS, XPU)
+@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
 
-@_register(CPU, CUDA, MPS, XPU)
+@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
     """Device-specific classes: instantiate_device_type_tests must not use except_for."""
-    if ctx.instantiation_call is not None and ctx.except_for is not None:
+    if ctx.instantiation is not None and ctx.instantiation.except_for is not None:
         return [
-            _error_msg(
+            error_msg(
+                name="[except_for]",
                 path=ctx.filename,
-                line=ctx.instantiation_call.lineno,
-                description=f"{ctx.classification} class '{ctx.class_node.name}' "
+                line=ctx.instantiation.call.lineno,
+                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
                 f"must not use except_for in instantiate_device_type_tests.",
             )
         ]
     return []
 
 
-@_register(CPU, CUDA, MPS, XPU)
+@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
     """Device-specific classes: instantiate_device_type_tests must specify
     only_for matching exactly the class's classification."""
-    if ctx.instantiation_call is None:
+    if ctx.instantiation is None:
         return []
-    expected = ctx.classification.lower()
+    expected = ctx.classification.value.lower()
 
-    if ctx.only_for is None:
+    if (
+        ctx.instantiation.only_for is None
+        or ctx.instantiation.only_for is _KWARG_UNKNOWN
+    ):
         return [
-            _error_msg(
+            error_msg(
+                name="[only_for]",
                 path=ctx.filename,
-                line=ctx.instantiation_call.lineno,
-                description=f"{ctx.classification} class '{ctx.class_node.name}' "
+                line=ctx.instantiation.call.lineno,
+                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
                 f"must use only_for='{expected}' "
                 f"in instantiate_device_type_tests.",
             )
         ]
-    if ctx.only_for != [expected]:
+    if ctx.instantiation.only_for != [expected]:
         return [
-            _error_msg(
+            error_msg(
+                name="[only_for]",
                 path=ctx.filename,
-                line=ctx.instantiation_call.lineno,
-                description=f"{ctx.classification} class '{ctx.class_node.name}' "
-                f"has only_for values {ctx.only_for}, "
+                line=ctx.instantiation.call.lineno,
+                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
+                f"has only_for values {ctx.instantiation.only_for}, "
                 f"but must be exactly {[expected]}.",
             )
         ]
@@ -484,30 +533,17 @@ def check_file(filename: str) -> list[LintMessage]:
         if not isinstance(node, ast.ClassDef) or not _is_test_class(node):
             continue
 
-        assign_node = _find_hw_classification_assignment(node)
-
-        # Missing hw_classification attribute
-        if assign_node is None:
+        classification = _get_hw_classification(node)
+        if classification is None:
             messages.append(
-                _error_msg(
+                error_msg(
+                    name="[hw_classification]",
                     path=filename,
                     line=node.lineno,
-                    description=f"Test class '{node.name}' must declare "
-                    f"{HW_CLASSIFICATION_ATTR} = HardwareClassification.<MEMBER>.",
-                )
-            )
-            continue
-
-        value = _extract_hw_classification_value(assign_node)
-
-        # Value is not HardwareClassification.enum_member
-        if value is None:
-            messages.append(
-                _error_msg(
-                    path=filename,
-                    line=assign_node.lineno,
-                    description=f"Could not determine {HW_CLASSIFICATION_ATTR} value for class '{node.name}'. "
-                    f"Use 'HardwareClassification.<MEMBER>'.",
+                    description=f"Test class '{node.name}' is missing or has an invalid "
+                    f"hw_classification. Valid declarations:\n"
+                    f"    hw_classification = HardwareClassification.<MEMBER>\n"
+                    f"    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
                 )
             )
             continue
@@ -518,9 +554,9 @@ def check_file(filename: str) -> list[LintMessage]:
             rel_path=rel_path,
             class_node=node,
             tree=tree,
-            classification=value,
+            classification=classification,
         )
-        for rule in rules.get(value, []):
+        for rule in rules.get(classification, []):
             messages.extend(rule(ctx))
 
     return messages
