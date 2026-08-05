@@ -329,7 +329,7 @@ def make_strided_sdpa_input(
     return tensor.detach().requires_grad_(requires_grad)
 
 
-class TestTransformers(NNTestCase):
+class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
@@ -560,7 +560,7 @@ class TestTransformersCUDA(NNTestCase):
                 )[0]
 
 
-class TestTransformersDevice(NNTestCase):
+class TestTransformersAccelerator(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
@@ -2389,13 +2389,15 @@ def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
     return padded_tensor, last_dim_size
 
 
-class TestSDPA(NNTestCase):
+class TestSDPAGeneric(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
     Summary:
         If you are adding a new test to this class, make sure that it runs
         for both cpu and cuda. If you're test is only applicable to cuda,
-        add it to TestSDPAGpuOnly.
+        add it to TestSDPAAccelerator.
     """
+    hw_classification = HardwareClassification.GENERIC
+
     @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
@@ -2559,8 +2561,9 @@ class TestSDPA(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
-class TestSDPACpuOnly(NNTestCase):
+class TestSDPACPU(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
+    hw_classification = HardwareClassification.CPU
 
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
@@ -2943,7 +2946,7 @@ class TestSDPACpuOnly(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
-class TestSDPAGpuOnly(NNTestCase):
+class TestSDPAAccelerator(NNTestCase):
     """ Used to test GPU only functionality of scaled_dot_product_attention.
     Generalized from TestSDPACudaOnly; CUDA-specific tests remain guarded by
     PLATFORM_SUPPORTS_* gates that are False on non-CUDA accelerators.
@@ -2958,6 +2961,7 @@ class TestSDPAGpuOnly(NNTestCase):
     """
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
@@ -5576,7 +5580,7 @@ class TestSDPAGpuOnly(NNTestCase):
 
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
-    Mostly migrate from TestSDPAGpuOnly in test/test_transformers.py
+    Mostly migrate from TestSDPAAccelerator in test/test_transformers.py
     """
 
 
@@ -5831,7 +5835,7 @@ class TestSDPAXpuOnly(NNTestCase):
         mask_type,
         train,
     ):
-        # Migrate from TestSDPACpuOnly
+        # Migrate from TestSDPACPU
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
@@ -6232,11 +6236,11 @@ if TEST_XPU:
     device_types += ("xpu", )
 
 
-instantiate_device_type_tests(TestTransformersDevice, globals(), only_for=device_types, allow_xpu=True)
+instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAGpuOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
+instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
