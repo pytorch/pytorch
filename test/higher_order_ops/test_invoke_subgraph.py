@@ -3945,6 +3945,109 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_subgraph_reuse_symint_arg(self):
+        """A symint arg must match on its expression, not on object identity.
+
+        Each tensor holds its own SymInt objects, so the same symbol threaded
+        through successive regions arrives as a different object every call.
+        """
+
+        @nested_compile_region
+        def gn(x, n):
+            return x * n
+
+        def fn(x):
+            a = gn(x, x.shape[0])
+            b = gn(a, a.shape[0])
+            return b
+
+        x = torch.randn(8, 4)
+        ref = fn(x)
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            res = compiled(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+        x2 = torch.randn(5, 4)
+        self.assertEqual(fn(x2), compiled(x2))
+
+    def test_subgraph_reuse_transposed_buffer_dynamic(self):
+        """Reuse must work when a region reads a transposed view of a buffer.
+
+        `w.T` is desugared into an aten op traced into the subgraph, so the
+        region only lifts `w` itself. With dynamic shapes the region also lifts
+        the symint for the (specialized) feature dim.
+        """
+
+        class Layer(torch.nn.Module):
+            def __init__(self, d):
+                super().__init__()
+                self.register_buffer("w", torch.randn(d, d))
+
+            @nested_compile_region
+            def forward(self, x):
+                return torch.matmul(x, self.w.T)
+
+        class Model(torch.nn.Module):
+            def __init__(self, d, n):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer(d) for _ in range(n)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        model = Model(8, 3)
+        x = torch.randn(4, 8)
+        ref = model(x)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(model, backend=backend, fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            res = compiled(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+        # A different batch size must not recompile.
+        x2 = torch.randn(9, 8)
+        self.assertEqual(model(x2), compiled(x2))
+
+        self.assertEqual(len(backend.graphs), 1)
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(8)", L_x_: "f32[s77, 8]", L_self_modules_layers_modules_0_buffers_w_: "f32[8, 8]", L_self_modules_layers_modules_1_buffers_w_: "f32[8, 8]", L_self_modules_layers_modules_2_buffers_w_: "f32[8, 8]"):
+        l_x_ = L_x_
+        l_self_modules_layers_modules_0_buffers_w_ = L_self_modules_layers_modules_0_buffers_w_
+        l_self_modules_layers_modules_1_buffers_w_ = L_self_modules_layers_modules_1_buffers_w_
+        l_self_modules_layers_modules_2_buffers_w_ = L_self_modules_layers_modules_2_buffers_w_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_self_modules_layers_modules_0_buffers_w_, s77, s27, l_x_);  subgraph_0 = l_self_modules_layers_modules_0_buffers_w_ = l_x_ = None
+        x: "f32[s77, 8]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_self_modules_layers_modules_1_buffers_w_, s77, s27, x);  subgraph_1 = l_self_modules_layers_modules_1_buffers_w_ = x = None
+        x_1: "f32[s77, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        subgraph_2 = self.subgraph_0
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', l_self_modules_layers_modules_2_buffers_w_, s77, s27, x_1);  subgraph_2 = l_self_modules_layers_modules_2_buffers_w_ = s77 = s27 = x_1 = None
+        x_2: "f32[s77, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        return (x_2,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_self_modules_layers_modules_0_buffers_w_: "f32[8, 8]", s77: "Sym(s77)", s27: "Sym(8)", l_x_: "f32[s77, 8]"):
+            numpy_t: "f32[8, 8]" = torch.ops.aten.numpy_T(l_self_modules_layers_modules_0_buffers_w_);  l_self_modules_layers_modules_0_buffers_w_ = None
+            matmul: "f32[s77, 8]" = torch.matmul(l_x_, numpy_t);  l_x_ = numpy_t = None
+            return (matmul,)
+""",
+            )
+
     def test_subgraph_reuse_different_list_lengths(self):
         """Reuse must be skipped when list args have different lengths.
 
@@ -4285,15 +4388,42 @@ class GraphModule(torch.nn.Module):
         try:
             x = torch.tensor(0)
             ref = fn(x)
+            backend = EagerAndRecordGraphs()
             with self._count_speculate_calls() as count:
-                res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+                res = torch.compile(fn, backend=backend, fullgraph=True)(x)
             self.assertEqual(res, ref)
             # Both calls retrace: the global is rebound every iteration, so
             # GlobalSource lands in both traced_sources and mutated_sources and
-            # no reuse entry is ever saved. Reaching 1 would need the captured
-            # tensor treated as a subgraph input rather than as a source to
-            # re-resolve, since its value differs between the two calls.
+            # no reuse entry is ever saved.
             self.assertEqual(count(), 2)
+            # The captured tensor is lifted as a subgraph input, and the second
+            # trace dedups onto the first graph via are_same_graph_modules, so
+            # the retrace costs Dynamo time but yields one shared subgraph.
+            # Getting to a single trace needs the capture re-read at the new
+            # call site: it is not a user arg, so reuse would re-resolve its
+            # recorded source, and on the second call the right value is an
+            # intermediate that no source names.
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_hidden_: "i64[]"):
+        l_hidden_ = L_hidden_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_hidden_);  subgraph_0 = l_hidden_ = None
+        hidden: "i64[]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
+        hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (hidden, hidden_1)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_hidden_: "i64[]"):
+            add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
+            return (add,)
+""",  # noqa: B950
+            )
         finally:
             _reuse_test_global = None
 
@@ -4321,8 +4451,18 @@ class GraphModule(torch.nn.Module):
             _reuse_test_global = torch.tensor(10)
             ref = fn(x)
             _reuse_test_global = torch.tensor(10)
-            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(res, ref)
+            # The first call saves a reuse entry, but the second call's lookup
+            # rejects it: GlobalSource is in traced_sources and the rebinding
+            # put it in mutated_sources. The global does get lifted as a
+            # subgraph input, so both call sites share one graph module and the
+            # second correctly receives the new tensor -- only the Dynamo trace
+            # is duplicated. Reaching 1 needs the read re-resolved against
+            # side-effect state at the second call site; replaying the saved
+            # source yields the pre-rebinding value, which miscompiles.
+            self.assertEqual(count(), 2)
         finally:
             _reuse_test_global = None
 
