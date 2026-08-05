@@ -1946,6 +1946,9 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
+                if isinstance(ex, unittest.SkipTest):
+                    completion_queue.put(ex)
+                    continue
                 if isinstance(ex, SystemExit):
                     # Get exit code from the process
                     exit_code = getattr(ex, "code", None)
