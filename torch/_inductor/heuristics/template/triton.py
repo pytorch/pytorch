@@ -2748,11 +2748,19 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             # barrier.
             if not (has_two_ctas() and config.triton.enable_template_tma_store):
                 return False
-            # The 2-CTA MMA pairs CTAs across M and halves B along N, so each CTA
-            # needs a full 128x128 MMA tile. Smaller tiles hang on the cluster
-            # barrier rather than failing to compile, which would wedge autotuning,
-            # so only the 256x256 tile is allowed.
-            if block_m != 256 or block_n != 256:
+            # The real constraint is realized SMEM buffer depth <= 2: the cross-CTA
+            # issue barrier is single-slot (phase = iter % 2) with no pipeline-depth
+            # awareness, so a deeper pipeline lets one CTA run ahead of its peer and
+            # deadlock. Realized depth is min(num_stages, what the SMEM budget fits),
+            # so it also moves with BLOCK_K and EPILOGUE_SUBTILE; num_stages <= 2 is a
+            # conservative proxy that avoids replicating the budget math here.
+            if template_kwargs["num_stages"] > 2:
+                return False
+            # 2-CTA halves B along N, and BLOCK_N=64 leaves 32 elements per CTA,
+            # under the 64 the 128-byte swizzle needs. Below BLOCK_M=128 the MMA
+            # lowering falls back to 1-CTA, so those configs only duplicate the
+            # non-2-CTA sweep.
+            if block_m < 128 or block_n < 128:
                 return False
         return True
 
