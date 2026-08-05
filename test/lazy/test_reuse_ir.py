@@ -9,7 +9,12 @@ import torch._lazy.ir_cache
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 torch._lazy.ts_backend.init()
@@ -18,6 +23,8 @@ torch._lazy.config.set_reuse_ir(True)
 
 @unittest.skipIf(IS_WINDOWS, "To be fixed")
 class TestLazyReuseIrDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def testAdd(self, device):
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
