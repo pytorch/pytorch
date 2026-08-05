@@ -316,9 +316,16 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # The device is set here rather than in setUp because _init_pg is the
+        # only hook that runs in the worker processes; setUp runs in the
+        # dispatcher, on rank -1. MemPool and use_mem_pool bind to the current
+        # device, so without this every rank would pool on device 0 while its
+        # tensors live on cuda:rank -- only rank 0 would register anything and
+        # the collective below would hang.
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     def _backend(self):
         # nccl2 bootstraps its communicator on the first collective, and
