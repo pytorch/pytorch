@@ -15,6 +15,11 @@ from torch.distributed.elastic.multiprocessing.errors import (
     record,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class SentinelError(Exception):
@@ -54,7 +59,8 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-class ApiTest(unittest.TestCase):
+class ApiTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -283,3 +289,7 @@ class ApiTest(unittest.TestCase):
         error_msg = str(ex)
         self.assertIn("(SIGSEGV)", error_msg)
         self.assertIn(f"exitcode  : {-signal.SIGSEGV}", error_msg)
+
+
+if __name__ == "__main__":
+    run_tests()
