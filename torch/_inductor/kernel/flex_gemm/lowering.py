@@ -55,6 +55,41 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
+def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
+    graph = graph_module.graph
+    changed = False
+    for node in list(graph.nodes):
+        if node.target not in (
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.baddbmm.default,
+        ):
+            continue
+        bias, mat1, mat2 = node.args[:3]
+        alpha = node.kwargs.get("alpha", 1.0)
+        beta = node.kwargs.get("beta", 1.0)
+        gemm_target = (
+            torch.ops.aten.mm.default
+            if node.target is torch.ops.aten.addmm.default
+            else torch.ops.aten.bmm.default
+        )
+        with graph.inserting_before(node):
+            result = graph.call_function(gemm_target, (mat1, mat2))
+            if alpha != 1:
+                result = graph.call_function(torch.ops.aten.mul.Tensor, (result, alpha))
+            if beta != 0:
+                if beta != 1:
+                    bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
+                result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
+        result.meta = node.meta
+        node.replace_all_uses_with(result)
+        graph.erase_node(node)
+        changed = True
+    if changed:
+        graph.eliminate_dead_code()
+        graph.lint()
+        graph_module.recompile()
+
+
 def flex_gemm_tensor_placeholders(
     graph_module: torch.fx.GraphModule,
 ) -> list[torch.fx.Node]:
@@ -362,7 +397,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
 
-    from torch._inductor.kernel.flex_gemm.epilogue import (
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
@@ -462,7 +497,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     local_reduce_store = (
         None if outputs.local_reduce is None else outputs.local_reduce.store
     )
-    output_meta = outputs.main.meta.get("val")
+    output_meta = outputs.output.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
@@ -658,6 +693,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     if backend == "NVGEMM":
+        decompose_nvgemm_additive_gemm(subgraph.graph_module)
         with config.patch(
             max_autotune=True,
             max_autotune_gemm_backends="NVGEMM",
