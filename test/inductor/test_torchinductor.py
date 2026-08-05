@@ -7845,6 +7845,7 @@ for dtype in (torch.int32, torch.int64):
         # tests element_size > itemsize (complex64 -> float32).
         # This test exercises element_size < itemsize (float32 -> complex64).
         import torch.fx as fx
+
         from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
         graph = fx.Graph()
@@ -7939,6 +7940,7 @@ for dtype in (torch.int32, torch.int64):
         # Non-0-d counterpart of test_view_dtype_0d_smaller_to_larger_element_size.
         # element_size (8) > itemsize (4): complex64 -> float32.
         import torch.fx as fx
+
         from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
         graph = fx.Graph()
@@ -7976,6 +7978,7 @@ for dtype in (torch.int32, torch.int64):
         # Non-0-d counterpart of test_view_dtype_0d_smaller_to_larger_element_size.
         # element_size (4) < itemsize (8): float32 -> complex64.
         import torch.fx as fx
+
         from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
         graph = fx.Graph()
@@ -8015,6 +8018,7 @@ for dtype in (torch.int32, torch.int64):
         # peephole must not fold x * 0 -> 0 (it would drop NaN/Inf when x is not
         # known to be finite). Integer/bool x * 0 is still folded.
         import torch.fx as fx
+
         from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
         for dtype, should_fold in (
@@ -15125,6 +15129,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_halide  # bf16
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
+
         from torch._inductor.codegen.common import boolean_ops
         from torch._inductor.compile_fx import shape_env_from_inputs
         from torch._inductor.debug import DebugContext
