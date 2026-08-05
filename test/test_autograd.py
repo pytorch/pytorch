@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
@@ -15701,6 +15702,23 @@ class TestAutogradStreamSynchronization(TestCase):
 
 
 class TestMultithreadAutograd(TestCase):
+    # Shared preamble for subprocess scripts that need to count autograd
+    # threads via /proc.  Each test concatenates this with its own logic.
+    _AUTOGRAD_THREADS_SCRIPT = """\
+import os
+def autograd_threads():
+    names = []
+    for tid in os.listdir("/proc/self/task"):
+        try:
+            with open(f"/proc/self/task/{tid}/comm") as f:
+                name = f.read().strip()
+            if name.startswith("pt_autograd"):
+                names.append(name)
+        except OSError:
+            pass
+    return names
+"""
+
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
     ):
@@ -16139,32 +16157,27 @@ class TestMultithreadAutograd(TestCase):
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
     @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
     def test_no_device_threads_when_multithreading_disabled(self):
         # Issue #184783: set_multithreading_enabled(False) should prevent
         # autograd device threads from being spawned.
         # We run in a subprocess to ensure a fresh engine state.
-        script = """\
-import os, sys, torch
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, torch
 
+device = torch.accelerator.current_accelerator().type
 torch.autograd.set_multithreading_enabled(False)
-x = torch.ones(100, device="cuda", requires_grad=True)
+x = torch.ones(100, device=device, requires_grad=True)
 (x * 2).sum().backward()
 
-threads = []
-for tid in os.listdir("/proc/self/task"):
-    try:
-        with open(f"/proc/self/task/{tid}/comm") as f:
-            name = f.read().strip()
-        if name.startswith("pt_autograd"):
-            threads.append(name)
-    except OSError:
-        pass
-
+threads = autograd_threads()
 if threads:
     print(f"FAIL: found autograd threads: {threads}", file=sys.stderr)
     sys.exit(1)
 """
+        )
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -16177,33 +16190,26 @@ if threads:
         )
 
     @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
     def test_device_threads_created_on_reenable(self):
         # Verify that disabling multithreading, running backward, then
         # re-enabling actually creates device threads for subsequent calls.
-        script = """\
-import os, sys, threading, torch
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, threading, torch
 from torch.autograd import Function
 
+device = torch.accelerator.current_accelerator().type
 torch.autograd.set_multithreading_enabled(False)
-x = torch.ones(10, device="cuda", requires_grad=True)
+x = torch.ones(10, device=device, requires_grad=True)
 x.mean().backward()
 
-# No threads should exist yet
-threads = []
-for tid in os.listdir("/proc/self/task"):
-    try:
-        with open(f"/proc/self/task/{tid}/comm") as f:
-            name = f.read().strip()
-        if name.startswith("pt_autograd"):
-            threads.append(name)
-    except OSError:
-        pass
+threads = autograd_threads()
 if threads:
     print(f"FAIL phase1: threads exist while disabled: {threads}", file=sys.stderr)
     sys.exit(1)
 
-# Re-enable and run backward again
 torch.autograd.set_multithreading_enabled(True)
 
 exec_threads = []
@@ -16216,28 +16222,19 @@ class RecordThread(Function):
         exec_threads.append(threading.current_thread().name)
         return grad
 
-y = torch.ones(10, device="cuda", requires_grad=True)
+y = torch.ones(10, device=device, requires_grad=True)
 RecordThread.apply(y).sum().backward()
 
-# Device threads should now exist
-threads = []
-for tid in os.listdir("/proc/self/task"):
-    try:
-        with open(f"/proc/self/task/{tid}/comm") as f:
-            name = f.read().strip()
-        if name.startswith("pt_autograd"):
-            threads.append(name)
-    except OSError:
-        pass
+threads = autograd_threads()
 if not threads:
     print("FAIL phase2: no threads after re-enable", file=sys.stderr)
     sys.exit(1)
 
-# Backward should have run on the device thread, not main
 if exec_threads[0] == threading.current_thread().name:
     print("FAIL phase2: backward ran on main thread after re-enable", file=sys.stderr)
     sys.exit(1)
 """
+        )
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -16250,12 +16247,14 @@ if exec_threads[0] == threading.current_thread().name:
         )
 
     @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
     def test_device_threads_default_behavior(self):
-        # Regression test: default multithreading (enabled) still creates
-        # device threads and routes CUDA backward work to them.
-        script = """\
-import os, sys, threading, torch
+        # Regression guard: default multithreading (enabled) still creates
+        # device threads and routes accelerator backward work to them.
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, threading, torch
 from torch.autograd import Function
 
 exec_threads = []
@@ -16268,19 +16267,11 @@ class RecordThread(Function):
         exec_threads.append(threading.current_thread().name)
         return grad
 
-x = torch.ones(10, device="cuda", requires_grad=True)
+device = torch.accelerator.current_accelerator().type
+x = torch.ones(10, device=device, requires_grad=True)
 RecordThread.apply(x).sum().backward()
 
-threads = []
-for tid in os.listdir("/proc/self/task"):
-    try:
-        with open(f"/proc/self/task/{tid}/comm") as f:
-            name = f.read().strip()
-        if name.startswith("pt_autograd"):
-            threads.append(name)
-    except OSError:
-        pass
-if not threads:
+if not autograd_threads():
     print("FAIL: no autograd threads with default settings", file=sys.stderr)
     sys.exit(1)
 
@@ -16288,6 +16279,7 @@ if exec_threads[0] == threading.current_thread().name:
     print("FAIL: backward ran on main thread with default settings", file=sys.stderr)
     sys.exit(1)
 """
+        )
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -16299,52 +16291,49 @@ if exec_threads[0] == threading.current_thread().name:
             f"Default behavior test failed: {result.stderr}",
         )
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_multithreading_disabled_cuda_correctness(self):
-        # Functional correctness: CUDA backward with multithreading disabled
-        # produces correct gradients.
+    def test_multithreading_disabled_gradient_correctness(self):
+        # Gradient correctness on CPU with multithreading disabled.
         with torch.autograd.set_multithreading_enabled(False):
-            x = torch.randn(4, 4, device="cuda", requires_grad=True)
+            x = torch.randn(4, 4, requires_grad=True)
+            y = (x**2).sum()
+            y.backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_multithreading_disabled_accelerator_correctness(self):
+        # Gradient correctness on accelerator with multithreading disabled.
+        device = torch.accelerator.current_accelerator().type
+        with torch.autograd.set_multithreading_enabled(False):
+            x = torch.randn(4, 4, device=device, requires_grad=True)
             y = (x**2).sum()
             y.backward()
             self.assertEqual(x.grad, 2 * x)
 
     @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
     def test_context_manager_deferred_threads(self):
         # Inside the disabled context manager, no device threads should
         # be spawned.  After exiting and running backward, threads appear.
-        script = """\
-import os, sys, torch
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, torch
 
-def autograd_threads():
-    names = []
-    for tid in os.listdir("/proc/self/task"):
-        try:
-            with open(f"/proc/self/task/{tid}/comm") as f:
-                name = f.read().strip()
-            if name.startswith("pt_autograd"):
-                names.append(name)
-        except OSError:
-            pass
-    return names
-
+device = torch.accelerator.current_accelerator().type
 with torch.autograd.set_multithreading_enabled(False):
-    x = torch.ones(10, device="cuda", requires_grad=True)
+    x = torch.ones(10, device=device, requires_grad=True)
     x.mean().backward()
-    threads_inside = autograd_threads()
-    if threads_inside:
-        print(f"FAIL: threads inside context: {threads_inside}", file=sys.stderr)
+    if autograd_threads():
+        print(f"FAIL: threads inside context: {autograd_threads()}", file=sys.stderr)
         sys.exit(1)
 
-# After exiting the context manager, multithreading is re-enabled
-y = torch.ones(10, device="cuda", requires_grad=True)
+y = torch.ones(10, device=device, requires_grad=True)
 y.mean().backward()
-threads_after = autograd_threads()
-if not threads_after:
+if not autograd_threads():
     print("FAIL: no threads after context exit", file=sys.stderr)
     sys.exit(1)
 """
+        )
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -16357,14 +16346,11 @@ if not threads_after:
         )
 
     def test_reentrant_thread_pool_with_multithreading_disabled(self):
-        # Verify that the reentrant thread pool (thread_pool_shared_) works
-        # correctly when multithreading is disabled.  With the PR changes,
-        # thread_pool_shared_ is initialized in the Engine constructor (not
-        # in start_device_threads()), so deep reentrant backward that
-        # exceeds max_recursion_depth_ (MAX_DEPTH=60) triggers
+        # Deep reentrant backward (depth > MAX_DEPTH=60) triggers
         # add_thread_pool_task() which dereferences thread_pool_shared_.
-        # This must not crash and must produce correct gradients.
-        # Uses the same DeepReentrant pattern as test_deep_reentrant.
+        # With the deferred-init change, thread_pool_shared_ is
+        # allocated in the Engine constructor, so this path must work
+        # even when start_device_threads() has been skipped.
         script = """\
 import sys, torch
 from torch.autograd import Function, Variable
@@ -16387,21 +16373,13 @@ class DeepReentrant(Function):
 
 torch.autograd.set_multithreading_enabled(False)
 
-# Use 100 to exceed MAX_DEPTH=60, triggering the reentrant thread pool
 v = torch.tensor(100.0, requires_grad=True)
 DeepReentrant.apply(v).sum().backward()
+assert v.grad is not None and v.grad.item() == 1.0, f"bad gradient: {v.grad}"
 
-if v.grad is None or v.grad.item() != 1.0:
-    print(f"FAIL: incorrect gradient: {v.grad}", file=sys.stderr)
-    sys.exit(1)
-
-# Run again with a different depth to verify thread pool reuse
 v2 = torch.tensor(200.0, requires_grad=True)
 DeepReentrant.apply(v2).sum().backward()
-
-if v2.grad is None or v2.grad.item() != 1.0:
-    print(f"FAIL: incorrect gradient on reuse: {v2.grad}", file=sys.stderr)
-    sys.exit(1)
+assert v2.grad is not None and v2.grad.item() == 1.0, f"bad gradient on reuse: {v2.grad}"
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
