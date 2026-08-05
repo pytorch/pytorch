@@ -39,6 +39,7 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.graph import _BoxedCodeGen
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -3441,16 +3442,15 @@ class <lambda>(torch.nn.Module):
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
-@torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompileDevice(TestCase):
-    @requires_cuda_and_triton
-    def test_return_none(self):
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_return_none(self, device):
         from torch.nn import functional as F
 
         weight = torch.ones(
-            1000, device=GPU_TYPE, dtype=torch.float32, requires_grad=True
+            1000, device=device, dtype=torch.float32, requires_grad=True
         )
-        ones = torch.ones(1000, device=GPU_TYPE, dtype=torch.float32)
+        ones = torch.ones(1000, device=device, dtype=torch.float32)
 
         @nested_compile_region
         def fn(x, train):
@@ -5292,6 +5292,14 @@ class GraphModule(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphCompileDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
