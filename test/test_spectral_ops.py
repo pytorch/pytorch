@@ -12,7 +12,7 @@ import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
-     make_tensor, skipIfTorchDynamo)
+     make_tensor, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
@@ -1562,6 +1562,7 @@ def generate_doc_test(doc_test):
 
 class TestCUFFT(TestCase):
     hw_classification = HardwareClassification.CUDA
+
     @deviceCountAtLeast(1)
     @dtypes(torch.double)
     def test_cufft_plan_cache(self, devices, dtype):

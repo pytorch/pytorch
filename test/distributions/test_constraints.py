@@ -1,10 +1,9 @@
 # Owner(s): ["module: distributions"]
 
-import unittest
 
 import torch
 from torch.distributions import biject_to, constraints, transform_to
-from torch.testing._internal.common_utils import TestCase, run_tests, parametrize
+from torch.testing._internal.common_utils import TestCase, run_tests, parametrize, HardwareClassification
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests
 )
@@ -93,6 +92,7 @@ def build_constraint(constraint_fn, args, device="cpu"):
 
 class TestConstraints(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("constraint_fn, result, value", EXAMPLES)
     def test_constraint(self, device, constraint_fn, result, value):
         t = torch.tensor(value, dtype=torch.double, device=device)

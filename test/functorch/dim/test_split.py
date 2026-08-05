@@ -453,6 +453,7 @@ class TestSplit(TestCase):
 
 class TestSplitDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
     def test_device_handling(self, device):
         """Test split behavior with different devices."""
         if torch.accelerator.is_available():
