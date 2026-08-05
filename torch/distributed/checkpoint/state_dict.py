@@ -863,27 +863,34 @@ def _unflatten_optim_state_dict(
                 if not param.requires_grad:
                     continue
 
-                # Reconstruct state for this parameter
-                # pyrefly: ignore [unsupported-operation]
-                state[fqn] = {}
-                for state_name in optim.state[param]:
+                # Reconstruct state for this parameter.
+                param_state_names = optim.state[param]
+                if not param_state_names:
+                    continue
+
+                param_state: DictValueType = {}
+                for state_name in param_state_names:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
-                    if flattened_state_key not in state_dict:
-                        # Try to reconstruct the value
-                        reconstructed_value = _reconstruct_nested_dict(
-                            flattened_state_key, state_dict
-                        )
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = (
-                            reconstructed_value
-                        )
-                    else:
+                    if flattened_state_key in state_dict:
                         # Existing keys mean no nesting, directly use the value.
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = state_dict[
-                            flattened_state_key
-                        ]
+                        param_state[state_name] = state_dict[flattened_state_key]
+                        continue
+
+                    reconstructed_value = _reconstruct_nested_dict(
+                        flattened_state_key, state_dict
+                    )
+                    if reconstructed_value:
+                        param_state[state_name] = reconstructed_value
+
+                if param_state:
+                    state[fqn] = param_state
+                elif info.strict:
+                    raise RuntimeError(
+                        f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                        "The parameter requires gradients but has no saved optimizer state. "
+                        "To load anyway, use StateDictOptions(strict=False)."
+                    )
 
         first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
         for k in param_group:
