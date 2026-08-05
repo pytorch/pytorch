@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 import os
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -44,70 +42,18 @@ class TestFlyDSLTemplate(TestCase):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIn("flydsl._mlir", reason)
 
-    def test_runtime_unavailable_when_library_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            package_spec = SimpleNamespace(submodule_search_locations=["package"])
-            mlir_spec = SimpleNamespace(
-                submodule_search_locations=[str(Path(tmp) / "_mlir")],
-                origin=None,
-            )
-            with (
-                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
-                mock.patch.object(
-                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
-                ),
-            ):
-                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
-        self.assertIn("runtime shared library", reason)
-
-    def test_runtime_unavailable_when_ldd_dependency_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            mlir_path = Path(tmp) / "_mlir"
-            runtime_so = mlir_path / "_mlir_libs" / "libfly_jit_runtime.so"
-            runtime_so.parent.mkdir(parents=True)
-            runtime_so.touch()
-            package_spec = SimpleNamespace(submodule_search_locations=["package"])
-            mlir_spec = SimpleNamespace(
-                submodule_search_locations=[str(mlir_path)],
-                origin=None,
-            )
-            ldd = SimpleNamespace(
-                returncode=0,
-                stdout="libdependency.so => not found",
-                stderr="",
-            )
-            with (
-                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
-                mock.patch.object(
-                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
-                ),
-                mock.patch.object(flydsl_utils, "system", return_value="Linux"),
-                mock.patch.object(flydsl_utils, "run", return_value=ldd),
-            ):
-                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
-        self.assertIn("unresolved", reason)
-
-    def test_runtime_uses_resolved_mlir_location(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            mlir_path = Path(tmp) / "resolved" / "_mlir"
-            runtime_so = mlir_path / "_mlir_libs" / "libfly_jit_runtime.so"
-            runtime_so.parent.mkdir(parents=True)
-            runtime_so.touch()
-            package_spec = SimpleNamespace(submodule_search_locations=["first"])
-            mlir_spec = SimpleNamespace(
-                submodule_search_locations=[str(mlir_path)],
-                origin=None,
-            )
-            ldd = SimpleNamespace(returncode=0, stdout="", stderr="")
-            with (
-                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
-                mock.patch.object(
-                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
-                ),
-                mock.patch.object(flydsl_utils, "system", return_value="Linux"),
-                mock.patch.object(flydsl_utils, "run", return_value=ldd),
-            ):
-                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+    def test_runtime_available_for_supported_version(self):
+        package_spec = SimpleNamespace(submodule_search_locations=["package"])
+        with (
+            mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+            mock.patch.object(
+                flydsl_utils, "_pathfinder_find_spec", return_value=SimpleNamespace()
+            ),
+            mock.patch.object(
+                flydsl_utils, "_distribution_version", return_value="0.3.0.dev1"
+            ),
+        ):
+            reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIsNone(reason)
 
     def test_unavailable_runtime_declines_choice(self):
