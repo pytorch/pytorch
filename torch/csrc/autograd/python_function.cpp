@@ -1806,8 +1806,8 @@ PyObject* THPFunction_apply(
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      THPObjectPtr result(
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }
