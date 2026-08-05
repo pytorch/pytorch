@@ -55,12 +55,20 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
   fi
+
+  CONDA_CHANNEL_ARGS=""
+  if [[ $PYTHON_DEV_CHANNEL == "1" ]]
+  then
+    CONDA_CHANNEL_ARGS="-c conda-forge/label/python_dev -c conda-forge/label/python_rc"
+  fi
+
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   # NB: pip is no longer pulled in transitively by conda-forge's python
   # package, so request it explicitly. Without it, `python3 -m pip` in the
   # env fails and `conda run -n env pip` silently falls back to base.
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
+             ${CONDA_CHANNEL_ARGS} \
              ${PYTHON_DEP} \
              ${SYSROOT_DEP} \
              pip \
@@ -89,6 +97,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Needs to be installed here so pip can build 3.14t wheels
   conda_install cmake=3.31.6
 
+  # 3.15 build deps
+  conda_install libxml2-devel libxslt zlib
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
