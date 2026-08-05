@@ -41,6 +41,7 @@ static_assert(
 // Outer-dim (non-innermost) routing thresholds, phrased in the
 // [outer_size, dim_size, inner_size] view of the input (dim reduced).
 C10_METAL_CONSTEXPR uint32_t OUTER_SMALL_DIM_MAX_SIZE = 256;
+C10_METAL_CONSTEXPR uint32_t NARROW_BATCHED_MIN_DIM_SIZE = 128;
 C10_METAL_CONSTEXPR uint32_t NARROW_SPLIT_ELEMS_PER_TG = 8192;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MIN_DIM_SIZE = 4096;
 C10_METAL_CONSTEXPR uint32_t OUTER_SPLIT_MIN_TGS = 32;
