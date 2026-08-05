@@ -96,14 +96,6 @@ case ${image} in
             if [[ "$GPU_ARCH_VERSION" == *"7.1"* ]]; then
                 GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
             fi
-            # we want the patch version of 7.0 instead
-            if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
-                GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
-            fi
-            # we want the patch version of 6.4 instead
-            if [[ "$GPU_ARCH_VERSION" == *"6.4"* ]]; then
-                GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.4"
-            fi
             TARGET=rocm_final_legacy
             GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
             # Legacy images also cover the older gfx900/gfx906 targets.
