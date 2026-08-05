@@ -154,7 +154,7 @@ class TestFlyDSLCache(TestCase):
 
         self.assertEqual(results, {"first": "first", "second": "second"})
 
-    def test_cache_clear_during_compile_resets_counters(self):
+    def test_cache_clear_during_compile_does_not_repopulate(self):
         started = threading.Event()
         release = threading.Event()
         result = []
@@ -172,13 +172,12 @@ class TestFlyDSLCache(TestCase):
         release.set()
         worker.join()
 
-        # The in-flight caller gets its result and stores it, so the clear does
-        # not guarantee an empty cache -- only that the counters restart and
-        # that nothing is left waiting behind a stale key lock.
+        # The in-flight caller gets its result, but a compile started before the
+        # clear must not repopulate the cache.
         self.assertEqual(result, ["compiled"])
         info = compile_fn.cache_info()
         self.assertEqual((info.hits, info.misses), (0, 0))
-        self.assertEqual(info.currsize, 1)
+        self.assertEqual(info.currsize, 0)
 
     def test_cache_clear_drops_key_locks(self):
         @flydsl_jit_cache

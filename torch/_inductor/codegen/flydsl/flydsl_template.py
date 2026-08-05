@@ -68,7 +68,8 @@ class FlyDSLTemplate(KernelTemplate):
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         template_kwargs = dict(kwargs)
-        kernel_name = f"flydsl_{self.name}_{next(self.index_counter)}"
+        benchmark_kernel_name = f"flydsl_{self.name}"
+        choice_name = f"{benchmark_kernel_name}_{next(self.index_counter)}"
 
         if self.template is None:
             raise RuntimeError("Template compilation failed (Jinja2 required)")
@@ -78,7 +79,7 @@ class FlyDSLTemplate(KernelTemplate):
             V.graph, "get_dtype", KernelTemplate._fake_get_dtype(output_node)
         ):
             kernel = self.kernel_type(
-                kernel_name=kernel_name,
+                kernel_name=benchmark_kernel_name,
                 input_nodes=input_nodes,
                 output_node=output_node,
             )
@@ -110,7 +111,7 @@ class FlyDSLTemplate(KernelTemplate):
             )
 
             bmreq = FlyDSLBenchmarkRequest(
-                kernel_name=kernel_name,
+                kernel_name=benchmark_kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
                 output_tensor_meta=TensorMeta.from_irnodes(output_node),
                 extra_args=extra_args,
@@ -132,7 +133,7 @@ class FlyDSLTemplate(KernelTemplate):
 
             caller_type = self.caller_type or FlyDSLTemplateCaller
             return caller_type(
-                name=kernel_name,
+                name=choice_name,
                 input_nodes=input_nodes,
                 layout=layout,
                 make_kernel_render=make_kernel_render,
