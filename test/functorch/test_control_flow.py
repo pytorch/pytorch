@@ -10166,9 +10166,13 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
         )
         self.assertEqual(out, exp)
-        # combine_mode="pointwise" is only lowered on CUDA, so skip the compile
-        # check on CPU. All the pointwise vmap tests below skip compile for the
-        # same reason.
+        # Only generic mode is compile-checked here. Generic never builds a HOP
+        # (it lowers to the pure-Python scan recursion), so vmap composes with
+        # compile cleanly. pointwise + vmap + compile is unsupported: Inductor's
+        # associative_scan pointwise lowering assumes a flat combine graph with
+        # 2 * len(xs) inputs and cannot handle the batched combine subgraph that
+        # vmap produces. See test_associative_scan_in_vmap_pointwise_compile_xfail.
+        # The pointwise vmap tests below skip compile for the same reason.
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
@@ -10308,6 +10312,25 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, x)
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
+
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_associative_scan_in_vmap_pointwise_compile_xfail(self):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
