@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import logging
-from typing import Any
 from typing_extensions import override
 
 import torch
@@ -22,6 +21,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_needs_physical_callbacks,
 )
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+from torch._inductor.kernel.gemm_epilogue_analysis import GemmOutputLocalReducePlan
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
 
@@ -41,16 +41,19 @@ class FlexGemmEpilogueLocalReduceConfig:
     @classmethod
     def from_output_plan(
         cls,
-        local_reduce: Any | None,
+        local_reduce: GemmOutputLocalReducePlan | None,
         out_index: int | None,
         *,
         swap_ab: bool = False,
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Translate lowering's output-consumer plan into template metadata."""
+        """Bind analyzed local-reduction consumers to FlexGEMM's runtime ABI."""
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            geometry=local_reduce.match.geometry,
+            geometry=FlexGemmLocalReduceGeometry(
+                local_reduce.match.geometry.group,
+                local_reduce.match.geometry.axis,
+            ),
             out_index=out_index,
             feeds_main=local_reduce.feeds_main,
             swap_ab=swap_ab,
