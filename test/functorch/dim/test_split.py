@@ -3,14 +3,14 @@ import unittest
 
 import torch
 from functorch.dim import Dim, dims, Tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
-    TestCase, HardwareClassification,
+    TestCase,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests
-)
+
 
 
 class TestSplit(TestCase):

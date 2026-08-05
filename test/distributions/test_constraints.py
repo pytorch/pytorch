@@ -3,9 +3,12 @@
 
 import torch
 from torch.distributions import biject_to, constraints, transform_to
-from torch.testing._internal.common_utils import TestCase, run_tests, parametrize, HardwareClassification
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+HardwareClassification,
+parametrize,
+run_tests,
+TestCase,
 )
 
 
@@ -87,7 +90,11 @@ def build_constraint(constraint_fn, args, device="cpu"):
     if not args:
         return constraint_fn
     return constraint_fn(
-        *(torch.tensor(x, dtype=torch.double, device=device) if isinstance(x, list) else x for x in args)
+        *(torch.tensor(x, dtype=torch.double, device=device)
+          if isinstance(x, list)
+          else x
+          for x in args
+        )
     )
 
 class TestConstraints(TestCase):
