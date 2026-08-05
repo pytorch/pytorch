@@ -53,6 +53,8 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/op
 RUN ln -sf /opt/python/cp310-cp310/bin/python3 /usr/local/bin/python3
 
 # Build a newer version of libgomp than that supported in Almalinux 8.
+# Both CPU and CUDA final stages inherit this base, and wheel repair bundles
+# this GCC 13.3 libgomp into AArch64 wheels.
 COPY ./common/install_libgomp.sh install_libgomp.sh
 RUN bash ./install_libgomp.sh && rm -f install_libgomp.sh
 
