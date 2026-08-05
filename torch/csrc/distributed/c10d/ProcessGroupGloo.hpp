@@ -84,7 +84,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-    std::chrono::milliseconds getTimeout() const;
+    std::chrono::milliseconds getTimeout() const override;
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {

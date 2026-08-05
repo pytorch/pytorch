@@ -223,6 +223,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     return true;
   }
+  bool supportsShrinking() const override {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+    return true;
+#else
+    return false;
+#endif
+  }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
 
@@ -234,9 +241,15 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const c10::intrusive_ptr<::c10d::Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
+  c10::intrusive_ptr<::c10d::Backend> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0,
+      const c10::intrusive_ptr<::c10d::Backend::Options>& opts_override =
+          nullptr) override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -415,10 +428,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void init(at::Device device);
   void finalize();
   void initNcclResources();
-  // Adopt a communicator created by ncclCommSplit and bring this backend to the
-  // INITIALIZED state, sharing the parent's NcclApi (port of TorchCommNCCL's
-  // split() child construction).
-  void initFromSplitComm(
+  // Adopt a child communicator and bring this backend to the INITIALIZED state,
+  // sharing the parent's NcclApi.
+  void initFromComm(
       ncclComm_t comm,
       at::Device device,
       std::shared_ptr<NcclApi> nccl_api);
@@ -519,11 +531,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   RedOpRAII getNcclReduceOp(
       const ::c10d::ReduceOp& op,
       ncclComm_t comm,
-      const ncclDataType_t dataType);
+      const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
+  applyEphemeralTimeout(std::chrono::milliseconds timeout);
+  void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
   void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
@@ -588,6 +603,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool abort_process_on_timeout_or_error_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  std::mutex ephemeral_timeout_mutex_;
+  std::chrono::milliseconds ephemeral_timeout_active_{0};
+  std::chrono::milliseconds ephemeral_timeout_inflight_{0};
 
   // Identifies the current communicator generation in the reconfigure regime;
   // -1 until the first reconfigure(). Baked into the reconfigure handle so
