@@ -115,11 +115,9 @@ def _version_is_ok() -> bool:
 def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the FlyDSL arch string for ``device_index``.
 
-    Shared so the eager overrides and the Inductor FlyDSL templates cannot
-    disagree about what they are compiling for -- they run in different
-    processes and only one of them can import flydsl, so neither can rely on
-    the runtime's own resolver. Deliberately reads only the environment and
-    torch's device properties.
+    Reads only the environment and torch's device properties: this decides what
+    the kernel is compiled for, and it runs in processes that cannot import
+    flydsl, so it cannot defer to the runtime's own resolver.
     """
     env = _environ.get("FLYDSL_GPU_ARCH")
     if env:

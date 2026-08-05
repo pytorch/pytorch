@@ -276,6 +276,21 @@ def _instrument_cached_compile(
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Shared implementation behind the per-DSL compile instrumentation.
+
+    Args:
+        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
+        dsl: DSL name reported in the event, e.g. ``"cutedsl"``.
+        key_fn: Optional callable with the wrapped function's signature
+            returning a short string describing the compile key for logs.
+            Defaults to a repr of the args/kwargs.
+
+    Returns a decorator. The decorated function behaves identically to the
+    original (same return value, same caching); it only adds a log line and
+    a tlparse artifact per call. Errors raised by the wrapped compile are
+    timed, reported with ``outcome="error"``, and re-raised unchanged.
+    """
+
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
         wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn))
         # Forward jit_cache's bespoke attributes (functools.wraps doesn't copy
@@ -296,8 +311,8 @@ def instrument_cutedsl_compile(
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
 
-    The decorated function preserves the wrapped function's return value,
-    caching interface, and exceptions while reporting compile events.
+    See :func:`_instrument_cached_compile` for the arguments and for what the
+    returned decorator guarantees.
     """
 
     return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn)
@@ -310,7 +325,7 @@ def instrument_flydsl_compile(
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a FlyDSL (``@flydsl_jit_cache``-decorated) compile function.
 
-    Same contract as :func:`instrument_cutedsl_compile`; only the DSL name
+    Same contract as :func:`_instrument_cached_compile`; only the DSL name
     reported in the event differs.
     """
 

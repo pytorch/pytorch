@@ -21,12 +21,20 @@ class TestFlyDSLRuntimeProbe(TestCase):
     reasons it can decline.
     """
 
-    # The module binds these at import time (``from ... import x as _x``), so
-    # they have to be patched on the module, not on importlib.
+    # Both names are bound at import time (``from ... import x as _x``), so
+    # patch them on the module. In particular _PathFinder is replaced whole
+    # rather than having its find_spec patched: it *is*
+    # importlib.machinery.PathFinder, so patching that method would answer
+    # "not found" for every sys.path import in the process, and any lazy
+    # import inside the block would fail with an unrelated ModuleNotFoundError.
     def _with_specs(self, package_spec, mlir_spec=None):
         return (
             patch.object(flydsl_utils, "_find_spec", return_value=package_spec),
-            patch.object(flydsl_utils._PathFinder, "find_spec", return_value=mlir_spec),
+            patch.object(
+                flydsl_utils,
+                "_PathFinder",
+                SimpleNamespace(find_spec=lambda *args, **kwargs: mlir_spec),
+            ),
         )
 
     def test_missing_package(self):
