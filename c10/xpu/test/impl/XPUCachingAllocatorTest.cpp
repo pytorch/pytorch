@@ -199,6 +199,7 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
 
   c10::xpu::XPUCachingAllocator::raw_delete(ptr);
   c10::xpu::XPUCachingAllocator::emptyCache();
+  c10::xpu::XPUCachingAllocator::setUseOnOOM(device, pool_id, false);
   c10::xpu::XPUCachingAllocator::releasePool(device, pool_id);
 }
 

@@ -1260,11 +1260,7 @@ class DeviceCachingAllocator {
     // if already trying to use a mempool, then just oom
     bool active_pool = params.pool->owner_PrivatePool;
     if (!active_pool) {
-      // Copy the set to avoid iterator invalidation: releasePool (called below)
-      // erases from use_on_oom_pools.
-      std::vector<MempoolId_t> pools(
-          use_on_oom_pools.begin(), use_on_oom_pools.end());
-      for (MempoolId_t mempool_id : pools) {
+      for (MempoolId_t mempool_id : use_on_oom_pools) {
         auto tid = std::this_thread::get_id();
         auto filter = [tid](sycl::queue*) {
           return std::this_thread::get_id() == tid;
@@ -1893,7 +1889,7 @@ class DeviceCachingAllocator {
   }
 
   void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
-    // Enable or disable used on OOM for this pool. Also cleared by releasePool.
+    // Enable or disable used on OOM for this pool.
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (use_on_oom) {
       use_on_oom_pools.insert(mempool_id);
