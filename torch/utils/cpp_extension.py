@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import hashlib
 import importlib
 import importlib.abc
 import importlib.util
@@ -2449,6 +2450,16 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
+    # setuptools hands every extension of a project the same output directory,
+    # so writing build.ninja (and letting ninja keep .ninja_log / .ninja_deps
+    # beside it) straight into build_directory makes concurrent `build_ext -j`
+    # invocations clobber one another. Keep each invocation's bookkeeping in its
+    # own subdirectory, keyed on the objects it produces so rebuilds still reuse
+    # it. Every path written into the file is absolute, so relocating the file
+    # does not change what gets built.
+    build_directory = os.path.join(
+        build_directory,
+        '.ninja-' + hashlib.sha256('\n'.join(objects).encode()).hexdigest()[:16])
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)

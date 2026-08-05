@@ -10,6 +10,7 @@ import string
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import warnings
 
@@ -1637,6 +1638,92 @@ except RuntimeError as e:
                         "C++ CapturedTraceback:",
                         error_message,
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
+                    )
+
+
+class TestCppExtensionNinjaIsolation(common.TestCase):
+    """setuptools gives every extension of a project the same output directory."""
+
+    def _write_sources(self, root, name, count=4):
+        directory = os.path.join(root, name)
+        os.makedirs(directory)
+        sources = []
+        for i in range(count):
+            path = os.path.join(directory, f"{name}_{i}.cpp")
+            with open(path, "w") as source:
+                source.write(
+                    "#include <map>\n"
+                    "#include <string>\n"
+                    f"int {name}_{i}() {{\n"
+                    "  std::map<std::string, int> m;\n"
+                    "  for (int k = 0; k < 128; ++k) {\n"
+                    "    m[std::to_string(k)] = k;\n"
+                    "  }\n"
+                    "  return static_cast<int>(m.size());\n"
+                    "}\n"
+                )
+            sources.append(path)
+        return sources
+
+    def test_parallel_builds_sharing_an_output_directory(self):
+        torch.utils.cpp_extension.verify_ninja_availability()
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+
+            plan = {}
+            for name in [f"ext{i}" for i in range(4)]:
+                sources = self._write_sources(root, name)
+                os.makedirs(os.path.join(shared, name))
+                plan[name] = (
+                    sources,
+                    [
+                        os.path.join(
+                            shared,
+                            name,
+                            os.path.basename(s)[: -len(".cpp")] + obj_suffix,
+                        )
+                        for s in sources
+                    ],
+                )
+
+            errors = {}
+
+            def build(name):
+                sources, objects = plan[name]
+                try:
+                    torch.utils.cpp_extension._write_ninja_file_and_compile_objects(
+                        sources=sources,
+                        objects=objects,
+                        cflags=[],
+                        post_cflags=[],
+                        cuda_cflags=None,
+                        cuda_post_cflags=None,
+                        cuda_dlink_post_cflags=None,
+                        sycl_cflags=None,
+                        sycl_post_cflags=None,
+                        sycl_dlink_post_cflags=None,
+                        build_directory=shared,
+                        verbose=False,
+                        with_cuda=False,
+                        with_sycl=False,
+                    )
+                except Exception as error:
+                    errors[name] = error
+
+            threads = [threading.Thread(target=build, args=(name,)) for name in plan]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, {})
+            for name, (_, objects) in plan.items():
+                for obj in objects:
+                    self.assertTrue(
+                        os.path.exists(obj),
+                        f"compiling {name} reported success but produced no {obj}",
                     )
 
 
