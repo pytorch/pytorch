@@ -29,6 +29,7 @@ from torch.profiler._cupti.records import (
     CudaEvent,
     ExternalCorrelation,
     Field,
+    GraphHostNode,
     Kernel,
     Memcpy,
     Memcpy2,
@@ -142,6 +143,21 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.FLAGS,
         Memset.CHANNEL_ID,
         Memset.CHANNEL_TYPE,
+    },
+    # Graph host nodes run a CPU callback as a CUDA-graph node; CUPTI reports them with a
+    # graph_node_id + start/end on the stream that waits for them, so they render like the
+    # other graphed GPU ops (attributed via the graph annotation resolver).
+    ActivityKind.GRAPH_HOST_NODE: {
+        GraphHostNode.START,
+        GraphHostNode.END,
+        GraphHostNode.DEVICE_ID,
+        GraphHostNode.CONTEXT_ID,
+        GraphHostNode.STREAM_ID,
+        GraphHostNode.CORRELATION_ID,
+        GraphHostNode.GRAPH_NODE_ID,
+        GraphHostNode.GRAPH_ID,
+        GraphHostNode.PROCESS_ID,
+        GraphHostNode.THREAD_ID,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -347,6 +363,11 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             ):
                 frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
                     self._lane_resolver, frame
+                )
+            # Host nodes: attach the recorded callback name/address (see _resolve_host_fn_columns).
+            if kind_str == "graph_host_node" and self._graph_host_fns:
+                frame["host_fn"], frame["host_fn_addr"] = _resolve_host_fn_columns(
+                    self._graph_host_fns, frame
                 )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
@@ -782,7 +803,13 @@ def _window_graph_deps(
     if resolver is None:
         return {}
     present: set[int] = set()
-    for kind_str in ("kernel", "gpu_memcpy", "gpu_memset", "graph_event_node"):
+    for kind_str in (
+        "kernel",
+        "gpu_memcpy",
+        "gpu_memset",
+        "graph_event_node",
+        "graph_host_node",
+    ):
         c = columns.get(kind_str)
         if c is not None and "graph_node_id" in c:
             present.update(int(g) for g in np.unique(c["graph_node_id"]) if g)
@@ -814,6 +841,21 @@ def _resolve_annotation_column(resolver, gnid: Any) -> Any:
     for i, g in enumerate(gnid.tolist()):
         out[i] = resolver(g)
     return out
+
+
+def _resolve_host_fn_columns(host_fns: dict[int, Any], frame: dict[str, Any]) -> Any:
+    """Per-row (host_fn name, host_fn addr) for host-node rows, from the recorder's
+    graph_node_id -> (name, addr) map (recorded at graph instantiate; host nodes carry no
+    name in the CUPTI record). name is None and addr 0 for nodes not in the map."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    names = np.full(n, None, dtype=object)
+    addrs = np.zeros(n, dtype=np.int64)
+    for i, g in enumerate(gnid.tolist()):
+        entry = host_fns.get(g)
+        if entry is not None:
+            names[i], addrs[i] = entry
+    return names, addrs
 
 
 def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
@@ -939,6 +981,23 @@ def _memset_columns(cols, convert, resolver):
     }
 
 
+def _graph_host_node_columns(cols, convert, resolver):
+    gnid = cols[GraphHostNode.GRAPH_NODE_ID.id].astype(np.int64)
+    return {
+        "start_ns": convert(cols[GraphHostNode.START.id]),
+        "end_ns": convert(cols[GraphHostNode.END.id]),
+        "device_id": cols[GraphHostNode.DEVICE_ID.id].astype(np.int64),
+        "context_id": cols[GraphHostNode.CONTEXT_ID.id].astype(np.int64),
+        "stream_id": cols[GraphHostNode.STREAM_ID.id].astype(np.int64),
+        "correlation_id": cols[GraphHostNode.CORRELATION_ID.id].astype(np.int64),
+        "graph_node_id": gnid,
+        "graph_id": cols[GraphHostNode.GRAPH_ID.id].astype(np.int64),
+        "annotation": _resolve_annotation_column(resolver, gnid),
+        "process_id": cols[GraphHostNode.PROCESS_ID.id].astype(np.int64),
+        "thread_id": cols[GraphHostNode.THREAD_ID.id].astype(np.int64),
+    }
+
+
 def _api_columns(cols, convert, resolver):
     del resolver
     return {
@@ -1017,6 +1076,11 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.MEMCPY): ("gpu_memcpy", _memcpy_columns, True),
     int(ActivityKind.MEMCPY2): ("gpu_memcpy", _memcpy2_columns, True),
     int(ActivityKind.MEMSET): ("gpu_memset", _memset_columns, True),
+    int(ActivityKind.GRAPH_HOST_NODE): (
+        "graph_host_node",
+        _graph_host_node_columns,
+        True,
+    ),
     int(ActivityKind.RUNTIME): ("cuda_runtime", _api_columns, True),
     int(ActivityKind.DRIVER): ("cuda_driver", _api_columns, True),
     int(ActivityKind.EXTERNAL_CORRELATION): (

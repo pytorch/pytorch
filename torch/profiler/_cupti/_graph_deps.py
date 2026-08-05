@@ -56,6 +56,9 @@ class _GraphDependencyRecorder:
         # the rendered EventRecord span with the event it records -- which, together with the
         # node->node dependency arrows, shows what downstream nodes wait on (see get_graph_data).
         self.event_record_events: dict[int, int] = {}
+        # graph_node_id -> (host_fn_name, host_fn_addr) for host nodes, recorded in the same
+        # instantiate pass (host nodes carry no name in the CUPTI record; see get_graph_data).
+        self.host_fns: dict[int, tuple[str | None, int]] = {}
         self._handle: Any = None
 
     def arm(self) -> None:
@@ -69,7 +72,7 @@ class _GraphDependencyRecorder:
     def _on_instantiate(self, torch_cuda_graph: Any) -> None:
         # We hold the live graph here, so get_graph_data() works during instantiate()
         # for both keep_graph modes (the template is destroyed only afterwards). Raises
-        # when cuda.bindings / a recent driver is unavailable -- degrade to no edges.
+        # when cuda.bindings / a recent driver is unavailable -- degrade to no records.
         try:
             nodes = torch_cuda_graph.get_graph_data()["nodes"]
         except (RuntimeError, AttributeError, KeyError):
@@ -84,13 +87,25 @@ class _GraphDependencyRecorder:
             for n in nodes
             if n["node_type"] == "event_record" and n["event_ptr"]
         }
-        if not recorded and not events:
+        host = {
+            n["tools_id"]: (n["host_fn_name"], n["host_fn_addr"])
+            for n in nodes
+            if n["node_type"] == "host"
+        }
+        if not recorded and not events and not host:
             return
         self.deps.update(recorded)
         self.event_record_events.update(events)
+        self.host_fns.update(host)
         # Track the exec graph id (tools_id >> 32, shared by all the graph's nodes) so the
         # observer's graph-destroy hook can purge this graph's entries on destruction.
-        any_id = next(iter(recorded)) if recorded else next(iter(events))
+        any_id = (
+            next(iter(recorded))
+            if recorded
+            else next(iter(events))
+            if events
+            else next(iter(host))
+        )
         torch_cuda_graph._recorded_exec_ids.add(any_id >> 32)
 
 
