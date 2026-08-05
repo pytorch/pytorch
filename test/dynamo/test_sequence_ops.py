@@ -3,6 +3,7 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import sys
 import unittest
 
 import torch
@@ -1086,11 +1087,16 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_subclass_list_no_new_rejects_init_kwargs(self):
-        # Without a __new__ override, list.__init__ still rejects keyword args.
+        # Without a __new__ override, list.__init__ rejects keyword args on
+        # 3.11+ (the tp_new check was added when it moved to argument clinic);
+        # 3.10 tolerates them.
         class L(list):
             pass
 
-        with self.assertRaises(TypeError):
+        if sys.version_info >= (3, 11):
+            with self.assertRaises(TypeError):
+                L([1, 2], newarg=3)
+        else:
             L([1, 2], newarg=3)
 
     # -- mutation visibility --
