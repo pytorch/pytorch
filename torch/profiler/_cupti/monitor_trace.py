@@ -227,6 +227,14 @@ def _graph_dependency_flow_events(
     cross replays; each edge is one flow from the predecessor's end to the successor's start.
     Empty without deps.
 
+    KNOWN LIMITATION (CUPTI bug, reported to NVIDIA): a CUDA-graph host node keeps the launching
+    cuGraphLaunch's correlationId only on a replay enqueued after the previous replay finished;
+    a replay queued behind an in-flight one reports correlationId 0 instead (kernel/memcpy/memset
+    nodes of the same graph always keep theirs). Since a profiler cannot synchronize between a
+    workload's replays, the id is unrecoverable, and those rows collapse into a correlationId-0
+    bucket holding no other node of their replay -- so a host node's arrows draw only on the
+    replays whose id survived.
+
     NOTE: under cross-stream clock skew the recorded predecessor end can land after the successor
     start, and chrome/Perfetto JSON flows cannot render backwards in time, so such an arrow may
     misrender (or bind to the wrong slice when spans overlap on one lane). The .pftrace export
@@ -368,7 +376,13 @@ def _trace_window_entries(
     # Each kind builds X events from one dict literal per row over the bulk-converted
     # columns; graph-id/node and annotation keys (absent for eager kernels) are patched on
     # only when the column carries them.
-    for ks in ("kernel", "gpu_memcpy", "gpu_memset", "graph_event_node"):
+    for ks in (
+        "kernel",
+        "gpu_memcpy",
+        "gpu_memset",
+        "graph_event_node",
+        "graph_host_node",
+    ):
         c = _col(ks)
         if c is None:
             continue
@@ -516,6 +530,33 @@ def _trace_window_entries(
                 }
                 for i in range(n)
             ]
+        else:
+            # graph_host_node: a CPU callback run as a CUDA-graph node. Rendered on the
+            # waiting stream's lane like the other graphed ops; graph id / node / annotation
+            # and the recorded callback name/address are patched on below (host nodes always
+            # carry a graph_node_id).
+            pid_l = c["process_id"].tolist()
+            htid_l = c["thread_id"].tolist()
+            events = [
+                {
+                    "ph": "X",
+                    "cat": "graph_host_node",
+                    "name": "HostNode",
+                    "pid": dev_l[i],
+                    "tid": tid_l[i],
+                    "ts": ts_l[i],
+                    "dur": dur_l[i],
+                    "args": {
+                        "device": dev_l[i],
+                        "context": ctx_l[i],
+                        "stream": str_l[i],
+                        "correlation": corr_l[i],
+                        "host process": pid_l[i],
+                        "host thread": htid_l[i],
+                    },
+                }
+                for i in range(n)
+            ]
         # Graph ids, annotations, and the comms metadata blob are absent for eager kernels;
         # patch them on only when the column has any. The metadata blob (collective
         # descriptor JSON) is spread into args so its fields show up in the chrome trace.
@@ -524,6 +565,12 @@ def _trace_window_entries(
         ann_l = c["annotation"].tolist()
         meta_col = c.get("metadata")
         meta_l = meta_col.tolist() if meta_col is not None else None
+        # Host-node callback name/address (resolved at graph instantiate; the CUPTI record
+        # carries no fn field). Present only on the graph_host_node column group.
+        fn_col = c.get("host_fn")
+        fn_l = fn_col.tolist() if fn_col is not None else None
+        addr_col = c.get("host_fn_addr")
+        addr_l = addr_col.tolist() if addr_col is not None else None
         # Pluggable lane assignment: a graph lane resolver (if installed) supplies per-op
         # (logical_lane, lane_name) columns; a graphed op whose logical lane differs from
         # its CUDA stream is moved onto that lane below. CUPTI reports graph-replay ops on
@@ -548,6 +595,7 @@ def _trace_window_entries(
             or any(ann_l)  # any non-empty annotation (None / empty skip)
             or meta_l is not None
             or lane_l is not None
+            or fn_l is not None
         ):
             gid_l = gid.tolist()
             gnid_l = gnid.tolist()
@@ -565,6 +613,11 @@ def _trace_window_entries(
                     _annotation_to_args(a, meta_l[i])
                 if ev_events is not None and gnid_l[i] in ev_events:
                     a["cuda event"] = hex(ev_events[gnid_l[i]])
+                if fn_l is not None and fn_l[i]:
+                    a["host fn"] = fn_l[i]
+                    ev["name"] = f"HostNode: {fn_l[i]}"
+                if addr_l is not None and addr_l[i]:
+                    a["host fn addr"] = hex(addr_l[i])
                 if gnid_l[i] and lane_l is not None and lane_l[i] != str_l[i]:
                     lane_id = lane_l[i]
                     lane = _export_tid(lane_id)
