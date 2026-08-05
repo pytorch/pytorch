@@ -1131,6 +1131,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+@instantiate_parametrized_tests
 class TestCrossPGOverlap(InductorTestCase):
     """
     Tests for cross-PG overlap scheduling.
@@ -1228,6 +1229,47 @@ class TestCrossPGOverlap(InductorTestCase):
         ).check("%wait_tensor").run(str(out.graph))
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+
+    @parametrize("wait_a_first", [False, True])
+    def test_active_wait_is_not_scheduled_recursively(self, wait_a_first):
+        pg1_name = self.pg1_name
+        pg2_name = self.pg2_name
+
+        def func(a, b):
+            start_a = torch.ops._c10d_functional.all_gather_into_tensor(a, 2, pg1_name)
+            start_b = torch.ops._c10d_functional.all_gather_into_tensor(b, 2, pg1_name)
+            if wait_a_first:
+                wait_a = torch.ops._c10d_functional.wait_tensor(start_a)
+                wait_b = torch.ops._c10d_functional.wait_tensor(start_b)
+            else:
+                wait_b = torch.ops._c10d_functional.wait_tensor(start_b)
+                wait_a = torch.ops._c10d_functional.wait_tensor(start_a)
+            start_c = torch.ops._c10d_functional.all_gather_into_tensor(
+                wait_b, 2, pg2_name
+            )
+            wait_c = torch.ops._c10d_functional.wait_tensor(start_c)
+            return wait_a.sum() + wait_c.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "all_gather" in str(node.target):
+                return 10.0 if override_size == 0 else 3.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        schedule_overlap_bucketing(
+            traced,
+            custom_runtime_estimation=custom_runtime,
+            pre_bucketing_fsdp_collectives=False,
+        )
+        traced.graph.lint()
 
     def test_two_queue_scheduling_off_path_nodes(self):
         """
