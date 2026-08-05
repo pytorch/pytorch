@@ -9,7 +9,7 @@ from ..exc import raise_type_error, unimplemented
 from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, CallFunctionNoArgsSource, ImportSource
-from .base import Member, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
 
@@ -91,14 +91,19 @@ class CUDAMemPoolVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def _id(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if self.source:
-            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
-        return ConstantVariable.create(self.value.id)
-
-    tp_members = {
-        "id": Member(_id),
-    }
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "id":
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            return ConstantVariable.create(self.value.id)
+        unimplemented(
+            gb_type="unsupported torch.cuda.MemPool attribute",
+            context=f"torch.cuda.MemPool.{name}",
+            explanation="Dynamo only supports reading torch.cuda.MemPool.id.",
+            hints=[],
+        )
 
     def as_proxy(self) -> Proxy:
         return self.proxy
