@@ -104,9 +104,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 def _move_batch_dims_to_last(unbatched_args, in_dims):
-    """Move each batched arg's vmap batch dim to the last axis so it does not
-    interfere with the scan dim (0). ``in_dims`` is the pytree of batch dims from
-    ``unwrap_batched`` (``None`` for unbatched leaves)."""
+    # Batch dim goes last so it never collides with the scan dim (0).
     return pytree.tree_map(
         lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
         unbatched_args,
@@ -115,27 +113,16 @@ def _move_batch_dims_to_last(unbatched_args, in_dims):
 
 
 def _batch_dims_as_last(in_dims):
-    """Flatten a pytree of batch dims into a tuple of last-axis markers: ``-1``
-    where a leaf is batched (its batch dim was moved to the last axis by
-    :func:`_move_batch_dims_to_last`), ``None`` otherwise."""
+    # Flat markers matching _move_batch_dims_to_last: -1 where batched, else None.
     return tuple(
-        pytree.tree_leaves(
-            pytree.tree_map(lambda bdim: -1 if bdim is not None else None, in_dims)
-        )
+        -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
     )
 
 
 class _VmapCombineFnWrapper:
-    """Combine_fn wrapper shared by the ``scan`` and ``associative_scan`` vmap
-    batching rules.
-
-    It re-vmaps ``combine_fn`` under the current interpreter, keeping the vmap
-    batch dim on the last axis so it does not interfere with the scan dim (0).
-    After the wrapped op runs, ``out_dims`` holds the flat per-output batch dims
-    (-1 where batched, None otherwise), aligned to the flat list of leaves the op
-    returns. ``in_dims`` must already be broadcast to the flat operator arg list
-    (e.g. associative_scan duplicates the xs markers for its two-input operator).
-    """
+    # Re-vmaps a scan/associative_scan combine_fn, keeping the batch dim on the
+    # last axis so it does not collide with the scan dim (0). After the op runs,
+    # out_dims holds the flat per-output markers aligned to the op's flat outputs.
 
     def __init__(self, combine_fn, in_dims, batch_size, randomness):
         self.combine_fn = combine_fn
@@ -153,13 +140,13 @@ class _VmapCombineFnWrapper:
             outputs,
             per_slice_out_dims,
         )
-        self.out_dims = tuple(
-            pytree.tree_leaves(
-                pytree.tree_map(
-                    lambda bdim: -1 if bdim is not None else None, per_slice_out_dims
-                )
+        out_dims = _batch_dims_as_last(per_slice_out_dims)
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
             )
-        )
+        self.out_dims = out_dims
         return outputs
 
 
