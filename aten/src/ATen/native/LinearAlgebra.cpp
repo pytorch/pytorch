@@ -2108,17 +2108,22 @@ static Tensor _matmul_impl(
         tensor2_sizes.begin(),
         tensor2_sizes.begin() + std::max<int64_t>(dim_tensor2 - 2, 0LL));
 
-    // Same optimization for the gradients as that in should_fold
-    // If we're going to broadcast we force it to go through the should_fold branch
-    if (dim_tensor1 == 3 && dim_tensor2 == 3 &&
-        TORCH_GUARD_OR_TRUE(batch_tensor1[0].sym_ne(batch_tensor2[0]))) {
-      if (TORCH_GUARD_OR_FALSE(batch_tensor1[0].sym_eq(1)) &&
-          (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
-        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
-      }
-      if (TORCH_GUARD_OR_FALSE(batch_tensor2[0].sym_eq(1)) &&
-          (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
-        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+    if (dim_tensor1 == 3 && dim_tensor2 == 3) {
+      // Same optimization for the gradients as that in should_fold
+      // If we're going to broadcast we force it to go through the should_fold
+      // branch
+      if (TORCH_GUARD_OR_TRUE(batch_tensor1[0].sym_ne(batch_tensor2[0]))) {
+        if (TORCH_GUARD_OR_FALSE(batch_tensor1[0].sym_eq(1)) &&
+            (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+          return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+        }
+        if (TORCH_GUARD_OR_FALSE(batch_tensor2[0].sym_eq(1)) &&
+            (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+          return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+        }
+      } else {
+        return has_out ? at::bmm_out(out, tensor1, tensor2)
+                       : tensor1.bmm(tensor2);
       }
     }
 
