@@ -24,6 +24,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_SPARSE,
+    ROCM_VERSION,
+    evaluate_gfx_arch_within,
     xfailIfSM89PreCUDA13,
 )
 from torch.testing._internal.common_device_type import (
@@ -46,6 +48,7 @@ SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 _IS_SM8X = False
 _IS_SM9X = False
 _IS_HIPSPARSELT_AVAILABLE = False
+_IS_HIPSPARSELT_DEVICE_SUPPORTED = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.version.cuda is not None and (
         torch.cuda.get_device_capability(0)[0] == 8
@@ -56,6 +59,13 @@ if torch.cuda.is_available():
     _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(
         int(v) for v in torch.version.hip.split(".")[:2]
     ) >= (7, 12)
+    if _IS_HIPSPARSELT_AVAILABLE:
+        hipsparselt_archs = ["gfx942", "gfx950"]
+        if ROCM_VERSION >= (7, 14):
+            hipsparselt_archs.append("gfx1250")
+        _IS_HIPSPARSELT_DEVICE_SUPPORTED = evaluate_gfx_arch_within(
+            hipsparselt_archs
+        )
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = (
@@ -64,7 +74,7 @@ if torch.cuda.is_available():
 
     # add cuSPASRELt tests if available
     if torch.backends.cusparselt.is_available() and (
-        _IS_SM8X or _IS_SM9X or _IS_HIPSPARSELT_AVAILABLE
+        _IS_SM8X or _IS_SM9X or _IS_HIPSPARSELT_DEVICE_SUPPORTED
     ):
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = (
             SparseSemiStructuredTensorCUSPARSELT
