@@ -738,6 +738,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   void decref_pyobject() const noexcept final;
   bool try_incref_pyobject() const noexcept final;
 
+  virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
+    TORCH_WARN_ONCE(
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support addEphemeralTimeout"));
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

@@ -1033,7 +1033,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // and consider alternative approaches, such as directly setting the timeout
   // or utilizing a barrier collective (one can set any timeout to the barrier),
   // whenever feasible.
-  void addEphemeralTimeout(const std::chrono::milliseconds& timeout);
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
 
   // This function is only intended for testing purposes because we don't
   // want to expose the `WorkNCCL` via pybind. It verifies whether the
