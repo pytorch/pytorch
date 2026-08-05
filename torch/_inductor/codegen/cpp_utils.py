@@ -91,6 +91,11 @@ DEVICE_TO_ATEN = {
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
+    torch.sparse_coo: "at::kSparse",
+    torch.sparse_csr: "at::kSparseCsr",
+    torch.sparse_csc: "at::kSparseCsc",
+    torch.sparse_bsr: "at::kSparseBsr",
+    torch.sparse_bsc: "at::kSparseBsc",
 }
 
 # matches c10/core/DeviceType.h
