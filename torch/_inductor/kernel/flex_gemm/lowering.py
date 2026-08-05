@@ -8,6 +8,7 @@ is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 import torch
@@ -17,6 +18,7 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
+from torch._inductor import config
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
@@ -31,6 +33,50 @@ from .constraints import (
     statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
 )
+from .debug import (
+    format_flex_gemm_analysis,
+    format_flex_gemm_analysis_details,
+    format_flex_gemm_config_candidates,
+    format_flex_gemm_lowering_plan,
+    format_flex_gemm_problem,
+    format_flex_gemm_selection,
+    log_flex_gemm_artifact,
+)
+
+
+def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
+    graph = graph_module.graph
+    changed = False
+    for node in list(graph.nodes):
+        if node.target not in (
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.baddbmm.default,
+        ):
+            continue
+        bias, mat1, mat2 = node.args[:3]
+        alpha = node.kwargs.get("alpha", 1.0)
+        beta = node.kwargs.get("beta", 1.0)
+        gemm_target = (
+            torch.ops.aten.mm.default
+            if node.target is torch.ops.aten.addmm.default
+            else torch.ops.aten.bmm.default
+        )
+        with graph.inserting_before(node):
+            result = graph.call_function(gemm_target, (mat1, mat2))
+            if alpha != 1:
+                result = graph.call_function(torch.ops.aten.mul.Tensor, (result, alpha))
+            if beta != 0:
+                if beta != 1:
+                    bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
+                result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
+        result.meta = node.meta
+        node.replace_all_uses_with(result)
+        graph.erase_node(node)
+        changed = True
+    if changed:
+        graph.eliminate_dead_code()
+        graph.lint()
+        graph_module.recompile()
 
 
 def flex_gemm_tensor_placeholders(
@@ -300,7 +346,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
 
-    from torch._inductor.kernel.flex_gemm.epilogue import (
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
@@ -345,8 +391,46 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
+    gemm_input_names = tuple(
+        arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
+        for index, arg in enumerate(gemm_fx_node.args)
+    )
+    problem_report = partial(
+        format_flex_gemm_problem,
+        subgraph.graph_module,
+        gemm_op,
+        tuple(zip(gemm_input_names, gemm_args, strict=True)),
+        tuple(
+            zip(
+                (node.name for node in epilogue_arg_placeholders),
+                epilogue_args,
+                strict=True,
+            )
+        ),
+        alpha=float(alpha),
+        beta=float(beta),
+        tuned=tuned,
+        fast_math=fast_math,
+        explicit_config=explicit_config,
+    )
+    log_flex_gemm_artifact(
+        "problem",
+        problem_report,
+        lowering_name=subgraph.name,
+    )
     # This is where we figure out what the fx-graph body is doing
-    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
+    log_flex_gemm_artifact(
+        "analysis",
+        lambda: format_flex_gemm_analysis(epilogue_analysis),
+        lowering_name=subgraph.name,
+    )
+    log_flex_gemm_artifact(
+        "analysis_details",
+        lambda: format_flex_gemm_analysis_details(epilogue_analysis),
+        lowering_name=subgraph.name,
+        verbose=True,
+    )
     if (
         epilogue_analysis.required_geometries
         and gemm_op is not torch.ops.aten.mm.default
@@ -404,15 +488,37 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
         gemm_op, epilogue_input_nodes, output_size
     )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce, local_reduce_out_index
+    log_flex_gemm_artifact(
+        "lowering_plan",
+        lambda: format_flex_gemm_lowering_plan(
+            output_size,
+            output_meta.dtype,
+            tuple(
+                zip(
+                    (node.name for node in epilogue_arg_placeholders),
+                    epilogue_arg_kinds,
+                    strict=True,
+                )
+            ),
+            aux_metas,
+            local_reduce_metas,
+        ),
+        lowering_name=subgraph.name,
+    )
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_reduction_plan(
+        epilogue_analysis.reduction_plan, local_reduce_out_index
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
-        gemm_op,
         epilogue_analysis,
         epilogue_arg_placeholders,
         fast_math=fast_math,
+    )
+    log_flex_gemm_artifact(
+        "generated_epilogue",
+        lambda: epilogue_source.strip(),
+        lowering_name=subgraph.name,
+        verbose=True,
     )
     quack_config_keys = flex_gemm_config_keys_for_local_reduce(
         layout.device,
@@ -422,6 +528,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         tuned,
         explicit_config,
     )
+    log_flex_gemm_artifact(
+        "config_candidates",
+        lambda: format_flex_gemm_config_candidates(quack_config_keys),
+        lowering_name=subgraph.name,
+        verbose=True,
+    )
     epilogue_arg_indices = tuple(
         range(
             len(gemm_input_nodes),
@@ -429,7 +541,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
     )
     choices: list[Any] = []
+    choice_config_keys = {}
     for quack_config_key in quack_config_keys:
+        choice_start = len(choices)
         error = flex_gemm_epilogue_template.maybe_append_choice(
             choices,
             input_nodes=input_nodes,
@@ -450,18 +564,36 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
         if error is not None:
             raise error
+        choice_config_keys.update(
+            (choice.name, quack_config_key) for choice in choices[choice_start:]
+        )
     input_gen_fns = {
         index: flex_gemm_autotune_view_input
         for index, input_node in enumerate(input_nodes)
         if isinstance(input_node, ir.ReinterpretView)
     }
-    result, _ = autotune_select_algorithm(
+    result, selected_choice = autotune_select_algorithm(
         "flex_gemm_epilogue",
         choices,
         input_nodes,
         layout,
         input_gen_fns=input_gen_fns or None,
         **({"return_multi_template": False} if mutated_input_nodes else {}),
+    )
+    selected_config_key = (
+        None
+        if selected_choice is None
+        else choice_config_keys.get(selected_choice.name)
+    )
+    log_flex_gemm_artifact(
+        "selection",
+        lambda: format_flex_gemm_selection(
+            selected_choice,
+            selected_config_key,
+            candidate_count=len(quack_config_keys),
+            tuned=tuned,
+        ),
+        lowering_name=subgraph.name,
     )
     return flex_gemm_ordered_outputs(
         result,
@@ -474,7 +606,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") == "QUACK":
+    backend = kernel_options.get("backend", "TRITON")
+    if backend == "NVGEMM":
+        decompose_nvgemm_additive_gemm(subgraph.graph_module)
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="NVGEMM",
+        ):
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
+    if backend == "QUACK":
         return lower_quack_flex_gemm(
             gemm_op, subgraph, args, gemm_kwargs, kernel_options
         )
