@@ -11459,6 +11459,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=0.06,
         )
 
+    @config.patch(fallback_random=True)
+    def test_bernoulli_default_fallback_random(self):
+        # aten.bernoulli.default must stay excluded from decomposition under
+        # fallback_random=True, like bernoulli_/bernoulli.p already are: its
+        # core decomp (rand + compare) consumes RNG state in a different
+        # order than the ATen kernel, so the two diverge on CUDA even with
+        # the same seed. See https://github.com/pytorch/pytorch/issues/188074
+        def fn(x):
+            return torch.bernoulli(x)
+
+        x = torch.full((200, 200), 0.3, device=self.device)
+        compiled = torch.compile(fn, backend="inductor")
+
+        torch.manual_seed(0)
+        expected = fn(x)
+        torch.manual_seed(0)
+        actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
     def test_narrow(self):
         def fn(x):
             return (

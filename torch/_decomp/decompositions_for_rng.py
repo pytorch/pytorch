@@ -270,4 +270,16 @@ def bernoulli_p(self, p=0.5, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < p
 
 
+@register_extra_random_decomp([aten.bernoulli.default])
+def bernoulli_default(self, *, generator=None):
+    # Unlike bernoulli_/bernoulli.p above, this has no dedicated Inductor
+    # lowering to fall back on for CPU, so (unlike its siblings) it must
+    # keep decomposing on CPU too to stay fused in the default (non
+    # fallback_random) path.
+    raw_p = torch.rand(
+        self.size(), generator=generator, dtype=torch.float32, device=self.device
+    )
+    return (raw_p < self).to(self.dtype)
+
+
 rng_decompositions.update(extra_random_decomps)  # type: ignore[arg-type]

@@ -146,6 +146,11 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    # Excluded so it stays unfused (like bernoulli_/bernoulli.p in
+    # extra_random_decomps) under fallback_random=True. Its core decomp
+    # consumes Philox RNG state in a different order than the ATen kernel,
+    # producing outputs that diverge from eager even with the same seed.
+    aten.bernoulli.default,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
