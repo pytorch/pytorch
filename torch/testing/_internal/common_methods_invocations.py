@@ -4763,12 +4763,13 @@ def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs
     # amortize the launch: N in [4096, 8192) needs >= 8192 rows, [8192, 16384)
     # needs >= 4096, and N >= 16384 needs >= 2048.
     #
-    # Exactly one dispatching shape is listed, and it is the smallest of them.
-    # Any such shape is 64 MB per fp32 tensor, and every TestCommon test pays
-    # for it -- test_noncontiguous_samples copies it, test_compare_cpu runs the
-    # reference on CPU, test_multiple_devices repeats it per device. The other
-    # two bands, and the kernel's internal paths, are covered far more cheaply
-    # by test/python_native/test_flydsl_rmsnorm_fwd.py. No memory guard: this
+    # Exactly one dispatching shape is listed. Each band's minimum works out to
+    # the same 2^25 elements -- 128 MiB per fp32 tensor, 64 MiB at fp16/bf16 --
+    # and every TestCommon test pays for it: test_noncontiguous_samples copies
+    # it, test_compare_cpu runs the reference on CPU, test_multiple_devices
+    # repeats it per device. The other two bands, and the kernel's internal
+    # paths, are covered far more cheaply by
+    # test/python_native/test_flydsl_rmsnorm_fwd.py. No memory guard: this
     # variant is already gated to gfx950, which has hundreds of GB of HBM, and
     # largeTensorTest's own gc.collect() + empty_cache() per test costs an
     # order of magnitude more here than the samples it would protect.

@@ -26,6 +26,16 @@ def _is_supported_arch(device_index: int) -> bool:
     return arch is not None and arch.split(":", 1)[0] in _SUPPORTED_ARCHES
 
 
+def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
+    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing."""
+    int32_max = (1 << 31) - 1
+    return (
+        0 < rows_m <= int32_max
+        and 0 < n <= int32_max
+        and rows_m * n * itemsize < 1 << 32
+    )
+
+
 def _common_supported(
     input: torch.Tensor,
     n: int,
@@ -56,11 +66,10 @@ def _common_supported(
     # its normal semantics for these uncommon inputs.
     if _is_cow_tensor(input) or _is_cow_tensor(weight):
         return False
-    # Deliberately no base-address alignment check. The kernel's 128-bit buffer
-    # copies tolerate misaligned inputs (verified against ATen for fp16 and
-    # fp32 on gfx950), and a misaligned base is where the override wins by the
-    # widest margin: ATen's own vectorized path bails out there, so declining
-    # these inputs would hand back the largest speedups the kernel has.
+    rows_m = input.numel() // n
+    itemsize = input.element_size()
+    if not _fits_int32_buffer_span(rows_m, n, itemsize):
+        return False
     return True
 
 
@@ -116,12 +125,6 @@ def _fused_rms_norm_impl(
 
 
 def register_flydsl_rmsnorm_overrides() -> None:
-    # QuACK registers against this symbol too, for NVIDIA. Both registrations
-    # coexist: the predicates are mutually exclusive (ROCm versus NVIDIA), so
-    # the order the two are registered in -- last registered is consulted
-    # first, see torch/_native/README.md -- does not decide anything today.
-    # Whoever makes either predicate accept the other's hardware has to pick
-    # an order in ops/norm/__init__.py deliberately.
     fu.register_op_override(
         "aten",
         "_fused_rms_norm",

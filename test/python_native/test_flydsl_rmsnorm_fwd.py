@@ -108,6 +108,22 @@ class TestFlyDSLRMSNormHelpers(TestCase):
 
         self.assertEqual(normalized_shape_1d(normalized_shape), expected)
 
+    @parametrize(
+        "rows_m,n,itemsize,expected",
+        (
+            (2048, 114688, 4, True),
+            (16383, 65536, 4, True),
+            (16384, 65536, 4, False),
+            (16385, 65536, 4, False),
+            (1 << 31, 1, 1, False),
+            (1, 1 << 31, 1, False),
+        ),
+    )
+    def test_flydsl_buffer_span(self, rows_m, n, itemsize, expected):
+        from torch._native.ops.norm.flydsl_rmsnorm_impl import _fits_int32_buffer_span
+
+        self.assertEqual(_fits_int32_buffer_span(rows_m, n, itemsize), expected)
+
     def test_impl_without_weight_raises(self):
         # The predicate declines weight=None, so reaching the impl means a
         # caller bypassed it. The error has to name the missing argument
