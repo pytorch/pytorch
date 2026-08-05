@@ -566,9 +566,9 @@ class BenchmarkRequest:
 
         # create args and out tensor
         if out is None:
-            if not (self.input_tensor_meta and self.output_tensor_meta):
+            if self.output_tensor_meta is None:
                 raise AssertionError(
-                    "Input and output tensor meta must be populated when input_tensors is empty"
+                    "Output tensor meta must be populated when out is None"
                 )
             if not len(input_tensors) == 0:
                 raise AssertionError(
