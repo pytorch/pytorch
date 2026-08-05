@@ -29,14 +29,14 @@ log = logging.getLogger(__name__)
 
 _FLYDSL_DSL_NAME = "flydsl"
 
-# The RMSNorm kernel depends on the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor
-# interface.
-# Other versions fall back to ATen unless a developer explicitly sets
+# The kernels this gate protects -- the first is the RMSNorm override in the PR
+# above -- are written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor
+# interface. Other versions fall back to ATen unless a developer explicitly sets
 # TORCH_NATIVE_SKIP_VERSION_CHECK=1.
 _FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
-def _flydsl_runtime_unavailable_reason() -> None | str:
+def _flydsl_runtime_unavailable_reason() -> str | None:
     flydsl_spec = _find_spec("flydsl")
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:
         return "missing optional dependency `flydsl`"
@@ -113,11 +113,10 @@ def _version_is_ok() -> bool:
 
 @functools.lru_cache
 def _resolve_rocm_arch(device_index: int) -> str | None:
-    """Return the FlyDSL arch string for ``device_index``.
+    """Return the gfx name to compile for, or None if it cannot be determined.
 
-    Reads only the environment and torch's device properties: this decides what
-    the kernel is compiled for, and it runs in processes that cannot import
-    flydsl, so it cannot defer to the runtime's own resolver.
+    FLYDSL_GPU_ARCH wins, then HSA_OVERRIDE_GFX_VERSION, then the device's own
+    gcnArchName. Reads only the environment and torch's device properties.
     """
     env = _environ.get("FLYDSL_GPU_ARCH")
     if env:

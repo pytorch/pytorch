@@ -97,7 +97,11 @@ class NonzeroWorkspaceNotSupportedError(Exception):
 
 
 def _cache_env_for_subprocess() -> dict[str, str | None]:
-    env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "FLYDSL_RUNTIME_CACHE_DIR",
+    ]
     return {v: os.environ.get(v) for v in env_vars}
 
 
