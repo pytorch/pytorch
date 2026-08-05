@@ -22,6 +22,10 @@ enum BIN_SELECTION_ALGORITHM {
   BINARY_SEARCH,
 };
 
+constexpr NSUInteger kHistcThreadsPerThreadgroup = 256;
+// Bounds the number of local histograms merged into global memory.
+constexpr NSUInteger kHistcMaxThreadgroups = 128;
+
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
@@ -143,6 +147,80 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
 }
 
+template <typename input_t>
+void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, const Tensor& input) {
+  TORCH_INTERNAL_ASSERT(input.dim() == 2 && input.size(1) == 1);
+  TORCH_INTERNAL_ASSERT(bin_edges.size() == 1);
+  TORCH_INTERNAL_ASSERT(hist_output.numel() + 1 == bin_edges[0].numel());
+
+  const int64_t num_bins = hist_output.numel();
+  TORCH_CHECK(input.numel() * input.element_size() <= UINT32_MAX, "histc(): Tensor is larger than 4Gb");
+  const auto num_elements = c10::checked_convert<uint32_t>(input.numel(), "uint32_t");
+  Tensor counts = at::zeros({num_bins}, hist_output.options().dtype(kLong));
+  if (num_elements == 0) {
+    hist_output.copy_(counts);
+    return;
+  }
+
+  const bool dense = input.is_contiguous();
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLBuffer> stridedIndicesBuffer = nil;
+      if (!dense) {
+        const uint32_t nDim = input.dim();
+        const IntArrayRef& inputShape = input.sizes();
+        std::vector<uint32_t> inputShapeData(inputShape.size());
+        std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
+        for (const auto i : c10::irange(inputShape.size())) {
+          inputShapeData[i] = static_cast<uint32_t>(inputShape[i]);
+        }
+        stridedIndicesBuffer = [[device newBufferWithLength:num_elements * sizeof(uint) options:0] autorelease];
+        id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
+        [computeEncoder setComputePipelineState:stridedIndicesPSO];
+        mtl_setArgs(computeEncoder, strides, stridedIndicesBuffer, inputShapeData, nDim);
+        mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, num_elements);
+      }
+
+      const bool use_threadgroup = num_bins <= [device maxThreadgroupMemoryLength] / sizeof(uint);
+      const std::string kernel = fmt::format("histc_atomic_{}_{}_{}",
+                                             use_threadgroup ? "threadgroup" : "global",
+                                             dense ? "dense" : "strided",
+                                             scalarToMetalTypeString(input));
+      id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histc", {input, counts});
+      [computeEncoder setComputePipelineState:histogramPSO];
+      mtl_setArgs(computeEncoder,
+                  input,
+                  counts,
+                  dense ? getMTLBufferStorage(counts) : stridedIndicesBuffer,
+                  num_elements,
+                  num_bins,
+                  bin_edges[0]);
+
+      if (use_threadgroup) {
+        const NSUInteger threadgroup_size =
+            std::min<NSUInteger>(kHistcThreadsPerThreadgroup, [histogramPSO maxTotalThreadsPerThreadgroup]);
+        const NSUInteger threadgroups =
+            std::min<NSUInteger>((num_elements + threadgroup_size - 1) / threadgroup_size, kHistcMaxThreadgroups);
+        const uint32_t total_threads = threadgroups * threadgroup_size;
+        mtl_setArgs<6>(computeEncoder, total_threads);
+        [computeEncoder setThreadgroupMemoryLength:num_bins * sizeof(uint) atIndex:0];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(threadgroups, 1, 1)
+                       threadsPerThreadgroup:MTLSizeMake(threadgroup_size, 1, 1)];
+      } else {
+        mtl_dispatch1DJob(computeEncoder, histogramPSO, num_elements);
+      }
+      getMPSProfiler().endProfileKernel(histogramPSO);
+    }
+  });
+  hist_output.copy_(counts);
+}
+
 template <BIN_SELECTION_ALGORITHM bin_algorithm>
 static void histogramdd_out_mps_template(const Tensor& self,
                                          const std::optional<Tensor>& weight,
@@ -216,7 +294,15 @@ static void histogramdd_linear_kernel(const Tensor& self,
         self, weight, density, hist, bin_edges);
   } else {
     // histc codepath: bin_edges are not returned to the caller
-    mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION>(self, weight, density, hist, bin_edges);
+    TORCH_CHECK(self.device() == hist.device(), "histc: expected self and out to be on the same device");
+    TORCH_INTERNAL_ASSERT(!weight.has_value() && !density);
+    AT_DISPATCH_V2(self.scalar_type(),
+                   "histc_mps",
+                   AT_WRAP([&]() { mps::histc_atomic_kernel_impl<scalar_t>(hist, bin_edges, self); }),
+                   AT_EXPAND(AT_ALL_TYPES),
+                   kBFloat16,
+                   kHalf,
+                   AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   }
 }
 
