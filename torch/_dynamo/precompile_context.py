@@ -14,6 +14,7 @@ from torch._dynamo.package import (
     DynamoCache,
     PrecompileCacheEntry,
 )
+from torch.compiler import _cache
 
 
 """
@@ -86,7 +87,7 @@ class PrecompileContext:
 
     """
 
-    # Protected by the compile_lock
+    # Protected by torch.compiler._cache._artifact_lock
     # _backend_artifacts_by_key organizes results by the key of each artifact.
     # Each object here must be serializable
     _backend_artifacts_by_key: dict[_BackendId, BackendCacheArtifact[Any]] = {}
@@ -97,8 +98,9 @@ class PrecompileContext:
 
     @classmethod
     def clear(cls) -> None:
-        cls._backend_artifacts_by_key.clear()
-        cls._dynamo_cache_entries.clear()
+        with _cache._artifact_lock:
+            cls._backend_artifacts_by_key.clear()
+            cls._dynamo_cache_entries.clear()
 
     @classmethod
     def record_artifact(
@@ -114,24 +116,26 @@ class PrecompileContext:
         from torch.utils._mode_utils import no_dispatch
 
         with no_dispatch():
-            cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
-                artifact
-            )
+            copied = copy.deepcopy(artifact)
+        with _cache._artifact_lock:
+            cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copied
 
     @classmethod
     def record_dynamo_cache_entry(
         cls, cache_entry: _DynamoCacheEntry, key: str
     ) -> None:
-        cls._dynamo_cache_entries[key] = cache_entry
+        with _cache._artifact_lock:
+            cls._dynamo_cache_entries[key] = cache_entry
 
     @classmethod
     def edit_artifact(cls, key: str, edit_fn: Callable[..., Any]) -> None:
         """
         Edit the content of an existing artifact
         """
-        if key not in cls._backend_artifacts_by_key:
-            raise AssertionError(f"Key {key} not found in artifacts")
-        artifact = cls._backend_artifacts_by_key[_BackendId(key)]
+        with _cache._artifact_lock:
+            if key not in cls._backend_artifacts_by_key:
+                raise AssertionError(f"Key {key} not found in artifacts")
+            artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
@@ -139,7 +143,8 @@ class PrecompileContext:
         """
         Return the backend cache artifact with the associated key
         """
-        return cls._backend_artifacts_by_key.get(_BackendId(key), None)
+        with _cache._artifact_lock:
+            return cls._backend_artifacts_by_key.get(_BackendId(key), None)
 
     @staticmethod
     def dump_debug_info(
@@ -164,10 +169,11 @@ class PrecompileContext:
 
     @classmethod
     def save_to_dynamo_cache(cls) -> dict[str, Any]:
-        precompile_cache_entries, debug_info = cls.create_cache_entries()
-        for key, entry in precompile_cache_entries.items():
-            DynamoCache.write(entry, key)
-        return debug_info
+        with _cache._artifact_lock:
+            precompile_cache_entries, debug_info = cls.create_cache_entries()
+            for key, entry in precompile_cache_entries.items():
+                DynamoCache.write(entry, key)
+            return debug_info
 
     @classmethod
     def create_cache_entries(
@@ -177,8 +183,9 @@ class PrecompileContext:
         Grabs all the cache entries in the precompile context and
         stitches them together into full PrecompileCacheEntries.
         """
-        dynamo_entries = cls._dynamo_cache_entries
-        backend_artifacts = cls._backend_artifacts_by_key
+        with _cache._artifact_lock:
+            dynamo_entries = dict(cls._dynamo_cache_entries)
+            backend_artifacts = dict(cls._backend_artifacts_by_key)
 
         num_artifacts = len(dynamo_entries)
 

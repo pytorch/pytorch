@@ -254,8 +254,8 @@ class TritonBundler:
                 # kernels that are not statically launchable (i.e. cache miss)
                 # can launch a worker without waiting on the blocking step of
                 # StaticAutotunerFuture.result().
-                CompiledTritonKernels._cache[result.cache_key] = StaticAutotunerFuture(
-                    result.kernel
+                CompiledTritonKernels.save_with_key(
+                    result.cache_key, StaticAutotunerFuture(result.kernel)
                 )
                 counters["inductor"]["triton_bundler_load_static_autotuner"] += 1
                 kernel_names.append(result.kernel_name)

@@ -760,14 +760,19 @@ def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
     - Execute torch.compile
     - Call torch.compiler.save_cache_artifacts()
     """
-    from ._cache import CacheArtifactManager
+    from ._cache import _artifact_lock, CacheArtifactManager
 
-    if torch._dynamo.config.caching_precompile:
-        from torch._dynamo.precompile_context import PrecompileContext
+    # One critical section across both halves: save_to_dynamo_cache() records
+    # into _new_cache_artifacts (via DynamoCache.write) and serialize() then
+    # drains and clears it, so a gap would let a concurrent compile's artifacts
+    # be swept up by this save.
+    with _artifact_lock:
+        if torch._dynamo.config.caching_precompile:
+            from torch._dynamo.precompile_context import PrecompileContext
 
-        PrecompileContext.save_to_dynamo_cache()
+            PrecompileContext.save_to_dynamo_cache()
 
-    return CacheArtifactManager.serialize()
+        return CacheArtifactManager.serialize()
 
 
 def load_cache_artifacts(serialized_artifacts: bytes) -> CacheInfo | None:

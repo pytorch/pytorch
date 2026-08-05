@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import re
 import sys
+import threading
 from concurrent.futures import (
     Future,
     ThreadPoolExecutor,
@@ -236,6 +237,11 @@ class CompiledTritonKernels:
     """
 
     _cache: dict[str, CodeCacheFuture] = {}
+    # Megacache population (TritonBundler.load_autotuners) runs on a background
+    # thread while compilation saves to and clears this cache, so all _cache
+    # access must go through the accessors below and hold this lock. Reentrant
+    # because clearing runs the values' finalizers.
+    _lock = threading.RLock()
 
     @staticmethod
     def key(kernel_src: str):
@@ -257,25 +263,34 @@ class CompiledTritonKernels:
         TODO: Source code here is not just the kernel's source code, but also includes the inductor preamble, etc.
         so it could be less strict.
         """
-        key = CompiledTritonKernels.key(kernel_src)
-        CompiledTritonKernels._cache[key] = future
+        # key() hashes, so compute it outside the lock
+        CompiledTritonKernels.save_with_key(
+            CompiledTritonKernels.key(kernel_src), future
+        )
+
+    @staticmethod
+    def save_with_key(key: str, future: CodeCacheFuture) -> None:
+        """Save under an already-computed key, for callers that have one."""
+        with CompiledTritonKernels._lock:
+            CompiledTritonKernels._cache[key] = future
 
     @staticmethod
     def get(kernel_src: str) -> CodeCacheFuture | None:
         key = CompiledTritonKernels.key(kernel_src)
-        return CompiledTritonKernels._cache.get(key, None)
+        with CompiledTritonKernels._lock:
+            return CompiledTritonKernels._cache.get(key, None)
 
     @staticmethod
     def cache_clear():
-        CompiledTritonKernels._cache = {}
+        with CompiledTritonKernels._lock:
+            CompiledTritonKernels._cache = {}
 
     @staticmethod
     def remove_future(kernel_src: str) -> None:
         key = CompiledTritonKernels.key(kernel_src)
-
-        # Delete the LambdaFuture if there is one
-        if key in CompiledTritonKernels._cache:
-            del CompiledTritonKernels._cache[key]
+        with CompiledTritonKernels._lock:
+            # Delete the LambdaFuture if there is one
+            CompiledTritonKernels._cache.pop(key, None)
 
 
 class AsyncCompile:

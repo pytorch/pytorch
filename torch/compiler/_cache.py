@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import logging
+import threading
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Generator
@@ -17,6 +18,15 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+# Guards CacheArtifactManager and PrecompileContext class state. Not the Dynamo
+# compile_lock: artifacts are recorded from paths that run with no compile in
+# progress -- first-launch autotuning, and the lazy-backward AOTAutogradCache
+# save, which fires after compile_fx_backward has released compile_lock -- so
+# compile_lock could never cover them. Reentrant because save_cache_artifacts()
+# nests recording inside serialization.
+_artifact_lock = threading.RLock()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -205,7 +215,7 @@ class CacheArtifactManager:
           used unless code version matches.
     """
 
-    # Protected by the compile_lock
+    # Protected by _artifact_lock
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
     # Keep a separate seen artifacts list to avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
@@ -220,30 +230,39 @@ class CacheArtifactManager:
 
     @classmethod
     def clear(cls) -> None:
-        cls._new_cache_artifacts.clear()
-        cls._seen_artifacts.clear()
-        cls._serializer.clear()
-        cls._cache_info.clear()
+        with _artifact_lock:
+            cls._new_cache_artifacts.clear()
+            cls._seen_artifacts.clear()
+            cls._serializer.clear()
+            cls._cache_info.clear()
 
     @classmethod
     @contextmanager
     def with_fresh_cache(cls) -> Generator[None, None, None]:
-        original_new_cache_artifacts = cls._new_cache_artifacts
-        original_seen_artifacts = cls._seen_artifacts
-        original_serializer = cls._serializer
-        original_cache_info = cls._cache_info
+        # NOTE: the lock is only held across the swap and the restore, never
+        # across the yield. It makes each half atomic, but this remains a
+        # process-wide swap: artifacts another thread records inside the body
+        # land in the throwaway state and are dropped on restore.
+        with _artifact_lock:
+            original_new_cache_artifacts = cls._new_cache_artifacts
+            original_seen_artifacts = cls._seen_artifacts
+            original_serializer = cls._serializer
+            original_cache_info = cls._cache_info
 
-        cls._new_cache_artifacts = defaultdict(list)
-        cls._seen_artifacts = OrderedSet()
-        cls._serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-        cls._cache_info = cls._cache_info.__class__()
+            cls._new_cache_artifacts = defaultdict(list)
+            cls._seen_artifacts = OrderedSet()
+            cls._serializer = AppendingByteSerializer(
+                serialize_fn=_serialize_single_cache
+            )
+            cls._cache_info = cls._cache_info.__class__()
         try:
             yield
         finally:
-            cls._new_cache_artifacts = original_new_cache_artifacts
-            cls._seen_artifacts = original_seen_artifacts
-            cls._serializer = original_serializer
-            cls._cache_info = original_cache_info
+            with _artifact_lock:
+                cls._new_cache_artifacts = original_new_cache_artifacts
+                cls._seen_artifacts = original_seen_artifacts
+                cls._serializer = original_serializer
+                cls._cache_info = original_cache_info
 
     @classmethod
     def record_artifact(
@@ -256,45 +275,49 @@ class CacheArtifactManager:
         Called from each caching operation to record the artifact in this
         "mega" list
         """
+        # encode_create() can be expensive, so keep it out of the lock
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
-        if artifact in cls._seen_artifacts:
-            return
-        log.debug("Recording %s", artifact)
-        cls._new_cache_artifacts[artifact_type].append(artifact)
-        cls._seen_artifacts.add(artifact)
+        with _artifact_lock:
+            if artifact in cls._seen_artifacts:
+                return
+            log.debug("Recording %s", artifact)
+            cls._new_cache_artifacts[artifact_type].append(artifact)
+            cls._seen_artifacts.add(artifact)
 
     @classmethod
     def need_serialize(cls) -> bool:
         """
         Have we seen new artifacts since last serialize call?
         """
-        return len(cls._new_cache_artifacts) != 0
+        with _artifact_lock:
+            return len(cls._new_cache_artifacts) != 0
 
     @classmethod
     def serialize(cls) -> tuple[bytes, CacheInfo] | None:
         """
         Converts the "mega" list into portable format
         """
-        for artifact in chain(*cls._new_cache_artifacts.values()):
-            log.debug("saving: %s", artifact)
-            cls._cache_info.add(artifact)
+        with _artifact_lock:
+            for artifact in chain(*cls._new_cache_artifacts.values()):
+                log.debug("saving: %s", artifact)
+                cls._cache_info.add(artifact)
 
-        if cls._cache_info.empty():
-            # If there are no artifacts, don't just return bytes with
-            # version.
+            if cls._cache_info.empty():
+                # If there are no artifacts, don't just return bytes with
+                # version.
+                return None
+
+            try:
+                # We deep copy cls._cache_info since later compilations
+                # can keep adding to cache_info
+                info = copy.deepcopy(cls._cache_info)
+                cls._serializer.extend(cls._new_cache_artifacts.items())
+                artifact_bytes = cls._serializer.to_bytes()
+                cls._new_cache_artifacts.clear()
+                return artifact_bytes, info
+            except Exception:
+                log.warning("Failed to pickle cache artifacts", exc_info=True)
             return None
-
-        try:
-            # We deep copy cls._cache_info since later compilations
-            # can keep adding to cache_info
-            info = copy.deepcopy(cls._cache_info)
-            cls._serializer.extend(cls._new_cache_artifacts.items())
-            artifact_bytes = cls._serializer.to_bytes()
-            cls._new_cache_artifacts.clear()
-            return artifact_bytes, info
-        except Exception:
-            log.warning("Failed to pickle cache artifacts", exc_info=True)
-        return None
 
     @staticmethod
     def deserialize(serialized_artifacts: bytes) -> CacheArtifactsResult | None:

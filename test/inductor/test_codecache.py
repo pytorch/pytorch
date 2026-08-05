@@ -8,6 +8,7 @@ import logging
 import os
 import pickle
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, config_comms, metrics
+from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -503,6 +505,195 @@ class TestPyCodeCache(TestCase):
 
         generated_source = load_async.call_args.args[0]
         self.assertIn("Py_NewRef(Py_None)", generated_source)
+
+
+class TestCompiledTritonKernels(TestCase):
+    def setUp(self):
+        super().setUp()
+        CompiledTritonKernels.cache_clear()
+
+    def test_accessors_hold_the_lock(self):
+        """Every _cache accessor must serialize on _lock.
+
+        Megacache population (TritonBundler.load_autotuners) runs on a
+        background thread while compilation saves to and clears this cache.
+        An unguarded accessor lets dict_dealloc run the values' finalizers
+        re-entrantly while the other thread mutates the dict, which corrupts
+        the interpreter heap and surfaces as a SIGSEGV somewhere unrelated
+        (S686093).
+        """
+        acquired = []
+        real_lock = CompiledTritonKernels._lock
+
+        class TrackingLock:
+            def __enter__(self):
+                acquired.append(True)
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc_info):
+                return real_lock.__exit__(*exc_info)
+
+        with mock.patch.object(CompiledTritonKernels, "_lock", TrackingLock()):
+            CompiledTritonKernels.save("kernel_src", mock.sentinel.future)
+            self.assertEqual(
+                CompiledTritonKernels.get("kernel_src"), mock.sentinel.future
+            )
+            CompiledTritonKernels.save_with_key("key", mock.sentinel.other)
+            CompiledTritonKernels.remove_future("kernel_src")
+            CompiledTritonKernels.cache_clear()
+
+        self.assertEqual(len(acquired), 5)
+        self.assertEqual(CompiledTritonKernels._cache, {})
+
+    def test_concurrent_save_and_clear(self):
+        """Saving and clearing from two threads must not corrupt the heap.
+
+        Exercises the unhashed save_with_key() path that TritonBundler uses,
+        which inserts fast enough to hit the race. Needs values with a __del__
+        but no GPU or Triton. Runs in a subprocess because the failure mode
+        kills the interpreter rather than raising.
+        """
+        script = textwrap.dedent(
+            """
+            import threading
+
+            from torch._inductor.async_compile import CompiledTritonKernels
+
+            class Finalized:
+                __slots__ = ("payload",)
+
+                def __init__(self):
+                    self.payload = b"x" * 512
+
+                def __del__(self):
+                    total = 0
+                    for i in range(50):
+                        total += i
+
+            TOTAL = 200000
+            pool = [Finalized() for _ in range(TOTAL)]
+            stop = threading.Event()
+            gate = threading.Event()
+            errors = []
+            saved = []
+
+            def saver():
+                try:
+                    n = 0
+                    while pool:
+                        try:
+                            value = pool.pop()
+                        except IndexError:
+                            break
+                        # Event ops take a lock, so the GIL can be yielded next
+                        # to the insert -- as TritonBundler.load_autotuners does
+                        # via reload_cubin_path()'s file IO between its inserts.
+                        gate.set()
+                        CompiledTritonKernels.save_with_key(f"k{n}", value)
+                        gate.clear()
+                        n += 1
+                    saved.append(n)
+                except BaseException as e:
+                    errors.append(repr(e))
+
+            def clearer():
+                try:
+                    while not stop.is_set():
+                        CompiledTritonKernels.cache_clear()
+                except BaseException as e:
+                    errors.append(repr(e))
+
+            t_save = threading.Thread(target=saver)
+            t_clear = threading.Thread(target=clearer, daemon=True)
+            t_save.start()
+            t_clear.start()
+            t_save.join()
+            stop.set()
+            t_clear.join(timeout=5)
+
+            # A thread dying must fail the test, not silently look like success.
+            if errors:
+                raise SystemExit("thread errors: " + "; ".join(errors))
+            if saved != [TOTAL]:
+                raise SystemExit(f"saver completed {saved}, expected [{TOTAL}]")
+            print("SURVIVED")
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, timeout=600
+        )
+        self.assertNotEqual(
+            proc.returncode,
+            -signal.SIGSEGV,
+            f"save/clear race crashed: {proc.stderr.decode()[-2000:]}",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode()[-2000:])
+
+
+class TestCacheArtifactManagerLocking(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Artifact types register on import; record_artifact() asserts otherwise.
+        CacheArtifactManager._ensure_cache_artifacts_registered()
+        CacheArtifactManager.clear()
+        PrecompileContext.clear()
+
+    def test_accessors_hold_the_artifact_lock(self):
+        """CacheArtifactManager/PrecompileContext state needs its own lock.
+
+        The class comments claim compile_lock protection, but two writers run
+        with no compile in progress and so cannot hold it: first-launch
+        autotuning (AutotuneCache.save -> _record_artifact) and the
+        lazy-backward AOTAutogradCache save, which fires after
+        compile_fx_backward has already released compile_lock.
+        """
+        acquired = []
+        real_lock = torch.compiler._cache._artifact_lock
+
+        class TrackingLock:
+            def __enter__(self):
+                acquired.append(True)
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc_info):
+                return real_lock.__exit__(*exc_info)
+
+        with mock.patch.object(torch.compiler._cache, "_artifact_lock", TrackingLock()):
+            CacheArtifactManager.record_artifact("autotune", "key", {"cfg": 1})
+            CacheArtifactManager.need_serialize()
+            CacheArtifactManager.serialize()
+            CacheArtifactManager.clear()
+            PrecompileContext.record_dynamo_cache_entry(mock.sentinel.entry, "key")
+            PrecompileContext.clear()
+
+        self.assertEqual(len(acquired), 6)
+
+    def test_save_cache_artifacts_is_atomic(self):
+        """save_cache_artifacts() must hold the lock across both halves.
+
+        save_to_dynamo_cache() records into _new_cache_artifacts via
+        DynamoCache.write, and serialize() then drains and clears it. Two
+        separate critical sections would let a concurrent compile's artifacts
+        land in the gap and get swept up by this save.
+        """
+        depth = []
+        real_lock = torch.compiler._cache._artifact_lock
+
+        class DepthLock:
+            def __enter__(self):
+                depth.append(len(depth))
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc_info):
+                return real_lock.__exit__(*exc_info)
+
+        CacheArtifactManager.record_artifact("autotune", "key", {"cfg": 1})
+        with mock.patch.object(torch.compiler._cache, "_artifact_lock", DepthLock()):
+            torch.compiler.save_cache_artifacts()
+
+        # serialize() must have run nested inside the outer acquisition, not
+        # after it was released.
+        self.assertGreaterEqual(len(depth), 2)
 
 
 @instantiate_parametrized_tests
