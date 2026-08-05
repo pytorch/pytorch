@@ -1166,6 +1166,16 @@ disabled_passes: str = Config(
 )
 
 
+class mkldnn:
+    # Controls MKLDNN/oneDNN graph rewrite patterns in the post-grad fusion pass.
+    # This does not affect eager-mode torch.backends.mkldnn behavior. Future
+    # MKLDNN rewrite pattern knobs shared by CPU and XPU should live here.
+    enable_fusion_passes = Config(
+        env_name_force="TORCHINDUCTOR_MKLDNN_ENABLE_FUSION_PASSES",
+        default=True,
+    )
+
+
 # The multiprocessing start method to use for inductor workers in the codecache.
 def decide_worker_start_method() -> str:
     if "TORCHINDUCTOR_WORKER_START" in os.environ:

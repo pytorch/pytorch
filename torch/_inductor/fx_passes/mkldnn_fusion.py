@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, optimization_hint
 from torch.utils._ordered_set import OrderedSet
 
-from .. import ir, mkldnn_ir
+from .. import config, ir, mkldnn_ir
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -463,12 +463,20 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _mkldnn_fusion_pass_enabled(extra_check):
+        def fn(match):
+            return config.mkldnn.enable_fusion_passes and extra_check(match)
+
+        return fn
+
     def _register_unary_fusion_lowering(
         pattern, unary_attr, computation_op, lowp_dtype=None
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
+            extra_check=_mkldnn_fusion_pass_enabled(
+                _is_valid_computation_unary_fusion(computation_op, lowp_dtype)
+            ),
             output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
@@ -488,7 +496,9 @@ if torch._C._has_mkldnn:
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
+            extra_check=_mkldnn_fusion_pass_enabled(
+                _is_single_computation_op(computation_op, lowp_dtype)
+            ),
             output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
@@ -536,7 +546,9 @@ if torch._C._has_mkldnn:
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
+            extra_check=_mkldnn_fusion_pass_enabled(
+                _is_single_computation_op(computation_op, lowp_dtype)
+            ),
             output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
@@ -766,7 +778,9 @@ if torch._C._has_mkldnn:
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_binary(computation_op, binary_op),
+            extra_check=_mkldnn_fusion_pass_enabled(
+                _is_valid_computation_binary(computation_op, binary_op)
+            ),
             output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
@@ -846,8 +860,10 @@ if torch._C._has_mkldnn:
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_binary_inplace(
-                computation_op, binary_op, other_index
+            extra_check=_mkldnn_fusion_pass_enabled(
+                _is_valid_computation_binary_inplace(
+                    computation_op, binary_op, other_index
+                )
             ),
             output_metadata_ignores_input_storage=True,
         )

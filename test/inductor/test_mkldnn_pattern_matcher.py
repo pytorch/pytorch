@@ -331,6 +331,41 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    def test_mkldnn_fusion_pass_config_disables_fusion_only(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+
+            def forward(self, x):
+                return torch.relu(self.conv(x))
+
+        v = torch.randn((1, 3, 56, 56), dtype=torch.float32).add(1)
+
+        def default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
+                0 if TEST_ACL else 1,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+            )
+
+        self._test_common(M().eval(), (v,), default_matcher_check_fn)
+
+        def disabled_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["mkldnn_unary_fusion_matcher_count"], 0
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+            )
+
+        with config.patch({"mkldnn.enable_fusion_passes": False}):
+            self._test_common(M().eval(), (v,), disabled_matcher_check_fn)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
     @reduced_f32_on_and_off()
     def test_conv3d_unary(self, device):
         self.device = device
