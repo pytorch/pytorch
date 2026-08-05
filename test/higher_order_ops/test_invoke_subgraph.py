@@ -4404,9 +4404,10 @@ class GraphModule(torch.nn.Module):
             # call site: it is not a user arg, so reuse would re-resolve its
             # recorded source, and on the second call the right value is an
             # intermediate that no source names.
-            self.assertExpectedInline(
-                normalize_gm(backend.graphs[0].print_readable(False)),
-                """\
+            if not TEST_WITH_CROSSREF:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(False)),
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_hidden_: "i64[]"):
         l_hidden_ = L_hidden_
@@ -4424,7 +4425,7 @@ class GraphModule(torch.nn.Module):
             add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
             return (add,)
 """,
-            )
+                )
         finally:
             _reuse_test_global = None
 
