@@ -94,7 +94,10 @@ template <>
 float getDurationFromEvent<c10::Event>(
     c10::Event& startEvent,
     c10::Event& endEvent) {
-  TORCH_CHECK(false, "getDuration not supported by c10::Event.");
+  TORCH_CHECK(
+      endEvent.query(),
+      "getDurationFromEvent can only be called after the end event has completed.");
+  return static_cast<float>(startEvent.elapsedTime(endEvent));
 }
 
 // For any third party library that uses the flight recorder, if one wants to
@@ -122,5 +125,39 @@ std::string dump_fr_trace_json(bool includeCollectives, bool onlyActive) {
           std::unordered_map<std::string, std::string>>{},
       includeCollectives,
       onlyActive);
+}
+
+void dump_fr_trace_file(
+    int rank,
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  // Serialize writes so concurrent dumps cannot interleave into the same
+  // file, but take the trace before locking: dump() can block on device APIs
+  // and must not hold up an unrelated caller.
+  static std::mutex writeDebugInfoMutex;
+  auto trace =
+      dump_fr_trace(includeCollectives, includeStackTraces, onlyActive);
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
+  DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
+  LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();
+  writer.write(trace);
+}
+
+bool try_dump_fr_trace_file(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  auto* recorder = FlightRecorder<c10::Event>::get();
+  int rank = recorder->getRank();
+  if (!recorder->enabled_ || rank < 0) {
+    return false;
+  }
+  dump_fr_trace_file(rank, includeCollectives, includeStackTraces, onlyActive);
+  return true;
+}
+
+void reset_fr_trace() {
+  FlightRecorder<c10::Event>::get()->reset_all();
 }
 } // namespace c10d

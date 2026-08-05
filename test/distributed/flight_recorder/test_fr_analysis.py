@@ -213,6 +213,20 @@ class FlightRecorderOpBackendTest(TestCase):
         op = Op(self._make_event("xccl"), {"0": {0, 1}}, "0")
         self.assertEqual(op.type, "all_reduce")
 
+    def test_c10d_backend(self):
+        # Entries recorded by c10d's FlightRecorderHook rather than a backend's
+        # own integration.
+        op = Op(self._make_event("c10d"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_c10d_backend_p2p(self):
+        send = self._make_event("c10d", "send 0->1")
+        op = Op(send, {"0": {0, 1}}, "0")
+        self.assertEqual((op.type, op.src, op.dst), ("send", 0, 1))
+        recv = self._make_event("c10d", "recv 1<-0")
+        op = Op(recv, {"0": {0, 1}}, "0")
+        self.assertEqual((op.type, op.src, op.dst), ("recv", 0, 1))
+
     def test_unsupported_backend_raises(self):
         with self.assertRaises(AssertionError):
             Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")

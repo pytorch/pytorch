@@ -4906,6 +4906,42 @@ be removed again via remove().)")
                 Stringified pickle work traces.
                 Default settings return everything.
         )");
+  module.def(
+      "_dump_fr_trace_file",
+      [](int rank,
+         std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        ::c10d::dump_fr_trace_file(
+            rank,
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(false),
+            onlyActive.value_or(false));
+      },
+      py::arg("rank"),
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      py::call_guard<py::gil_scoped_release>(),
+      R"(
+            Dumps the pickled work traces to the file the registered
+            DebugInfoWriter points at, which defaults to
+            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+
+            Arguments:
+                rank(int): Rank used to name the per-rank output file.
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+        )");
+  module.def(
+      "_reset_fr_trace",
+      []() { ::c10d::reset_fr_trace(); },
+      R"(
+            Drops every work trace recorded so far, so a subsequent dump only
+            contains collectives issued after this call. Backend-agnostic
+            counterpart of _reset_fr_recording_nccl.
+        )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
       module, "_WorkerServer", R"(

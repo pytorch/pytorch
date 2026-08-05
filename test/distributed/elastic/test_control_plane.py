@@ -161,6 +161,15 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    def test_fr_dump_file_without_rank(self) -> None:
+        with local_worker_server() as pool:
+            # No process group has registered with the generic flight recorder
+            # in this process, so it has no rank to name the dump file with and
+            # must refuse rather than write a bogus file.
+            resp = pool.request("POST", "/handler/fr_dump_file")
+            self.assertEqual(resp.status, 503)
+            self.assertIn(b"Flight Recorder rank is unset", resp.data)
+
     @skipIfRocmArch(MI200_ARCH)
     def test_tcp(self) -> None:
         import requests
