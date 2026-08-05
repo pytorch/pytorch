@@ -1200,6 +1200,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """2""")
 
+    def test_metaclass_descriptor(self):
+        class Meta(type):
+            def __neg__(cls):
+                return 999
+
+        class Base(metaclass=Meta):
+            # Alias int's unary __neg__ slot wrapper into this class's dict under a
+            # different name. __objclass__ == int, __name__ == '__neg__', but looked
+            # up on Base, whose metaclass separately defines __neg__.
+            sneaky = int.__neg__
+
+        def fn(x):
+            if Base.sneaky.__objclass__ is not int:
+                raise AssertionError("Base.sneaky.__objclass__ is not int")
+
+            n = x.size(0)  # symint under dynamic shapes -> NOT a compile-time constant
+            # CPython: Base.sneaky is the unbound int.__neg__ wrapper_descriptor,
+            # so this is int.__neg__(n) == -n.
+            r = Base.sneaky(n)
+            return x + r
+
+        x = torch.zeros(7)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x)[0].item(), -7)
+
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
