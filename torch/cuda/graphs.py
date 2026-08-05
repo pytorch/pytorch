@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import typing
+import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
@@ -726,6 +727,12 @@ class CUDAGraph(_CUDAGraph):
         is a true dependency (encoded in the graph) or a fake dependency
         caused by mapping of independent streams to the same hardware
         channel.
+
+        Child-graph and conditional nodes are reported as nodes in their own
+        right, but this walk does not descend into their bodies (those are
+        separate ``cudaGraph_t`` objects), so the work inside them is absent
+        from ``nodes`` and a warning is issued. The ids that *are* reported
+        stay valid: the exec graph preserves top-level node ids.
         """
         # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
         if self._instantiate_graph_data is not None:
@@ -754,7 +761,14 @@ class CUDAGraph(_CUDAGraph):
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
         }
+        # Node types whose work lives in a separate cudaGraph_t (see the warning below).
+        nested_graph_types = {
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+        }
+        nested_node_types: set[str] = set()
 
         raw = self.raw_cuda_graph()
 
@@ -771,6 +785,8 @@ class CUDAGraph(_CUDAGraph):
             handle_to_idx[int(node)] = i
 
             ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            if ntype in nested_graph_types:
+                nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
             graph_id = tools_id >> 32
             node_id = tools_id & 0xFFFFFFFF
@@ -821,6 +837,18 @@ class CUDAGraph(_CUDAGraph):
         for info in node_infos:
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
+
+        if nested_node_types:
+            # What is returned stays correct: the exec graph preserves top-level node
+            # ids and numbers the nested ones after them. Those nested nodes do execute
+            # and do show up in a profiler trace (under this exec graph id, with the
+            # appended node ids), they are just missing from the topology below.
+            warnings.warn(
+                f"get_graph_data: this graph contains {sorted(nested_node_types)} "
+                "nodes; the work inside them is in a separate cudaGraph_t that this "
+                "walk does not descend into, so it is absent from the returned nodes",
+                stacklevel=2,
+            )
 
         data = {
             "exec_graph_id": exec_graph_id,
@@ -984,6 +1012,11 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
+        # The capture stream is now capturing into the top-level graph; remember it so
+        # mark_kernels can tell a conditional-node body apart from this graph.
+        from torch.cuda._graph_annotations import maybe_stamp_capture_root
+
+        maybe_stamp_capture_root(torch.cuda.current_stream())
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda._graph_annotations import (

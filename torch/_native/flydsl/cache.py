@@ -39,28 +39,33 @@ class _JitCacheWrapper:
         self._key_locks = {}
         self._hits = 0
         self._misses = 0
-        self._generation = 0
 
     def __call__(self, *args, **kwargs):
         kwargs = dict(kwargs)
         compile_args = kwargs.pop("compile_args", _MISSING)
-        cache_key = args + (tuple(sorted(kwargs.items())) if kwargs else ())
+        cache_key = args, tuple(sorted(kwargs.items()))
+
+        # The hit path runs on every operator call, not just every compile, so
+        # it stays off the lock. dict.get is atomic; the hit counter is a plain
+        # increment and can therefore lose an update under contention, which is
+        # acceptable for a diagnostic. Misses are counted under the lock.
+        cached = self._cache.get(cache_key, _MISSING)
+        if cached is not _MISSING:
+            self._hits += 1
+            return cached
 
         with self._lock:
+            key_lock = self._key_locks.setdefault(cache_key, RLock())
+
+        # One compile per specialization; different specializations still
+        # compile concurrently.
+        with key_lock:
             cached = self._cache.get(cache_key, _MISSING)
             if cached is not _MISSING:
                 self._hits += 1
                 return cached
-            key_lock = self._key_locks.setdefault(cache_key, RLock())
-
-        with key_lock:
             with self._lock:
-                cached = self._cache.get(cache_key, _MISSING)
-                if cached is not _MISSING:
-                    self._hits += 1
-                    return cached
                 self._misses += 1
-                generation = self._generation
 
             if compile_args is _MISSING:
                 compiled = self._fn(*args, **kwargs)
@@ -68,26 +73,22 @@ class _JitCacheWrapper:
                 compiled = self._fn(*args, compile_args=compile_args, **kwargs)
 
             with self._lock:
-                # A cache_clear() that landed while this compile was running
-                # bumped the generation. The caller still gets its result, but
-                # storing it would leave the cache non-empty, and the miss it
-                # counted already went away with the clear.
-                if generation == self._generation:
-                    self._cache[cache_key] = compiled
+                self._cache[cache_key] = compiled
             return compiled
 
     def cache_clear(self) -> None:
         with self._lock:
             self._cache.clear()
-            # The key locks go too: a compile still running under the old lock
-            # will not store its result, so the next caller for that key has to
-            # be free to compile again rather than wait behind it.
             self._key_locks.clear()
             self._hits = 0
             self._misses = 0
-            self._generation += 1
 
     def cache_info(self) -> CacheInfo:
+        """Return cache statistics.
+
+        ``hits`` is best-effort under concurrent calls because hot cache hits
+        do not take the cache lock.
+        """
         with self._lock:
             return CacheInfo(self._hits, self._misses, len(self._cache))
 
