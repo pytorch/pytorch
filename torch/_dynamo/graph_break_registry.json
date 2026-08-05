@@ -3967,6 +3967,26 @@
       ]
     }
   ],
+  "GB3837": [
+    {
+      "Gb_type": "bytearray constructor",
+      "Context": "arg type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot trace bytearray() with this argument type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5460": [
+    {
+      "Gb_type": "bytearray constructor with non-constant args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo cannot trace bytearray() with non-constant arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0258": [
     {
       "Gb_type": "collections.deque() with bad arguments",

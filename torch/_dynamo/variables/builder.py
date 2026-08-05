@@ -930,7 +930,7 @@ class VariableBuilder:
                 cls.wrap_tensor,
             ),
             (
-                (tuple, list, odict_values, collections.deque, torch.Size),
+                (tuple, list, odict_values, collections.deque, torch.Size, bytearray),
                 cls.wrap_listlike,
             ),
             (itertools.count, cls.wrap_itertools_count),
@@ -2375,7 +2375,8 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(
-        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
+        self,
+        value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple, bytearray],
     ) -> VariableTracker:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
