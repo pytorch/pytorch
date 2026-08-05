@@ -28,16 +28,14 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
-    sm_is_or_higher_than,
 )
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import IS_LINUX, run_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = get_devtype().type
+device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
 
 DIM = 2000
 
@@ -83,7 +81,7 @@ class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
 class ReplicateTest(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
-        return min(2, torch.get_device_module(device_type).device_count())
+        return min(2, torch.accelerator.device_count())
 
     def _test_compile(
         self,
@@ -215,11 +213,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         # Check device capability wrt bf16
-        if (
-            not sm_is_or_higher_than(torch.device(device_type), 8, 0)
-            and torch.version.hip is None
-        ):
-            self.skipTest("bf16 requires sm >= 8.0")
+        device_module = torch.get_device_module(device_type)
+        if hasattr(device_module, "get_device_capability"):
+            major, _ = device_module.get_device_capability()
+            if major < 8:
+                self.skipTest("bf16 requires compute capability >= 8.0")
+        else:
+            self.skipTest("bf16 requires compute capability check")
 
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
