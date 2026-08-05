@@ -530,6 +530,8 @@ kernel void sum_reduction_outer(
   }
 }
 
+// Narrow layout for inner_size < OUTER_TG_WIDTH: flat coalesced walk; the
+// thread count is a multiple of inner_size, pinning each thread to one column.
 template <
     typename TI,
     typename TO,
@@ -550,6 +552,7 @@ kernel void sum_reduction_narrow(
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
   const uint num_segs = max(sizes.w, 1u);
+  const uint active = (TG_SIZE / inner_size) * inner_size;
 
   const uint seg_rows = ceil_div(dim_size, num_segs);
   const uint r0 = tg_pos.y * seg_rows;
@@ -561,14 +564,14 @@ kernel void sum_reduction_narrow(
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = 0;
   }
-  const uint stride = TG_SIZE * NCHAINS;
+  const uint stride = active * NCHAINS;
   uint k = tid;
-  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+  for (; k + (NCHAINS - 1) * active < count; k += stride) {
     for (uint j = 0; j < NCHAINS; j++) {
-      acc[j] += load_val<MODE>(input[base + k + j * TG_SIZE]);
+      acc[j] += load_val<MODE>(input[base + k + j * active]);
     }
   }
-  for (; k < count; k += TG_SIZE) {
+  for (; k < count; k += active) {
     acc[0] += load_val<MODE>(input[base + k]);
   }
   TA sum = acc[0];
@@ -582,7 +585,7 @@ kernel void sum_reduction_narrow(
 
   if (tid < inner_size) {
     TA s = 0;
-    for (uint t = tid; t < TG_SIZE; t += inner_size) {
+    for (uint t = tid; t < active; t += inner_size) {
       s += shmem[t];
     }
     if (divisor > 0) {
@@ -594,6 +597,8 @@ kernel void sum_reduction_narrow(
   }
 }
 
+// Strided-input variant of sum_reduction_narrow: identical thread-to-column
+// mapping, addressing through explicit dim/inner/outer strides.
 template <
     typename TI,
     typename TO,
@@ -618,6 +623,8 @@ kernel void sum_reduction_narrow_strided(
   const uint num_segs = max(sizes.w, 1u);
   const uint dim_stride = strides.x;
   const uint inner_stride = strides.y;
+  const uint rstep = TG_SIZE / inner_size;
+  const uint active = rstep * inner_size;
 
   const uint seg_rows = ceil_div(dim_size, num_segs);
   const uint r0 = tg_pos.y * seg_rows;
@@ -626,23 +633,22 @@ kernel void sum_reduction_narrow_strided(
   const uint count = (r0 < dim_size) ? (r1 - r0) * inner_size : 0u;
 
   const uint col_off = (tid % inner_size) * inner_stride;
-  const uint rstep = TG_SIZE / inner_size;
   uint row = tid / inner_size;
 
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = 0;
   }
-  const uint stride = TG_SIZE * NCHAINS;
+  const uint stride = active * NCHAINS;
   uint k = tid;
-  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+  for (; k + (NCHAINS - 1) * active < count; k += stride) {
     for (uint j = 0; j < NCHAINS; j++) {
       acc[j] += load_val<MODE>(
           input[base + (row + j * rstep) * dim_stride + col_off]);
     }
     row += rstep * NCHAINS;
   }
-  for (; k < count; k += TG_SIZE) {
+  for (; k < count; k += active) {
     acc[0] += load_val<MODE>(input[base + row * dim_stride + col_off]);
     row += rstep;
   }
@@ -657,7 +663,7 @@ kernel void sum_reduction_narrow_strided(
 
   if (tid < inner_size) {
     TA s = 0;
-    for (uint t = tid; t < TG_SIZE; t += inner_size) {
+    for (uint t = tid; t < active; t += inner_size) {
       s += shmem[t];
     }
     if (divisor > 0) {
@@ -1544,6 +1550,7 @@ kernel void value_reduction_outer(
   }
 }
 
+// Value-op counterpart of sum_reduction_narrow; see the layout comment there.
 template <
     template <typename> class OpFn,
     typename Load,
@@ -1565,6 +1572,7 @@ kernel void value_reduction_narrow(
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
   const uint num_segs = max(sizes.w, 1u);
+  const uint active = (TG_SIZE / inner_size) * inner_size;
 
   const uint seg_rows = ceil_div(dim_size, num_segs);
   const uint r0 = tg_pos.y * seg_rows;
@@ -1577,15 +1585,15 @@ kernel void value_reduction_narrow(
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
   }
-  const uint stride = TG_SIZE * NCHAINS;
+  const uint stride = active * NCHAINS;
   uint k = tid;
-  for (; k + (NCHAINS - 1) * TG_SIZE < count; k += stride) {
+  for (; k + (NCHAINS - 1) * active < count; k += stride) {
     for (uint j = 0; j < NCHAINS; j++) {
       acc[j] = Op::combine(
-          acc[j], Load::template load<TA>(input[base + k + j * TG_SIZE]));
+          acc[j], Load::template load<TA>(input[base + k + j * active]));
     }
   }
-  for (; k < count; k += TG_SIZE) {
+  for (; k < count; k += active) {
     acc[0] = Op::combine(acc[0], Load::template load<TA>(input[base + k]));
   }
   TA val = acc[0];
@@ -1599,7 +1607,7 @@ kernel void value_reduction_narrow(
 
   if (tid < inner_size) {
     TA s = identity_val;
-    for (uint t = tid; t < TG_SIZE; t += inner_size) {
+    for (uint t = tid; t < active; t += inner_size) {
       s = Op::combine(s, shmem[t]);
     }
     const uint out_idx = (num_segs > 1) ? (tg_pos.y * inner_size + tid)
