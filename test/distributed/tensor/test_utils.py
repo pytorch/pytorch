@@ -1399,7 +1399,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
             optim.step()
 
             # Verify parameters still have correct placement after optimizer step
-            for name, param in model.named_parameters():
+            for _name, param in model.named_parameters():
                 self.assertIsInstance(param, DTensor)
                 self.assertEqual(len(param.placements), 2)
 
@@ -1846,7 +1846,7 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
             mesh_shape,
             tensor_shape,
             src_p,
-            src_tensor_dim,
+            _src_tensor_dim,
             tgt_p,
             tgt_tensor_dim,
             operate_mesh_dim,

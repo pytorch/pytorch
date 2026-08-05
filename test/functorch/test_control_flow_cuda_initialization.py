@@ -34,8 +34,8 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
 
         outputs = []
 
-        for p in [pred, torch.logical_not(pred)]:
-            for i in range(3):
+        for _p in [pred, torch.logical_not(pred)]:
+            for _i in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
                 outputs.append(f_compiled(pred, *other_args).clone())
 

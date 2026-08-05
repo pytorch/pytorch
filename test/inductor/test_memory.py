@@ -513,7 +513,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             # Look for patterns like "cond" or "cond_1" in the generated code
             # along with their buffer sizes
             lines = code.split("\n")
-            for i, line in enumerate(lines):
+            for _i, line in enumerate(lines):
                 # Match true_graph buffer allocations which indicate cond execution
                 match = re.search(r"true_graph_(\d+)_buf0\s*=.*\((\d+),", line)
                 if match:

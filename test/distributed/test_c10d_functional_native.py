@@ -154,7 +154,7 @@ class TestWithNCCL(DistributedTestBase):
             "avg",
             "default",
         )
-        for i, (output, input) in enumerate(zip(outputs, inputs)):
+        for i, (output, _input) in enumerate(zip(outputs, inputs)):
             if output.completed:
                 raise AssertionError("Expected output.completed to be False")
             expected = sum(self.ranks) / self.world_size * i

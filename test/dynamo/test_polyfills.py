@@ -203,7 +203,7 @@ class TestGroupTensorsByDeviceAndDtype(TestCase):
             # Perform some tensor computation to ensure the frame is not skipped
             # Sum up results for each dtype group
             total = torch.tensor(0.0)
-            for grouped_tensors, indices in grouped.values():
+            for grouped_tensors, _indices in grouped.values():
                 tensor_list, grad_list = grouped_tensors
                 for t, g in zip(tensor_list, grad_list):
                     if t is not None and g is not None:
