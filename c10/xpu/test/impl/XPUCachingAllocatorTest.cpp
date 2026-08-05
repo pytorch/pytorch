@@ -191,7 +191,7 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   void* ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   EXPECT_NE(ptr, nullptr)
       << "Allocation should have succeeded via OOM pool fallback";
-  EXPECT_EQ(oom_ptr, ptr)
+  ASSERT_EQ(oom_ptr, ptr)
       << "Allocation should have returned the pre-cached OOM pool block";
 
   // Step 5: restore a permissive fraction before cleanup.
