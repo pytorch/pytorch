@@ -37,7 +37,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.2": "9",
 }
 
-ROCM_ARCHES = ["7.1", "7.2"]
+ROCM_ARCHES = ["7.2", "7.14"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -77,6 +77,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
+    # dependency on latest patch version for (major, minor)
+    "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
@@ -490,6 +492,10 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS.get(
+                                gpu_arch_version, ""
+                            )
+                            if gpu_arch_type == "rocm"
                             else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
                             if gpu_arch_type == "cpu"
                             and os in ("windows", "macos-arm64")
