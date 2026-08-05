@@ -368,6 +368,16 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(grads[1][:2], make_tensor([4.0, 8.0]))
         self.assertEqual(found_inf.item(), 1.0)
 
+    def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("mps")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("mps"), torch.is_autocast_enabled())
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("mps"), torch.is_autocast_enabled())
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
@@ -5987,6 +5997,27 @@ class TestMPS(TestCaseMPS):
         x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
         self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
 
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.complex32])
+    def test_sum_splitk_fp32_partials(self, dtype):
+        # Split-K partials must be stored in opmath_t, not the output dtype.
+        # (4, 1048576) splits into 2048 segments of 512; every even segment
+        # sums to a rounding tie of the output dtype (2049 for fp16, 513 for
+        # bf16) and every odd one to its negation plus 2, so rounding the
+        # partials loses half of each row's sum (1024 instead of 2048).
+        a, b = (1.0, 2.0) if dtype == torch.bfloat16 else (4.0, 5.0)
+        rdtype = torch.half if dtype == torch.complex32 else dtype
+        pos = torch.full((512,), a, dtype=rdtype)
+        pos[-1] = b
+        neg = -pos
+        neg[-1] += 2.0
+        row = torch.cat([pos, neg]).repeat(1024)
+        if dtype == torch.complex32:
+            row = torch.complex(row, row)
+        x = row.repeat(4, 1)
+        # sum_cpu is not implemented for chalf; the complex64 detour is exact.
+        ref = x.to(torch.complex64).sum(-1).to(dtype) if dtype == torch.complex32 else x.sum(-1)
+        self.assertEqual(x.to("mps").sum(-1).cpu(), ref)
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
@@ -10377,6 +10408,19 @@ class TestMPS(TestCaseMPS):
         x[positions] = True
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("N", [4095, 4097])
+    def test_fused_rms_norm_weight_multiply_in_fp32(self, dtype, N):
+        # Values on either side of 4096 exercise the single-row and looped kernels.
+        # Keep x*inv*weight in fp32 and cast once, like the CPU composite
+        # (#147203). Compare the half path to the same fused kernel run in fp32.
+        x = torch.randn(2, N, dtype=dtype, device="mps")
+        w = (torch.randn(N, dtype=torch.float32, device="mps") * 8).to(dtype)
+        with torch.inference_mode():
+            y = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)[0]
+            ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
+        self.assertEqual(y, ref, atol=0, rtol=0)
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
