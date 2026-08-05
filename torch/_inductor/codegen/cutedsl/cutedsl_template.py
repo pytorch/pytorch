@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder, unique
+from torch._inductor.utils import OrderedSet, Placeholder
 from torch._inductor.virtualized import V
 
 from ...autotune_process import CuteDSLBenchmarkRequest, TensorMeta
@@ -102,7 +102,9 @@ class CuteDSLTemplate(KernelTemplate):
             code = kernel.render(self.template, **kwargs)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+            expected_input_args = tuple(
+                OrderedSet(node.get_name() for node in input_nodes)
+            )
             if input_call_args[: len(expected_input_args)] != expected_input_args:
                 raise RuntimeError(
                     "CuteDSL template input registration order changed while "
