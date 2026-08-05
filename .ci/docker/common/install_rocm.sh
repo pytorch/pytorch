@@ -24,7 +24,6 @@ install_rocm() {
     echo "ROCm Multi-Arch Wheel Installation (TheRock)"
     echo "Index URL:  ${THEROCK_INDEX_URL}"
     echo "ROCm version: ${ROCM_VERSION}"
-    echo "ROCm spec:  rocm[libraries,devel,device-all]==${ROCM_VERSION}"
     echo "=============================================="
 
     # device-all pulls kernels for every supported gfx target (multi-arch wheel);
