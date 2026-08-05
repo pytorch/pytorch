@@ -232,6 +232,47 @@ class TestSegmentedTree(TestCase):
                         f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
                     )
 
+    @given(
+        values=positive_integers,
+        range_data=st.data(),
+        update_value=update_values,
+    )
+    def test_set_range_after_lazy_update(self, values, range_data, update_value):
+        naive_values = values.copy()
+        tree = SegmentedTree(values, add_op, max_op, 0)
+
+        update_start, update_end = range_data.draw(valid_range_indices(len(values)))
+        tree.update_range(update_start, update_end, update_value)
+        naive_range_update(naive_values, update_start, update_end, update_value)
+
+        start, end = range_data.draw(valid_range_indices(len(values)))
+        replacement = range_data.draw(
+            st.lists(
+                st.integers(min_value=1, max_value=100),
+                min_size=end - start + 1,
+                max_size=end - start + 1,
+            )
+        )
+        tree.set_range(start, replacement)
+        naive_values[start : start + len(replacement)] = replacement
+
+        for i in range(len(values)):
+            for j in range(i, len(values)):
+                self.assertEqual(
+                    tree.summarize_range(i, j),
+                    naive_range_max(naive_values, i, j),
+                )
+
+    def test_set_range_validation(self):
+        tree = SegmentedTree([1, 3, 5, 7, 9], add_op, max_op, 0)
+
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            tree.set_range(0, [])
+        with self.assertRaisesRegex(ValueError, "Start index -1 out of bounds"):
+            tree.set_range(-1, [2])
+        with self.assertRaisesRegex(ValueError, "End index 5 out of bounds"):
+            tree.set_range(4, [2, 4])
+
     def test_sequential_updates_and_queries(self):
         values = [2, 4, 6, 8, 10, 12, 14]
         naive_values = values.copy()

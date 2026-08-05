@@ -3476,6 +3476,10 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             [combo_ab, use_a, use_b, combo_cd, use_c, use_d, big, use_big],
         )
         self.assertEqual(len(scheduler.nodes), len(set(scheduler.nodes)))
+        self.assertEqual(
+            [peak_tree.summarize_range(i, i) for i in range(len(nodes))],
+            mem_ctx.current_step_peak,
+        )
         positions = {node: idx for idx, node in enumerate(scheduler.nodes)}
         for producer, consumer in (
             (a, use_a),

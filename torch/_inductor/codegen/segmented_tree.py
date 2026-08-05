@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Generic, TypeVar
 
 
@@ -193,6 +193,31 @@ class SegmentedTree(Generic[T]):
         # Combine results from children
         return self.summary_op(left_result, right_result)
 
+    def _set_range_helper(
+        self,
+        node: int,
+        start: int,
+        end: int,
+        left: int,
+        right: int,
+        values: Sequence[T],
+    ) -> None:
+        self._push_lazy(node, start, end)
+
+        if start > right or end < left:
+            return
+
+        if start == end:
+            self.tree[node] = values[start - left]
+            return
+
+        mid = (start + end) // 2
+        left_child = 2 * node
+        right_child = 2 * node + 1
+        self._set_range_helper(left_child, start, mid, left, right, values)
+        self._set_range_helper(right_child, mid + 1, end, left, right, values)
+        self.tree[node] = self.summary_op(self.tree[left_child], self.tree[right_child])
+
     def update_range(self, start: int, end: int, value: T) -> None:
         """
         Update a range of values in the segment tree.
@@ -215,6 +240,19 @@ class SegmentedTree(Generic[T]):
             raise ValueError(f"End index {end} out of bounds [0, {self.n - 1}]")
 
         self._update_range_helper(1, 0, self.n - 1, start, end, value)
+
+    def set_range(self, start: int, values: Sequence[T]) -> None:
+        """Replace consecutive leaf values in O(len(values) + log n)."""
+        if not values:
+            raise ValueError("Values must be non-empty")
+
+        end = start + len(values) - 1
+        if start < 0 or start >= self.n:
+            raise ValueError(f"Start index {start} out of bounds [0, {self.n - 1}]")
+        if end >= self.n:
+            raise ValueError(f"End index {end} out of bounds [0, {self.n - 1}]")
+
+        self._set_range_helper(1, 0, self.n - 1, start, end, values)
 
     def summarize_range(self, start: int, end: int) -> T:
         """

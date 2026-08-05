@@ -6832,10 +6832,8 @@ class Scheduler:
         for idx, node in enumerate(local_nodes, start=region_start):
             mem_ctx.current_node_to_idx[node] = idx
         mem_ctx.current_live_before[region_start : region_end + 1] = region_live_before
-        for idx, peak in enumerate(region_step_peak, start=region_start):
-            previous_peak = mem_ctx.current_step_peak[idx]
-            mem_ctx.current_step_peak[idx] = peak
-            peak_tree.update_range(idx, idx, peak - previous_peak)
+        mem_ctx.current_step_peak[region_start : region_end + 1] = region_step_peak
+        peak_tree.set_range(region_start, region_step_peak)
         for node in group_nodes:
             mem_ctx.accepted_node_to_combo[node] = combo_node
         return combo_node, combo_step
