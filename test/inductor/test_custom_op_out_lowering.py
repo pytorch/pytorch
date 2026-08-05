@@ -9,19 +9,15 @@ from torch._inductor import config
 from torch._inductor.codegen import common
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
-    parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
-
-
-@instantiate_parametrized_tests
-class TestCustomOpOutLowering(InductorTestCase):
-    """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
+class TestCustomOpOutLoweringAccelerator(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _register_add_one_ops(self, lib):
         """Register a simple add_one op with functional + .out overloads."""
@@ -47,7 +43,6 @@ class TestCustomOpOutLowering(InductorTestCase):
 
         return torch.ops.mylib.add_one, torch.ops.mylib.add_one.out
 
-    @parametrize("device", DEVICES)
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -66,7 +61,6 @@ class TestCustomOpOutLowering(InductorTestCase):
 
             FileCheck().check(".out(").check_not(".default(").run(code)
 
-    @parametrize("device", DEVICES)
     def test_add_one_lowered_to_out_dynamic_shape(self, device):
         """Out-variant lowering with symbolic output shape (see #185503)."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -111,7 +105,6 @@ class TestCustomOpOutLowering(InductorTestCase):
 
         return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
 
-    @parametrize("device", DEVICES)
     def test_multi_output_lowered_to_out(self, device):
         """Test a two-output functional op gets lowered to its .out variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -130,7 +123,6 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             FileCheck().check(".out(").check("out0=").check("out1=").run(code)
 
-    @parametrize("device", DEVICES)
     def test_op_without_out_variant_falls_through(self, device):
         """Test that ops without an out-variant fall through to FallbackKernel."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -155,6 +147,15 @@ class TestCustomOpOutLowering(InductorTestCase):
                 torch.compile(f, backend="inductor", fullgraph=True), x
             )
             self.assertEqual(compiled_out, eager_out)
+
+
+instantiate_device_type_tests(
+    TestCustomOpOutLoweringAccelerator, globals(), allow_mps=True, allow_xpu=True
+)
+
+
+class TestCustomOpOutLoweringGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -195,6 +196,9 @@ class TestCustomOpOutLowering(InductorTestCase):
             else:
                 FileCheck().check_regex(output_assert).run(source_code)
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
+
+
+instantiate_parametrized_tests(TestCustomOpOutLoweringGeneric)
 
 
 if __name__ == "__main__":
