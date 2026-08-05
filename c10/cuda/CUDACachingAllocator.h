@@ -126,12 +126,11 @@ struct StreamSegmentSize {
 };
 
 // Registers one CUDA stream capture and its place in the capture hierarchy.
-// Conditional child captures share their parent's private mempool but have
-// distinct capture IDs and primary capture streams.
+// Conditional child captures share their parent's private mempool but have a
+// distinct capture ID.
 struct CaptureRegistration {
   MempoolId_t mempool_id;
   CaptureId_t capture_id{0};
-  cudaStream_t primary_capture_stream{};
   std::optional<CaptureId_t> parent_capture_id;
 };
 
@@ -139,7 +138,6 @@ struct CaptureRegistration {
 // validation errors are reported only after CUDAGraph has restored its
 // registry and pool-routing state.
 struct CaptureEndResult {
-  MempoolId_t mempool_id;
   size_t invalid_capture_free_count{0};
 };
 
@@ -464,15 +462,12 @@ inline void markCaptureEnd(c10::DeviceIndex device) {
 // Capture-registration hooks used by CUDAGraph. These are non-virtual so the
 // existing CUDAAllocator vtable contract remains unchanged. Custom allocators
 // receive the legacy notification; the native allocator additionally records
-// the capture hierarchy and stream roles.
+// the capture hierarchy.
 C10_CUDA_API void markCaptureBegin(
     c10::DeviceIndex device,
     const CaptureRegistration& registration);
 C10_CUDA_API CaptureEndResult
 markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id);
-C10_CUDA_API void finalizeCaptureEnd(
-    c10::DeviceIndex device,
-    const CaptureEndResult& result);
 
 inline void recordHistory(
     bool enabled,
