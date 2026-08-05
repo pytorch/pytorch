@@ -13,6 +13,20 @@ log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
 
 
+def fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    """Return whether a 2D tensor fits FlyDSL's 32-bit dimensions and offsets."""
+    int32_max = (1 << 31) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize <= 1 << 32
+    )
+
+
 def _flydsl_runtime_unavailable_reason() -> str | None:
     flydsl_spec = find_spec("flydsl")
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:

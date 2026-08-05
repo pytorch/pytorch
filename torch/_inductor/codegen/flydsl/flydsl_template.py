@@ -47,6 +47,8 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
+        if getattr(V.graph, "cpp_wrapper", False):
+            return NotImplementedError("FlyDSL does not support C++ wrappers")
         if not flydsl_utils.runtime_available():
             return NotImplementedError("FlyDSL runtime is unavailable")
         try:
@@ -81,6 +83,8 @@ class FlyDSLTemplate(KernelTemplate):
             code = kernel.render(self.template, **kwargs)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
+            # KernelArgs deduplicates input buffers by string value, so mirror
+            # that contract even when equal names are distinct Python objects.
             expected_input_args = tuple(
                 OrderedSet(node.get_name() for node in input_nodes)
             )

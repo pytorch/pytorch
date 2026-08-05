@@ -742,14 +742,17 @@ class AsyncCompile:
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_kernel_wrapper(
-                "CuteDSL",
-                kernel_name,
-                MAIN_SUFFIX,
-                CuteDSLKernelWrapper,
-                key,
-                path,
-            )
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find CuteDSL main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
 
     def flydsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
         """
@@ -837,14 +840,17 @@ class AsyncCompile:
 
         def task():
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_kernel_wrapper(
-                "Pallas",
-                kernel_name,
-                MAIN_SUFFIX,
-                PallasKernelWrapper,
-                key,
-                path,
-            )
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find Pallas main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
 
         if get_compile_threads() <= 1:
             return task()
