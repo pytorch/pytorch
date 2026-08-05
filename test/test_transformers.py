@@ -329,7 +329,7 @@ def make_strided_sdpa_input(
     return tensor.detach().requires_grad_(requires_grad)
 
 
-class TestTransformers(NNTestCase):
+class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
@@ -560,7 +560,7 @@ class TestTransformersCUDA(NNTestCase):
                 )[0]
 
 
-class TestTransformersDevice(NNTestCase):
+class TestTransformersAccelerator(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
@@ -6226,7 +6226,7 @@ if TEST_XPU:
     device_types += ("xpu", )
 
 
-instantiate_device_type_tests(TestTransformersDevice, globals(), only_for=device_types, allow_xpu=True)
+instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
