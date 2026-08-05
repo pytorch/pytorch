@@ -167,7 +167,11 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus(
   if (status() == WorkStatus::INPROGRESS) {
     try {
       if (end_event_->query()) {
-        setTerminalStatus(WorkStatus::COMPLETED);
+        if (setTerminalStatus(WorkStatus::COMPLETED) &&
+            owned_ephemeral_timeout_.count() > 0 &&
+            !ephemeral_timeout_released_.exchange(true)) {
+          comm_->releaseEphemeralTimeout(owned_ephemeral_timeout_);
+        }
         return status();
       }
     } catch (const std::exception& e) {
