@@ -674,13 +674,6 @@ class AsyncCompile:
         self, backend_name, kernel_name, main_suffix, wrapper_cls, key, path
     ):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
-        return wrapper_cls(
-            self._load_kernel_fn(backend_name, kernel_name, main_suffix, key, path),
-            kernel_path=path,
-        )
-
-    def _load_kernel_fn(self, backend_name, kernel_name, main_suffix, key, path):
-        """Reload a kernel module from PyCodeCache and return its entry point."""
         mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
         main_func_name = f"{kernel_name}_{main_suffix}"
         if not hasattr(mod, main_func_name):
@@ -689,7 +682,7 @@ class AsyncCompile:
                 f"Could not find {backend_name} main kernel function "
                 f"'{main_func_name}'. Available callables: {available}"
             )
-        return getattr(mod, main_func_name)
+        return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
         """
@@ -844,17 +837,14 @@ class AsyncCompile:
 
         def task():
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-
-            # Find our special entry point named function
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
-            if not hasattr(mod, main_func_name):
-                available = [name for name in dir(mod) if callable(getattr(mod, name))]
-                raise RuntimeError(
-                    f"Could not find Pallas main kernel function '{main_func_name}'. Available callables: {available}"
-                )
-
-            return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+            return self._load_kernel_wrapper(
+                "Pallas",
+                kernel_name,
+                MAIN_SUFFIX,
+                PallasKernelWrapper,
+                key,
+                path,
+            )
 
         if get_compile_threads() <= 1:
             return task()
