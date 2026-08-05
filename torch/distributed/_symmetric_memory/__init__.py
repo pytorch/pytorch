@@ -473,7 +473,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-def ring_addmm_reduce_scatter(
+def addmm_reduce_scatter_two_ranks(
     mm_out_op: torch._ops.OpOverload,
     A_shards: tuple[torch.Tensor, ...],
     B: torch.Tensor,
@@ -482,53 +482,39 @@ def ring_addmm_reduce_scatter(
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
     """
-    Reduce-scatter GEMM schedule that rotates partial sums around the ring and
-    uses GEMM's C operand for accumulation.
+    Two-rank reduce-scatter that accumulates through GEMM's C operand.
+
+    Each rank computes the partial for its peer's output shard into symmetric
+    memory and signals it, then folds the peer's partial into its own GEMM as
+    the C operand. The reduction is therefore never a separate kernel, and the
+    peer's partial is added in fp32 inside the GEMM, so the result is rounded
+    once.
     """
     M_shard, N = output.shape
-    dtype = output.dtype
-    num_d_buffers = max(2, len(A_shards) - 1)
-    p2p_workspace_size_req = num_d_buffers * output.numel() * output.element_size()
-    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
-    group_size = symm_mem.world_size
+    symm_mem = get_symm_mem_workspace(
+        group_name, min_size=output.numel() * output.element_size()
+    )
     rank = symm_mem.rank
-    left_peer = (rank - 1 + group_size) % group_size
-    right_peer = (rank + 1) % group_size
+    peer = 1 - rank
+    local_partial = symm_mem.get_buffer(rank, (M_shard, N), output.dtype)
+    peer_partial = symm_mem.get_buffer(peer, (M_shard, N), output.dtype)
     signal_channel = 1
 
-    local_d_full = symm_mem.get_buffer(rank, (num_d_buffers * M_shard, N), dtype)
-    left_d_full = symm_mem.get_buffer(left_peer, (num_d_buffers * M_shard, N), dtype)
-
     symm_mem.barrier(channel=0)
+    # Produce the peer's shard first, so it can be consumed while this rank
+    # computes its own. mm.out cannot widen, hence the beta=0 addmm.
+    a_peer = A_shards[peer]
+    if output.dtype == a_peer.dtype:
+        mm_out_op(a_peer, B, out=local_partial)
+    else:
+        torch.addmm(local_partial, a_peer, B, beta=0, out=local_partial)
+    symm_mem.put_signal(dst_rank=peer, channel=signal_channel)
 
-    for i in range(group_size):
-        tile_idx = (rank - 1 - i + group_size) % group_size
-        a_tile = A_shards[tile_idx]
-        if i < group_size - 1:
-            buf_idx = i % num_d_buffers
-            d_target = local_d_full[buf_idx * M_shard : (buf_idx + 1) * M_shard, :]
-        else:
-            d_target = output
-
-        if i == 0:
-            if d_target.dtype == a_tile.dtype:
-                mm_out_op(a_tile, B, out=d_target)
-            else:
-                torch.addmm(d_target, a_tile, B, beta=0, out=d_target)
-        else:
-            symm_mem.wait_signal(src_rank=left_peer, channel=signal_channel)
-            prev_buf_idx = (i - 1) % num_d_buffers
-            c_source = left_d_full[
-                prev_buf_idx * M_shard : (prev_buf_idx + 1) * M_shard, :
-            ]
-            torch.addmm(c_source, a_tile, B, beta=1, out=d_target)
-
-        if i < group_size - 1:
-            symm_mem.put_signal(dst_rank=right_peer, channel=signal_channel)
-
+    symm_mem.wait_signal(src_rank=peer, channel=signal_channel)
+    torch.addmm(peer_partial, A_shards[rank], B, beta=1, out=output)
     if reduce_op == "avg":
-        output.div_(group_size)
-
+        # exact for two ranks: dividing by 2 only decrements the exponent
+        output.div_(2)
     symm_mem.barrier(channel=0)
     return output
 
@@ -1488,19 +1474,19 @@ def _fused_matmul_reduce_scatter_impl(
     x = x.flatten(0, -2)
     A_shards = x.chunk(group.size())
 
-    can_use_ring = (
+    # Only two ranks: with more, the schedule would have to carry a running sum
+    # from peer to peer, and in low precision that sum is rounded at every hop.
+    can_use_addmm_schedule = (
         A.dim() == 2
         and scatter_dim == 0
         and not kwargs
+        and group.size() == 2
         and reduce_op in ("sum", "avg")
-        and (
-            output_dtype not in (torch.float16, torch.bfloat16)
-            or (group.size() == 2 and reduce_op == "sum")
-        )
+        and (output_dtype not in (torch.float16, torch.bfloat16) or reduce_op == "sum")
     )
-    if can_use_ring:
+    if can_use_addmm_schedule:
         output = x.new_empty(A_shards[0].shape[0], B.shape[1], dtype=output_dtype)
-        return ring_addmm_reduce_scatter(
+        return addmm_reduce_scatter_two_ranks(
             mm_out_op,
             A_shards,
             B,
