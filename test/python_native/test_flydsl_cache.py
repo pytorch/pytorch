@@ -54,6 +54,26 @@ class TestFlyDSLCache(TestCase):
         self.assertEqual(compile_fn.cache_info().hits, 1)
         self.assertEqual(compile_fn.cache_info().misses, 1)
 
+    def test_failed_compile_is_not_cached(self):
+        calls = 0
+
+        @flydsl_jit_cache
+        def compile_fn(key):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("compile failed")
+
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, "compile failed"):
+                compile_fn("key")
+
+        # The exception propagates unchanged and leaves nothing behind, so the
+        # next call retries rather than replaying a failure. `misses` therefore
+        # counts compile attempts, not stored entries.
+        self.assertEqual(calls, 2)
+        info = compile_fn.cache_info()
+        self.assertEqual((info.hits, info.misses, info.currsize), (0, 2, 0))
+
     def test_cache_clear_resets_entries_and_counters(self):
         calls = 0
 

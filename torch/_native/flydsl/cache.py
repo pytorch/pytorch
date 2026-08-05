@@ -79,6 +79,11 @@ class _JitCacheWrapper:
     def cache_clear(self) -> None:
         with self._lock:
             self._cache.clear()
+            # The key locks go too, so a compile still running under the old
+            # lock no longer excludes the next caller for that key: the two can
+            # then compile the same specialization concurrently and both store.
+            # Only a clear can produce that, and it beats leaving callers to
+            # queue behind a compile whose result the clear was meant to drop.
             self._key_locks.clear()
             self._hits = 0
             self._misses = 0

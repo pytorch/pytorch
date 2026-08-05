@@ -1,8 +1,10 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import torch
 from torch._native import flydsl_utils
 from torch._vendor.packaging.version import Version
 from torch.testing._internal.common_utils import (
@@ -11,6 +13,82 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
+
+_QUERY_RAISES = object()
+
+
+class TestFlyDSLArchResolution(TestCase):
+    """What the kernel gets compiled for.
+
+    Compiling for the wrong arch is silent -- a wave64 reduction on a wave32
+    device produces wrong numbers rather than an error -- so each source of the
+    answer is pinned here.
+    """
+
+    def setUp(self):
+        super().setUp()
+        flydsl_utils._resolve_rocm_arch.cache_clear()
+        self.addCleanup(flydsl_utils._resolve_rocm_arch.cache_clear)
+
+    def _resolve(self, *, flydsl_arch="", hsa="", props=_QUERY_RAISES):
+        """Resolve with the environment and the device query both controlled.
+
+        ``props=None`` means no CUDA device; the default means the query itself
+        raises.
+        """
+        env = {"FLYDSL_GPU_ARCH": flydsl_arch, "HSA_OVERRIDE_GFX_VERSION": hsa}
+        query = (
+            RuntimeError("no device") if props is _QUERY_RAISES else None,
+            props,
+        )
+        with (
+            patch.dict(os.environ, env),
+            patch.object(torch.cuda, "is_available", return_value=props is not None),
+            patch.object(
+                torch.cuda,
+                "get_device_properties",
+                side_effect=query[0],
+                return_value=query[1],
+            ),
+        ):
+            return flydsl_utils._resolve_rocm_arch(0)
+
+    def test_explicit_arch_env_wins_and_is_stripped(self):
+        # Set on both, so this also pins the precedence over the HSA override.
+        self.assertEqual(
+            self._resolve(flydsl_arch="gfx950:sramecc+", hsa="9.0.10"), "gfx950"
+        )
+
+    def test_hsa_override_gfx_form_is_passed_through(self):
+        # Not stripped: consumers compare the base arch themselves, and the
+        # flags are meaningful to whoever set the variable.
+        self.assertEqual(self._resolve(hsa="gfx950:sramecc+"), "gfx950:sramecc+")
+
+    def test_hsa_override_stepping_is_hexadecimal(self):
+        # 9.0.10 is gfx90a, not gfx9010 -- the one rule here that is easy to
+        # get wrong by reading the format as decimal.
+        self.assertEqual(self._resolve(hsa="9.0.10"), "gfx90a")
+
+    @parametrize("hsa", ("9.0", "9.0.x", "not-a-version"))
+    def test_unusable_hsa_override_falls_back_to_the_device(self, hsa):
+        props = SimpleNamespace(gcnArchName="gfx942:xnack-")
+        self.assertEqual(self._resolve(hsa=hsa, props=props), "gfx942")
+
+    def test_device_properties_are_stripped(self):
+        props = SimpleNamespace(gcnArchName="gfx950:sramecc+:xnack-")
+        self.assertEqual(self._resolve(props=props), "gfx950")
+
+    def test_no_cuda_device_returns_none(self):
+        self.assertIsNone(self._resolve(props=None))
+
+    def test_device_query_failure_returns_none(self):
+        # get_device_properties raising must decline rather than propagate:
+        # this runs inside the dispatcher predicate.
+        self.assertIsNone(self._resolve())
+
+    def test_missing_gcn_arch_name_returns_none(self):
+        self.assertIsNone(self._resolve(props=SimpleNamespace()))
 
 
 class TestFlyDSLRuntimeProbe(TestCase):
@@ -130,6 +208,7 @@ class TestFlyDSLVersionGate(TestCase):
             self.assertTrue(flydsl_utils._version_is_ok())
 
 
+instantiate_parametrized_tests(TestFlyDSLArchResolution)
 instantiate_parametrized_tests(TestFlyDSLVersionGate)
 
 
