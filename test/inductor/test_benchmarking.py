@@ -571,6 +571,65 @@ class TestBenchmarker(TestCase):
         "hip_value, expected_buffer_size_bytes",
         ((None, 1024), ("mock-hip", 256 * 1024 * 1024)),
     )
+    def test_inductor_benchmarker_flushes_triton_cache_size_on_hip(
+        self, hip_value, expected_buffer_size_bytes, device=GPU_TYPE
+    ):
+        benchmarker = InductorBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 1024
+        _, _callable = self.make_params(device, size=16)
+
+        captured_buffer_lengths = []
+        original_empty = torch.empty
+
+        def empty_spy(*args, **kwargs):
+            captured_buffer_lengths.append(args[0])
+            return original_empty(*args, **kwargs)
+
+        with patch.object(torch.version, "hip", hip_value):
+            with patch(
+                "torch._inductor.runtime.benchmarking.torch.empty",
+                side_effect=empty_spy,
+            ):
+                timing = benchmarker.benchmark_gpu(
+                    _callable,
+                    estimation_iters=1,
+                    memory_warmup_iters=0,
+                    benchmark_iters=1,
+                    is_vetted_benchmarking=True,
+                )
+
+        self.assertGreater(timing, 0)
+        self.assertEqual(len(captured_buffer_lengths), 1)
+        self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
+
+    @parametrize("hip_value", (None, "mock-hip"))
+    def test_inductor_benchmarker_unknown_device_cache_size(self, hip_value):
+        """A device reporting no cache size is assumed to be flush-sized."""
+        from torch._inductor.runtime import benchmarking as _bench
+
+        class FakeDeviceInterface:
+            def current_device(self):
+                return 0
+
+            def get_device_properties(self, device):
+                return object()  # exposes neither cache-size attribute
+
+        benchmarker = InductorBenchmarker()
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(torch.version, "hip", hip_value),
+        ):
+            flush_size = benchmarker.get_cache_flush_size("cuda")
+            self.assertIsNone(benchmarker.get_device_cache_size("cuda"))
+            self.assertEqual(flush_size, 256 * 1024 * 1024)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @parametrize(
+        "hip_value, expected_buffer_size_bytes",
+        ((None, 1024), ("mock-hip", 256 * 1024 * 1024)),
+    )
     def test_torch_profiler_benchmarker_reuses_inductor_helpers(
         self, hip_value, expected_buffer_size_bytes, device=GPU_TYPE
     ):

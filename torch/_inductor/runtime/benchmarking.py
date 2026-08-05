@@ -24,6 +24,8 @@ _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
 MILLISECONDS_PER_SECOND = 1000
+# Buffer size triton.testing.do_bench zeroes between iterations to evict inputs.
+_TRITON_CACHE_FLUSH_SIZE = 256 * 1024 * 1024
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -564,14 +566,18 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self._in_cudagraph_benchmark = False
 
     @cached_property
-    def L2_cache_size(self: Self) -> int:
+    def L2_cache_size(self: Self) -> int | None:
         """Get the L2 cache size, in bytes, of the current device."""
         return self.get_device_cache_size()
 
     def get_device_cache_size(
         self: Self, device_type: str | torch.device | None = None
-    ) -> int:
-        """Get the L2/global cache size, in bytes, of the current device."""
+    ) -> int | None:
+        """Get the L2/global cache size, in bytes, of the current device.
+
+        None if the device reports no cache size, so that callers can tell
+        "unknown" apart from a real size.
+        """
         if "L2_cache_size" in self.__dict__:
             return self.__dict__["L2_cache_size"]
 
@@ -583,7 +589,23 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             cache_size = getattr(props, attr, None)
             if cache_size:
                 return cache_size
-        return 256 * 1024 * 1024
+        return None
+
+    def get_cache_flush_size(
+        self: Self, device_type: str | torch.device | None = None
+    ) -> int:
+        """Get the size, in bytes, of the buffer zeroed between timed iterations.
+
+        The device cache size, except on ROCm: hipDeviceProp reports only the
+        per-XCD L2 (4 MB on gfx942), not the last-level cache behind it (256 MB
+        on MI300X/MI350X), so an L2-sized flush leaves the input cached and
+        autotuning ranks configs by their cache-warm times. Use Triton's flush
+        size there, but never shrink below what the device does report.
+        """
+        cache_size = self.get_device_cache_size(device_type)
+        if torch.version.hip:
+            return max(_TRITON_CACHE_FLUSH_SIZE, cache_size or 0)
+        return _TRITON_CACHE_FLUSH_SIZE if cache_size is None else cache_size
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -653,8 +675,9 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         Keyword Arguments:
         - estimation_iters: Optionally, the number of iterations to run `_callable`
         during runtime estimation.
-        - memory_warmup_iters: Optionally, the number of iterations to flush the L2
-        cache before starting benchmarking.
+        - memory_warmup_iters: Optionally, the number of times to zero the cache
+        flush buffer, to bring the cache to a steady state, before starting
+        benchmarking.
         - benchmark_iters: Optionally, the number of iterations to run `_callable`
         during the benchmarking.
         - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
@@ -714,7 +737,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         buffer = torch.empty(
-            self.get_device_cache_size(device_type) // 4,
+            self.get_cache_flush_size(device_type) // 4,
             dtype=torch.int,
             device=device_type,
         )
@@ -835,16 +858,9 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         _callable()
         device_interface.synchronize()
 
-        # Keep Triton's 256 MB cache flush on ROCm. On other backends, reuse
-        # the shared L2-sized flush from InductorBenchmarker.
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        if torch.version.hip:
-            buffer_size_bytes = 256 * 1024 * 1024
-        else:
-            buffer_size_bytes = self.get_device_cache_size(device_type)
-        buffer = torch.empty(
-            buffer_size_bytes // 4, dtype=torch.int, device=device_type
-        )
+        flush_size = self.get_cache_flush_size(device_type)
+        buffer = torch.empty(flush_size // 4, dtype=torch.int, device=device_type)
         buffer.zero_()
 
         # Estimation phase with separate event pairs — also serves as warmup.
