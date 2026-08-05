@@ -406,7 +406,8 @@ FLEX_ATTENTION_TEMPLATE = r"""
 
   // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
 {%- if amx_supported %}
-  bool use_amx_overlap = at::cpu::init_amx()
+  static const amx_ok = at::cpu::init_amx();
+  bool use_amx_overlap = amx_ok
       && need_pack
       && std::is_same_v<scalar_t, at::BFloat16>
       && (headSize % 32 == 0)
