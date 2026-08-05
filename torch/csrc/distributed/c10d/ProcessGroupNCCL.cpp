@@ -949,6 +949,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
 
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order"; see groupRanks(). Materialize that mapping here rather than
+  // lazily, so groupRanks() is a pure read and needs no synchronization.
+  if (options_->global_ranks_in_group.empty()) {
+    defaultRanks_.resize(size_);
+    std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
+  }
+
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
   // environment variables from config file, which can race with getenv from
@@ -2668,10 +2676,22 @@ const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
-    static std::vector<uint64_t> globalRanks(size_);
-    std::iota(globalRanks.begin(), globalRanks.end(), 0);
-    return globalRanks;
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order": _new_process_group_helper() only fills the vector in for
+  // subgroups, and a directly-constructed (stateless) ProcessGroupNCCL leaves
+  // it at its default. defaultRanks_ (built in the constructor) is therefore
+  // the right answer whenever it is empty.
+  //
+  // This must NOT be gated on local_id_ == 0. local_id_ is a process-global
+  // counter over every ProcessGroupNCCL ever constructed in this process, so
+  // the default group only gets 0 when it happens to be the first NCCL backend
+  // built. If any NCCL pg was created earlier -- a stateless pg, one inherited
+  // across fork(), or simply a previous init_process_group() that has since
+  // been destroyed -- the default group fell through to the empty
+  // global_ranks_in_group below and split() then indexed an empty vector,
+  // segfaulting on a null data pointer.
+  if (options_->global_ranks_in_group.empty()) {
+    return defaultRanks_;
   }
   return options_->global_ranks_in_group;
 }
