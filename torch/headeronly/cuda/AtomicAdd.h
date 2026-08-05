@@ -7,23 +7,13 @@
 #include <cstdint>
 #include <type_traits>
 
-// The contents are device-only and compile away in plain host translation
-// units.
 #if defined(__CUDACC__) || defined(__HIPCC__)
-
-// Header-only fastAtomicAdd, usable from libtorch-agnostic (stable ABI) CUDA
-// and HIP extensions; ATen/native/cuda/KernelUtils.cuh delegates here. The
-// gpuAtomicAddNoReturn fallbacks (ATen/cuda/Atomic.cuh) are inlined as
-// detail::atomicAddScalar. This file is consumed un-hipified, so ROCm paths
-// are spelled with HIP-native types behind USE_ROCM.
 
 #if defined(USE_ROCM)
 #include <device_functions.h>
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 
-// Same fallbacks as ATen/cuda/detail/ROCmMacros.cuh, which is not reachable
-// header-only.
 #if !__has_builtin(__builtin_amdgcn_processor_is)
 #if defined(__amdgcn_processor__)
 // Device pass: __amdgcn_processor__ is available
@@ -136,9 +126,6 @@ using bfloat16_t = __nv_bfloat16;
 using bfloat16x2_t = __nv_bfloat162;
 #endif
 
-// 16-bit atomic add through a 32-bit CAS loop, for Half/BFloat16 on targets
-// without a native scalar atomic (ROCm, CUDA below sm_70/sm_80). Mirrors the
-// AtomicFPOp loops in ATen/cuda/Atomic.cuh.
 template <typename scalar_t>
 __device__ __forceinline__ void atomicAdd16BitCAS(
     scalar_t* address,
@@ -158,12 +145,8 @@ __device__ __forceinline__ void atomicAdd16BitCAS(
   } while (assumed != old);
 }
 
-// Scalar (non-vectored) atomic adds with the same semantics ATen gets from
-// gpuAtomicAddNoReturn for these types.
 __device__ __forceinline__ void atomicAddScalar(float* address, float value) {
 #if defined(USE_ROCM)
-  // See Note [HIP unsafeAtomicAdd] in ATen/cuda/Atomic.cuh: correct only on
-  // GPU memory, which callers of these helpers must guarantee.
   if (__builtin_amdgcn_processor_is("gfx908"))
     return atomicAddNoRet(address, value);
   (void)unsafeAtomicAdd(address, value);
@@ -176,8 +159,6 @@ __device__ __forceinline__ void atomicAddScalar(double* address, double value) {
 #if defined(USE_ROCM)
   (void)unsafeAtomicAdd(address, value);
 #elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
-  // atomicAdd on double needs sm_60; polyfill with the CAS loop
-  // gpuAtomicAddNoReturn uses below that.
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
   unsigned long long int old = *address_as_ull;
   unsigned long long int assumed;
@@ -217,8 +198,6 @@ template <typename scalar_t>
 __device__ __forceinline__ void atomicAddScalar(
     scalar_t* address,
     scalar_t value) {
-  // Types with a native atomicAdd only; the exotic integer/complex types
-  // gpuAtomicAddNoReturn also covers are out of scope here.
   atomicAdd(address, value);
 }
 
@@ -335,9 +314,6 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
   detail::atomicAddScalar(tensor + index, value);
 }
 
-// index must be in [0, numel); numel bounds the 16-bit pairing above. On ROCm
-// the float/double paths use unsafeAtomicAdd:
-// https://rocm.docs.amd.com/projects/HIP/en/latest/reference/cpp_language_extensions.html#unsafe-floating-point-atomic-operations
 template <class scalar_t, class index_t>
 __device__ __forceinline__ void fastAtomicAdd(
     scalar_t* tensor,

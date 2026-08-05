@@ -31,11 +31,6 @@ idx_cl(
   return ((n * height + h) * width + w) * channel + c;
 }
 
-// The half-precision pairing fast paths of fastSpecializedAtomicAdd (and
-// fastAtomicAdd) live in torch/headeronly/cuda/AtomicAdd.h. The overloads
-// here delegate to them, and keep the remaining types on
-// gpuAtomicAddNoReturn, which covers integer/bool/complex types beyond the
-// headeronly surface.
 template <
     typename scalar_t,
     typename index_t,

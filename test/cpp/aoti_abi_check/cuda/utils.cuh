@@ -6,7 +6,6 @@
 
 #include <vector>
 
-// Tests must call SKIP_IF_NO_CUDA_DEVICE() first to skip on CPU-only machines.
 #define SKIP_IF_NO_CUDA_DEVICE()                                     \
   do {                                                               \
     int device_count = 0;                                            \
@@ -20,7 +19,6 @@
 
 namespace torch::test {
 
-// Device buffer initialized from host data, copied back with to_host().
 template <typename T>
 class DeviceBuffer {
  public:

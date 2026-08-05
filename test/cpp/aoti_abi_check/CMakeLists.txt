@@ -35,7 +35,6 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
 )
 
-# Device tests for device-only headeronly APIs live in cuda/
 set(AOTI_ABI_CHECK_CUDA_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_atomic_add.cu
 )

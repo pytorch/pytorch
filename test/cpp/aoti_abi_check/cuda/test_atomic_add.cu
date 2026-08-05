@@ -26,10 +26,6 @@ __global__ void scatter_add_kernel(
   }
 }
 
-// Accumulates ones into a buffer of buf_numel elements through fastAtomicAdd
-// on the sub-buffer starting at out_offset with out_numel elements, then
-// returns the whole buffer so callers can also check the elements outside
-// the sub-buffer.
 template <typename scalar_t>
 std::vector<scalar_t> launchScatterAdd(
     const std::vector<int64_t>& indices,
@@ -56,8 +52,6 @@ std::vector<scalar_t> launchScatterAdd(
   return d_buf.to_host();
 }
 
-// indices arange(2048) % 33 hit both __half2 alignments and the boundary
-// fallbacks; ones sum to small integer counts, exact in every dtype.
 template <typename scalar_t>
 void testScatterAdd(bool fast_atomics) {
   SKIP_IF_NO_CUDA_DEVICE();
@@ -77,10 +71,6 @@ void testScatterAdd(bool fast_atomics) {
   }
 }
 
-// numel exists so the 16-bit fast path never pairs past the tensor. The odd
-// 2-byte offset puts index 0 on the pair-with-predecessor branch, which must
-// fall back to a scalar atomic rather than touch buf[0]; index numel - 1
-// likewise must not pair with buf[buf_numel - 1].
 template <typename scalar_t>
 void testStaysInBounds() {
   SKIP_IF_NO_CUDA_DEVICE();
