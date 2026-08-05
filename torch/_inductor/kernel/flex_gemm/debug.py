@@ -144,12 +144,12 @@ def _format_geometry(geometry: Any) -> str:
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_main_transform(transform: Any | None) -> str:
+def _format_output_contraction(contraction: Any | None) -> str:
     """Format the logical contraction applied to the main output."""
-    if transform is None:
+    if contraction is None:
         return "none"
-    layout = "chunked" if transform.chunked else "interleaved"
-    return f"grouped-N, group={transform.group}, layout={layout}"
+    layout = "chunked" if contraction.chunked else "interleaved"
+    return f"N-axis, group={contraction.group}, layout={layout}"
 
 
 def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
@@ -186,7 +186,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
-        f"  main_transform: {_format_main_transform(outputs.main_transform)}",
+        f"  output_contraction: {_format_output_contraction(outputs.output_contraction)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
@@ -250,7 +250,10 @@ def format_flex_gemm_analysis_details(
         ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
         ("grouped_layouts", analysis.local_reduce.grouped_tensors),
         ("local_reduce_matches", analysis.local_reduce.matches),
-        ("grouped_select_indices", analysis.grouped_select_indices),
+        (
+            "output_contraction_select_indices",
+            analysis.output_contraction_select_indices,
+        ),
     ):
         _append_items(
             lines,
