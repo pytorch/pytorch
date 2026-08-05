@@ -91,6 +91,7 @@ from ..utils import (
     istype,
     list_methods,
     namedtuple_fields,
+    no_keywords,
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -5029,8 +5030,8 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
         # them. See the generated list___init__ wrapper's tp_new comparison:
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
-        if kwargs and type(self.value).__new__ is not list.__new__:
-            kwargs = {}
+        if type(self.value).__new__ is list.__new__:
+            no_keywords(tx, "list", kwargs)
         # The actual init delegates to the underlying list VT via
         # UserDefinedObjectVariable.call_method's _base_methods dispatch.
         return super().call_method(tx, "__init__", args, kwargs)
