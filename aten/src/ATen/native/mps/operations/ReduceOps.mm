@@ -911,6 +911,18 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
     getMPSProfiler().endProfileKernel(ps);
   };
+  // Shared split-K driver: allocate the [num_outputs, num_segs] (value,
+  // index) partials, run the layout-specific pass 1, resolve with combine.
+  auto run_arg_split = [&](uint32_t num_outputs, uint32_t num_segs, void (^pass1)(const Tensor&, const Tensor&)) {
+    auto val_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(partial_dtype));
+    auto idx_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(kInt));
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        pass1(val_partials, idx_partials);
+        encode_arg_combine(val_partials, idx_partials, num_outputs, num_segs);
+      }
+    });
+  };
 
   // Non-contiguous input that movedim could not normalize but whose dims
   // still collapse to [outer_size, dim_size, inner_size] with the dim not
@@ -939,14 +951,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
       if (outer_size == 1 && dim_size >= OUTER_SPLIT_MIN_DIM_SIZE && natural_tgs < OUTER_SPLIT_MIN_TGS) {
         const auto num_segs =
             std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
-        auto val_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(partial_dtype));
-        auto idx_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(kInt));
-        dispatch_sync_with_rethrow(stream->queue(), ^() {
-          @autoreleasepool {
-            encode_arg_outer_p1(
-                input, val_partials, idx_partials, dim_size, inner_size, num_segs, dim_stride, inner_stride);
-            encode_arg_combine(val_partials, idx_partials, inner_size, num_segs);
-          }
+        run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+          encode_arg_outer_p1(input, vals, idxs, dim_size, inner_size, num_segs, dim_stride, inner_stride);
         });
         return;
       }
@@ -975,25 +981,15 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         if (inner_size < OUTER_TG_WIDTH) {
           const auto num_segs = std::clamp<uint32_t>(
               (static_cast<int64_t>(dim_size) * inner_size) / NARROW_SPLIT_ELEMS_PER_TG, 2u, SPLIT_MAX_SEGS);
-          auto val_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(partial_dtype));
-          auto idx_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(kInt));
-          dispatch_sync_with_rethrow(stream->queue(), ^() {
-            @autoreleasepool {
-              encode_arg_narrow_p1(input, val_partials, idx_partials, dim_size, inner_size, num_segs);
-              encode_arg_combine(val_partials, idx_partials, inner_size, num_segs);
-            }
+          run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+            encode_arg_narrow_p1(input, vals, idxs, dim_size, inner_size, num_segs);
           });
           return;
         }
         const auto num_segs =
             std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
-        auto val_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(partial_dtype));
-        auto idx_partials = at::empty({(int64_t)inner_size, (int64_t)num_segs}, input.options().dtype(kInt));
-        dispatch_sync_with_rethrow(stream->queue(), ^() {
-          @autoreleasepool {
-            encode_arg_outer_p1(input, val_partials, idx_partials, dim_size, inner_size, num_segs, inner_size, 1);
-            encode_arg_combine(val_partials, idx_partials, inner_size, num_segs);
-          }
+        run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+          encode_arg_outer_p1(input, vals, idxs, dim_size, inner_size, num_segs, inner_size, 1);
         });
         return;
       }
@@ -1015,13 +1011,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
           std::min(row_len / ARG_SPLIT_MIN_SEG_LEN, std::max(2u, ARG_SPLIT_TARGET_PARTIALS / std::max(num_rows, 1u)));
       const auto seg_len = at::ceil_div(row_len, std::max(max_segs, 2u));
       const auto num_segs = at::ceil_div(row_len, seg_len);
-      auto val_partials = at::empty({(int64_t)num_rows, (int64_t)num_segs}, input.options().dtype(partial_dtype));
-      auto idx_partials = at::empty({(int64_t)num_rows, (int64_t)num_segs}, input.options().dtype(kInt));
-      dispatch_sync_with_rethrow(stream->queue(), ^() {
-        @autoreleasepool {
-          encode_arg_inner_p1(input, val_partials, idx_partials, num_rows, row_len, seg_len, num_segs);
-          encode_arg_combine(val_partials, idx_partials, num_rows, num_segs);
-        }
+      run_arg_split(num_rows, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
+        encode_arg_inner_p1(input, vals, idxs, num_rows, row_len, seg_len, num_segs);
       });
       return;
     }
