@@ -1,8 +1,10 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+import ctypes
 import gc
 import typing
+import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
@@ -709,12 +711,26 @@ class CUDAGraph(_CUDAGraph):
                         "graph_id": int,
                         "node_id": int,
                         "kernel_name": str or None,
+                        "event_ptr": int,
+                        "host_fn_addr": int,
+                        "host_fn_name": str or None,
                         "dependencies": [int, ...],
                         "dependents": [int, ...],
                     },
                     ...,
                 ],
             }
+
+        ``event_ptr`` is the ``cudaEvent_t`` handle (as an int) an event-record
+        or event-wait node records / waits on -- these nodes produce no timed
+        CUPTI record, so matching a wait to the record that signals it is the
+        only way to reason about the cross-stream sync it encodes. It is ``0``
+        for other node types.
+
+        ``host_fn_addr`` / ``host_fn_name`` are populated for host nodes (a CPU
+        callback run as a graph node): the callback address and a best-effort
+        demangled symbol name for it (``None`` when it resolves to no exported
+        symbol). They are ``0`` / ``None`` for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -726,6 +742,12 @@ class CUDAGraph(_CUDAGraph):
         is a true dependency (encoded in the graph) or a fake dependency
         caused by mapping of independent streams to the same hardware
         channel.
+
+        Child-graph and conditional nodes are reported as nodes in their own
+        right, but this walk does not descend into their bodies (those are
+        separate ``cudaGraph_t`` objects), so the work inside them is absent
+        from ``nodes`` and a warning is issued. The ids that *are* reported
+        stay valid: the exec graph preserves top-level node ids.
         """
         # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
         if self._instantiate_graph_data is not None:
@@ -754,7 +776,14 @@ class CUDAGraph(_CUDAGraph):
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
         }
+        # Node types whose work lives in a separate cudaGraph_t (see the warning below).
+        nested_graph_types = {
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+        }
+        nested_node_types: set[str] = set()
 
         raw = self.raw_cuda_graph()
 
@@ -771,6 +800,8 @@ class CUDAGraph(_CUDAGraph):
             handle_to_idx[int(node)] = i
 
             ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            if ntype in nested_graph_types:
+                nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
             graph_id = tools_id >> 32
             node_id = tools_id & 0xFFFFFFFF
@@ -785,6 +816,37 @@ class CUDAGraph(_CUDAGraph):
                     if err == _cuda_driver.CUresult.CUDA_SUCCESS:
                         kernel_name = name.decode() if isinstance(name, bytes) else name
 
+            # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
+            # capture the handle so a wait node can be matched to the record that signals it.
+            # Not best-effort like the kernel-name lookup above (a name can legitimately be
+            # unavailable): the node type is already established here, so these calls are
+            # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
+            # record/wait match quietly wrong rather than loud.
+            event_ptr = 0
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
+                    )
+                )
+            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
+                    )
+                )
+
+            # Host nodes carry no name in the CUPTI record; recover the callback address
+            # from the node params and resolve a best-effort symbol name (see
+            # _resolve_host_fn_name). Both are None/0 for other node types.
+            host_fn_addr = 0
+            host_fn_name = None
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeHost:
+                err, params = _cuda_runtime.cudaGraphHostNodeGetParams(node)
+                if err == _cuda_runtime.cudaError_t.cudaSuccess:
+                    host_fn_addr = int(params.fn)
+                    host_fn_name = _resolve_host_fn_name(host_fn_addr)
+
             node_infos.append(
                 {
                     "index": i,
@@ -793,6 +855,9 @@ class CUDAGraph(_CUDAGraph):
                     "graph_id": graph_id,
                     "node_id": node_id,
                     "kernel_name": kernel_name,
+                    "event_ptr": event_ptr,
+                    "host_fn_addr": host_fn_addr,
+                    "host_fn_name": host_fn_name,
                     "dependencies": [],
                     "dependents": [],
                 }
@@ -822,6 +887,18 @@ class CUDAGraph(_CUDAGraph):
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
 
+        if nested_node_types:
+            # What is returned stays correct: the exec graph preserves top-level node
+            # ids and numbers the nested ones after them. Those nested nodes do execute
+            # and do show up in a profiler trace (under this exec graph id, with the
+            # appended node ids), they are just missing from the topology below.
+            warnings.warn(
+                f"get_graph_data: this graph contains {sorted(nested_node_types)} "
+                "nodes; the work inside them is in a separate cudaGraph_t that this "
+                "walk does not descend into, so it is absent from the returned nodes",
+                stacklevel=2,
+            )
+
         data = {
             "exec_graph_id": exec_graph_id,
             "nodes": node_infos,
@@ -829,6 +906,29 @@ class CUDAGraph(_CUDAGraph):
         if self._caching_graph_data:
             self._instantiate_graph_data = data
         return data
+
+
+class _DlInfo(ctypes.Structure):
+    _fields_ = [
+        ("dli_fname", ctypes.c_char_p),
+        ("dli_fbase", ctypes.c_void_p),
+        ("dli_sname", ctypes.c_char_p),
+        ("dli_saddr", ctypes.c_void_p),
+    ]
+
+
+def _resolve_host_fn_name(addr: int) -> str | None:
+    """Best-effort symbol name for a host-node callback address via dladdr + demangle.
+    Returns None when the address resolves to no exported symbol (e.g. an anonymous
+    trampoline). Host nodes carry no name in the CUPTI record, so this is the only source."""
+    if not addr:
+        return None
+    info = _DlInfo()
+    if not ctypes.CDLL(None).dladdr(ctypes.c_void_p(addr), ctypes.byref(info)):
+        return None
+    if not info.dli_sname:
+        return None
+    return torch._C._demangle(info.dli_sname.decode())
 
 
 def _dump_graph_dot(cuda_graph: CUDAGraph, path: str, *, verbose: bool = True) -> None:
@@ -984,6 +1084,11 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
+        # The capture stream is now capturing into the top-level graph; remember it so
+        # mark_kernels can tell a conditional-node body apart from this graph.
+        from torch.cuda._graph_annotations import maybe_stamp_capture_root
+
+        maybe_stamp_capture_root(torch.cuda.current_stream())
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda._graph_annotations import (
