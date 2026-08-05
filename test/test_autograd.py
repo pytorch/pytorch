@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
+    xfailIf,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -977,6 +978,33 @@ class TestAutograd(TestCase):
 
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+
+    @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
+    def test_custom_function_setup_context_releases_return_value(self):
+        class Sentinel:
+            pass
+
+        sentinel_ref = None
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                nonlocal sentinel_ref
+                sentinel = Sentinel()
+                sentinel_ref = weakref.ref(sentinel)
+                return sentinel
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        MyFunc.apply(torch.randn(3, requires_grad=True))
+
+        self.assertIsNone(sentinel_ref())
 
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
@@ -4279,6 +4307,7 @@ class TestAutograd(TestCase):
         # graph was freed, causing a RuntimeError here.
         self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
+    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 13))
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
@@ -17874,6 +17903,81 @@ class TestAutogradMultipleDispatch(TestCase):
                 for i in range(min(shape)):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
+
+
+@skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")
+class TestFunctionAssertMessages(TestCase):
+    # THPFunction_assert forwards to a printf-style formatter. Regression tests
+    # that the dynamic content (offending type name / index) is not silently
+    # dropped from the error message.
+    def _apply(self, forward_fn):
+        class F(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return forward_fn(ctx, x)
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        return F.apply(torch.randn(2, requires_grad=True))
+
+    def test_dirty_tensors_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_dirty_element_reports_index_and_type(self):
+        def fwd(ctx, x):
+            ctx.dirty_tensors = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"argument 0 is of type .*str"):
+            self._apply(fwd)
+
+    def test_to_save_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.to_save = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_non_differentiable_not_tuple_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = "notatuple"
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            self._apply(fwd)
+
+    def test_mark_non_differentiable_element_reports_type(self):
+        def fwd(ctx, x):
+            ctx.non_differentiable = ("notatensor",)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, r"but got .*str"):
+            self._apply(fwd)
+
+    def test_saved_for_forward_not_tuple_reports_type(self):
+        class F(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.saved_for_forward = "notatuple"
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, r"but is .*str"):
+            F.apply(torch.randn(2, requires_grad=True))
 
 
 # Import test cases from below autograd/ here. These are found
