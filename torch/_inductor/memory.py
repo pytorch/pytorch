@@ -520,6 +520,11 @@ def estimate_region_peak_memory(
     consumer is this node. Then accumulates per step starting from
     `cur_memory` (live bytes at the window boundary).
 
+    `step_of` must resolve every successor in the buffers visited here,
+    including nodes outside `nodes_in_window`. If the schedule has already
+    replaced nodes, it must resolve each original node to its current
+    representative.
+
     Returns `(peak, live_before)` where `live_before[slot]` is the
     walk's live bytes before that slot's allocations.
     """

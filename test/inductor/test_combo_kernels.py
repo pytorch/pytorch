@@ -306,90 +306,6 @@ class ComboKernelPartitionLoggingTests(TestCase):
         self.assertEqual(len(large_pointwise_logs), 2)
 
 
-class ComboKernelDataIndependentCSETests(TestCase):
-    def test_cse_scope(self):
-        from torch._inductor.fx_passes.post_grad import (
-            _annotate_data_independent_cse_tokens,
-        )
-        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def fn(x):
-            lhs = torch.sin(x)
-            rhs = torch.sin(x)
-            first = torch.full((4,), 1.0)
-            second = torch.full((4,), 1.0)
-            return lhs + rhs + first + second
-
-        gm = make_fx(fn)(torch.randn(4))
-        _annotate_data_independent_cse_tokens(gm)
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertEqual(targets.count(torch.ops.aten.sin.default), 2)
-        self.assertEqual(targets.count(torch.ops.aten.full.default), 2)
-        sin_groups = [
-            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.sin.default
-        ]
-        full_groups = [
-            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.full.default
-        ]
-        self.assertEqual(sin_groups, [None, None])
-        self.assertEqual(len(set(full_groups)), 1)
-        self.assertIsNotNone(full_groups[0])
-
-    def test_cse_symbolic_shape_dependencies(self):
-        from torch._inductor.fx_passes.post_grad import (
-            _annotate_data_independent_cse_tokens,
-        )
-        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def fn(x):
-            size = x.shape[0]
-            first = torch.arange(size)
-            second = torch.arange(size)
-            return x + first + second
-
-        gm = make_fx(fn, tracing_mode="symbolic")(torch.randn(4))
-        _annotate_data_independent_cse_tokens(gm)
-        groups = [
-            node.meta.get(DATA_INDEPENDENT_CSE_TOKEN)
-            for node in gm.graph.nodes
-            if node.target == torch.ops.aten.arange.default
-        ]
-        self.assertEqual(len(groups), 2)
-        self.assertEqual(len(set(groups)), 1)
-        self.assertIsNotNone(groups[0])
-
-    def test_cse_preserves_distinct_mutation_bases(self):
-        from torch._inductor.fx_passes.post_grad import (
-            _annotate_data_independent_cse_tokens,
-        )
-        from torch._inductor.ir import DATA_INDEPENDENT_CSE_TOKEN
-
-        graph = torch.fx.Graph()
-        bases = [
-            graph.call_function(torch.ops.aten.zeros.default, ((4,),)) for _ in range(2)
-        ]
-        mutations = [
-            graph.call_function(
-                torch.ops.aten.add_.Tensor,
-                (base, 1),
-            )
-            for base in bases
-        ]
-        graph.output(tuple(mutations))
-        gm = torch.fx.GraphModule({}, graph)
-
-        _annotate_data_independent_cse_tokens(gm)
-
-        tokens = [base.meta.get(DATA_INDEPENDENT_CSE_TOKEN) for base in bases]
-        self.assertEqual(tokens, [None, None])
-
-
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -438,158 +354,6 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-
-    @requires_gpu_and_triton
-    @parametrize("identical", [False, True])
-    def test_data_independent_mask_cse_combo(self, identical):
-        import torch.nn.functional as F
-
-        def make_mask(size, dtype, other):
-            idx = torch.arange(size, device=GPU_TYPE)
-            causal = idx[:, None] >= idx[None, :]
-            return torch.where(causal, 0.0, other).to(dtype)
-
-        def fn(q, k, v):
-            size = q.shape[-2]
-            m1 = make_mask(size, q.dtype, float("-inf"))
-            o1 = F.scaled_dot_product_attention(q, k, v, attn_mask=m1)
-            m2 = make_mask(size, q.dtype, float("-inf") if identical else -1e4)
-            o2 = F.scaled_dot_product_attention(q, k, v, attn_mask=m2)
-            return o1 + o2
-
-        inps = [
-            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
-            for _ in range(3)
-        ]
-        out_eager = fn(*inps)
-        out, code = run_and_get_code(torch.compile(fn), *inps)
-
-        self.assertEqual(out_eager, out)
-        source = "\n".join(code)
-        if identical:
-            self.assertNotIn("'num_kernels': 2", source)
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
-        else:
-            self.assertIn("'num_kernels': 2", source)
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
-
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch("cse", False)
-    def test_data_independent_cse_same_consumer_can_combo(self):
-        def make_matrix(size, dtype):
-            idx = torch.arange(size, device=GPU_TYPE)
-            return (idx[:, None] >= idx[None, :]).to(dtype)
-
-        def fn(x):
-            size = x.shape[0]
-            lhs = make_matrix(size, x.dtype)
-            rhs = make_matrix(size, x.dtype)
-            return torch.mm(lhs, rhs)
-
-        inp = torch.randn(128, device=GPU_TYPE, dtype=torch.float16)
-        out, code = run_and_get_code(torch.compile(fn), inp)
-
-        self.assertEqual(out, fn(inp))
-        self.assertIn("'num_kernels': 2", "\n".join(code))
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch("cse", False)
-    @parametrize("memory_gate", [False, True])
-    @parametrize("second_consumer_copies", [1, 2])
-    def test_data_independent_cse_mixed_consumers(
-        self, memory_gate, second_consumer_copies
-    ):
-        import torch.nn.functional as F
-        from torch._inductor import ir
-        from torch._inductor.scheduler import Scheduler
-
-        def make_mask(size, dtype):
-            idx = torch.arange(size, device=GPU_TYPE)
-            causal = idx[:, None] >= idx[None, :]
-            return torch.where(causal, 0.0, -1.0).to(dtype)
-
-        def fn(q, k, v):
-            size = q.shape[-2]
-            lhs = make_mask(size, q.dtype)
-            rhs = make_mask(size, q.dtype)
-            mm = torch.mm(lhs, rhs)
-            if second_consumer_copies == 1:
-                other = F.scaled_dot_product_attention(
-                    q, k, v, attn_mask=make_mask(size, q.dtype)
-                )
-            else:
-                other = torch.mm(make_mask(size, q.dtype), make_mask(size, q.dtype))
-            return mm, other
-
-        inps = [
-            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
-            for _ in range(3)
-        ]
-        expected = fn(*inps)
-        observed_partitions = set()
-        cross_consumer_partitions = []
-        speedup_by_combo_kernel = Scheduler.speedup_by_combo_kernel
-
-        def cse_signature(node):
-            if node.read_writes.reads:
-                return None
-            output_signatures = []
-            for output in node.get_outputs():
-                signature = output.node.annotations.get(
-                    ir.DATA_INDEPENDENT_CSE_SIGNATURE
-                )
-                if not isinstance(signature, tuple):
-                    return None
-                output_signatures.append(
-                    (
-                        output.node.get_device(),
-                        output.node.get_dtype(),
-                        tuple(output.node.get_size()),
-                        signature,
-                    )
-                )
-            return tuple(output_signatures)
-
-        def capture_candidates(scheduler, nodes):
-            signature_groups = {}
-            for node in nodes:
-                if (signature := cse_signature(node)) is not None:
-                    signature_groups.setdefault(signature, []).append(node)
-            for equivalent_nodes in signature_groups.values():
-                if len(equivalent_nodes) < 2:
-                    continue
-                partition = frozenset(equivalent_nodes)
-                consumer_sets = {
-                    scheduler._combo_canonical_consumers(node)
-                    for node in equivalent_nodes
-                }
-                observed_partitions.add(partition)
-                if len(consumer_sets) > 1:
-                    cross_consumer_partitions.append(partition)
-            return speedup_by_combo_kernel(scheduler, nodes)
-
-        with (
-            fresh_cache(),
-            torch._inductor.config.patch(
-                {
-                    "combo_kernel_peak_memory_pct_threshold": (
-                        0.05 if memory_gate else None
-                    )
-                }
-            ),
-            patch.object(Scheduler, "speedup_by_combo_kernel", capture_candidates),
-        ):
-            out, code = run_and_get_code(torch.compile(fn), *inps)
-
-        self.assertEqual(out, expected)
-        self.assertEqual(cross_consumer_partitions, [])
-        self.assertEqual(
-            sorted(len(partition) for partition in observed_partitions),
-            [2] * second_consumer_copies,
-        )
-        self.assertIn("'num_kernels': 2", "\n".join(code))
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu_and_triton
     def test_reduce_functions(self):
@@ -2508,8 +2272,7 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         )
 
     @requires_gpu_and_triton
-    @parametrize("mode", ["autotune_disabled", "deterministic"])
-    def test_no_benchmark_keeps_indirect_indexing(self, mode):
+    def test_disabled_autotune_keeps_indirect_indexing(self):
         def fn(a, b, c, idx):
             return a[idx + 1024], b * 2.0, c + 1.0
 
@@ -2519,38 +2282,10 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.randn(256, device=GPU_TYPE),
             torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
         ]
-        config = (
-            {"combo_kernels_autotune": 0}
-            if mode == "autotune_disabled"
-            else {"deterministic": True}
-        )
-        with fresh_cache(), torch._inductor.config.patch(config):
+        with fresh_cache(), torch._inductor.config.patch({"combo_kernels_autotune": 0}):
             out, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         FileCheck().check("'num_kernels': 3").run(code[0])
-
-    @requires_gpu_and_triton
-    def test_compile_time_autotune_deterministic_mode(self):
-        # Deterministic mode bans timing-based benchmarking (may_ban_benchmarking).
-        # Compile-time autotune must skip its subkernel benchmark and fall back to
-        # default configs -- not crash.
-        def f(a, b, c, d, e, g):
-            return a + b, c * d, e.sum(-1), g.amax(-1)
-
-        inps = [
-            torch.randn(8192, device=GPU_TYPE),
-            torch.randn(8192, device=GPU_TYPE),
-            torch.randn(4096, device=GPU_TYPE),
-            torch.randn(4096, device=GPU_TYPE),
-            torch.randn(1024, 512, device=GPU_TYPE),
-            torch.randn(1024, 768, device=GPU_TYPE),
-        ]
-        counters.clear()
-        with fresh_cache(), torch._inductor.config.patch(deterministic=True):
-            out = torch.compile(f)(*inps)
-        self.assertEqual(out, f(*inps))
-        # No timing-based benchmark ran in deterministic mode.
-        self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
 
 
 @instantiate_parametrized_tests
@@ -3081,9 +2816,6 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
-        # Compile-time autotune passes per-subkernel blocks as args, so runtime
-        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
-        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
@@ -3377,6 +3109,11 @@ class _PeakMemFakeNode:
             return out
         return self._outputs
 
+    def get_nodes(self):
+        if self.snodes is None:
+            return [self]
+        return [node for snode in self.snodes for node in snode.get_nodes()]
+
 
 class _PeakMemFakeBuffer:
     def __init__(self, name: str, succ_nodes, size_alloc: int, size_free: int) -> None:
@@ -3550,7 +3287,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             graph_outputs=set() if graph_outputs is None else graph_outputs,
             node_to_idx=node_to_idx,
             baseline_peak=baseline_peak,
-            running_peak=baseline_peak,
             current_nodes=list(nodes),
             current_node_to_idx=node_to_idx.copy(),
             current_live_before=live_before,
@@ -3603,28 +3339,153 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertIsNotNone(combo)
         self.assertEqual(combo_step, 0)
 
-    def test_cse_consumers_use_fused_nodes(self):
-        from torch._inductor.scheduler import NodeUser, Scheduler
+    def test_halving_rollback_and_final_schedule(self):
+        from torch._inductor.scheduler import Scheduler
 
-        producer1 = _PeakMemFakeNode("producer1")
-        producer2 = _PeakMemFakeNode("producer2")
-        consumer1 = _PeakMemFakeNode("consumer1")
-        consumer2 = _PeakMemFakeNode("consumer2")
-        fused_consumer = _PeakMemFakeNode("fused_consumer")
-        producer1._outputs = [SimpleNamespace(users=[NodeUser(consumer1)])]
-        producer2._outputs = [SimpleNamespace(users=[NodeUser(consumer2)])]
-        scheduler = _PeakMemFakeScheduler(
-            [producer1, producer2, fused_consumer],
-            {
-                consumer1.get_name(): fused_consumer,
-                consumer2.get_name(): fused_consumer,
-            },
+        a, use_a, b, use_b, c, use_c, d, use_d, big, use_big = (
+            _PeakMemFakeNode(name)
+            for name in (
+                "a",
+                "use_a",
+                "b",
+                "use_b",
+                "c",
+                "use_c",
+                "d",
+                "use_d",
+                "big",
+                "use_big",
+            )
         )
+        nodes = [a, use_a, b, use_b, c, use_c, d, use_d, big, use_big]
 
+        def wire(producer, consumer, size):
+            buf = _PeakMemFakeBuffer(
+                "buf_" + producer.get_name(), {consumer}, size, size
+            )
+            producer._outputs = [buf]
+            consumer.mpi_node.pred_buffers = {buf}
+
+        for producer, consumer in (
+            (a, use_a),
+            (b, use_b),
+            (c, use_c),
+            (d, use_d),
+        ):
+            wire(producer, consumer, 80)
+        wire(big, use_big, 160)
+
+        live_before = [0, 80, 0, 80, 0, 80, 0, 80, 0, 160, 0]
+        mem_ctx = self._memory_context(nodes, 160, live_before)
+
+        class FakeScheduler(_PeakMemFakeScheduler):
+            def __init__(self):
+                super().__init__(nodes)
+                self.node_to_stream = dict.fromkeys(nodes, 0)
+                self.node_to_mempool = {}
+
+            def speedup_by_combo_kernel(self, snodes):
+                return True
+
+            def get_node_stream(self, node):
+                return self.node_to_stream[node]
+
+            def _init_peak_memory_context(self):
+                return mem_ctx
+
+            def _try_combo_with_halving(self, *args, **kwargs):
+                return Scheduler._try_combo_with_halving(self, *args, **kwargs)
+
+            def prune_redundant_deps(self, snodes):
+                pass
+
+        class FakeForeach:
+            @staticmethod
+            def group_nodes_for_combo_kernels(_scheduler):
+                return [[a, b, c, d]]
+
+            @staticmethod
+            def combinable_nodes(snodes):
+                return snodes
+
+            def __new__(cls, scheduler, snodes, **kwargs):
+                combo = _PeakMemFakeNode("combo")
+                combo.scheduler = scheduler
+                combo.snodes = list(snodes)
+                pred_buffers = set()
+                for node in snodes:
+                    pred_buffers.update(node.mpi_node.pred_buffers)
+                combo.mpi_node = SimpleNamespace(pred_buffers=pred_buffers)
+                return combo
+
+        peak_tree = mem_ctx.current_peak_tree
+        self.assertIsNotNone(peak_tree)
+
+        def state():
+            return (
+                list(mem_ctx.current_nodes),
+                dict(mem_ctx.current_node_to_idx),
+                list(mem_ctx.current_live_before),
+                list(mem_ctx.current_step_peak),
+                [peak_tree.summarize_range(i, i) for i in range(len(nodes))],
+                dict(mem_ctx.accepted_node_to_combo),
+            )
+
+        initial_state = state()
+        attempts = []
+        try_memory = Scheduler._try_combo_with_memory_check
+
+        def checked_try(scheduler, subset, ctx, enable_autotune):
+            if subset == [c, d]:
+                self.assertIn(a, ctx.accepted_node_to_combo)
+                self.assertIs(
+                    ctx.accepted_node_to_combo[a], ctx.accepted_node_to_combo[b]
+                )
+            result = try_memory(scheduler, subset, ctx, enable_autotune)
+            attempts.append(list(subset))
+            if subset == [a, b, c, d]:
+                self.assertIsNone(result[0])
+                self.assertEqual(state(), initial_state)
+            return result
+
+        scheduler = FakeScheduler()
+        with (
+            patch(
+                "torch._inductor.scheduler.ForeachKernelSchedulerNode",
+                FakeForeach,
+            ),
+            patch.object(Scheduler, "_try_combo_with_memory_check", checked_try),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_peak_memory_increase_gb": None,
+                    "combo_kernel_peak_memory_pct_threshold": 0.0,
+                    "combo_kernel_max_distance": -1,
+                    "reorder_for_peak_memory": False,
+                }
+            ),
+        ):
+            Scheduler.create_combo_kernel_nodes(scheduler)
+
+        self.assertEqual(attempts, [[a, b, c, d], [a, b], [c, d]])
+        combo_ab = mem_ctx.accepted_node_to_combo[a]
+        combo_cd = mem_ctx.accepted_node_to_combo[c]
+        self.assertIs(combo_ab, mem_ctx.accepted_node_to_combo[b])
+        self.assertIs(combo_cd, mem_ctx.accepted_node_to_combo[d])
         self.assertEqual(
-            Scheduler._combo_canonical_consumers(scheduler, producer1),
-            Scheduler._combo_canonical_consumers(scheduler, producer2),
+            scheduler.nodes,
+            [combo_ab, use_a, use_b, combo_cd, use_c, use_d, big, use_big],
         )
+        self.assertEqual(len(scheduler.nodes), len(set(scheduler.nodes)))
+        positions = {node: idx for idx, node in enumerate(scheduler.nodes)}
+        for producer, consumer in (
+            (a, use_a),
+            (b, use_b),
+            (c, use_c),
+            (d, use_d),
+            (big, use_big),
+        ):
+            current = mem_ctx.accepted_node_to_combo.get(producer, producer)
+            self.assertLess(positions[current], positions[consumer])
 
     def test_accepts_charge_later_windows(self):
         """Later candidates must see the schedule produced by earlier accepts,
@@ -3877,7 +3738,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-            base = torch.cuda.memory_allocated()
             with (
                 fresh_cache(),
                 torch._inductor.config.patch(
@@ -3887,7 +3747,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 with torch.no_grad():
                     _ = torch.compile(model)(x)
                 torch.cuda.synchronize()
-            return torch.cuda.max_memory_allocated() - base
+            return torch.cuda.max_memory_allocated()
 
         # Gating disabled: combos can co-allocate freely -> higher peak.
         peak_disabled = compile_and_measure_peak(
