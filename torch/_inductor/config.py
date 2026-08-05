@@ -2712,9 +2712,17 @@ class xpu(cutlass):
 
 
 class rocm:
+    """Configuration for Inductor's ROCm (AMD GPU) backend."""
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
+
+    # When True, inductor autotune pushes a per-op dynamic-dims mask for
+    # symbolic GEMM dims so TunableOp persists wildcard kernel-map entries that
+    # runtime concrete-miss lookups can reuse. False stops producing new
+    # wildcard entries; existing rows in a loaded file still satisfy lookups.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
