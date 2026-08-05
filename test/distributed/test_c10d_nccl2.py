@@ -3,9 +3,11 @@
 # Tests specific to the in-tree torchcomms NCCL backends.
 
 import ctypes
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from datetime import timedelta
@@ -663,6 +665,91 @@ class ProcessGroupNCCL2NonDeterministicNVLSTest(_DeterministicNVLSTest):
     @skip_if_lt_x_gpu(2)
     def test_non_deterministic_does_not_force_nccl_algo(self) -> None:
         self.assertIsNone(self._all_reduce_and_read_algo())
+
+
+class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
+    """What nccl2 reports about a collective to profilers and flight recorders."""
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_sequence_number_is_per_group(self) -> None:
+        # TracingGuard used to record a process-global counter of its own
+        # instead of the issuing group's sequence_number_, so a rank's
+        # numbering depended on how it interleaved its other groups'
+        # collectives -- and profilers pair collectives across ranks by
+        # (process group, sequence number).
+        groups = [
+            dist.new_group(
+                backend=self.backend_str(),
+                use_local_synchronization=True,
+                timeout=timedelta(seconds=60),
+            )
+            for _ in range(2)
+        ]
+        t = torch.ones(4, device=self.device)
+        try:
+            # Bootstrap both communicators outside the profiled region.
+            for group in groups:
+                dist.all_reduce(t, group=group)
+            torch.cuda.synchronize()
+            # Three collectives on the first group, one on the second: a
+            # process-global counter would number the second group's collective
+            # after all of the first group's.
+            counts = [3, 1]
+            base = [group._get_sequence_number_for_group() for group in groups]
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=True,
+            ) as prof:
+                for group, count in zip(groups, counts):
+                    for _ in range(count):
+                        dist.all_reduce(t, group=group)
+                torch.cuda.synchronize()
+
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+                trace_path = f.name
+            try:
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    trace = json.load(f)
+            finally:
+                os.unlink(trace_path)
+
+            recorded: dict[str, set[int]] = {}
+            for ev in trace.get("traceEvents", []):
+                args = ev.get("args", {})
+                if "Process Group Name" in args and "Seq" in args:
+                    recorded.setdefault(args["Process Group Name"], set()).add(
+                        args["Seq"]
+                    )
+            for group, count, first in zip(groups, counts, base):
+                self.assertEqual(
+                    sorted(recorded.get(group.group_name, set())),
+                    [first + i + 1 for i in range(count)],
+                )
+        finally:
+            for group in groups:
+                dist.destroy_process_group(group)
 
 
 _UNINITIALIZED_CUDA_SCRIPT = """\
