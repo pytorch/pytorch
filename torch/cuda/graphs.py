@@ -899,6 +899,34 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
     return _hook
 
 
+# Recognized keys of graph()'s annotation_config, each mapped to its allowed values.
+# Annotation options live in that dict rather than as separate arguments so later ones do
+# not each widen the signature; validating here means a typo raises instead of silently
+# leaving the default in place.
+_ANNOTATION_CONFIG_VALUES: dict[str, tuple[str, ...]] = {
+    "backend": ("auto", "cupti", "edge_walk"),
+}
+
+
+def _parse_annotation_config(config: dict[str, typing.Any] | None) -> str:
+    """Validate ``graph(annotation_config=...)`` and return the annotation backend."""
+    if config is None:
+        return "auto"
+    unknown = set(config) - set(_ANNOTATION_CONFIG_VALUES)
+    if unknown:
+        raise ValueError(
+            f"unrecognized annotation_config key(s) {sorted(unknown)}; "
+            f"supported: {sorted(_ANNOTATION_CONFIG_VALUES)}"
+        )
+    for key, allowed in _ANNOTATION_CONFIG_VALUES.items():
+        value = config.get(key, allowed[0])
+        if value not in allowed:
+            raise ValueError(
+                f"annotation_config[{key!r}] must be one of {list(allowed)}, got {value!r}"
+            )
+    return config.get("backend", "auto")
+
+
 class graph:
     r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph` object for later replay.
 
@@ -926,15 +954,21 @@ class graph:
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
             Requires single-threaded autograd; wrap the capture in
             ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
-        annotation_backend (str, optional): How ``mark_kernels`` scopes discover which nodes
-            they contain, when ``enable_annotations=True``. ``"auto"`` (default) uses CUPTI
-            node-creation callbacks if the CUPTI monitor already holds a subscription, and
-            otherwise falls back to walking the capture graph's dependent edges. ``"cupti"``
-            requires the CUPTI path and brings the monitor up if needed -- note that once a
-            CUPTI subscription is held, kineto's one-shot initialization fails permanently,
-            so a later :class:`torch.profiler.profile` records no GPU activity.
-            ``"edge_walk"`` forces the dependent-edge walk, which cannot see nodes that are
-            unreachable from the capture frontier of the stream current on scope entry.
+        annotation_config (dict, optional): How annotation recording behaves, when
+            ``enable_annotations=True``. Options live in this dict rather than as separate
+            arguments so later ones do not each widen the signature; an unrecognized key or
+            value raises, so a typo fails instead of silently doing nothing. Currently
+            supported:
+
+            ``"backend"`` -- how ``mark_kernels`` scopes discover which nodes they contain.
+            ``"auto"`` (default) uses CUPTI node-creation callbacks if the CUPTI monitor
+            already holds a subscription, and otherwise falls back to walking the capture
+            graph's dependent edges. ``"cupti"`` requires the CUPTI path and brings the
+            monitor up if needed -- note that once a CUPTI subscription is held, kineto's
+            one-shot initialization fails permanently, so a later
+            :class:`torch.profiler.profile` records no GPU activity. ``"edge_walk"`` forces
+            the dependent-edge walk, which cannot see nodes created while the current stream
+            was not yet capturing.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -963,14 +997,10 @@ class graph:
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
         enable_annotations: bool = False,
-        annotation_backend: str = "auto",
+        annotation_config: dict[str, typing.Any] | None = None,
         check_input_liveness: bool = False,
     ):
-        if annotation_backend not in ("auto", "cupti", "edge_walk"):
-            raise ValueError(
-                "annotation_backend must be 'auto', 'cupti' or 'edge_walk', got "
-                f"{annotation_backend!r}"
-            )
+        self._annotation_backend = _parse_annotation_config(annotation_config)
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -990,7 +1020,6 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
-        self._annotation_backend = annotation_backend
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -1030,18 +1059,18 @@ class graph:
             if torch._C._is_multithreading_enabled():
                 if force:
                     raise RuntimeError(
-                        "annotation_backend='cupti' requires single-threaded autograd, so "
-                        "that graph nodes are created on the capturing thread and attributed "
-                        "to the right mark_kernels scope. Wrap the capture in "
+                        "annotation_config={'backend': 'cupti'} requires single-threaded "
+                        "autograd, so that graph nodes are created on the capturing thread and "
+                        "attributed to the right mark_kernels scope. Wrap the capture in "
                         "torch.autograd.grad_mode.set_multithreading_enabled(False)."
                     )
             elif _graph_node_callbacks.register(force=force):
                 backend = "cupti"
             elif force:
                 raise RuntimeError(
-                    "annotation_backend='cupti' could not register CUPTI node-creation "
-                    "callbacks. This needs the cupti-python package and a CUPTI monitor "
-                    "able to subscribe; pass annotation_backend='auto' to fall back to the "
+                    "annotation_config={'backend': 'cupti'} could not register CUPTI "
+                    "node-creation callbacks. This needs the cupti-python package and a "
+                    "CUPTI monitor able to subscribe; use 'auto' to fall back to the "
                     "dependent-edge walk instead."
                 )
 

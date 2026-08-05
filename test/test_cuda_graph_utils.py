@@ -1233,7 +1233,7 @@ def _cupti_backend_available():
     not _cupti_backend_available(), "requires a CUPTI monitor able to subscribe"
 )
 class TestCuptiAnnotationBackend(TestCase):
-    """``annotation_backend="cupti"``: nodes are attributed as CUPTI reports their creation
+    """``annotation_config={"backend": "cupti"}``: nodes are attributed as CUPTI reports their creation
     rather than by walking the capture graph's dependent edges."""
 
     def setUp(self):
@@ -1273,7 +1273,7 @@ class TestCuptiAnnotationBackend(TestCase):
             x = self._warm(torch.randn(64, 64, device="cuda"))
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(
-                g, enable_annotations=True, annotation_backend=backend
+                g, enable_annotations=True, annotation_config={"backend": backend}
             ):
                 with mark_kernels("phase"):
                     for _ in range(4):
@@ -1296,7 +1296,7 @@ class TestCuptiAnnotationBackend(TestCase):
             g = torch.cuda.CUDAGraph()
             side = torch.cuda.Stream()
             with torch.cuda.graph(
-                g, enable_annotations=True, annotation_backend=backend
+                g, enable_annotations=True, annotation_config={"backend": backend}
             ):
                 capturing = torch.cuda.current_stream()
                 joined = torch.cuda.Event()
@@ -1318,7 +1318,9 @@ class TestCuptiAnnotationBackend(TestCase):
     def test_nested_scopes_merge_inner_wins(self):
         x = self._warm(torch.randn(64, 64, device="cuda"))
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g, enable_annotations=True, annotation_backend="cupti"):
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
             with mark_kernels({"name": "outer", "shared": "outer", "only_outer": 1}):
                 x = x + 1
                 with mark_kernels({"name": "inner", "shared": "inner"}):
@@ -1340,7 +1342,9 @@ class TestCuptiAnnotationBackend(TestCase):
         # the stale merge.
         x = self._warm(torch.randn(64, 64, device="cuda"))
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g, enable_annotations=True, annotation_backend="cupti"):
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
             with mark_kernels({"name": "outer"}):
                 x = x + 1
                 with mark_kernels({"name": "inner"}):
@@ -1357,7 +1361,7 @@ class TestCuptiAnnotationBackend(TestCase):
         g = torch.cuda.CUDAGraph()
         with self.assertRaisesRegex(RuntimeError, "boom"):
             with torch.cuda.graph(
-                g, enable_annotations=True, annotation_backend="cupti"
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
             ):
                 with mark_kernels("doomed"):
                     x = x + 1
@@ -1366,7 +1370,9 @@ class TestCuptiAnnotationBackend(TestCase):
         clear_kernel_annotations()
         g2 = torch.cuda.CUDAGraph()
         y = self._warm(torch.randn(64, 64, device="cuda"))
-        with torch.cuda.graph(g2, enable_annotations=True, annotation_backend="cupti"):
+        with torch.cuda.graph(
+            g2, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
             y = y + 1
         # No scope was open, so nothing should be attributed to the doomed one.
         self.assertEqual(self._annotations(), {})
@@ -1376,7 +1382,9 @@ class TestCuptiAnnotationBackend(TestCase):
 
         x = self._warm(torch.randn(64, 64, device="cuda"))
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g, enable_annotations=True, annotation_backend="cupti"):
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
             with mark_kernels("phase"):
                 x = x + 1
         self.assertIsNone(_graph_node_callbacks._handler)
@@ -1391,7 +1399,9 @@ class TestCuptiAnnotationBackend(TestCase):
         # they join a profiler trace's "graph node id".
         x = self._warm(torch.randn(64, 64, device="cuda"))
         g = torch.cuda.CUDAGraph(keep_graph=True)
-        with torch.cuda.graph(g, enable_annotations=True, annotation_backend="cupti"):
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"backend": "cupti"}
+        ):
             with mark_kernels("phase"):
                 x = x + 1
         g.instantiate()
@@ -1408,7 +1418,7 @@ class TestCuptiAnnotationBackend(TestCase):
         with torch.autograd.grad_mode.set_multithreading_enabled(True):
             with self.assertRaisesRegex(RuntimeError, "single-threaded autograd"):
                 with torch.cuda.graph(
-                    g, enable_annotations=True, annotation_backend="cupti"
+                    g, enable_annotations=True, annotation_config={"backend": "cupti"}
                 ):
                     x = x + 1
 
@@ -1428,8 +1438,16 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertEqual(len(self._annotations()), 1)
 
     def test_invalid_backend_rejected(self):
-        with self.assertRaisesRegex(ValueError, "annotation_backend"):
-            torch.cuda.graph(torch.cuda.CUDAGraph(), annotation_backend="nope")
+        with self.assertRaisesRegex(ValueError, r"annotation_config\['backend'\]"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend": "nope"}
+            )
+        # A misspelled or unsupported key must raise rather than silently leave the default
+        # in place.
+        with self.assertRaisesRegex(ValueError, "unrecognized annotation_config key"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
+            )
 
 
 if __name__ == "__main__":
