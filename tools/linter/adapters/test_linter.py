@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Ensure test classes declare a valid `hw_classification` attribute.
+"""Validate test case requirements.
 
-A JSON allowlist tracks test files that have not yet been fully classified.
-Files in the allowlist are skipped silently. Files not in the allowlist
-must have `hw_classification` on every `TestCase` subclass — missing or
-invalid values are reported as ERROR.
+This linter enforces test case requirements, including hardware classification
+declaration, test instantiation patterns, test method signatures, and
+supported decorators.
 
-To graduate a file from the allowlist: add `hw_classification` to all test
-classes in that file and remove its entry from the JSON file.
+A JSON allowlist tracks test files that are not yet migrated to this linter's
+requirements. Files in the allowlist are skipped silently. Files not in the
+allowlist must satisfy the test case requirements defined below.
 
-Rule summary by classification:
+All test classes inheriting from `TestCase` must first declare a valid
+`hw_classification` attribute. Supported values are `GENERIC`, `ACCELERATOR`,
+`CPU`, `CUDA`, `MPS`, and `XPU`.
+
+The requirements for each `hw_classification` are summarized below:
+
   GENERIC
     - Class must not be used with instantiate_device_type_tests.
     - Test methods must not accept device/devices parameter.
@@ -33,17 +38,19 @@ from __future__ import annotations
 
 import argparse
 import ast
+import concurrent.futures
 import json
-import multiprocessing as mp
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
 
-LINTER_CODE = "HW_CLASSIFICATION"
+LINTER_CODE = "TEST_LINTER"
 HW_CLASSIFICATION_ATTR = "hw_classification"  # class attribute name to check
 HW_CLASSIFICATION_ENUM_CLASS = (
     "HardwareClassification"  # enum class the attribute must reference
@@ -92,18 +99,15 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-def create_error_msg(filename: str, line: int, description: str) -> LintMessage:
-    return LintMessage(
-        path=filename,
-        line=line,
-        char=None,
-        code=LINTER_CODE,
-        severity=LintSeverity.ERROR,
-        name=f"[{HW_CLASSIFICATION_ATTR}]",
-        original=None,
-        replacement=None,
-        description=description,
-    )
+_error_msg = partial(
+    LintMessage,
+    char=None,
+    code=LINTER_CODE,
+    severity=LintSeverity.ERROR,
+    name=f"[{HW_CLASSIFICATION_ATTR}]",
+    original=None,
+    replacement=None,
+)
 
 
 def _is_test_file(filename: str) -> bool:
@@ -116,7 +120,10 @@ def _is_test_file(filename: str) -> bool:
 def _is_test_class(node: ast.ClassDef) -> bool:
     # Identify test classes by the presence of test_* methods rather than
     # inheritance. Resolving TestCase inheritance through AST is incomplete
-    # because subclasses can be defined indirectly (e.g. NNTestCase, JitTestCase).
+    # because subclasses can be defined indirectly (e.g. NNTestCase, JitTestCase)
+    # and across different files. Therefore, intermediate base classes and
+    # concrete test classes are treated uniformly: any class defining test_*
+    # methods must declare hw_classification.
     for stmt in node.body:
         if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
             return True
@@ -288,10 +295,10 @@ def _check_device_param(ctx: RuleContext, *, required: bool) -> list[LintMessage
             continue
         action = "must accept" if required else "must not accept"
         messages.append(
-            create_error_msg(
-                ctx.filename,
-                stmt.lineno,
-                f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+            _error_msg(
+                path=ctx.filename,
+                line=stmt.lineno,
+                description=f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
                 f"{action} a 'device' or 'devices' parameter.",
             )
         )
@@ -309,10 +316,10 @@ def _check_instantiation(
         return []
     action = "must be" if required else "must not be"
     return [
-        create_error_msg(
-            ctx.filename,
-            ctx.class_node.lineno,
-            f"{ctx.classification} class '{ctx.class_node.name}' {action} "
+        _error_msg(
+            path=ctx.filename,
+            line=ctx.class_node.lineno,
+            description=f"{ctx.classification} class '{ctx.class_node.name}' {action} "
             f"instantiated via 'instantiate_device_type_tests'.",
         )
     ]
@@ -365,10 +372,10 @@ def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
                 and name != "onlyAccelerator"
             ):
                 messages.append(
-                    create_error_msg(
-                        ctx.filename,
-                        stmt.lineno,
-                        f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
+                    _error_msg(
+                        path=ctx.filename,
+                        line=stmt.lineno,
+                        description=f"{ctx.classification} test method '{ctx.class_node.name}.{stmt.name}' "
                         f"must not use '@{name}' decorators except onlyAccelerator",
                     )
                 )
@@ -383,10 +390,10 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
     """
     if ctx.instantiation_call is not None and ctx.only_for is not None:
         return [
-            create_error_msg(
-                ctx.filename,
-                ctx.instantiation_call.lineno,
-                f"{ctx.classification} class '{ctx.class_node.name}' "
+            _error_msg(
+                path=ctx.filename,
+                line=ctx.instantiation_call.lineno,
+                description=f"{ctx.classification} class '{ctx.class_node.name}' "
                 f"must not use only_for in instantiate_device_type_tests. "
                 f"Use except_for instead (blacklist approach).",
             )
@@ -414,10 +421,10 @@ def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
     """Device-specific classes: instantiate_device_type_tests must not use except_for."""
     if ctx.instantiation_call is not None and ctx.except_for is not None:
         return [
-            create_error_msg(
-                ctx.filename,
-                ctx.instantiation_call.lineno,
-                f"{ctx.classification} class '{ctx.class_node.name}' "
+            _error_msg(
+                path=ctx.filename,
+                line=ctx.instantiation_call.lineno,
+                description=f"{ctx.classification} class '{ctx.class_node.name}' "
                 f"must not use except_for in instantiate_device_type_tests.",
             )
         ]
@@ -434,20 +441,20 @@ def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
 
     if ctx.only_for is None:
         return [
-            create_error_msg(
-                ctx.filename,
-                ctx.instantiation_call.lineno,
-                f"{ctx.classification} class '{ctx.class_node.name}' "
+            _error_msg(
+                path=ctx.filename,
+                line=ctx.instantiation_call.lineno,
+                description=f"{ctx.classification} class '{ctx.class_node.name}' "
                 f"must use only_for='{expected}' "
                 f"in instantiate_device_type_tests.",
             )
         ]
     if ctx.only_for != [expected]:
         return [
-            create_error_msg(
-                ctx.filename,
-                ctx.instantiation_call.lineno,
-                f"{ctx.classification} class '{ctx.class_node.name}' "
+            _error_msg(
+                path=ctx.filename,
+                line=ctx.instantiation_call.lineno,
+                description=f"{ctx.classification} class '{ctx.class_node.name}' "
                 f"has only_for values {ctx.only_for}, "
                 f"but must be exactly {[expected]}.",
             )
@@ -482,10 +489,10 @@ def check_file(filename: str) -> list[LintMessage]:
         # Missing hw_classification attribute
         if assign_node is None:
             messages.append(
-                create_error_msg(
-                    filename,
-                    node.lineno,
-                    f"Test class '{node.name}' must declare "
+                _error_msg(
+                    path=filename,
+                    line=node.lineno,
+                    description=f"Test class '{node.name}' must declare "
                     f"{HW_CLASSIFICATION_ATTR} = HardwareClassification.<MEMBER>.",
                 )
             )
@@ -496,10 +503,10 @@ def check_file(filename: str) -> list[LintMessage]:
         # Value is not HardwareClassification.enum_member
         if value is None:
             messages.append(
-                create_error_msg(
-                    filename,
-                    assign_node.lineno,
-                    f"Could not determine {HW_CLASSIFICATION_ATTR} value for class '{node.name}'. "
+                _error_msg(
+                    path=filename,
+                    line=assign_node.lineno,
+                    description=f"Could not determine {HW_CLASSIFICATION_ATTR} value for class '{node.name}'. "
                     f"Use 'HardwareClassification.<MEMBER>'.",
                 )
             )
@@ -527,12 +534,17 @@ def main() -> None:
     parser.add_argument("filenames", nargs="+", help="paths to lint")
     args = parser.parse_args()
 
-    with mp.Pool(8) as pool:
-        results = pool.map(check_file, args.filenames)
-
-    for msgs in results:
-        for msg in msgs:
-            print(json.dumps(msg._asdict()), flush=True)
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=os.cpu_count(),
+    ) as executor:
+        futures = {executor.submit(check_file, x): x for x in args.filenames}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                for lint_message in future.result():
+                    print(json.dumps(lint_message._asdict()), flush=True)
+            except Exception:
+                logging.critical('Failed at "%s".', futures[future])
+                raise
 
 
 if __name__ == "__main__":
