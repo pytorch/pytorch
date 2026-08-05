@@ -150,7 +150,10 @@ class TestLazyReuseIrDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestLazyReuseIrDevice, globals(), only_for=("cpu", "cuda")
+    TestLazyReuseIrDevice,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
