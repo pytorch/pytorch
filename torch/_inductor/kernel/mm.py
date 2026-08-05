@@ -23,7 +23,6 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
-from ..codegen.flydsl.flydsl_utils import fits_int32_buffer_span
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -217,6 +216,19 @@ def check_supported_striding(mat_a, mat_b) -> None:
     )
 
 
+def _fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    int32_max = (1 << 31) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
+    )
+
+
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
@@ -289,7 +301,7 @@ def get_flydsl_mm_template_kwargs(
         (m_static, out_stride[0], n_static),
     )
     if any(
-        not fits_int32_buffer_span(
+        not _fits_int32_buffer_span(
             rows,
             PythonWrapperCodegen.statically_known_int_or_none(stride),
             cols,

@@ -139,6 +139,26 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIsInstance(result, NotImplementedError)
         self.assertEqual(choices, [])
 
+    def test_gen_defines(self):
+        kernel = FlyDSLTemplateKernel(
+            kernel_name="test_kernel",
+            input_nodes=[],
+            output_node=None,
+        )
+        defines = kernel.gen_defines(
+            TILE_M=128,
+            ENABLE_FEATURE=True,
+            SCALE=1.5,
+        )
+        self.assertEqual(
+            defines,
+            (
+                "TILE_M: fx.Constexpr = 128\n"
+                "ENABLE_FEATURE: fx.Constexpr = True\n"
+                "SCALE: fx.Constexpr = 1.5\n"
+            ),
+        )
+
     def test_render_includes_imports(self):
         template = mock.Mock()
         template.render.return_value = (
@@ -186,7 +206,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
         self.assertEqual(scheduling.get_backend_features(device=None), set())
 
-    def test_scheduling_codegen_template_uses_run_interface(self):
+    def test_scheduling_codegen_template_calls_kernel_wrapper(self):
         layout = FixedLayout(torch.device("cpu"), torch.float32, [1], [1])
         input_node = Buffer(name="input", layout=layout)
         output_node = Buffer(name="output", layout=layout)
