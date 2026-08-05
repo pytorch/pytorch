@@ -27,6 +27,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
+    Environment,
     ExternalCorrelation,
     Field,
     GraphHostNode,
@@ -225,6 +226,19 @@ EVENT_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
+# Periodically-sampled GPU environment (power/clock/thermal/cooling), selected only under
+# enable_environment_counters. Rendered as counter tracks; DATA is the 20-byte metric union,
+# split by ENVIRONMENT_KIND. Opt-in: the sampling adds overhead, so it is off by default.
+ENVIRONMENT_FIELDS: dict[ActivityKind, set[Field]] = {
+    ActivityKind.ENVIRONMENT: {
+        Environment.DEVICE_ID,
+        Environment.TIMESTAMP,
+        Environment.ENVIRONMENT_KIND,
+        Environment.ENVIRONMENT_KIND_DATA,
+    },
+}
+
+
 class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
     """Accumulates decoded records and exports them as chrome-trace windows. A window opens
     at trace start (:meth:`open_window`), closes at stop (:meth:`close_window`), and its
@@ -235,6 +249,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         self,
         metadata_resolver: Callable[[int], str | None] | None = None,
         enable_cuda_sync: bool = False,
+        enable_environment_counters: bool = False,
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
         pm_metrics: Iterable[str] | None = None,
@@ -277,6 +292,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection.update({k: set(v) for k, v in EVENT_FIELDS.items()})
         if enable_cuda_sync:
             selection.update({k: set(v) for k, v in SYNC_FIELDS.items()})
+        if enable_environment_counters:
+            selection.update({k: set(v) for k, v in ENVIRONMENT_FIELDS.items()})
         # Graph naming on via the default registry resolver (the profiler always wants graph
         # captures named -- it's free when there are none and a no-op for eager-only runs).
         # Eager naming stays off (the default): the full profiler already selects
@@ -1069,6 +1086,19 @@ def _cuda_event_columns(cols, convert, resolver):
     }
 
 
+def _environment_columns(cols, convert, resolver):
+    del resolver
+    # DATA is the union's first 8 bytes (u64): the primary metric pair (e.g. POWER ->
+    # power | powerLimit<<32, SPEED -> smClock | memoryClock<<32). Split by environment_kind
+    # in the consumer (monitor_trace) into the counter tracks.
+    return {
+        "start_ns": convert(cols[Environment.TIMESTAMP.id]),
+        "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
+        "environment_kind": cols[Environment.ENVIRONMENT_KIND.id].astype(np.int64),
+        "data": cols[Environment.ENVIRONMENT_KIND_DATA.id].astype(np.uint64),
+    }
+
+
 # kind -> (chrome-trace tag, column builder, is_timed). Timed kinds bucket into windows;
 # untimed kinds (external_correlation, cuda_event) are join inputs that ride along.
 _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
@@ -1091,4 +1121,5 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.OVERHEAD): ("overhead", _overhead_columns, True),
     int(ActivityKind.SYNCHRONIZATION): ("cuda_sync", _sync_columns, True),
     int(ActivityKind.CUDA_EVENT): ("cuda_event", _cuda_event_columns, False),
+    int(ActivityKind.ENVIRONMENT): ("environment", _environment_columns, True),
 }
