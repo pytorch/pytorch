@@ -146,6 +146,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
+    from .kernel.gemm_epilogue import GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -584,20 +585,6 @@ def try_get_name(x):
     if isinstance(x, StorageBox):
         x = x.data
     return x.get_name() if isinstance(x, Buffer) else None
-
-
-# Note [Data-independent CSE signatures]
-# Post-grad CSE analysis assigns DATA_INDEPENDENT_CSE_TOKEN only to FX nodes
-# that do not depend on tensor data. CSE-equivalent FX nodes share a token and
-# post-grad sets HAS_DATA_INDEPENDENT_CSE on the GraphModule. GraphLowering
-# copies that bit to has_data_independent_cse. StorageBox.realize uses it to
-# convert the producer tokens into the
-# DATA_INDEPENDENT_CSE_SIGNATURE annotation only when the IR operation has no
-# data reads. The scheduler consumes only that buffer annotation; tokens are
-# graph-local and must never be compared across GraphModules.
-DATA_INDEPENDENT_CSE_TOKEN = "inductor_data_independent_cse_token"
-DATA_INDEPENDENT_CSE_SIGNATURE = "inductor_data_independent_cse_signature"
-HAS_DATA_INDEPENDENT_CSE = "inductor_has_data_independent_cse"
 
 
 class IRNode:
@@ -1321,7 +1308,21 @@ def get_reduction_combine_fn(
     reduction_type: str, dtype: torch.dtype, arg_break_ties_left: bool = True
 ) -> Callable[..., object]:
     if reduction_type in REDUCTION_COMBINE_FN:
-        return REDUCTION_COMBINE_FN[reduction_type]
+        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+
+        if (
+            config.strict_signed_zero
+            and reduction_type in ("max", "min")
+            and is_float_dtype(dtype)
+        ):
+
+            def strict_signed_zero_combine_fn(a: object, b: object) -> OpsValue:
+                value = combine_fn(a, b)
+                return ops.where(ops.eq(a, b), b, value)
+
+            return strict_signed_zero_combine_fn
+
+        return combine_fn
 
     elif reduction_type in (
         "argmax",
@@ -4556,9 +4557,13 @@ class Layout(OutputSpec):
             return True
         if sizevars.guard_or_false(sympy.Eq(left, 0)):
             return False
-        return sizevars.guard_or_false(
-            sympy.Ge(left, right)
-        ) or sizevars.guard_or_false(sympy.Eq(left % right, 0))
+        # Prove unbacked divisibility structurally, and keep SymPy from
+        # introducing reciprocal powers into any backed-symbol guard.
+        return (
+            sizevars.guard_or_false(sympy.Ge(left, right))
+            or sizevars.statically_known_multiple_of(left, right)
+            or sizevars.guard_or_false(sympy.Eq(Mod(left, right), 0))
+        )
 
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
         if len(self.stride) != len(order):
@@ -6588,6 +6593,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
+        local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -6639,6 +6645,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
         )
@@ -10625,16 +10632,6 @@ class StorageBox(MutableBox):
 
         if not isinstance(self.data, (Pointwise, Reduction, Scan, Sort)):
             raise AssertionError(type(self.data))
-        cse_signature = None
-        if V.graph.has_data_independent_cse and self.data.num_reads() == 0:
-            cse_tokens = OrderedSet(
-                origin.meta[DATA_INDEPENDENT_CSE_TOKEN]
-                for origin in self.origins
-                if isinstance(origin, torch.fx.Node)
-                and DATA_INDEPENDENT_CSE_TOKEN in origin.meta
-            )
-            if cse_tokens:
-                cse_signature = tuple(sorted(cse_tokens))
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         device = self.data.get_device()
@@ -10653,8 +10650,6 @@ class StorageBox(MutableBox):
         )
         self.data.name = V.graph.register_buffer(self.data)
         V.graph.register_operation(self.data)
-        if cse_signature is not None:
-            self.data.annotations[DATA_INDEPENDENT_CSE_SIGNATURE] = cse_signature
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback

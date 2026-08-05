@@ -1,6 +1,7 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import contextlib
+import glob
 import io
 import sys
 import math
@@ -4566,6 +4567,15 @@ class TestMPS(TestCaseMPS):
         x = torch.arange(2, device="mps")
         self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/97310:
+        # highly-skewed input with a single long run of duplicates triggered
+        # MPSGraph scatter contention that took ~19s on a 2M-element tensor.
+        # Workload shape mirrors per-frame connected-component labels for
+        # 1080p video.
+        skewed = torch.zeros(1080 * 1920, dtype=torch.int64)
+        skewed[100_000:157_600] = 193_501
+        helper(skewed, True, True)
+
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
             cpu_x = x
@@ -5933,6 +5943,44 @@ class TestMPS(TestCaseMPS):
             kw = {"dim": dim, "keepdim": keepdim}
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+
+    @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
+    def test_int64_minmax_partial_simdgroups(self, n):
+        # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
+        # reads its neighbours' registers, so a reduction stage that leaves fewer
+        # than 32 lanes active used to fold their zeros into the result. Sizes
+        # span threadgroups of 64 to 1024 threads over the single-pass and
+        # split-K paths.
+        x = -torch.arange(1, n + 1, dtype=torch.int64, device="mps")
+        self.assertEqual(x.amax().cpu(), x.cpu().amax())
+        self.assertEqual((-x).amin().cpu(), (-x).cpu().amin())
+
+    @parametrize("case", ["full_1d", "full_2d", "inner", "outer"])
+    def test_sum_integer_no_overflow(self, case):
+        # int sums must accumulate in int64: 2**30 overflows int32 after 4 adds
+        shape, dim = {"full_1d": ((1 << 20,), None), "full_2d": ((1024, 1024), None),
+                      "inner": ((131072, 16), 1), "outer": ((65536, 16), 0)}[case]
+        x = torch.full(shape, 2**30, dtype=torch.int32, device="mps")
+        args = () if dim is None else (dim,)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.int8, torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64])
+    @parametrize("reduction", ["full", "outer", "inner"])
+    def test_sum_no_input_upcast(self, dtype, reduction):
+        # Skipping the input up-cast puts the (int8|uint8|bool|int16|int32, int64)
+        # kernels on the live path for the first time.
+        x = (torch.arange(1 << 20, device="mps") % 7).to(dtype)
+        dim = {"full": None, "outer": 0, "inner": 1}[reduction]
+        args = () if dim is None else (dim,)
+        if dim is not None:
+            x = x.view(1024, 1024)
+        self.assertEqual(x.sum(*args).cpu(), x.cpu().sum(*args))
+
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_sum_lowp_no_input_upcast(self, dtype):
+        # (half|bfloat16, float32) kernels, likewise unreachable before.
+        x = ((torch.arange(1 << 20, device="mps") % 4) * 0.25).to(dtype)
+        self.assertEqual(x.sum(dtype=torch.float32).cpu(), x.cpu().sum(dtype=torch.float32))
 
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
@@ -9096,6 +9144,27 @@ class TestMPS(TestCaseMPS):
             helper(5, 2, 10, dtype)
             helper(2, 2, 0, dtype)
 
+    @parametrize("dtype,start,end,steps", [
+        (torch.int32, 2**24, 2**24 + 8, 9),
+        (torch.int64, 2**40, 2**40 + 8, 9),
+        (torch.int64, -(2**40), -(2**40) + 8, 9),
+        (torch.int64, 2**40 + 8, 2**40, 9),
+    ])
+    def test_linspace_integral_precision(self, dtype, start, end, steps):
+        expected = torch.linspace(start, end, steps, dtype=dtype)
+        actual = torch.linspace(start, end, steps, dtype=dtype, device="mps")
+        self.assertEqual(actual.cpu(), expected)
+
+        storage = torch.empty(steps * 2, dtype=dtype, device="mps")
+        out = storage[::2]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.cpu(), expected)
+
+        storage = torch.empty((steps, 2), dtype=dtype, device="mps")
+        out = storage[:, :1]
+        torch.linspace(start, end, steps, out=out)
+        self.assertEqual(out.flatten().cpu(), expected)
+
     # Test argange
     def test_arange(self):
         self.assertEqual(np.arange(10), torch.arange(10, device='mps'))
@@ -10272,10 +10341,11 @@ class TestMPS(TestCaseMPS):
     # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
     # the nonzero OpInfo; only the large-tensor paths are MPS-specific and can't
     # be reached through OpInfo, so they live here.
-    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
-    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    # ~3 GiB unified memory needed: the input bool tensor is ~2.2 GiB; the
+    # intra-block prefixes are recomputed in the scatter kernel rather than
+    # stored, so there is no per-element scratch buffer.
     @serialTest()
-    @largeTensorTest("11GB", device="mps")
+    @largeTensorTest("3GB", device="mps")
     def test_nonzero_multichunk_above_int32(self):
         # (1<<31)+1024 elements: above INT_MAX, and above the 2^31 per-dispatch
         # chunk size, so it exercises the multi-chunk count/scatter path and the
@@ -10287,10 +10357,10 @@ class TestMPS(TestCaseMPS):
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
 
-    # ~22 GiB unified memory needed (input bool ~4 GiB + int32 prefix ~16 GiB);
+    # ~5 GiB unified memory needed (input bool ~4 GiB; no per-element scratch);
     # skips on machines/CI without enough memory.
     @serialTest()
-    @largeTensorTest("22GB", device="mps")
+    @largeTensorTest("5GB", device="mps")
     def test_nonzero_above_uint32(self):
         # More than 2^32 elements: the flat index and the count/scatter dispatch
         # both exceed Metal's 32-bit thread_position_in_grid, so this exercises
@@ -12999,6 +13069,19 @@ class TestSDPA(TestCaseMPS):
             attn_mask.masked_fill_(causal_mask.logical_not(), float("-inf"))
             attn_mask[..., 0, 0] = float("-inf")
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [80, 128])
+    @parametrize("scale", [1.0, 3.7, 0.1234567, 1e-3], name_fn=lambda s: str(s).replace(".", "p"))
+    def test_prefill_attention_scale(self, dtype, head_dim, scale):
+        # Max relative error rather than the mean _run_prefill_test uses: rounding
+        # the scale into Q in the input dtype moves a few rows a lot, and a mean
+        # washes that out well below these tolerances.
+        q, k, v = self._prefill_qkv(1, 2, 2, 128, 128, head_dim, "contiguous", dtype)
+        ref = F.scaled_dot_product_attention(q.cpu().float(), k.cpu().float(), v.cpu().float(), scale=scale)
+        got = F.scaled_dot_product_attention(q, k, v, scale=scale).cpu().float()
+        tol = {torch.float32: 5e-5, torch.float16: 2e-3, torch.bfloat16: 8e-3}[dtype]
+        self.assertLess(((got - ref).abs().max() / ref.abs().max()).item(), tol)
 
     def test_caching_scale(self):
         # TODO remove this test once sdpa_general becomes a metal kernel
@@ -15880,7 +15963,7 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
-        # TODO: Rounding is broken for linspace, see https://github.com/pytorch/pytorch/issues/137635
+        # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
@@ -16902,6 +16985,40 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            lambda msg: f"{msg}\nCapture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+    @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
+    def test_metal_capture_nondefault_stream(self):
+        # stopCapture of a device-wide capture must drain pool streams too,
+        # not just the default stream
+        capture_name = f"stream_full{''.join(random.choice('0123456789') for i in range(5))}"
+        stream = torch._C._MPSStreamBase()
+        try:
+            with torch.mps.profiler.metal_capture(capture_name):
+                torch._C._mps_setStream(stream)
+                mps_tensor = torch.zeros(32, device="mps")
+                mps_tensor += 1
+            self.assertFalse(torch.mps.profiler.is_capturing_metal())
+            self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
+        finally:
+            torch._C._mps_setStream(None)
+        capture_dirnames = glob.glob(f"*-{capture_name}.gputrace")
+        for dirname in capture_dirnames:
+            shutil.rmtree(dirname)
+        self.assertEqual(len(capture_dirnames), 1)
+
+    @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
+    def test_metal_capture_exception(self):
+        # stopCapture must drain in-flight work even when the body raises
+        capture_name = f"raise_full{''.join(random.choice('0123456789') for i in range(5))}"
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with torch.mps.profiler.metal_capture(capture_name):
+                mps_tensor = torch.zeros(32, device="mps")
+                mps_tensor += 1
+                raise RuntimeError("boom")
+        self.assertFalse(torch.mps.profiler.is_capturing_metal())
+        self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
+        for dirname in glob.glob(f"*-{capture_name}.gputrace"):
+            shutil.rmtree(dirname)
 
     def test_metal_lambda_expressions(self):
         # Lambda expressions require Metal 3.2 (macOS 15+)
