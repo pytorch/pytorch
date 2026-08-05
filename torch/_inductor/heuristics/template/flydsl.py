@@ -100,6 +100,17 @@ def get_default_mxfp8_gemm_configs() -> list[FlyDSLMXFP8Config]:
     Returns the default configuration set for the gfx950 FlyDSL MXFP8 kernel.
     """
     config_tuples: list[FlyDSLMXFP8ConfigArgs] = [
+        # Deep register blocking (8x8 / 8x4 repeats): fewer, fatter waves so
+        # each LDS read feeds four MFMAs instead of two. These win every shape
+        # from M=2048 up -- 256x256 with a 2x2 wave grid is the large-GEMM
+        # sweet spot -- and are the reason MXFP8_MAX_MMA_REPEAT is 8.
+        (256, 256, 128, 2, 2, 2, 4),
+        (256, 256, 128, 2, 2, 2, 0),
+        (128, 128, 128, 2, 1, 2, 4),
+        (128, 128, 128, 2, 2, 1, 4),
+        (128, 128, 128, 2, 1, 1, 4),
+        (128, 256, 128, 2, 1, 4, 4),
+        (256, 128, 128, 2, 4, 1, 4),
         # Square-ish tiles: the throughput sweet spot for large GEMMs.
         (128, 128, 128, 2, 2, 2, 0),
         (128, 128, 128, 2, 2, 2, 4),

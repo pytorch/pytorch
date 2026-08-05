@@ -50,9 +50,20 @@ GFX950_WAVE_SIZE = 64
 GFX950_DMA_BYTES = 16
 GFX950_LDS_CAPACITY = 163840
 GFX950_MAX_BLOCK_THREADS = 1024
-# Repeats beyond this spill the f32[4] accumulators; same cutoff the FP16
-# exhaustive generator uses.
-MXFP8_MAX_MMA_REPEAT = 4
+# Per-wave register blocking depth. Each k step issues Rm + Rn LDS reads and
+# Rm * Rn MFMAs, so the cap directly sets the MFMA-per-LDS-read ratio that this
+# kernel is limited by -- 4x4 gives 2, 8x8 gives 4. It is not an LDS-bandwidth
+# limit (removing the XOR swizzle, i.e. going from 2-way to 16-way bank
+# conflicts, costs only 1.5%) nor an occupancy limit (20 waves/CU at 2x2
+# repeats is slower than 8 waves/CU at 4x4); the MFMA unit idles waiting on
+# ds_read issue slots and latency, which deeper blocking amortizes.
+#
+# Measured on gfx950 with bf16 output: 8x8 uses 224 of 512 VGPRs with no
+# scratch and is 1.17-1.29x faster than 4x4 for M >= 2048, while 16x8 spills
+# and collapses to roughly a fifth of the throughput. The FP16 template caps at
+# 4 because its 2-byte elements make each fragment twice as wide; e4m3 halves
+# that, so the cutoff has to be re-derived rather than inherited.
+MXFP8_MAX_MMA_REPEAT = 8
 # 16-byte granules spanned by one 128-K MFMA step.
 MXFP8_GRANULES_PER_MFMA_K = MXFP8_MFMA_K // GFX950_DMA_BYTES
 # The f8f6f4 ABI splits a lane's 32 operand bytes into two 16-byte halves that
