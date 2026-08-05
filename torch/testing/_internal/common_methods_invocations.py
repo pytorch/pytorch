@@ -4765,7 +4765,9 @@ def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs
     # N >= 16384 needs >= 2048.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     cases = (
-        # The dedicated RMSNorm test covers the first dispatch band.
+        # One shape per band, so no band is left to the dedicated RMSNorm test
+        # alone -- these are what test_ops/test_ops_gradients/export exercise.
+        ((8192, 4096), (4096,), {'eps': 1e-5}),
         ((4096, 8192), (8192,), {'eps': 1e-5}),
         # This also exercises the scalar tail of the vectorized path.
         ((2048, 16385), (16385,), {'eps': 1e-5}),
