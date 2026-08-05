@@ -551,6 +551,10 @@ def _nary_sym_min(*args: Any) -> Any:
     return functools.reduce(torch.sym_min, args)
 
 
+def _nary_sym_mul(*args: Any) -> Any:
+    return functools.reduce(operator.mul, args)
+
+
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -583,10 +587,12 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         elif v == "pow_by_natural":
             handlers[k] = operator.pow
 
-    # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
+    # sympy.Add and sympy.Mul are n-ary (e.g. Add(a, b, c)) but the
+    # corresponding operator functions are binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
     # sym_sum([a, b, c]) and sym_sum(a, b, c).
     handlers[sympy.Add] = torch.sym_sum
+    handlers[sympy.Mul] = _nary_sym_mul
     return handlers
 
 
