@@ -7343,7 +7343,7 @@ class TestJit(DistributionsTestCase):
 
 
 instantiate_device_type_tests(
-    TestDistributionsDeviceType,
+    TestDistributionsDevice,
     globals(),
 )
 
