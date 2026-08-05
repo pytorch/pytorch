@@ -20,6 +20,17 @@ namespace {
 // or a host scalar.
 using PreMulSumFactorT = std::variant<at::Tensor, double>;
 
+bool isUnsupportedFloat8(at::ScalarType type) {
+  return type == at::ScalarType::Float8_e5m2fnuz ||
+      type == at::ScalarType::Float8_e4m3fnuz ||
+      type == at::ScalarType::Float8_e8m0fnu
+#ifndef NCCL_SUPPORTS_FP8
+      || type == at::ScalarType::Float8_e5m2 ||
+      type == at::ScalarType::Float8_e4m3fn
+#endif
+      ;
+}
+
 // Extract the scaling factor from a c10d PREMUL_SUM ReduceOp supplement.
 PreMulSumFactorT getPreMulSumFactor(const ::c10d::ReduceOp& op) {
   TORCH_CHECK(
@@ -53,7 +64,7 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
       return ncclInt64;
     case at::ScalarType::Char:
       return ncclInt8;
-#if HAVE_FP8
+#ifdef NCCL_SUPPORTS_FP8
     case at::ScalarType::Float8_e5m2:
       return ncclFloat8e5m2;
     case at::ScalarType::Float8_e4m3fn:
@@ -66,6 +77,7 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
     case at::ScalarType::Bool:
     case at::ScalarType::Float8_e4m3fnuz:
     case at::ScalarType::Float8_e5m2fnuz:
+    case at::ScalarType::Float4_e2m1fn_x2:
       return ncclUint8;
     default:
       throw std::runtime_error("Unsupported tensor data type for NCCL");
@@ -86,8 +98,7 @@ void createPreMulSum(
   void* scalar = is_tensor ? tensor.data_ptr() : &scalar_factor;
 
   TORCH_INTERNAL_ASSERT(
-      is_tensor ? dataType == getNcclDataTypeInternal(tensor)
-                : dataType != ncclBfloat16,
+      !is_tensor || dataType == getNcclDataTypeInternal(tensor),
       "PreMulSum factor type must match input data type");
   NCCL_CHECK(
       nccl_api,
@@ -121,7 +132,7 @@ ProcessGroupNCCL::RedOpRAII::RedOpRAII(
           &ncclRedOp_, factor, comm, nccl_api_.get());
       break;
     case ncclBfloat16:
-      createPreMulSum<float, ncclBfloat16>(
+      createPreMulSum<at::BFloat16, ncclBfloat16>(
           &ncclRedOp_, factor, comm, nccl_api_.get());
       break;
     case ncclFloat64:
@@ -150,7 +161,7 @@ size_t ProcessGroupNCCL::wordSize(ncclDataType_t type) const {
     // case ncclInt8:
     case ncclUint8:
 #endif
-#if HAVE_FP8
+#ifdef NCCL_SUPPORTS_FP8
     case ncclFloat8e4m3:
     case ncclFloat8e5m2:
 #endif
@@ -185,7 +196,22 @@ ncclDataType_t ProcessGroupNCCL::getNcclDataType(const at::Tensor& tensor) {
 ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     const ::c10d::ReduceOp& op,
     ncclComm_t comm,
-    const ncclDataType_t dataType) {
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
+  TORCH_CHECK(
+      tensor.scalar_type() != at::ScalarType::Float4_e2m1fn_x2,
+      "Unsupported Float4 type for NCCL reduction");
+  if (tensor.scalar_type() == at::kBool) {
+    if (op == ::c10d::ReduceOp::SUM) {
+      return ncclMax;
+    }
+    TORCH_CHECK_TYPE(
+        op != ::c10d::ReduceOp::AVG,
+        "Cannot use ReduceOp.AVG with boolean inputs");
+  }
+
   switch (op) {
     case ::c10d::ReduceOp::SUM:
       return ncclSum;
@@ -202,7 +228,7 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::BXOR:
       TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
-      return RedOpRAII(op, comm, dataType, nccl_api_);
+      return RedOpRAII(op, comm, getNcclDataType(tensor), nccl_api_);
     case ::c10d::ReduceOp::AVG:
       return ncclAvg;
     default:
