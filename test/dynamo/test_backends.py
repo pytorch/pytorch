@@ -574,7 +574,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
                 self.p1 = torch.nn.Parameter(torch.randn(2, 3))
                 self.p2 = torch.nn.Parameter(torch.randn(2, 3))
 
-            @torch._dynamo.config.patch("prepare_freezing", True)
+            @torch._dynamo.patch_dynamo_config(prepare_freezing=True)
             def forward(self, x):
                 t = self.p1 + x
                 out = t / self.p2

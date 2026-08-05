@@ -79,6 +79,7 @@ class SideEffectReplayRegistryTests(TestCase):
                 ("list_iterator_mutation", 30),
                 ("count_iterator_mutation", 20),
                 ("random_mutation", 10),
+                ("contextvar_mutation", 5),
             ],
         )
 
