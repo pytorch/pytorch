@@ -26,13 +26,13 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     grouped_tensor_layout,
-    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     tensor_meta_shape,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
+    GemmReductionPlan,
     iter_fx_node_inputs,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
@@ -178,13 +178,37 @@ class GemmOutputPlan:
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
+    @property
+    def reduction_plan(self) -> GemmReductionPlan | None:
+        """Finalize FX ownership metadata into the shared reduction contract."""
+        local_reduce = self.local_reduce
+        if local_reduce is None:
+            return None
+        match = local_reduce.match
+        reduction_type = match.reduction_type
+        if reduction_type is None:
+            return None
+        reduction_output = (
+            local_reduce.store.node.name if local_reduce.store is not None else None
+        )
+        return GemmReductionPlan(
+            reduction_output,
+            match.geometry.group,
+            match.geometry.axis,
+            reduction_type,
+            "identity",
+            self.output.name,
+            feeds_main=local_reduce.feeds_main,
+            feed_output=self.output.name if local_reduce.feeds_main else None,
+        )
+
 
 @dataclasses.dataclass
 class GemmLocalReduceAnalysis:
     """Collect grouped TensorSSA layouts and supported local-reduction matches.
 
     ``from_graph_module`` visits the FX graph in topological order. See
-    ``GroupedTensorSSALayout`` for the grouped layout attached to reshape and
+    ``GemmReductionGeometry`` for the grouped layout attached to reshape and
     pointwise nodes, and ``GemmLocalReduceMatch`` for each supported reduced
     value found from those layouts.
 
@@ -195,7 +219,7 @@ class GemmLocalReduceAnalysis:
     """
 
     graph: GemmEpilogueGraph
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout] = dataclasses.field(
+    grouped_tensors: dict[torch.fx.Node, GemmReductionGeometry] = dataclasses.field(
         default_factory=dict
     )
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
@@ -259,9 +283,7 @@ class GemmLocalReduceAnalysis:
         grouped_layout = grouped_tensor_layout(shape, source_shape)
         if grouped_layout is None or not isinstance(source, torch.fx.Node):
             return False
-        self.grouped_tensors[node] = GroupedTensorSSALayout(
-            grouped_layout.group, grouped_layout.axis
-        )
+        self.grouped_tensors[node] = grouped_layout
         return True
 
     def propagate_local_reduce_match(self, node: torch.fx.Node, source: Any) -> bool:
@@ -292,14 +314,14 @@ class GemmLocalReduceAnalysis:
             return False
         if dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
+        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(dim):
             if not raise_invalid_dims:
                 return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         self.matches[node] = GemmLocalReduceMatch(
             node,
-            GemmReductionGeometry(layout.group_size, layout.axis),
+            layout,
             reduction_node=node,
             reduction_type=reduction_type,
         )
@@ -313,9 +335,7 @@ class GemmLocalReduceAnalysis:
         physical_grouped_nodes = OrderedSet(
             node
             for node, layout in self.grouped_tensors.items()
-            if layout.needs_physical_combine
-            and GemmReductionGeometry(layout.group_size, layout.axis)
-            in active_geometries
+            if layout.needs_physical_callbacks and layout in active_geometries
         )
         return any(
             node in physical_grouped_nodes
@@ -357,7 +377,7 @@ class GemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: GemmReductionGeometry,
     ) -> GemmLocalReduceMatch | None:
         """Find the grouped reduction that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
@@ -376,7 +396,7 @@ class GemmLocalReduceAnalysis:
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return GemmLocalReduceMatch(
                 value,
-                GemmReductionGeometry(layout.group_size, layout.axis),
+                layout,
                 reduction_node=value,
                 reduction_type=normalized.reduction_type,
             )
@@ -470,7 +490,7 @@ class GemmLocalReduceAnalysis:
         self,
         value: Any,
         grouped_source: torch.fx.Node,
-        layout: GroupedTensorSSALayout,
+        layout: GemmReductionGeometry,
     ) -> bool:
         """Return whether a candidate contains a grouped feed-main reduction."""
         if not isinstance(value, torch.fx.Node):
@@ -514,12 +534,12 @@ class GemmLocalReduceAnalysis:
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if layout.group_size <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 # Intentional fallthrough: axis-1 feeds within one TensorSSA
                 # fragment lower as plain generated TensorSSA without a feed plan.
                 return None
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
-        validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
+        validate_local_reduce_feed_main_capability(layout.axis, layout.group)
         source_meta = source_node.meta.get("val")
         if (
             output_meta is not None

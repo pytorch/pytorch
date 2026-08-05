@@ -449,7 +449,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             self.assertIsInstance(normalized_nodes[nodes[target]], normalized_type)
 
     def test_local_reduce_propagates_before_grouped_view_matching(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             FlexGemmLocalReduceAnalysis,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -1955,7 +1955,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
             FlexGemmLocalReduceStore,
@@ -1984,11 +1984,11 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(match)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(object(), aux, 0)
+            FlexGemmLocalReduceStore(node=object(), aux_index=0, value_node=aux)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, object(), 0)
+            FlexGemmLocalReduceStore(node=aux, aux_index=0, value_node=object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, aux, -1)
+            FlexGemmLocalReduceStore(node=aux, aux_index=-1, value_node=aux)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), (), analysis, ())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
@@ -1997,13 +1997,65 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                match, store=FlexGemmLocalReduceStore(aux, aux, 0)
+                match,
+                store=FlexGemmLocalReduceStore(
+                    node=aux,
+                    aux_index=0,
+                    value_node=aux,
+                ),
             ),
         )
         FlexGemmOutputPlan(
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(match, feeds_main=True),
+        )
+
+    def test_output_plan_uses_shared_reduction_plan(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceGeometry,
+        )
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmLocalReduceMatch,
+            FlexGemmLocalReduceStore,
+            FlexGemmOutputLocalReducePlan,
+            FlexGemmOutputPlan,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+
+        graph = torch.fx.Graph()
+        output = graph.placeholder("output")
+        reduced = graph.placeholder("reduced")
+        match = FlexGemmLocalReduceMatch(
+            reduced,
+            FlexGemmLocalReduceGeometry(8, 0),
+            reduction_type="max",
+        )
+        outputs = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                match,
+                store=FlexGemmLocalReduceStore(
+                    node=reduced,
+                    aux_index=0,
+                    value_node=reduced,
+                ),
+                feeds_main=True,
+            ),
+        )
+
+        self.assertEqual(
+            outputs.reduction_plan,
+            GemmReductionPlan(
+                "reduced",
+                8,
+                0,
+                "max",
+                "identity",
+                "output",
+                feeds_main=True,
+                feed_output="output",
+            ),
         )
 
     def test_ordered_outputs_restore_local_reduce_position(self):
@@ -2051,7 +2103,9 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueEmitter
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmEpilogueEmitter,
+        )
 
         graph = torch.fx.Graph()
         aux = graph.placeholder("aux")
@@ -3564,7 +3618,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_config_key,
             log_flex_gemm_artifact,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3634,7 +3688,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_analysis,
             format_flex_gemm_analysis_details,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3662,7 +3716,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.debug import (
             format_flex_gemm_analysis_details,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3687,7 +3741,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             format_flex_gemm_analysis_details,
             format_flex_gemm_lowering_plan,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3832,7 +3886,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmGroupedMainOutputTransform,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3877,13 +3931,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 registered = [
                     node
                     for node in split_nodes
-                    if node in analysis.local_reduce.grouped_layouts
+                    if node in analysis.local_reduce.grouped_tensors
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
                 self.assertEqual(len(shape_env.guards), 1)
 
     def test_incomplete_grouped_selects_are_rejected(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3912,7 +3966,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize("pointwise", (False, True))
     def test_accepted_grouped_reduction_installs_group_guard(self, pointwise):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -3944,7 +3998,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(len(shape_env.guards), 1)
 
     def test_grouped_main_output_does_not_contract_other_axes(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
