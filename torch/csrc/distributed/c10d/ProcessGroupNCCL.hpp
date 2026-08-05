@@ -384,6 +384,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    std::chrono::milliseconds getTimeout() const override {
+      return opTimeout_;
+    }
+
     const std::string& logPrefix() const;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -505,6 +509,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
+    std::string logPrefix_;
     friend class ProcessGroupNCCL;
   };
 
@@ -1024,23 +1029,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the given MemPool
   void deregisterMemPool(at::cuda::MemPool* pool);
 
-  // This method adds a temporary extension for the timeout period,
-  // applying to all collectives between the calling of this API and
-  // the completion of the first collective on the GPU. While this feature
-  // provides flexibility in specific scenarios, it introduces statefulness
-  // to timeout setting. Therefore, it is advisable to use this API sparingly
-  // and consider alternative approaches, such as directly setting the timeout
-  // or utilizing a barrier collective (one can set any timeout to the barrier),
-  // whenever feasible.
-  void addEphemeralTimeout(const std::chrono::milliseconds& timeout);
-
-  // This function is only intended for testing purposes because we don't
-  // want to expose the `WorkNCCL` via pybind. It verifies whether the
-  // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
-  // timeout.
-  bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work>& work,
-      const std::chrono::milliseconds& timeout);
+  // This method adds a temporary extension for the timeout period, applying to
+  // collectives issued after this call until the first such collective
+  // completes on the GPU. Existing work retains its original timeout.
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
 
   void setEnableNanCheck(bool enableNanCheck);
 

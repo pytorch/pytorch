@@ -10,6 +10,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_set>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -50,6 +51,43 @@ ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
     clone.netName = strdup(clone.netName);
   }
   return clone;
+}
+
+void waitForNcclCompletion(
+    NcclApi& nccl_api,
+    ncclComm_t comm,
+    ncclResult_t status,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  const auto start = std::chrono::steady_clock::now();
+  while (status == ncclInProgress) {
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        std::chrono::steady_clock::now() - start < timeout,
+        operation,
+        " timed out after ",
+        timeout.count(),
+        " ms");
+    std::this_thread::yield();
+    const auto query_status = nccl_api.commGetAsyncError(comm, &status);
+    if (query_status != ncclSuccess) {
+      throw NCCLException(
+          nccl_api,
+          fmt::format("{} async error query failed", operation),
+          query_status,
+          comm);
+    }
+  }
+  if (status != ncclSuccess) {
+    throw NCCLException(nccl_api, std::string(operation), status, comm);
+  }
+}
+
+void ProcessGroupNCCL::waitForNcclOperation(
+    ncclResult_t status,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
 }
 
 ncclResult_t NCCLException::getResult() const noexcept {
@@ -95,7 +133,16 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
       // Best effort to abort the communicator - ignore errors since we're
       // in the destructor
       if (nccl_api_) {
-        (void)nccl_api_->commAbort(nccl_comm_);
+        try {
+          waitForNcclCompletion(
+              *nccl_api_,
+              nccl_comm_,
+              nccl_api_->commAbort(nccl_comm_),
+              options_c10d_->timeout,
+              "NCCL Abort failed during destruction");
+        } catch (const std::exception& e) {
+          LOG(ERROR) << e.what();
+        }
       }
       nccl_comm_ = nullptr;
     }
@@ -185,7 +232,7 @@ void ProcessGroupNCCL::initNcclResources() {
   publishComm();
 }
 
-void ProcessGroupNCCL::initFromSplitComm(
+void ProcessGroupNCCL::initFromComm(
     ncclComm_t comm,
     at::Device device,
     std::shared_ptr<NcclApi> nccl_api) {
@@ -280,17 +327,17 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
-  child->initFromSplitComm(new_comm, device_, nccl_api_);
+  child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
 void ProcessGroupNCCL::abort() {
+  comm_state_ = CommState::ERROR;
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
     abortNcclComm();
   }
-  comm_state_ = CommState::ERROR;
 }
 
 void ProcessGroupNCCL::suspend() {
@@ -414,10 +461,11 @@ void ProcessGroupNCCL::finalize() {
     detachMemoryHook();
     retireComm();
     // Deregister comm from the CachingAllocator
-    NCCL_CHECK(
-        nccl_api_,
+    waitForNcclCompletion(
+        *nccl_api_,
         nccl_comm_,
         nccl_api_->commDestroy(nccl_comm_),
+        options_c10d_->timeout,
         "NCCL Destroy failed");
     nccl_comm_ = nullptr;
   }
@@ -427,10 +475,11 @@ void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    NCCL_CHECK(
-        nccl_api_,
+    waitForNcclCompletion(
+        *nccl_api_,
         nccl_comm_,
         nccl_api_->commAbort(nccl_comm_),
+        options_c10d_->timeout,
         "NCCL Abort failed");
     nccl_comm_ = nullptr;
   }
@@ -491,6 +540,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
 
   TracingGuard tracingGuard(name_, comm_size_, "send", dst, tensor, tensor);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
@@ -507,7 +557,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
   try {
-    NCCL_CHECK(
+    NCCL_CHECK_NONBLOCKING(
         nccl_api_,
         nccl_comm_,
         nccl_api_->send(
@@ -525,8 +575,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
     NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
     throw;
   }
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -549,6 +598,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
 
   TracingGuard tracingGuard(name_, comm_size_, "recv", src, tensor, tensor);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
 
@@ -560,7 +610,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
   try {
-    NCCL_CHECK(
+    NCCL_CHECK_NONBLOCKING(
         nccl_api_,
         nccl_comm_,
         nccl_api_->recv(
@@ -578,8 +628,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
     NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
     throw;
   }
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -628,6 +677,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
       input_tensors,
       output_tensors);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout, input_tensors);
 
@@ -638,46 +688,42 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  // Issue each operation individually
-  for (const auto& op : ops) {
-    if (op.type == BatchSendRecv::P2POp::OpType::SEND) {
-      ncclResult_t result = nccl_api_->send(
-          op.tensor.data_ptr(),
-          op.tensor.numel(),
-          getNcclDataType(op.tensor),
-          op.peer,
-          nccl_comm_,
-          stream);
-
-      if (result != ncclSuccess) {
-        throw NCCLException(
-            *nccl_api_,
-            "NCCL Send failed in batch operation",
-            result,
-            nccl_comm_);
-      }
-    } else if (op.type == BatchSendRecv::P2POp::OpType::RECV) {
-      ncclResult_t result = nccl_api_->recv(
-          op.tensor.data_ptr(),
-          op.tensor.numel(),
-          getNcclDataType(op.tensor),
-          op.peer,
-          nccl_comm_,
-          stream);
-
-      if (result != ncclSuccess) {
-        throw NCCLException(
-            *nccl_api_,
-            "NCCL Recv failed in batch operation",
-            result,
-            nccl_comm_);
+  try {
+    // Issue each operation individually
+    for (const auto& op : ops) {
+      if (op.type == BatchSendRecv::P2POp::OpType::SEND) {
+        NCCL_CHECK_NONBLOCKING(
+            nccl_api_,
+            nccl_comm_,
+            nccl_api_->send(
+                op.tensor.data_ptr(),
+                op.tensor.numel(),
+                getNcclDataType(op.tensor),
+                op.peer,
+                nccl_comm_,
+                stream),
+            "NCCL Send failed in batch operation");
+      } else if (op.type == BatchSendRecv::P2POp::OpType::RECV) {
+        NCCL_CHECK_NONBLOCKING(
+            nccl_api_,
+            nccl_comm_,
+            nccl_api_->recv(
+                op.tensor.data_ptr(),
+                op.tensor.numel(),
+                getNcclDataType(op.tensor),
+                op.peer,
+                nccl_comm_,
+                stream),
+            "NCCL Recv failed in batch operation");
       }
     }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
   // End NCCL group
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operations
   work->recordEnd();
@@ -702,6 +748,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "broadcast", root, tensor, tensor);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
 
   auto work = async_op ? createWork(stream, timeout, tensor)
@@ -710,9 +757,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
   // Record start event before NCCL operation
   work->recordStart("broadcast");
 
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->bcast(
           tensor.data_ptr(),
           tensor.numel(),
@@ -720,6 +765,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
           root,
           nccl_comm_,
           stream),
+      timeout,
       "NCCL Broadcast failed");
 
   // Record end event after NCCL operation
@@ -744,6 +790,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
   TracingGuard tracingGuard(
       name_, comm_size_, "all_reduce", rank_, tensor, tensor);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
@@ -752,17 +799,16 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
   work->recordStart("all_reduce");
 
   const auto dataType = getNcclDataType(tensor);
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->allReduce(
           tensor.data_ptr(),
           tensor.data_ptr(), // In-place operation
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
           stream),
+      timeout,
       "NCCL AllReduce failed");
 
   // Record end event after NCCL operation
@@ -787,6 +833,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
 
   TracingGuard tracingGuard(name_, comm_size_, "reduce", root, tensor, tensor);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
@@ -795,18 +842,17 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
   work->recordStart("reduce");
 
   const auto dataType = getNcclDataType(tensor);
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->reduce(
           tensor.data_ptr(),
           rank_ == root ? tensor.data_ptr() : nullptr,
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
           stream),
+      timeout,
       "NCCL Reduce failed");
 
   // Record end event after NCCL operation
@@ -833,23 +879,47 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   // Ensure input tensor is contiguous
   ensureTensorContiguous(tensor);
 
-  // Check that all output tensors are contiguous and have correct size
+  // Mixed-device outputs are staged on the communicator's device.
+  std::vector<at::Tensor> local_outputs;
+  local_outputs.reserve(tensor_list.size());
+  bool needs_staging = false;
   for (const auto& t : tensor_list) {
     ensureTensorContiguous(t);
-    if (t.numel() != tensor.numel()) {
-      throw std::runtime_error(
-          "All tensors in tensor_list must have same size as input tensor");
-    }
+    TORCH_CHECK(
+        t.device().is_cuda(),
+        "Expected all_gather output tensor on CUDA but found tensor on ",
+        t.device());
   }
+  TORCH_CHECK(
+      tensor_list[rank_].numel() == tensor.numel(),
+      "Input tensor must have the same size as the output tensor for its rank");
 
   checkTensorDevice(tensor);
-  checkTensorsDevice(tensor_list);
   checkSameDtype(tensor, tensor_list);
+  for (const auto& output : tensor_list) {
+    if (output.device() == device_) {
+      local_outputs.push_back(output);
+    } else {
+      local_outputs.push_back(at::empty(
+          output.sizes(),
+          tensor.options().memory_format(at::MemoryFormat::Contiguous)));
+      needs_staging = true;
+    }
+  }
 
   TracingGuard tracingGuard(
       name_, comm_size_, "all_gather", rank_, tensor_list, {tensor});
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
+  auto operation_stream =
+      at::cuda::getStreamFromExternal(stream, device_.index());
+  for (size_t i = 0; i < local_outputs.size(); ++i) {
+    if (local_outputs[i].device() != tensor_list[i].device()) {
+      c10::cuda::CUDACachingAllocator::recordStream(
+          local_outputs[i].storage().data_ptr(), operation_stream);
+    }
+  }
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
 
@@ -859,26 +929,37 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  for (int i = 0; i < comm_size_; ++i) {
-    ncclResult_t opResult = nccl_api_->broadcast(
-        tensor.data_ptr(),
-        tensor_list[i].data_ptr(),
-        tensor.numel(),
-        getNcclDataType(tensor_list[i]),
-        i,
-        nccl_comm_,
-        stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Broadcast failed in all_gather",
-          opResult,
-          nccl_comm_);
+  try {
+    for (int i = 0; i < comm_size_; ++i) {
+      const auto& input = i == rank_ ? tensor : local_outputs[i];
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->broadcast(
+              input.data_ptr(),
+              local_outputs[i].data_ptr(),
+              local_outputs[i].numel(),
+              getNcclDataType(local_outputs[i]),
+              i,
+              nccl_comm_,
+              stream),
+          "NCCL Broadcast failed in all_gather");
     }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
+
+  if (needs_staging) {
+    at::cuda::CUDAStreamGuard stream_guard(operation_stream);
+    for (size_t i = 0; i < tensor_list.size(); ++i) {
+      if (local_outputs[i].device() != tensor_list[i].device()) {
+        tensor_list[i].copy_(local_outputs[i], true);
+      }
+    }
+  }
 
   work->recordEnd();
 
@@ -909,15 +990,14 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "allGatherSingleImpl", rank_, input, output);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
 
   work->recordStart("allGatherSingleImpl");
 
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->allGather(
           input.data_ptr(),
           output.data_ptr(),
@@ -925,6 +1005,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
           getNcclDataType(input),
           nccl_comm_,
           stream),
+      timeout,
       "NCCL AllGather failed");
 
   work->recordEnd();
@@ -950,14 +1031,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
         "input_list size must equal comm_size for reduce_scatter");
   }
 
-  // Check that all input tensors are contiguous and have correct size
+  // Check that all input tensors are contiguous.
   for (const auto& t : input_list) {
     ensureTensorContiguous(t);
-    if (t.numel() != output.numel()) {
-      throw std::runtime_error(
-          "All input tensors must have same size as output tensor");
-    }
   }
+  TORCH_CHECK(
+      input_list[rank_].numel() == output.numel(),
+      "Output tensor must have the same size as the input tensor for its rank");
 
   checkTensorsDevice(input_list);
   checkTensorDevice(output);
@@ -966,6 +1046,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   TracingGuard tracingGuard(
       name_, comm_size_, "reduce_scatter", rank_, input_list, {output});
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input_list)
                        : createWork(stream, timeout);
@@ -976,43 +1057,47 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  for (int i = 0; i < comm_size_; ++i) {
-    const auto dataType = getNcclDataType(input_list[i]);
-    ncclResult_t opResult{};
-    if (i == rank_) {
-      // This rank receives the reduced result
-      opResult = nccl_api_->reduce(
-          input_list[i].data_ptr(),
-          output.data_ptr(),
-          output.numel(),
-          dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
-          i,
-          nccl_comm_,
-          stream);
-    } else {
-      // Other ranks contribute to the reduction
-      opResult = nccl_api_->reduce(
-          input_list[i].data_ptr(),
-          nullptr, // Non-root ranks don't receive
-          input_list[i].numel(),
-          dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
-          i,
-          nccl_comm_,
-          stream);
+  try {
+    for (int i = 0; i < comm_size_; ++i) {
+      const auto dataType = getNcclDataType(input_list[i]);
+      if (i == rank_) {
+        // This rank receives the reduced result
+        NCCL_CHECK_NONBLOCKING(
+            nccl_api_,
+            nccl_comm_,
+            nccl_api_->reduce(
+                input_list[i].data_ptr(),
+                output.data_ptr(),
+                output.numel(),
+                dataType,
+                getNcclReduceOp(op, nccl_comm_, input_list[i]),
+                i,
+                nccl_comm_,
+                stream),
+            "NCCL Reduce failed in reduce_scatter");
+      } else {
+        // Other ranks contribute to the reduction
+        NCCL_CHECK_NONBLOCKING(
+            nccl_api_,
+            nccl_comm_,
+            nccl_api_->reduce(
+                input_list[i].data_ptr(),
+                nullptr, // Non-root ranks don't receive
+                input_list[i].numel(),
+                dataType,
+                getNcclReduceOp(op, nccl_comm_, input_list[i]),
+                i,
+                nccl_comm_,
+                stream),
+            "NCCL Reduce failed in reduce_scatter");
+      }
     }
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Reduce failed in reduce_scatter",
-          opResult,
-          nccl_comm_);
-    }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   work->recordEnd();
 
@@ -1044,6 +1129,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "reduceScatterSingleImpl", rank_, input, output);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
@@ -1052,17 +1138,16 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   work->recordStart("reduceScatterSingleImpl");
 
   const auto dataType = getNcclDataType(input);
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->reduceScatter(
           input.data_ptr(),
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
           stream),
+      timeout,
       "NCCL ReduceScatter failed");
 
   // Record end event after NCCL operation
@@ -1100,6 +1185,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "allToAllSingleImpl", rank_, input, output);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
@@ -1111,9 +1197,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   const auto data_type = getNcclDataType(input);
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->allToAll(
           input.data_ptr(),
           output.data_ptr(),
@@ -1121,6 +1205,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
           data_type,
           nccl_comm_,
           stream),
+      timeout,
       "NCCL AllToAll failed");
 #else
   size_t offset = chunk_size * wordSize(data_type);
@@ -1129,32 +1214,30 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  for (int i = 0; i < comm_size_; ++i) {
-    // Send to rank i
-    ncclResult_t opResult = nccl_api_->send(
-        sptr + i * offset, chunk_size, data_type, i, nccl_comm_, stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Send failed in allToAllSingleImpl",
-          opResult,
-          nccl_comm_);
-    }
+  try {
+    for (int i = 0; i < comm_size_; ++i) {
+      // Send to rank i
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->send(
+              sptr + i * offset, chunk_size, data_type, i, nccl_comm_, stream),
+          "NCCL Send failed in allToAllSingleImpl");
 
-    // Receive from rank i
-    opResult = nccl_api_->recv(
-        rptr + i * offset, chunk_size, data_type, i, nccl_comm_, stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Recv failed in allToAllSingleImpl",
-          opResult,
-          nccl_comm_);
+      // Receive from rank i
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->recv(
+              rptr + i * offset, chunk_size, data_type, i, nccl_comm_, stream),
+          "NCCL Recv failed in allToAllSingleImpl");
     }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 #endif
 
   // Record end event after NCCL operation
@@ -1213,6 +1296,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   TracingGuard tracingGuard(
       name_, comm_size_, "all_to_all_v_single", rank_, input, output);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
@@ -1254,39 +1338,37 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  for (int i = 0; i < comm_size_; ++i) {
-    ncclResult_t opResult = nccl_api_->send(
-        sptr + senddispls[i] * type_size,
-        sendcounts[i],
-        data_type,
-        i,
-        nccl_comm_,
-        stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Send failed in all_to_all_v_single",
-          opResult,
-          nccl_comm_);
+  try {
+    for (int i = 0; i < comm_size_; ++i) {
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->send(
+              sptr + senddispls[i] * type_size,
+              sendcounts[i],
+              data_type,
+              i,
+              nccl_comm_,
+              stream),
+          "NCCL Send failed in all_to_all_v_single");
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->recv(
+              rptr + recvdispls[i] * type_size,
+              recvcounts[i],
+              data_type,
+              i,
+              nccl_comm_,
+              stream),
+          "NCCL Recv failed in all_to_all_v_single");
     }
-    opResult = nccl_api_->recv(
-        rptr + recvdispls[i] * type_size,
-        recvcounts[i],
-        data_type,
-        i,
-        nccl_comm_,
-        stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_,
-          "NCCL Recv failed in all_to_all_v_single",
-          opResult,
-          nccl_comm_);
-    }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1328,6 +1410,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
       input_tensor_list,
       output_tensor_list);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = async_op ? createWork(stream, timeout, input_tensor_list)
                        : createWork(stream, timeout);
@@ -1338,36 +1421,40 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
 
-  for (int i = 0; i < comm_size_; ++i) {
-    // Send to rank i
-    ncclResult_t opResult = nccl_api_->send(
-        input_tensor_list[i].data_ptr(),
-        input_tensor_list[i].numel(),
-        getNcclDataType(input_tensor_list[i]),
-        i,
-        nccl_comm_,
-        stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_, "NCCL Send failed in all_to_all", opResult, nccl_comm_);
-    }
+  try {
+    for (int i = 0; i < comm_size_; ++i) {
+      // Send to rank i
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->send(
+              input_tensor_list[i].data_ptr(),
+              input_tensor_list[i].numel(),
+              getNcclDataType(input_tensor_list[i]),
+              i,
+              nccl_comm_,
+              stream),
+          "NCCL Send failed in all_to_all");
 
-    // Receive from rank i
-    opResult = nccl_api_->recv(
-        output_tensor_list[i].data_ptr(),
-        output_tensor_list[i].numel(),
-        getNcclDataType(output_tensor_list[i]),
-        i,
-        nccl_comm_,
-        stream);
-    if (opResult != ncclSuccess) {
-      throw NCCLException(
-          *nccl_api_, "NCCL Recv failed in all_to_all", opResult, nccl_comm_);
+      // Receive from rank i
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->recv(
+              output_tensor_list[i].data_ptr(),
+              output_tensor_list[i].numel(),
+              getNcclDataType(output_tensor_list[i]),
+              i,
+              nccl_comm_,
+              stream),
+          "NCCL Recv failed in all_to_all");
     }
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
   }
 
-  NCCL_CHECK(
-      nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operations
   work->recordEnd();
@@ -1385,6 +1472,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   checkAndAbortIfTimedOutOrError();
 
   TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
 
@@ -1396,9 +1484,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   work->recordStart("barrier");
 
   // Use pre-allocated CUDA buffer for barrier
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
+  waitForNcclOperation(
       nccl_api_->allReduce(
           barrier_buffer_.get(),
           barrier_buffer_.get(),
@@ -1407,6 +1493,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
           ncclSum,
           nccl_comm_,
           stream),
+      timeout,
       "NCCL Barrier failed");
 
   // Record end event after NCCL operation
@@ -1450,6 +1537,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "scatter", root, input_tensor_list, {output_tensor});
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   std::vector<at::Tensor> input_tensors;
   if (async_op && rank_ == root) {
@@ -1468,23 +1556,29 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
         nccl_comm_,
         nccl_api_->groupStart(),
         "NCCL GroupStart failed");
-    for (int i = 0; i < comm_size_; ++i) {
-      if (i != root) {
-        ncclResult_t opResult = nccl_api_->send(
-            input_tensor_list[i].data_ptr(),
-            input_tensor_list[i].numel(),
-            getNcclDataType(input_tensor_list[i]),
-            i,
-            nccl_comm_,
-            stream);
-        if (opResult != ncclSuccess) {
-          throw NCCLException(
-              *nccl_api_, "NCCL Send failed in scatter", opResult, nccl_comm_);
+    try {
+      for (int i = 0; i < comm_size_; ++i) {
+        if (i != root) {
+          NCCL_CHECK_NONBLOCKING(
+              nccl_api_,
+              nccl_comm_,
+              nccl_api_->send(
+                  input_tensor_list[i].data_ptr(),
+                  input_tensor_list[i].numel(),
+                  getNcclDataType(input_tensor_list[i]),
+                  i,
+                  nccl_comm_,
+                  stream),
+              "NCCL Send failed in scatter");
         }
       }
+    } catch (...) {
+      NCCL_CHECK_IGNORE(
+          nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+      throw;
     }
-    NCCL_CHECK(
-        nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    waitForNcclOperation(
+        nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
     at::cuda::CUDAStreamGuard stream_guard(
         at::cuda::getStreamFromExternal(stream, device_.index()));
@@ -1494,14 +1588,27 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
-        nccl_api_->recv(
-            output_tensor.data_ptr(),
-            output_tensor.numel(),
-            getNcclDataType(output_tensor),
-            root,
-            nccl_comm_,
-            stream),
-        "NCCL Recv failed in scatter");
+        nccl_api_->groupStart(),
+        "NCCL GroupStart failed");
+    try {
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->recv(
+              output_tensor.data_ptr(),
+              output_tensor.numel(),
+              getNcclDataType(output_tensor),
+              root,
+              nccl_comm_,
+              stream),
+          "NCCL Recv failed in scatter");
+    } catch (...) {
+      NCCL_CHECK_IGNORE(
+          nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+      throw;
+    }
+    waitForNcclOperation(
+        nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   }
 
   // Record end event after NCCL operations
@@ -1545,6 +1652,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   TracingGuard tracingGuard(
       name_, comm_size_, "gather", root, {input_tensor}, output_tensor_list);
 
+  c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   std::vector<at::Tensor> output_tensors;
   if (rank_ == root) {
@@ -1563,23 +1671,29 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
         nccl_comm_,
         nccl_api_->groupStart(),
         "NCCL GroupStart failed");
-    for (int i = 0; i < comm_size_; ++i) {
-      if (i != root) {
-        ncclResult_t opResult = nccl_api_->recv(
-            output_tensor_list[i].data_ptr(),
-            output_tensor_list[i].numel(),
-            getNcclDataType(output_tensor_list[i]),
-            i,
-            nccl_comm_,
-            stream);
-        if (opResult != ncclSuccess) {
-          throw NCCLException(
-              *nccl_api_, "NCCL Recv failed in gather", opResult, nccl_comm_);
+    try {
+      for (int i = 0; i < comm_size_; ++i) {
+        if (i != root) {
+          NCCL_CHECK_NONBLOCKING(
+              nccl_api_,
+              nccl_comm_,
+              nccl_api_->recv(
+                  output_tensor_list[i].data_ptr(),
+                  output_tensor_list[i].numel(),
+                  getNcclDataType(output_tensor_list[i]),
+                  i,
+                  nccl_comm_,
+                  stream),
+              "NCCL Recv failed in gather");
         }
       }
+    } catch (...) {
+      NCCL_CHECK_IGNORE(
+          nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+      throw;
     }
-    NCCL_CHECK(
-        nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    waitForNcclOperation(
+        nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
     at::cuda::CUDAStreamGuard stream_guard(
         at::cuda::getStreamFromExternal(stream, device_.index()));
@@ -1589,14 +1703,27 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
-        nccl_api_->send(
-            input_tensor.data_ptr(),
-            input_tensor.numel(),
-            getNcclDataType(input_tensor),
-            root,
-            nccl_comm_,
-            stream),
-        "NCCL Send failed in gather");
+        nccl_api_->groupStart(),
+        "NCCL GroupStart failed");
+    try {
+      NCCL_CHECK_NONBLOCKING(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->send(
+              input_tensor.data_ptr(),
+              input_tensor.numel(),
+              getNcclDataType(input_tensor),
+              root,
+              nccl_comm_,
+              stream),
+          "NCCL Send failed in gather");
+    } catch (...) {
+      NCCL_CHECK_IGNORE(
+          nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+      throw;
+    }
+    waitForNcclOperation(
+        nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   }
 
   // Record end event after NCCL operations
