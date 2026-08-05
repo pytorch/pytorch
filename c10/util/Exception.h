@@ -373,9 +373,9 @@ class C10_API DistNetworkError : public DistError {
 
 // Used to distinguish EINTR-caused errors from transient network
 // failures.
-class C10_API DistInterruptedError: public DistNetworkError {
-  public:
-    using DistNetworkError::DistNetworkError;
+class C10_API DistInterruptedError : public DistNetworkError {
+ public:
+  using DistNetworkError::DistNetworkError;
 };
 
 // Raised when a queue is empty and a non-blocking pop is called.

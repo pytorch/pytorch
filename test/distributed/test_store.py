@@ -11,7 +11,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
-from xml.sax import handler
 
 import torch
 import torch.distributed as dist
@@ -1157,7 +1156,7 @@ class TimeoutTest(TestCase):
 
     def test_sigint_breaks_wait(self):
         import signal
-        
+
         rank_res = [None, None]
 
         def run(rank, my_store):
@@ -1177,7 +1176,7 @@ class TimeoutTest(TestCase):
 
         def handler(a, b):
             pass
-    
+
         signal.signal(signal.SIGINT, handler)
 
         rank0_store = dist.TCPStore(

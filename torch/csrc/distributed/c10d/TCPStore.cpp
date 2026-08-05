@@ -4,10 +4,10 @@
 #include <fmt/ranges.h>
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
-#include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
 
 #include <chrono>
 #include <fstream>
@@ -413,8 +413,7 @@ void TCPStore::waitForWorkers() {
       if (::nanosleep(&req, nullptr) != 0) {
         if (errno == EINTR) {
           if (c10d::detail::isTerminationSignalReceived()) {
-            C10_THROW_ERROR(
-                DistInterruptedError, c10::utils::str_error(errno));
+            C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(errno));
           }
         }
       }

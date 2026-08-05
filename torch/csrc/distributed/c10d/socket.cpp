@@ -5,8 +5,8 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <c10/util/error.h>
-#include <torch/csrc/distributed/c10d/socket.h>
 #include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
+#include <torch/csrc/distributed/c10d/socket.h>
 
 #include <optional>
 #include <system_error>
@@ -112,7 +112,8 @@ void delay(std::chrono::milliseconds d) {
     // here is not critical.
     if (err == std::errc::interrupted) {
       if (c10d::detail::isTerminationSignalReceived()) {
-        C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(err.value()));
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
       }
     }
   }
@@ -325,7 +326,8 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
       if (c10d::detail::isTerminationSignalReceived()) {
-        C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(err.value()));
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
       }
     }
 
@@ -488,7 +490,8 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
           *this);
     } else if (err == std::errc::interrupted) {
       if (c10d::detail::isTerminationSignalReceived()) {
-        C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(err.value()));
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
       }
     } else {
       C10D_WARNING(
@@ -932,7 +935,8 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
       if (c10d::detail::isTerminationSignalReceived()) {
-        C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(err.value()));
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
       }
     }
 
