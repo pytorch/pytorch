@@ -13,6 +13,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
+    LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
     LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR,
@@ -25,7 +26,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
-    grouped_tensor_layout,
     is_shape_preserving_pointwise_node,
     tensor_meta_shape,
 )
@@ -41,8 +41,137 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
+from torch._inductor.kernel.gemm_epilogue_utils import (
+    guarded_int,
+    normalize_shape,
+    statically_known_equal,
+    statically_known_shape_equal,
+)
 from torch.utils._ordered_set import OrderedSet
+
+
+def _is_inferred_reshape_dim(value: Any) -> bool:
+    """Return whether a reshape dimension is the literal inferred-size marker."""
+    return isinstance(value, int) and value == -1
+
+
+def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
+    return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
+        kept_size, source_size
+    )
+
+
+def _guard_grouped_reshape_group(
+    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """Specialize a backed group dimension used to recognize a grouped reshape."""
+    if len(shape) != 3:
+        return shape
+    for group_index, kept_index in ((-1, 0), (-2, -1)):
+        if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
+            continue
+        group_value = shape[group_index]
+        symbolic = (
+            group_value.meta.get("val")
+            if isinstance(group_value, torch.fx.Node)
+            else group_value
+        )
+        if not isinstance(symbolic, torch.SymInt):
+            continue
+        group = guarded_int(group_value)
+        if group is not None:
+            result = list(shape)
+            result[group_index] = group
+            return tuple(result)
+    return shape
+
+
+def _syntactic_grouped_tensor_layout(
+    shape: tuple[Any, ...],
+) -> GemmReductionGeometry | None:
+    """Match grouped-reshape syntax before validating source geometry."""
+    if len(shape) not in (3, 4):
+        return None
+    if (
+        isinstance(shape[-1], int)
+        and shape[-1] > 0
+        and _is_inferred_reshape_dim(shape[-2])
+    ):
+        return GemmReductionGeometry(group=shape[-1], axis=1)
+    if (
+        _is_inferred_reshape_dim(shape[-3])
+        and isinstance(shape[-2], int)
+        and shape[-2] > 0
+    ):
+        return GemmReductionGeometry(group=shape[-2], axis=0)
+    return None
+
+
+def _group_count_matches_selected_dim(
+    group_count: Any,
+    selected_size: Any,
+    group: int,
+    kept_size: Any,
+) -> bool:
+    """Match a group count, allowing -1 to infer the selected source dimension."""
+    if _is_inferred_reshape_dim(group_count):
+        return True
+    return statically_known_equal(group_count * group, selected_size) or (
+        not _is_inferred_reshape_dim(kept_size)
+        and statically_known_equal(group_count, selected_size // group)
+    )
+
+
+def _grouped_layout_matches_source_shape(
+    shape: tuple[Any, ...],
+    source_shape: tuple[Any, ...],
+    layout: GemmReductionGeometry,
+) -> bool:
+    """Require a 2-D GEMM output reshape to split exactly M or N."""
+    if len(shape) != 3:
+        return False
+
+    m, n = source_shape
+    match layout.axis, shape:
+        case 1, (kept_m, group_count, group) if group == layout.group:
+            return _kept_dim_matches_source(
+                kept_m, m
+            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
+        case 0, (group_count, group, kept_n) if group == layout.group:
+            return _kept_dim_matches_source(
+                kept_n, n
+            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
+        case _:
+            return False
+
+
+def grouped_tensor_layout(
+    shape: Any, source_shape: Any | None = None
+) -> GemmReductionGeometry | None:
+    """Recognize grouped M/N geometry, specializing backed group dimensions."""
+    shape = normalize_shape(shape)
+    if not isinstance(shape, tuple):
+        return None
+    if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
+        shape = normalize_shape(shape[0])
+    if source_shape is not None:
+        source_shape = normalize_shape(source_shape)
+        if isinstance(source_shape, tuple) and len(source_shape) == 2:
+            shape = _guard_grouped_reshape_group(shape, source_shape)
+            candidates = []
+            match shape:
+                case (*_, int(group)) if group > 0:
+                    candidates.append(GemmReductionGeometry(group=group, axis=1))
+            match shape:
+                case (*_, int(group), _) if group > 0:
+                    candidates.append(GemmReductionGeometry(group=group, axis=0))
+            for layout in candidates:
+                if _grouped_layout_matches_source_shape(shape, source_shape, layout):
+                    return layout
+            if _syntactic_grouped_tensor_layout(shape) is not None:
+                raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
+            return None
+    return _syntactic_grouped_tensor_layout(shape)
 
 
 FEED_MAIN_BINARY_FUNCTIONS = frozenset(
