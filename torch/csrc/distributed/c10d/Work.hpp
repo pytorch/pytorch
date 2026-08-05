@@ -133,8 +133,6 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual uint64_t getSequencenumber() const;
 
-  virtual std::chrono::milliseconds getTimeout() const;
-
   OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(

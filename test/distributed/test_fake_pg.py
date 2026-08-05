@@ -76,14 +76,6 @@ class TestFakePG(TestCase):
         # default init path leaves the backend options null).
         dist.set_timeout(timedelta(seconds=30))
 
-    def test_add_ephemeral_timeout_is_noop(self):
-        backend = FakeProcessGroup._create_internal(0, world_size=2)
-        backend._add_ephemeral_timeout(timedelta(seconds=42))
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
-
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
