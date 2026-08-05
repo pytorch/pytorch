@@ -4,6 +4,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import eval_frame
 from torch._dynamo.hooks import Hooks
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 c = 10
@@ -38,6 +39,8 @@ with_debug_nops = eval_frame._optimize_catch_errors(
 
 
 class NopTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_debug_nops
     def test1(self):
         self.assertEqual(fn1(1, 2), -7)
