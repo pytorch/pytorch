@@ -58,6 +58,7 @@ class FlyDSLTemplateKernel(Kernel):
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
+        self._template_signature_defined = False
 
     @contextlib.contextmanager
     def _patch_get_dtype_for_args(self):
@@ -117,6 +118,7 @@ class FlyDSLTemplateKernel(Kernel):
 
     def def_kernel(self, *argnames):
         renames = IndentedBuffer(initial_indent=1)
+        self._template_signature_defined = True
         self._template_input_args = []
         self._seen_input_args = OrderedSet()
 

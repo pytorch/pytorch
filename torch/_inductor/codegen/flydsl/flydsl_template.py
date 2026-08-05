@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import logging
 from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import OrderedSet, Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
@@ -16,11 +17,8 @@ from . import flydsl_utils
 from .flydsl_kernel import FlyDSLTemplateKernel
 
 
-log = getArtifactLogger(__name__, "output_code")
-
-
-def _ordered_unique_input_names(input_nodes: Iterable[IRNode]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(node.get_name() for node in input_nodes))
+log = logging.getLogger(__name__)
+output_code_log = getArtifactLogger(__name__, "output_code")
 
 
 class FlyDSLTemplate(KernelTemplate):
@@ -83,7 +81,9 @@ class FlyDSLTemplate(KernelTemplate):
             code = kernel.render(self.template, **kwargs)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = _ordered_unique_input_names(input_nodes)
+            expected_input_args = tuple(
+                OrderedSet(node.get_name() for node in input_nodes)
+            )
             if input_call_args[: len(expected_input_args)] != expected_input_args:
                 raise RuntimeError(
                     "FlyDSL template input registration order changed. "
@@ -110,7 +110,7 @@ class FlyDSLTemplate(KernelTemplate):
                 extra_args=extra_args,
                 source_code=code,
             )
-            log.debug("Generated FlyDSL Code:\n%s", bmreq.source_code)
+            output_code_log.debug("Generated FlyDSL Code:\n%s", bmreq.source_code)
 
             def make_kernel_render(out_node, hint_override: int | None = None):
                 render_kernel = self.kernel_type(
@@ -184,6 +184,8 @@ class FlyDSLTemplateCaller(ChoiceCaller):
             template=self.template,
             mutated_inputs=self.mutated_inputs,
         )
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
         return TensorBox.create(buffer)
 
     def call_name(self) -> str:
