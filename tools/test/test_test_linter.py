@@ -7,10 +7,10 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from tools.linter.adapters.hw_classification_linter import (
+from tools.linter.adapters.test_linter import (
     check_file,
     CPU,
-    create_error_msg,
+    _error_msg,
     CUDA,
     GENERIC,
     HW_CLASSIFICATION_ATTR,
@@ -45,10 +45,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                2,
-                f"Test class 'TestFoo' must declare {HW_CLASSIFICATION_ATTR} = {HW_CLASSIFICATION_ENUM_CLASS}.<MEMBER>.",
+            _error_msg(
+                path=msgs[0].path,
+                line=2,
+                description=f"Test class 'TestFoo' must declare {HW_CLASSIFICATION_ATTR} = {HW_CLASSIFICATION_ENUM_CLASS}.<MEMBER>.",
             ),
         )
 
@@ -63,10 +63,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                3,
-                f"Could not determine {HW_CLASSIFICATION_ATTR} value for class 'TestFoo'. "
+            _error_msg(
+                path=msgs[0].path,
+                line=3,
+                description=f"Could not determine {HW_CLASSIFICATION_ATTR} value for class 'TestFoo'. "
                 f"Use '{HW_CLASSIFICATION_ENUM_CLASS}.<MEMBER>'.",
             ),
         )
@@ -96,10 +96,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed with {param}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    4,
-                    f"{GENERIC} test method 'TestFoo.test_x' must not accept a 'device' or 'devices' parameter.",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=4,
+                    description=f"{GENERIC} test method 'TestFoo.test_x' must not accept a 'device' or 'devices' parameter.",
                 ),
             )
 
@@ -116,10 +116,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                3,
-                f"{GENERIC} class 'TestFoo' must not be instantiated via 'instantiate_device_type_tests'.",
+            _error_msg(
+                path=msgs[0].path,
+                line=3,
+                description=f"{GENERIC} class 'TestFoo' must not be instantiated via 'instantiate_device_type_tests'.",
             ),
         )
 
@@ -137,18 +137,18 @@ class TestHwClassificationLinter(unittest.TestCase):
 
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                3,
-                f"{GENERIC} class 'TestFoo' must not be instantiated via 'instantiate_device_type_tests'.",
+            _error_msg(
+                path=msgs[0].path,
+                line=3,
+                description=f"{GENERIC} class 'TestFoo' must not be instantiated via 'instantiate_device_type_tests'.",
             ),
         )
         self.assertEqual(
             msgs[1],
-            create_error_msg(
-                msgs[1].path,
-                5,
-                f"{GENERIC} test method 'TestFoo.test_x' must not accept a 'device' or 'devices' parameter.",
+            _error_msg(
+                path=msgs[1].path,
+                line=5,
+                description=f"{GENERIC} test method 'TestFoo.test_x' must not accept a 'device' or 'devices' parameter.",
             ),
         )
 
@@ -182,10 +182,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    5,
-                    f"{classification} test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=5,
+                    description=f"{classification} test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
                 ),
             )
 
@@ -201,10 +201,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    2,
-                    f"{classification} class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=2,
+                    description=f"{classification} class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
                 ),
             )
 
@@ -220,18 +220,18 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 2, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    2,
-                    f"{classification} class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=2,
+                    description=f"{classification} class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
                 ),
             )
             self.assertEqual(
                 msgs[1],
-                create_error_msg(
-                    msgs[1].path,
-                    4,
-                    f"{classification} test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
+                _error_msg(
+                    path=msgs[1].path,
+                    line=4,
+                    description=f"{classification} test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
                 ),
             )
 
@@ -249,10 +249,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    6,
-                    f"{classification} class 'TestFoo' must use only_for='{classification.lower()}' "
+                _error_msg(
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"{classification} class 'TestFoo' must use only_for='{classification.lower()}' "
                     f"in instantiate_device_type_tests.",
                 ),
             )
@@ -272,10 +272,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    6,
-                    f"{classification} class 'TestFoo' "
+                _error_msg(
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"{classification} class 'TestFoo' "
                     f"has only_for values ['{wrong}'], "
                     f"but must be exactly ['{classification.lower()}'].",
                 ),
@@ -295,10 +295,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {classification}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    6,
-                    f"{classification} class 'TestFoo' must not use except_for in instantiate_device_type_tests.",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"{classification} class 'TestFoo' must not use except_for in instantiate_device_type_tests.",
                 ),
             )
 
@@ -358,10 +358,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                5,
-                "ACCELERATOR test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
+            _error_msg(
+                path=msgs[0].path,
+                line=5,
+                description="ACCELERATOR test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
             ),
         )
 
@@ -376,10 +376,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                2,
-                "ACCELERATOR class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
+            _error_msg(
+                path=msgs[0].path,
+                line=2,
+                description="ACCELERATOR class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
             ),
         )
 
@@ -394,18 +394,18 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 2)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                2,
-                "ACCELERATOR class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
+            _error_msg(
+                path=msgs[0].path,
+                line=2,
+                description="ACCELERATOR class 'TestFoo' must be instantiated via 'instantiate_device_type_tests'.",
             ),
         )
         self.assertEqual(
             msgs[1],
-            create_error_msg(
-                msgs[1].path,
-                4,
-                "ACCELERATOR test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
+            _error_msg(
+                path=msgs[1].path,
+                line=4,
+                description="ACCELERATOR test method 'TestFoo.test_x' must accept a 'device' or 'devices' parameter.",
             ),
         )
 
@@ -424,10 +424,10 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(len(msgs), 1, f"failed for {bad_dec}")
             self.assertEqual(
                 msgs[0],
-                create_error_msg(
-                    msgs[0].path,
-                    6,
-                    f"ACCELERATOR test method 'TestFoo.test_x' must not use '@{bad_dec}' decorators except onlyAccelerator",
+                _error_msg(
+                    path=msgs[0].path,
+                    line=6,
+                    description=f"ACCELERATOR test method 'TestFoo.test_x' must not use '@{bad_dec}' decorators except onlyAccelerator",
                 ),
             )
 
@@ -444,10 +444,10 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(
             msgs[0],
-            create_error_msg(
-                msgs[0].path,
-                6,
-                "ACCELERATOR class 'TestFoo' must not use only_for in instantiate_device_type_tests. "
+            _error_msg(
+                path=msgs[0].path,
+                line=6,
+                description="ACCELERATOR class 'TestFoo' must not use only_for in instantiate_device_type_tests. "
                 "Use except_for instead (blacklist approach).",
             ),
         )
