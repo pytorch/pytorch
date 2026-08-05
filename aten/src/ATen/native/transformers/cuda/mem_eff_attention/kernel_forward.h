@@ -205,9 +205,9 @@ struct AttentionKernel {
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
 
       if (kSupportsDropout) {
-        dropout_batch_head_rng_offset =
-            batch_id * num_heads * num_queries * num_keys +
-            head_id * num_queries * num_keys;
+        // See NOTE [Mem-efficient attention dropout RNG offset]
+        dropout_batch_head_rng_offset = gemm_kernel_utils::dropout_rng_offset(
+            batch_id, head_id, num_heads, num_queries, num_keys);
       }
 
       int64_t q_start = 0, k_start = 0;
@@ -239,10 +239,10 @@ struct AttentionKernel {
         query_ptr += batch_id * q_strideB;
         key_ptr += batch_id * k_strideB;
         value_ptr += batch_id * v_strideB;
-        output_ptr += int64_t(batch_id * num_queries) * o_strideM;
+        output_ptr += int64_t(batch_id) * num_queries * o_strideM;
         if (output_accum_ptr != nullptr) {
           output_accum_ptr +=
-              int64_t(batch_id * num_queries) * (head_dim_value * num_heads);
+              int64_t(batch_id) * num_queries * head_dim_value * num_heads;
         }
         q_start = 0;
         k_start = 0;
@@ -261,7 +261,7 @@ struct AttentionKernel {
       }
       if (output_accum_ptr != nullptr) {
         output_accum_ptr +=
-            int64_t(q_start + query_start) * (head_dim_value * num_heads) +
+            int64_t(q_start + query_start) * head_dim_value * num_heads +
             head_id * head_dim_value;
       } else {
         // Accumulate directly in the destination buffer (eg for f32)
@@ -270,8 +270,8 @@ struct AttentionKernel {
 
       if (logsumexp_ptr != nullptr) {
         // lse[batch_id, head_id, query_start]
-        logsumexp_ptr +=
-            batch_id * lse_dim * num_heads + head_id * lse_dim + query_start;
+        logsumexp_ptr += (int64_t(batch_id) * num_heads + head_id) * lse_dim +
+            query_start;
       }
 
       // Custom masking
@@ -283,12 +283,12 @@ struct AttentionKernel {
       num_keys_absolute = num_keys;
       if (custom_mask_type == CausalFromTopLeft ||
           custom_mask_type == CausalFromBottomRight) {
-        // the bottom row of the current block is query_start + kQueriesPerBlock
-        // the last active key is then query_start + causal_diagonal_offset +
-        // kQueriesPerBlock so num_keys is the min between actual num_keys and
-        // this to avoid extra computations
+        // Exact rather than block-granular: the remap below drops causal
+        // masking, so slack keys here would be attended unmasked.
+        int32_t rows_this_block = cutlass::fast_min(
+            int32_t(kQueriesPerBlock), num_queries - int32_t(query_start));
         num_keys = cutlass::fast_min(
-            int32_t(query_start + causal_diagonal_offset + kQueriesPerBlock),
+            int32_t(query_start + causal_diagonal_offset + rows_this_block),
             num_keys);
       }
 
@@ -299,14 +299,18 @@ struct AttentionKernel {
       // 15/16th of tensor core compute In that case :
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
+      // Excluded under dropout: rows become heads here, but the per-row RNG
+      // offset still indexes them as queries.
       if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
-          logsumexp_ptr == nullptr && window_size == 0) {
+          logsumexp_ptr == nullptr && window_size == 0 &&
+          !(kSupportsDropout && use_dropout)) {
         if (head_id % kQueriesPerBlock != 0) {
           return false;
         }
         q_strideM = q_strideH;
         bias_strideM = bias_strideH;
-        num_queries = num_heads;
+        // Pointers are anchored at head_id, so only later heads are rows.
+        num_queries = num_heads - int32_t(head_id);
         num_heads = 1; // unused but here for intent
         // remove causal since n_query = 1
         // otherwise, offset would change with head !

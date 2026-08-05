@@ -130,7 +130,13 @@ def _adapt_config_for_tiling(
 
 
 def _outer_config_opt(
-    make_config, size_hints, rnumel, inductor_meta, num_dynamic, register_intensive
+    make_config,
+    size_hints,
+    rnumel,
+    inductor_meta,
+    num_dynamic,
+    register_intensive,
+    is_cooperative,
 ):
     """Optimized outer config for CUDA (non-HIP)."""
     max_x_block, x_block = 256, 64
@@ -138,7 +144,10 @@ def _outer_config_opt(
     x = size_hints["x"]
     num_warps = None
 
-    if x <= 1024:
+    if is_cooperative:
+        x_block = x
+        outer_r_block = min(rnumel, 512)
+    elif x <= 1024:
         x_block = max(min(x // 128, 8), 2)
         outer_r_block = min(rnumel, 64)
     elif x // 4096 <= 8:
@@ -202,6 +211,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
             "max_autotune_pointwise"
         )
+        is_cooperative = triton_meta.get("launch_cooperative_grid", False)
 
         register_intensive = False
         loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
@@ -288,6 +298,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             inductor_meta,
             num_dynamic,
             register_intensive,
+            is_cooperative,
         )
 
         configs: list[Config] = []
@@ -483,6 +494,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         inductor_meta,
         num_dynamic,
         register_intensive,
+        is_cooperative: bool,
     ):
         """Outer config. CUDA uses optimized heuristic."""
         return _outer_config_opt(
@@ -492,6 +504,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             inductor_meta,
             num_dynamic,
             register_intensive,
+            is_cooperative,
         )
 
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
@@ -582,8 +595,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             # If XBLOCK > 1, increase the number of splits to get closer to the target value.
             xblock: int = config.kwargs["XBLOCK"]  # pyrefly: ignore[missing-attribute]
             xsplit = (real_xnumel + xblock - 1) // xblock
-            config.kwargs["RSPLIT"] = get_valid_rsplit(  # pyrefly: ignore[missing-attribute]
-                target // xsplit
+            config.kwargs["RSPLIT"] = (
+                get_valid_rsplit(  # pyrefly: ignore[missing-attribute]
+                    target // xsplit
+                )
             )
 
         return configs
@@ -697,6 +712,7 @@ class ROCmReductionHeuristic(ReductionHeuristic):
         inductor_meta,
         num_dynamic,
         register_intensive,
+        is_cooperative: bool,
     ):
         # HIP uses simple outer config (no outer_config_opt)
         return make_config(64, 8, register_intensive=register_intensive)
