@@ -3448,9 +3448,9 @@ class TestInvokeSubgraphCompileDevice(TestCase):
         from torch.nn import functional as F
 
         weight = torch.ones(
-            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
+            1000, device=GPU_TYPE, dtype=torch.float32, requires_grad=True
         )
-        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
+        ones = torch.ones(1000, device=GPU_TYPE, dtype=torch.float32)
 
         @nested_compile_region
         def fn(x, train):
