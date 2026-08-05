@@ -1,8 +1,11 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <c10/core/Event.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 
 #include <fmt/format.h>
+#include <chrono>
+#include <future>
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
@@ -73,6 +76,57 @@ RegisterHandler frTracehandler(
       auto trace = ::c10d::dump_fr_trace_json(true, true);
       res.setContent(std::move(trace), "application/json");
       res.setStatus(200);
+    });
+
+RegisterHandler frDumpFileHandler(
+    "fr_dump_file",
+    [](const Request&, Response& res) {
+      int rank = ::c10d::FlightRecorder<c10::Event>::get()->getRank();
+      // Nothing has told the recorder which rank this process is, so we would
+      // write to <prefix>-1 and clobber every other rank's guess.
+      if (rank < 0) {
+        res.setStatus(503);
+        res.setContent(
+            "Flight Recorder rank is unset; no process group has registered with it yet",
+            "text/plain");
+        return;
+      }
+
+      // Single-flight guard: a polling health check must not spawn one worker
+      // per request, all writing the same file. The previous future's state is
+      // the signal - once wait_for(0) reports ready the worker has exited, so
+      // reassigning cannot block on a join; otherwise a dump is still running
+      // and we coalesce into it.
+      static std::mutex dumpFutureMutex;
+      static std::future<void> dumpFuture;
+
+      {
+        std::lock_guard<std::mutex> lock(dumpFutureMutex);
+        if (dumpFuture.valid() &&
+            dumpFuture.wait_for(std::chrono::seconds(0)) !=
+                std::future_status::ready) {
+          res.setStatus(200);
+          res.setContent(
+              fmt::format(
+                  "Flight Recorder dump already in progress for rank {}", rank),
+              "text/plain");
+          return;
+        }
+        // std::launch::async so the future's destructor joins the worker
+        // rather than leaking a detached thread.
+        dumpFuture = std::async(std::launch::async, [rank]() {
+          ::c10d::dump_fr_trace_file(
+              rank,
+              /*includeCollectives=*/true,
+              /*includeStackTraces=*/false,
+              /*onlyActive=*/false);
+        });
+      }
+
+      res.setStatus(200);
+      res.setContent(
+          fmt::format("Flight Recorder dump initiated for rank {}", rank),
+          "text/plain");
     });
 
 RegisterHandler waitCounterHandler{

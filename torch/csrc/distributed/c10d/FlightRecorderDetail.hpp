@@ -10,6 +10,13 @@ namespace c10d {
 template <typename EventType>
 float getDurationFromEvent(EventType& start, EventType& end);
 
+// CPU wall clock elapsed since an entry was created. This is an upper bound on
+// the collective's runtime, not a device-measured kernel duration: it also
+// covers enqueue, dispatch and retirement latency on the host.
+inline float wallClockDurationMs(c10::time_t time_created) {
+  return static_cast<float>(c10::getTime() - time_created) / 1e6f;
+}
+
 // Returns the traceback of current entry, in string form.
 // Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
 // the GIL. If you don't want to block the current thread or take the risk of a
@@ -220,11 +227,14 @@ std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
         entries_.begin() + static_cast<std::ptrdiff_t>(next_),
         std::back_inserter(result),
         filter);
-  }
-  // query any remaining events
-  for (auto& r : result) {
-    update_state(r);
-    r.start_ = r.end_ = nullptr;
+    // query any remaining events. The copies borrow the same event pointers
+    // as the entries, so this must stay under mutex_: retire_id() clears
+    // those pointers before their owner frees the events, and it also holds
+    // mutex_.
+    for (auto& r : result) {
+      update_state(r);
+      r.start_ = r.end_ = nullptr;
+    }
   }
   return result;
 }
@@ -269,7 +279,8 @@ template <typename EventType>
 void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     std::optional<size_t> reset_epoch,
-    bool compute_duration) {
+    bool compute_duration,
+    bool wall_clock_fallback) {
   if (!enabled_ || !id || !reset_epoch) {
     return;
   }
@@ -290,6 +301,9 @@ void FlightRecorder<EventType>::retire_id(
           entry->start_ && entry->end_;
       startEvent = entry->start_;
       endEvent = entry->end_;
+      if (!can_compute_duration && wall_clock_fallback) {
+        entry->duration_ = wallClockDurationMs(entry->time_created_);
+      }
     }
     entry->retired_ = true;
     entry->start_ = entry->end_ = nullptr;
@@ -300,7 +314,12 @@ void FlightRecorder<EventType>::retire_id(
     // cudaEventDuration() can hang, and we need to acquire the lock before we
     // can dump(), which we never want to block.
     guard.unlock();
-    duration = getDurationFromEvent<EventType>(*startEvent, *endEvent);
+    try {
+      duration = getDurationFromEvent<EventType>(*startEvent, *endEvent);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to compute duration for id " << *id << ": "
+                 << e.what();
+    }
     guard.lock();
 
     // Refresh the entry pointer, see if the entry has been overwritten
@@ -312,6 +331,8 @@ void FlightRecorder<EventType>::retire_id(
     }
     if (duration.has_value()) {
       entry->duration_ = duration;
+    } else if (wall_clock_fallback) {
+      entry->duration_ = wallClockDurationMs(entry->time_created_);
     }
   }
 }

@@ -4,7 +4,6 @@
 import builtins
 import collections.abc
 import contextlib
-import copy
 import ctypes
 import hashlib
 import io
@@ -50,6 +49,7 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     BroadcastOptions,
     DebugLevel,
+    FlightRecorderHook,
     GatherOptions,
     get_debug_level,
     NanCheckHook,
@@ -209,8 +209,10 @@ try:
     # pyrefly: ignore [missing-import]
     from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
+    # Aliased: the unqualified name is the c10d hook imported above, which is
+    # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
-    from torchcomms.hooks import FlightRecorderHook
+    from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
 
     _TORCHCOMM_AVAILABLE = True
 except ImportError:
@@ -1221,6 +1223,7 @@ class _World:
     def __init__(self) -> None:
         self._default_pg = None
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
+        self._pg_flight_recorder_hooks: dict[ProcessGroup, FlightRecorderHook] = {}
         self._comms: list[_TorchComm] = []
 
     @property
@@ -1311,6 +1314,17 @@ class _World:
     @property
     def pg_coalesce_state(self) -> dict[ProcessGroup, list[_CollOp]]:
         return self._pg_coalesce_state
+
+    @property
+    def pg_flight_recorder_hooks(self) -> dict[ProcessGroup, FlightRecorderHook]:
+        """
+        Owning handles for the FlightRecorder hooks attached at group creation.
+
+        The hook's registered callbacks only hold a weak reference to it, so
+        dropping the handle detaches the hook; it has to live as long as the
+        group does.
+        """
+        return self._pg_flight_recorder_hooks
 
     @property
     def comms(self) -> list[_TorchComm]:
@@ -2636,6 +2650,60 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     return split_from
 
 
+# Backends that feed a FlightRecorder without any help: ProcessGroupGloo
+# unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
+# integrations. "fake" and "undefined" never communicate, so recording them is
+# pure noise. Everything else -- nccl2, mpi, ucc, out-of-tree plugins -- is
+# invisible to the flight recorder unless a hook is attached.
+_FR_SELF_RECORDING_BACKENDS = frozenset(
+    {Backend.GLOO, Backend.NCCL, Backend.XCCL, Backend.FAKE, Backend.UNDEFINED}
+)
+
+
+def _maybe_attach_flight_recorder(
+    pg: ProcessGroup, backend_config: BackendConfig
+) -> None:
+    # Same variables and precedence as FlightRecorder's own constructor in
+    # FlightRecorder.hpp: first name that is set wins, 2000 if neither is, and
+    # 0 turns the recorder off entirely.
+    buffer_size = 2000
+    for var in ("TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"):
+        value = os.environ.get(var)
+        if value:
+            buffer_size = int(value)
+            break
+    if buffer_size <= 0:
+        return
+
+    # A hook is attached per ProcessGroup, but backends are per device, so a
+    # group that mixes a self-recording backend with one that needs the hook
+    # (e.g. "cpu:gloo,cuda:nccl2") cannot have it both ways. Skip the whole
+    # group: attaching would make ProcessGroupGloo's native entries and the
+    # hook's entries land in the same FlightRecorder<c10::Event> under the same
+    # (group_name, group_desc) key, i.e. two entries per gloo collective, and a
+    # trace that contradicts itself is worse than one that is missing the
+    # nccl2 half. Users who need the nccl2 half of a mixed group can still
+    # attach FlightRecorderHook explicitly.
+    if any(
+        backend_str in _FR_SELF_RECORDING_BACKENDS
+        for backend_str in backend_config.get_device_backend_map().values()
+    ):
+        return
+
+    # A backend creator that returns a ProcessGroup subclass replaces the group
+    # wholesale and never has a backend registered on it, so ProcessGroup::
+    # getGroupName() -- the key the recorder files entries under -- throws.
+    # Such a group cannot be recorded without changes on the C++ side.
+    if not pg._device_types:
+        return
+
+    # Unlike NanCheckHook, the group does not own this hook: its pre/post
+    # callbacks capture only a weak_ptr, so the hook detaches the moment the
+    # handle returned by attach() is dropped. Park it with the rest of the
+    # group's state, which destroy_process_group tears down.
+    _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg)
+
+
 def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
@@ -2823,7 +2891,7 @@ def _new_process_group_helper(
                 "TORCH_FR_BUFFER_SIZE",
                 os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
             )
-            recorder = FlightRecorderHook(max_entries=int(buffer_size))
+            recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
             recorder.register_with_comm(comm)
             # Keep a reference so the comm outlives this function scope.
             _world.comms.append(comm)
@@ -2934,6 +3002,12 @@ def _new_process_group_helper(
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
 
+    # Backend-agnostic FlightRecorder recording, for backends with no native
+    # integration. Attached here (rather than lazily) so a group is recorded
+    # from its very first collective, and after _set_group_name/_set_group_desc
+    # because the hook keys its entries on that pair.
+    _maybe_attach_flight_recorder(pg, backend_config)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
@@ -3020,6 +3094,7 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.pg_flight_recorder_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3062,6 +3137,7 @@ def destroy_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3139,6 +3215,7 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.pg_flight_recorder_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3163,6 +3240,7 @@ def _abort_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -6660,13 +6738,38 @@ def split_group(
     # loop honors this filter so unwanted backends are never split.
     device_types_filter: list[torch.device] | None = None
     if backend is not None:
+        # The parent's per-device backends are what BackendConfig expanded its
+        # backend string to when the group was built (see
+        # _new_process_group_helper), restricted to what actually got
+        # registered. Re-deriving them from Backend.default_device_backend_map
+        # answers a different question -- "which devices default to this
+        # backend" -- and gets a bare parent string wrong: a "gloo" parent runs
+        # gloo on cuda too, and "fake" is no device's default at all.
         parent_devices = {d.type for d in parent_pg._device_types}
-        parent_device_backends = _parse_backend_string(
-            parent_backend_str, available_devices=parent_devices
-        )
-        requested_device_backends = _parse_backend_string(
-            str(backend), available_devices=parent_devices
-        )
+        parent_device_backends = {
+            device_type: str(be)
+            for device_type, be in backend_config.get_device_backend_map().items()
+            if device_type in parent_devices
+        }
+        requested_backend_str = str(backend).lower()
+        if ":" in requested_backend_str:
+            requested_device_backends = _parse_backend_string(
+                requested_backend_str, available_devices=parent_devices
+            )
+        else:
+            # A bare backend name selects every parent device running it.
+            Backend._ensure_backend_registered(requested_backend_str)
+            requested_device_backends = {
+                device_type: be
+                for device_type, be in parent_device_backends.items()
+                if be == requested_backend_str
+            }
+            if not requested_device_backends:
+                raise ValueError(
+                    f"Requested backend '{requested_backend_str}' is not present "
+                    f"in the parent process group (parent backends: "
+                    f"{parent_device_backends})"
+                )
         for device_type, requested_be in requested_device_backends.items():
             if device_type not in parent_device_backends:
                 raise ValueError(
@@ -6687,11 +6790,12 @@ def split_group(
         pg_backend = Backend(str(backend))
         backend_config = BackendConfig(pg_backend)
 
-    if pg_options is None and not _use_torchcomms_enabled():
-        # default pg_options same as the parent process group
-        # A deep copy is needed because if the option will be modified inside split
-        # and if we split parent pg multiple times, we will run into device out of bound error.
-        pg_options = copy.deepcopy(parent_backend.options)
+    # pg_options is left as-is when the caller did not pass any: ProcessGroup::
+    # splitGroup gives each device's backend a copy of *that backend's* options,
+    # which is what the child needs. Substituting the default (accelerator)
+    # backend's options here would hand e.g. ProcessGroupNCCL::Options to the
+    # gloo leg of a "cpu:gloo,cuda:nccl" group, which rejects them and silently
+    # falls back to defaults, dropping the caller's timeout and group_name.
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
@@ -6736,22 +6840,26 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
 
-    if torch.accelerator.is_available():
-        split_backend_class = split_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        split_backend_class = split_pg._get_backend(torch.device("cpu"))
+    # `backend` may have filtered the accelerator's leg out of the child, so
+    # look the child's backend up on a device the child actually has.
+    accelerator = torch.accelerator.current_accelerator()
+    split_devices = {d.type for d in split_pg._device_types}
+    if accelerator is not None and accelerator.type in split_devices:
+        split_backend_device = accelerator
+    elif "cpu" in split_devices:
+        split_backend_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    split_backend_class = split_pg._get_backend(split_backend_device)
 
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
+
+    _maybe_attach_flight_recorder(split_pg, backend_config)
 
     # update global state
     _register_pg_in_world(
@@ -7807,6 +7915,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
+        _world.pg_flight_recorder_hooks.pop(pg, None)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups
