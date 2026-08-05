@@ -866,6 +866,16 @@ inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
       // persisted at compile-time tuning.
       result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
       if (result == at::cuda::tunable::ResultEntry::Null()) {
+        // Total miss: record the untuned shape before short-circuiting to the
+        // non-tunable path, preserving the RECORD_UNTUNED collection that the
+        // TunableOp operator() would otherwise perform (we never reach it).
+        if (tuning_ctx->IsRecordUntunedEnabled()) {
+          mgr.RecordUntuned(
+              tuning_ctx->GetUntunedFile(),
+              op_sig,
+              concrete_sig,
+              params.BLASSignature());
+        }
         return false;
       }
     }
@@ -1439,6 +1449,16 @@ inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
       // persisted at compile-time tuning.
       result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
       if (result == at::cuda::tunable::ResultEntry::Null()) {
+        // Total miss: record the untuned shape before short-circuiting to the
+        // non-tunable path, preserving the RECORD_UNTUNED collection that the
+        // TunableOp operator() would otherwise perform (we never reach it).
+        if (tuning_ctx->IsRecordUntunedEnabled()) {
+          mgr.RecordUntuned(
+              tuning_ctx->GetUntunedFile(),
+              op_sig,
+              concrete_sig,
+              params.BLASSignature());
+        }
         return false;
       }
     }

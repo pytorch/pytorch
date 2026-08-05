@@ -384,6 +384,16 @@ _tunable_scaled_gemm_rocm(
           && !tuning_ctx->IsTuningEnabled()) {
         result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
         if (result == at::cuda::tunable::ResultEntry::Null()) {
+          // Total miss: record the untuned shape before short-circuiting to the
+          // non-tunable path, preserving the RECORD_UNTUNED collection that the
+          // TunableOp operator() would otherwise perform (we never reach it).
+          if (tuning_ctx->IsRecordUntunedEnabled()) {
+            mgr.RecordUntuned(
+                tuning_ctx->GetUntunedFile(),
+                op_sig,
+                concrete_sig,
+                params.BLASSignature());
+          }
           return false;
         }
       }

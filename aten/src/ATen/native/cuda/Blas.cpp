@@ -326,7 +326,16 @@ bool launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
         // Both concrete and wildcard missed -- skip the TunableOp dispatch
         // entirely so we do not invoke the (potentially crashing) Default
         // kernel. Caller (launchGemmAndBiasCublasLt) re-dispatches via
-        // launchGemmAndBiasNonTunable.
+        // launchGemmAndBiasNonTunable. Record the untuned shape first,
+        // preserving the RECORD_UNTUNED collection that the TunableOp
+        // operator() would otherwise perform (we never reach it).
+        if (tuning_ctx->IsRecordUntunedEnabled()) {
+          mgr.RecordUntuned(
+              tuning_ctx->GetUntunedFile(),
+              op_sig,
+              concrete_sig,
+              params.BLASSignature());
+        }
         return false;
       }
     }
