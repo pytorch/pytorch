@@ -5,10 +5,10 @@ import torch
 from torch.distributions import biject_to, constraints, transform_to
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-HardwareClassification,
-parametrize,
-run_tests,
-TestCase,
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
 )
 
 
