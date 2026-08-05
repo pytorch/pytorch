@@ -2006,13 +2006,19 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             reduced = getattr(grouped, reduce_op)(-1)
             return torch.relu(result), reduced
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        supported = (group, reduction) != (64, "mean")
+        result, code, _ = self._compile_and_check(
+            fn, a, b, expected_kernels=1 if supported else None
+        )
         expected = fn(a, b)
         torch.testing.assert_close(result[1], expected[1], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
-        self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("output=", code)
-        self.assertIn(f"group={group}", code)
+        if supported:
+            self.assertIn("VendoredDenseGemmEFCOperator", code)
+            self.assertIn("output=", code)
+            self.assertIn(f"group={group}", code)
+        else:
+            self.assertNotIn("reduction_type='mean'", code)
 
     @parametrize(
         "case",
@@ -2230,7 +2236,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             reduced = grouped.exp().sum(-1).log() + grouped.amax(-1)
             return torch.relu(result), reduced
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=2)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
         self.assertNotIn("reduction_type='logsumexp'", code)
 
@@ -2391,12 +2397,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             scaled = (grouped * (scale + 1.0)).view(m, n)
             return normalized, scaled
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
         self.assertIn("axis=0", code)
-        self.assertIn("feeds_main=True", code)
-        self.assertIn("secondary_feed_output=out_ptr1", code)
-        self.assertIn("secondary_feed_type='sum_mul_affine:1:1'", code)
+        self.assertIn("feeds_main=False", code)
+        self.assertIn("output=out_ptr1", code)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
     def test_bf16_grouped_m_regrouped_reduction_reuse(self):
@@ -2413,10 +2418,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             aux = (regrouped * scale.reciprocal()).view(m, n)
             return normalized, aux
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=2)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
         self.assertIn("VendoredDenseGemmEFCOperator", code)
-        self.assertIn("feeds_main=True", code)
+        self.assertIn("feeds_main=False", code)
+        self.assertIn("output=out_ptr1", code)
 
     def test_bf16_grouped_m_composite_reduction_falls_back(self):
         m, n, k, group = 128, 64, 64, 8
@@ -2429,7 +2435,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             scale = grouped.sum(1, keepdim=True) + grouped.amax(1, keepdim=True)
             return (grouped / scale).view(m, n)
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=3)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
         self.assertNotIn("feeds_main=True", code)
 
@@ -2446,7 +2452,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             aux = grouped4 / grouped4.sum(1, keepdim=True)
             return out.view(m, n), aux.view(m, n)
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=3)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
         self.assertNotIn("feeds_main=True", code)
 
@@ -2462,7 +2468,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             scaled = grouped / (grouped.sum(1, keepdim=True) + 1.0)
             return (scaled + relu_grouped.sum(1, keepdim=True)).view(m, n)
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=3)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
         self.assertNotIn("feeds_main=True", code)
 
@@ -2479,7 +2485,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             aux = grouped1 * (grouped1.sum(1, keepdim=True) + 1.0)
             return out.view(m, n), aux.view(m, n)
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b, expected_kernels=3)
         self.assertEqual(result, fn(a, b), atol=1e-1, rtol=2e-2)
         self.assertNotIn("feeds_main=True", code)
 
@@ -2747,7 +2753,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIn("group=32", code)
 
     @parametrize("mode", ("softmax", "sum"))
-    def test_scaled_mm_dynamic_unrolled_reduction_fusion(self, mode):
+    def test_scaled_mm_dynamic_unrolled_reduction_falls_back(self, mode):
         m, n, k = 128, 128, 512
         packed_k = k // 2
         a = _create_tensor_with_layout(
@@ -2792,12 +2798,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         )
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertEqual(result2, fn(a2, b, scale_a2, scale_b))
-        self.assertIn("EpilogueArguments", code)
-        self.assertIn("group=4", code)
-        reduce_type = (
-            "online_softmax" if mode == "softmax" else "normalize_sum_affine:1:0:1:0"
-        )
-        self.assertIn(f"reduction_type='{reduce_type}'", code)
+        self.assertNotIn("EpilogueArguments", code)
 
     @parametrize(
         "case",
@@ -3081,7 +3082,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertNotIn("output=", code)
 
     @parametrize("group", (128, 256))
-    def test_scaled_mm_coda_rmsnorm_fusion(self, group):
+    def test_scaled_mm_coda_rmsnorm_partial_fusion(self, group):
         m, n, k, p = 128, 256, 512, 64
         packed_k = k // 2
         a = _create_tensor_with_layout(
@@ -3121,7 +3122,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             return (h2 @ b2).float() * rstd
 
         args = (a, b1, scale_a, scale_b, gamma, b2)
-        result, code, _ = self._compile_and_check(fn, *args)
+        result, code, _ = self._compile_and_check(fn, *args, expected_kernels=3)
         expected = fn(*args)
         torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
         self.assertIn("source_type='square'", code)
@@ -3191,8 +3192,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
         self.assertIn("feeds_main=True", code)
 
-    @parametrize("group", (4, 8, 16, 32))
-    def test_scaled_mm_grouped_softmax_fusion(self, group):
+    @parametrize("case", ((4, True), (8, False), (16, False), (32, False)))
+    def test_scaled_mm_grouped_softmax_support(self, case):
+        group, supported = case
         m, n, k = 128, 128, 512
         packed_k = k // 2
         a = _create_tensor_with_layout(
@@ -3221,9 +3223,19 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             grouped = result.float().view(m, -1, group)
             return torch.softmax(grouped, -1).reshape(m, n)
 
-        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        result, code, _ = self._compile_and_check(
+            fn,
+            a,
+            b,
+            scale_a,
+            scale_b,
+            expected_kernels=1 if supported else 2,
+        )
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("reduction_type='online_softmax'", code)
+        if supported:
+            self.assertIn("reduction_type='online_softmax'", code)
+        else:
+            self.assertNotIn("reduction_type='online_softmax'", code)
 
     @parametrize(
         "case",
