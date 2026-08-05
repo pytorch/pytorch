@@ -3153,6 +3153,62 @@ constant-returning traced call can only reduce (never increase) hard graph
 breaks, and the returned value is identical to eager under single-threaded
 tracing.
 
+## Gates (Cycle 6)
+
+### Cycle6-A: inline bind_args TypeError -> observed exception (operator + wrappers cluster)
+
+Status: IMPLEMENTED (Cycle 6). Classification (a): genuine in-scope Dynamo fix.
+High-value: one root cause clears 89 expected-failure sentinels across 13 test
+files, led by `test_operator-PyOperatorTestCase.*` (relevance 76.5, top of the
+re-ranked CSV) plus the `UserList`/`UserDict`/`functools`/`Counter` clusters.
+
+Root cause: when Dynamo inlines a Python function and the arguments do not match
+the signature, `InliningInstructionTranslator.build_inline_tracer` caught the
+`bind_args` `TypeError` and called `unimplemented(...)` (gb7312, a graph break).
+Eager raises a `TypeError` at the call site, so tests of the form
+`assertRaises(TypeError, fn, *bad_args)` (and any user `try/except TypeError`)
+never saw a `TypeError`: instead the `Unsupported` graph break propagated out of
+the compiled `assertRaises` call and the test errored. This is the fix intended
+by (never-landed) PR #188082.
+
+Fix (`torch/_dynamo/symbolic_convert.py`, ~line 6115): reroute the `bind_args`
+`TypeError` through `raise_observed_exception(TypeError, parent, args=[str(e)])`.
+`bind_args` mirrors CPython argument binding, so the failure is exactly eager's
+`TypeError`; raising it as an observed exception (attributed to the parent frame's
+CALL) lets user code catch it (matching eager). Uncaught at top level under
+`fullgraph=True` it still surfaces as `Unsupported` (generic observed-exception
+behavior); without `fullgraph` it falls back to eager, which raises the real
+`TypeError`.
+
+Regression test: `test/dynamo/test_exceptions.py::ExceptionTests`
+`test_inline_bind_args_failure_caught` / `_uncaught`.
+
+Sentinels removed (89 total; full-suite sweep, all confirmed passing):
+- test_operator PyOperatorTestCase: 37
+- test_userlist UserListTest: 16
+- test_userdict UserDictTest: 10
+- test_collections (Counter/NamedTuple): 6
+- test_functools (Reduce/CmpToKey/Partial, C+Py): 6
+- test_ordered_dict: 4
+- test_contextlib / test_itertools / test_keywordonlyarg: 2 each
+- test_class / test_heapq / test_scope / test_sort: 1 each
+
+Validation commands:
+```bash
+# affected CPython files now pass under Dynamo (representative)
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_operator.py      # OK (skipped=62)
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_userlist.py      # OK (skipped=5)
+# Dynamo regression suites clean
+python test/dynamo/test_exceptions.py             # OK
+python test/dynamo/test_functions.py              # Ran 532 -> OK
+python test/dynamo/test_misc.py                   # Ran 828 -> OK
+```
+
+Next gate: Cycle6-B (re-rank CSV; the top dict-iterator-pickling cluster remains
+out of scope per the pickle triage in Cycle5-H).
+
 ## Proposed Gate Changes Awaiting Human Approval
 
 Use this section only when an implementation subagent believes a gate is too

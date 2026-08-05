@@ -1720,6 +1720,38 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn(x)  # diverges: Dynamo does not raise
 
+    def test_inline_bind_args_failure_caught(self):
+        # An argument-binding failure while inlining a Python function surfaces
+        # as a catchable TypeError (matching eager), not an Unsupported graph
+        # break, so user try/except sees it.
+        def g(a, b):
+            return a + b
+
+        def fn(x):
+            try:
+                g(1)  # missing required argument -> TypeError in eager
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), x + 1)
+
+    def test_inline_bind_args_failure_uncaught(self):
+        # Uncaught, the same TypeError propagates out of the compiled call
+        # (via the eager fallback the observed exception triggers).
+        def g(a, b):
+            return a + b
+
+        def fn(x):
+            g(1, 2, 3)  # too many arguments
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(torch.zeros(3))
+
 
 instantiate_parametrized_tests(ExceptionTests)
 
