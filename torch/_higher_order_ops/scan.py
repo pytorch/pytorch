@@ -99,7 +99,8 @@ def _build_empty_output_for_length_zero(
     def _empty_or_passthrough(l):
         if isinstance(l, torch.Tensor):
             return torch.empty([0] + list(l.shape), dtype=l.dtype, device=l.device)
-        assert l is None, f"Expected leaf to be a Tensor or None, got {type(l)}"
+        if l is not None:
+            raise AssertionError(f"Expected leaf to be a Tensor or None, got {type(l)}")
         return l
 
     return pytree.tree_map(_empty_or_passthrough, sample_y)
@@ -558,8 +559,10 @@ def trace_scan(
             [o.meta["val"] if o is not None else None for o in outputs], len(init)
         )
         for t in fake_outputs:
-            if not isinstance(t, torch.Tensor):
-                assert t is None, f"Expected leaf to be a Tensor or None, got {type(t)}"
+            if not isinstance(t, torch.Tensor) and t is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(t)}"
+                )
         out = (
             *fake_carry,
             *(
@@ -1067,8 +1070,10 @@ def scan_fake_tensor_mode(
             len(init),
         )
         for t in outputs:
-            if not isinstance(t, torch.Tensor):
-                assert t is None, f"Expected leaf to be a Tensor or None, got {type(t)}"
+            if not isinstance(t, torch.Tensor) and t is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(t)}"
+                )
         out = (
             *carry,
             *(
@@ -1251,7 +1256,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = []
+    results: list[torch.Tensor | None] = []
     for leaf_idx, leaf in enumerate(dummy_out_leaves):
         if isinstance(leaf, torch.Tensor):
             if len(result_flat) == 0:
@@ -1264,9 +1269,10 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
                 torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
             )
         else:
-            assert leaf is None, (
-                f"Expected leaf to be a Tensor or None, got {type(leaf)}"
-            )
+            if leaf is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(leaf)}"
+                )
             results.append(leaf)
     return (
         pytree.tree_unflatten(carry, carry_spec),
