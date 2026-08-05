@@ -178,6 +178,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " does not support setting timeout; the new value is ignored");
   }
 
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
+
   // Fault Tolerance / Reconfigure API
   //
   // Backends that support dynamic membership override these.
@@ -654,7 +663,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  std::optional<at::Device> getBoundDeviceId() const {
+  virtual std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -665,7 +674,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(std::optional<at::Device> device) {
+  virtual void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }

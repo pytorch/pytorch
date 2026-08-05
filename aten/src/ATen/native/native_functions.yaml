@@ -7149,9 +7149,15 @@
   tags: needs_exact_strides
 
 - func: _scaled_grouped_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
+  structured_delegate: _scaled_grouped_mm_v2.out
+  variants: function
+  tags: needs_exact_strides
+
+- func: _scaled_grouped_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   variants: function
   dispatch:
-    CUDA: _scaled_grouped_mm_cuda_v2
+    CUDA: _scaled_grouped_mm_cuda_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -14544,6 +14550,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
+  dispatch:
+    SparseCPU, SparseCUDA, SparseMPS: linalg_vector_norm_sparse
   tags: reduction
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)

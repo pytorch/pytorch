@@ -1588,7 +1588,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout2d", ""),
                 xfail("svd_lowrank", ""),
                 xfail("pca_lowrank", ""),
-                xfail("clamp"),
                 # something weird happening with channels_last
                 xfail("bfloat16"),
                 xfail("double"),

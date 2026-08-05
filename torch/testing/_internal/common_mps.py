@@ -95,6 +95,8 @@ if torch.backends.mps.is_available():
             "istft",
             "item",
             "kron",
+            "linalg.cholesky",
+            "linalg.cholesky_ex",
             "linalg.cond",
             "linalg.cross",
             "linalg.diagonal",
