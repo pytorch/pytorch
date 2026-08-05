@@ -1551,6 +1551,53 @@ class TestRangeContains(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), (True, False, True, False, True, True))
 
 
+class TestDequeConstruct(torch._dynamo.test_case.TestCase):
+    """Tests for collections.deque() construction under Dynamo."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    @make_dynamo_test
+    def test_deque_bad_kwarg_raises_typeerror(self):
+        with self.assertRaises(TypeError):
+            collections.deque(unsupported_arg=[])
+
+    @make_dynamo_test
+    def test_deque_too_many_positional_raises_typeerror(self):
+        with self.assertRaises(TypeError):
+            collections.deque([1], [2], [3])
+
+    @make_dynamo_test
+    def test_deque_valid_construction(self):
+        d = collections.deque([1, 2, 3], maxlen=5)
+        self.assertEqual(list(d), [1, 2, 3])
+        self.assertEqual(d.maxlen, 5)
+
+    @make_dynamo_test
+    def test_deque_iterable_by_name_and_position_raises_typeerror(self):
+        # Must be a catchable TypeError, not a leaked StopIteration.
+        with self.assertRaises(TypeError):
+            collections.deque([1], iterable=[2])
+
+    @make_dynamo_test
+    def test_deque_valid_kwargs_over_positional_limit_raises_typeerror(self):
+        # total (positional + keyword) > 2 with only valid kwarg names.
+        with self.assertRaises(TypeError):
+            collections.deque([1], [2], maxlen=3)
+
+    @make_dynamo_test
+    def test_deque_bad_kwarg_over_limit_reports_count(self):
+        # CPython reports the arg-count TypeError (not the bad kwarg) here.
+        with self.assertRaises(TypeError):
+            collections.deque([], maxlen=1, bad=2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
