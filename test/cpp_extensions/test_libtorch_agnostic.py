@@ -2284,8 +2284,6 @@ class TestLibtorchAgnosticMetal(TestCase):
         import libtorch_agn_2_14 as libtorch_agnostic
 
         x = torch.randn(1000, device=device, dtype=torch.float32)
-        # The op clobbers the bound values before dispatch, so x * 3 proves the
-        # shim copied them at call time.
         out = libtorch_agnostic.ops.my_mps_set_arg_bytes_lifetime(x)
         self.assertEqual(out, x * 3.0)
 

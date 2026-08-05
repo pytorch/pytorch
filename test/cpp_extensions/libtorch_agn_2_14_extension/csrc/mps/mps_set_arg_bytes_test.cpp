@@ -107,15 +107,10 @@ void set_arg_bytes_raw_encode(
       torch_mps_set_arg_bytes(func, 2, args->ptr, args->size));
 }
 
-// Feeds (ptr, size) straight into the shim to probe its validation, both the
-// rejects and the inclusive 4096 boundary. STABLE_TORCH_ERROR_CODE_CHECK (not
-// TORCH_ERROR_CODE_CHECK) so the shim's TORCH_CHECK message survives to Python
-// for assertRaisesRegex.
 Tensor my_mps_set_arg_bytes_raw(Tensor input, int64_t size, bool null_ptr) {
   Tensor input_ = torch::stable::contiguous(input);
   AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
 
-  // 4 KB backing so every size up to the setBytes limit reads in bounds.
   static const char blob[4096] = {};
   SetArgBytesRawArgs args{
       input_.get(),
@@ -148,8 +143,6 @@ void scale_negate_clamp_lifetime_encode(
       torch_mps_set_arg_bytes(func, 3, &negate, sizeof(bool)));
   TORCH_ERROR_CODE_CHECK(
       torch_mps_set_arg_bytes(func, 4, bounds, sizeof(bounds)));
-  // The shim copies at call time, so clobbering the sources before dispatch
-  // must not change what the kernel sees.
   scale = -7.0f;
   negate = true;
   bounds[0] = 0.0f;
