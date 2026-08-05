@@ -3617,10 +3617,7 @@ class XPUMMPlusMMXpuTemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use mm_plus_mm_configs
         self.mm_configs = self.mm_plus_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
+        # exhaustive configs not validated for mm_plus_mm yet; match mm_configs
         self.exhaustive_configs = self.mm_plus_mm_configs
 
 
