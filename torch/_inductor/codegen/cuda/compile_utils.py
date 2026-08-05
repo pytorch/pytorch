@@ -142,6 +142,8 @@ def _cuda_arch_with_compile_suffix(arch: str) -> str:
         return "101a"
     if arch == "103":
         return "103a"
+    if arch == "107":
+        return "107a"
     if arch == "110":
         return "110a"
     if arch == "120":

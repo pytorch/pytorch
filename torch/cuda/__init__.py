@@ -11,7 +11,9 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
+import glob
 import importlib
+import importlib.util
 import os
 import platform
 import threading
@@ -90,12 +92,37 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    # TheRock ROCm wheels install the amdsmi python package in
+                    # site-packages/amdsmi and ship the native library under the
+                    # _rocm_sdk_core wheel (site-packages/_rocm_sdk_core/lib)
+                    # rather than on the loader path or under $ROCM_HOME. The
+                    # file there is a versioned soname (e.g. libamd_smi.so.26),
+                    # so amdsmi's bare CDLL("libamd_smi.so") can't find it. Locate
+                    # the package and append the concrete versioned files as a
+                    # last-resort fallback so the hook can redirect to them.
+                    if platform.system() == "Linux":
+                        paths = paths + self._rocm_sdk_core_amdsmi_paths()
                     self.paths: list[str] = paths
+
+                @staticmethod
+                def _rocm_sdk_core_amdsmi_paths() -> list[str]:
+                    try:
+                        spec = importlib.util.find_spec("_rocm_sdk_core")
+                    except (ImportError, ValueError):
+                        return []
+                    if spec is None or not spec.submodule_search_locations:
+                        return []
+                    found: list[str] = []
+                    for location in spec.submodule_search_locations:
+                        found += glob.glob(
+                            os.path.join(location, "lib", "libamd_smi.so*")
+                        )
+                    return sorted(found)
 
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name == "libamd_smi.so":
+                    if name and Path(name).name.startswith("libamd_smi.so"):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -116,6 +143,17 @@ try:
             except ModuleNotFoundError as err:
                 _AMDSMI_ERR = err
                 raise
+            except (KeyError, OSError) as err:
+                # The amdsmi python package is installed but its native library
+                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
+                # ROCm wheels lay amdsmi out so that its own find_smi_library()
+                # misses the versioned libamd_smi.so.* and raises KeyError. Treat
+                # this like a missing optional dependency (degrade to
+                # _HAS_AMDSMI=False) instead of aborting `import torch`.
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -1326,6 +1364,62 @@ def current_solver_handle():
     return torch._C._cuda_getCurrentSolverHandle()
 
 
+_ClearCublasWorkspaces = None
+
+
+def _clear_cublas_workspaces() -> None:
+    r"""Clear cuBLAS workspaces on this thread and current CUDA device's autograd worker."""
+    if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
+        return
+
+    torch._C._cuda_clearCublasWorkspaces()
+    if not is_initialized():
+        return
+
+    global _ClearCublasWorkspaces
+    if _ClearCublasWorkspaces is None:
+        from torch.autograd import Function
+
+        class ClearCublasWorkspaces(Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                return dummy
+
+            @staticmethod
+            def backward(ctx: Any, *grad_outputs: Any) -> Any:
+                torch._C._cuda_clearCublasWorkspaces()
+                return None
+
+        _ClearCublasWorkspaces = ClearCublasWorkspaces
+
+    # This synthetic backward is internal cleanup; keep it out of compiled
+    # autograd to avoid tracing it while still routing through the CUDA worker.
+    compiled_autograd = getattr(
+        getattr(torch._C, "_dynamo", None), "compiled_autograd", None
+    )
+    set_autograd_compiler = (
+        getattr(compiled_autograd, "set_autograd_compiler", None)
+        if compiled_autograd is not None
+        else None
+    )
+    prior_compiler = prior_dynamic = None
+    if set_autograd_compiler is not None:
+        prior_compiler, prior_dynamic = set_autograd_compiler(None, False)
+
+    try:
+        with (
+            torch.autograd.set_multithreading_enabled(True),
+            torch.inference_mode(False),
+            torch.enable_grad(),
+        ):
+            dummy = torch.empty(0, device="cuda", requires_grad=True)
+            output = _ClearCublasWorkspaces.apply(dummy)
+            output.backward(output.detach())
+    finally:
+        if set_autograd_compiler is not None:
+            set_autograd_compiler(prior_compiler, prior_dynamic)
+
+
 def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
@@ -2000,7 +2094,7 @@ def _compile_kernel(
         return getattr(result, mangled_name)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse, tunable
+from . import amp, graph_annotations, jiterator, nvtx, profiler, sparse, tunable
 
 
 _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
@@ -2084,6 +2178,7 @@ __all__ = [
     "get_stream_from_external",
     "get_sync_debug_mode",
     "graph",
+    "graph_annotations",
     "graph_pool_handle",
     "graphs",
     "has_half",

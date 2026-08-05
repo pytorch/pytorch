@@ -29,7 +29,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   # Resolve the stable CUDA version from generate_binary_build_matrix.py
   # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
@@ -65,6 +65,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
+      build-additional-packages: "torchao torchcomms"
       # torchtitan_h100_integration disabled pending runner availability
       test-matrix: |
         { include: [
