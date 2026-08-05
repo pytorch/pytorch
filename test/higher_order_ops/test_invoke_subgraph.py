@@ -16,6 +16,7 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -24,13 +25,20 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._subclasses.functional_tensor import (
+    FunctionalTensorMode,
+    PythonFunctionalizeAPI,
+)
+from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -46,6 +54,19 @@ nested_compile_region = torch.compiler.nested_compile_region
 
 if HAS_GPU:
     import triton
+
+
+def _aot_eager_with_runtime_epilogue():
+    """Create a recording AOT eager backend with a runtime mutation epilogue."""
+    fw_graphs = []
+
+    def fw_compiler(gm, _):
+        fw_graphs.append(gm)
+        return gm.forward
+
+    return aot_autograd(
+        fw_compiler=fw_compiler, keep_inference_input_mutations=False
+    ), fw_graphs
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -1468,6 +1489,210 @@ class GraphModule(torch.nn.Module):
             "Inplace update to inference tensor outside InferenceMode is not allowed",
         ):
             opt_fn(x, y)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_alias_annotated_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale_into(Tensor x, Tensor! out, float scale) -> ()")
+
+            def scale_into(x, out, scale):
+                out.copy_(x * scale)
+
+            lib.impl("scale_into", scale_into, "CompositeExplicitAutograd")
+
+            @nested_compile_region
+            def gn(x, y):
+                out = torch.empty_like(y)
+                torch.ops.mylib.scale_into(y, out, 2.0)
+                x.add_(out)
+                return torch.mul(x, y)
+
+            def fn(x, y):
+                return gn(x, y)
+
+            # x is mutated in place, so it cannot require grad (autograd leaf error).
+            x = torch.randn(8, requires_grad=False)
+            x_clone = x.clone()
+            y = torch.randn(8, requires_grad=False)
+
+            backend = AotEagerAndRecordGraphs()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            self.assertEqual(opt_fn(x, y), fn(x_clone, y))
+            self.assertEqual(x_clone, x)
+
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_0, identifier = 'auto_functionalized_subgraph_0', arg0 = arg1_1, _arg1_base_index = 0, _all_bases = [arg0_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = arg1_1 = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return (getitem,)
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            empty_like: "f32[8]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False)
+            auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.scale_into.default, x = arg0_1, scale = 2.0, _out_base_index = 0, _all_bases = [empty_like]);  empty_like = None
+            getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  getitem_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(add, arg0_1);  arg0_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mul,)""",
+                ignore_empty_lines=True,
+            )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_alias_annotated_custom_op_runtime_epilogue(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale_into(Tensor x, Tensor! out, float scale) -> ()")
+
+            def scale_into(x, out, scale):
+                out.copy_(x * scale)
+
+            lib.impl("scale_into", scale_into, "CompositeExplicitAutograd")
+
+            @nested_compile_region
+            def gn(x, y, z):
+                out = torch.empty_like(y)
+                torch.ops.mylib.scale_into(y, out, 2.0)
+                x.add_(out)
+                z.sub_(y)
+                return torch.mul(x, z)
+
+            def fn(x, y, z):
+                return gn(x, y, z)
+
+            backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(8, requires_grad=False)
+            x_clone = x.clone()
+            y = torch.randn(8, requires_grad=False)
+            y_clone = y.clone()
+            z = torch.randn(8, requires_grad=False)
+            z_clone = z.clone()
+
+            self.assertEqual(opt_fn(x, y, z), fn(x_clone, y_clone, z_clone))
+            self.assertEqual(x_clone, x)
+            self.assertEqual(y_clone, y)
+            self.assertEqual(z_clone, z)
+            self.assertExpectedInline(
+                normalize_gm(fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'functionalized_subgraph_0', arg1_1, arg0_1, arg2_1);  repeated_subgraph0 = arg1_1 = arg0_1 = arg2_1 = None
+        getitem: "f32[8]" = invoke_subgraph[0]
+        getitem_1: "f32[8]" = invoke_subgraph[1]
+        getitem_2: "f32[8]" = invoke_subgraph[2];  invoke_subgraph = None
+        return (getitem_1, getitem_2, getitem)
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
+            empty_like: "f32[8]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False)
+            auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.scale_into.default, x = arg0_1, scale = 2.0, _out_base_index = 0, _all_bases = [empty_like]);  empty_like = None
+            getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
+            sub: "f32[8]" = torch.ops.aten.sub.Tensor(arg2_1, arg0_1);  arg2_1 = arg0_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(add, sub)
+            return (mul, add, sub)""",
+                ignore_empty_lines=True,
+            )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._functorch.config.patch(unlift_effect_tokens=True)
+    def test_input_mutation_with_effect_runtime_epilogue(self):
+        @nested_compile_region
+        def gn(x, y):
+            torch.ops.aten._print.default("effect")
+            x.add_(y)
+            return x * y
+
+        def fn(x, y):
+            return gn(x, y)
+
+        backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+        x = torch.randn(8)
+        x_clone = x.clone()
+        y = torch.randn(8)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+        expected = fn(x_clone, y)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, x_clone)
+        graph = normalize_gm(fw_graphs[0].print_readable(print_output=False))
+        self.assertIn("'functionalized_subgraph_0'", graph)
+        self.assertIn("torch.ops.higher_order.with_effects", graph)
+        self.assertNotIn("torch.ops.aten.copy_.default", graph)
+        self.assertNotIn(
+            "auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph", graph
+        )
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_repeated_input_mutation_view_runtime_epilogue(self):
+        @nested_compile_region
+        def gn(x):
+            x.add_(2)
+            return x.sin()
+
+        def fn(base):
+            return gn(base[1:5]) + gn(base[1:5])
+
+        backend, fw_graphs = _aot_eager_with_runtime_epilogue()
+        base = torch.randn(8)
+        base_clone = base.clone()
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(base)
+        expected = fn(base_clone)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(base, base_clone)
+        graph = normalize_gm(fw_graphs[0].print_readable(print_output=False))
+        invoke_subgraph_nodes = fw_graphs[0].graph.find_nodes(
+            op="call_function", target=torch._higher_order_ops.invoke_subgraph
+        )
+        self.assertEqual(len(invoke_subgraph_nodes), 2)
+        self.assertEqual(
+            invoke_subgraph_nodes[0].args[0].target,
+            invoke_subgraph_nodes[1].args[0].target,
+        )
+        self.assertEqual(graph.count("'functionalized_subgraph_0'"), 2)
+        self.assertIn("torch.ops.aten.slice_scatter.default", graph)
+        self.assertNotIn("torch.ops.aten.copy_.default", graph)
+        self.assertNotIn(
+            "auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph", graph
+        )
+
+    def test_input_mutation_boxed_subgraph(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y):
+                x.add_(y)
+                return (torch.mul(x, y),)
+
+        gm = torch.fx.symbolic_trace(Mod())
+        gm.graph.set_codegen(_BoxedCodeGen())
+        gm.recompile()
+        self.assertTrue(gm._boxed_call)
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        x_clone = x.clone()
+        ref = Mod()(x_clone, y)
+
+        self.assertEqual(FunctionalCallableWithEpilogue(gm)([x, y]), ref)
+        self.assertEqual(x_clone, x)
+
+        x = torch.randn(8, requires_grad=False)
+        x_clone = x.clone()
+        ctx = PythonFunctionalizeAPI(FunctionalTensorMode(_keep_input_mutations=False))
+        functionalized = FunctionalizeCtxWrapper(ctx, gm, mutated_input_indices=(0,))
+        out, updated_x = functionalized([x, y])
+        self.assertEqual(x, x_clone)
+        self.assertEqual(updated_x, x_clone + y)
+        self.assertEqual(out, updated_x * y)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
@@ -3715,6 +3940,109 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_subgraph_reuse_symint_arg(self):
+        """A symint arg must match on its expression, not on object identity.
+
+        Each tensor holds its own SymInt objects, so the same symbol threaded
+        through successive regions arrives as a different object every call.
+        """
+
+        @nested_compile_region
+        def gn(x, n):
+            return x * n
+
+        def fn(x):
+            a = gn(x, x.shape[0])
+            b = gn(a, a.shape[0])
+            return b
+
+        x = torch.randn(8, 4)
+        ref = fn(x)
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            res = compiled(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+        x2 = torch.randn(5, 4)
+        self.assertEqual(fn(x2), compiled(x2))
+
+    def test_subgraph_reuse_transposed_buffer_dynamic(self):
+        """Reuse must work when a region reads a transposed view of a buffer.
+
+        `w.T` is desugared into an aten op traced into the subgraph, so the
+        region only lifts `w` itself. With dynamic shapes the region also lifts
+        the symint for the (specialized) feature dim.
+        """
+
+        class Layer(torch.nn.Module):
+            def __init__(self, d):
+                super().__init__()
+                self.register_buffer("w", torch.randn(d, d))
+
+            @nested_compile_region
+            def forward(self, x):
+                return torch.matmul(x, self.w.T)
+
+        class Model(torch.nn.Module):
+            def __init__(self, d, n):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer(d) for _ in range(n)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        model = Model(8, 3)
+        x = torch.randn(4, 8)
+        ref = model(x)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(model, backend=backend, fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            res = compiled(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+        # A different batch size must not recompile.
+        x2 = torch.randn(9, 8)
+        self.assertEqual(model(x2), compiled(x2))
+
+        self.assertEqual(len(backend.graphs), 1)
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s77: "Sym(s77)", s27: "Sym(8)", L_x_: "f32[s77, 8]", L_self_modules_layers_modules_0_buffers_w_: "f32[8, 8]", L_self_modules_layers_modules_1_buffers_w_: "f32[8, 8]", L_self_modules_layers_modules_2_buffers_w_: "f32[8, 8]"):
+        l_x_ = L_x_
+        l_self_modules_layers_modules_0_buffers_w_ = L_self_modules_layers_modules_0_buffers_w_
+        l_self_modules_layers_modules_1_buffers_w_ = L_self_modules_layers_modules_1_buffers_w_
+        l_self_modules_layers_modules_2_buffers_w_ = L_self_modules_layers_modules_2_buffers_w_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_self_modules_layers_modules_0_buffers_w_, s77, s27, l_x_);  subgraph_0 = l_self_modules_layers_modules_0_buffers_w_ = l_x_ = None
+        x: "f32[s77, 8]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_self_modules_layers_modules_1_buffers_w_, s77, s27, x);  subgraph_1 = l_self_modules_layers_modules_1_buffers_w_ = x = None
+        x_1: "f32[s77, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        subgraph_2 = self.subgraph_0
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', l_self_modules_layers_modules_2_buffers_w_, s77, s27, x_1);  subgraph_2 = l_self_modules_layers_modules_2_buffers_w_ = s77 = s27 = x_1 = None
+        x_2: "f32[s77, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        return (x_2,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_self_modules_layers_modules_0_buffers_w_: "f32[8, 8]", s77: "Sym(s77)", s27: "Sym(8)", l_x_: "f32[s77, 8]"):
+            numpy_t: "f32[8, 8]" = torch.ops.aten.numpy_T(l_self_modules_layers_modules_0_buffers_w_);  l_self_modules_layers_modules_0_buffers_w_ = None
+            matmul: "f32[s77, 8]" = torch.matmul(l_x_, numpy_t);  l_x_ = numpy_t = None
+            return (matmul,)
+""",
+            )
+
     def test_subgraph_reuse_different_list_lengths(self):
         """Reuse must be skipped when list args have different lengths.
 
@@ -3749,6 +4077,411 @@ class GraphModule(torch.nn.Module):
         for r, e in zip(res, ref):
             for ri, ei in zip(r, e):
                 self.assertEqual(ri, ei)
+
+    def _cleanup_pytree_registration(self, cls):
+        # _deregister_pytree_node raises KeyError for classes registered
+        # without serialized_type_name (they share a sentinel key in
+        # SERIALIZED_TYPE_TO_PYTHON_TYPE), so pop the registries directly
+        # instead, as in test_activation_checkpointing.py.
+        pytree.SUPPORTED_NODES.pop(cls, None)
+        pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+        pytree.CONSTANT_NODES.discard(cls)
+
+    def test_subgraph_reuse_dataclass_pytree_arg(self):
+        """Reuse must work for args that are registered pytree dataclasses.
+
+        Fingerprinting such args goes through the pytree-flatten path of
+        build_input_fingerprint (rather than the flat-leaf fast path), which
+        must classify the tensor field inside the dataclass as a reusable
+        leaf so that repeated calls with structurally-identical dataclass
+        instances hit the cache instead of retracing every time.
+
+        Note: this also passes on the pre-fix implementation (reuse already
+        worked, just slowly by re-tracing pytree.tree_flatten's dispatch on
+        every call) -- this guards the fingerprinting correctness, not the
+        compile-time regression fixed alongside it (see
+        test_subgraph_reuse_pytree_avoids_retracing_tree_flatten).
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # Same treespec/leaf types on every call -> single trace, rest reused.
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_avoids_retracing_tree_flatten(self):
+        """Regression test for the #191809 compile-time blowup.
+
+        build_input_fingerprint used to call
+        _make_inlined(tx, pytree.tree_flatten) on every single reuse-lookup
+        (i.e. once per region invocation, not once per compile), making
+        Dynamo bytecode-trace tree_flatten's own recursive dispatch from
+        scratch every time. Only the leaf-level flatten_fn of each container
+        node should be inlined/traced now, so _make_inlined must never be
+        called with pytree.tree_flatten itself for a plain dataclass arg.
+        """
+        import dataclasses
+
+        from torch._dynamo.variables import invoke_subgraph as invoke_subgraph_mod
+
+        def flatten_fn(value):
+            return ([value.hidden], None)
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput, flatten_fn, lambda children, _: RegionInput(*children)
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(8):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+
+        orig_make_inlined = invoke_subgraph_mod._make_inlined
+        inlined_fns = []
+
+        def _tracking_make_inlined(tx, f):
+            inlined_fns.append(f)
+            return orig_make_inlined(tx, f)
+
+        with (
+            mock.patch.object(
+                invoke_subgraph_mod, "_make_inlined", _tracking_make_inlined
+            ),
+            self._count_speculate_calls() as count,
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # Reuse must still work (same treespec/tags on every call).
+        self.assertEqual(count(), 1)
+        # The dataclass's own flatten_fn must have been inlined at least
+        # once, to confirm this test actually reaches
+        # build_fingerprint_with_pytree rather than passing vacuously (e.g.
+        # if a future change routed this case through the flat-leaf fast
+        # path instead).
+        self.assertIn(flatten_fn, inlined_fns)
+        # But the *generic recursive dispatch* must not be re-traced on
+        # every call -- that's the bug being fixed.
+        self.assertNotIn(pytree.tree_flatten, inlined_fns)
+
+    def test_subgraph_reuse_pytree_partial_flatten_fn(self):
+        """flatten_fn need not be a plain function -- e.g. functools.partial.
+
+        _make_inlined only supports plain Python functions (it always wraps
+        its argument in a UserFunctionVariable, which graph-breaks on
+        anything else). build_input_fingerprint must fall back rather than
+        call _make_inlined directly on a non-function flatten_fn.
+        """
+        import dataclasses
+        import functools
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        def _flatten_impl(config_flag, value):
+            return ([value.hidden], config_flag)
+
+        pytree.register_pytree_node(
+            RegionInput,
+            functools.partial(_flatten_impl, "cfg"),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.cos()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+        # fullgraph=True raises on any graph break instead of silently
+        # falling back, so this proves the partial flatten_fn doesn't
+        # graph-break.
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_namedtuple_arg(self):
+        """Reuse must work for args that are plain namedtuples.
+
+        All namedtuple types are implicitly registered as pytree nodes under
+        a single shared registry key (collections.namedtuple), unlike
+        explicitly-registered dataclasses. The fingerprinting path must
+        normalize the concrete namedtuple subtype to that shared key the same
+        way pytree._get_node_type does, or it will be misclassified as an
+        unsupported leaf and never get reused.
+        """
+        import collections
+
+        RegionInput = collections.namedtuple("RegionInput", ["hidden"])
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_two_distinct_namedtuple_types(self):
+        """Two different namedtuple types must not be conflated by reuse.
+
+        Both types normalize to the same registry key (collections.
+        namedtuple), so correctness depends on the concrete class surviving
+        in the TreeSpec context (set by pytree._namedtuple_flatten, which
+        returns type(d)) rather than being lost during normalization.
+        """
+        import collections
+
+        Left = collections.namedtuple("Left", ["hidden"])
+        Right = collections.namedtuple("Right", ["hidden"])
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x, y):
+            a = gn(Left(x))
+            b = gn(Right(y))
+            # A second Left(...) call should hit the cache from the first,
+            # proving reuse isn't simply broken outright (which would also
+            # produce two traces, same as the false Left/Right conflation
+            # this test is meant to catch).
+            c = gn(Left(y))
+            return a, b, c
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        ref = fn(x, y)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        # Left and Right each need their own trace (2), but the second Left
+        # call reuses the first rather than adding a third trace.
+        self.assertEqual(count(), 2)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_dataclass_pytree_kwarg(self):
+        """Reuse must work for pytree dataclasses passed as kwargs.
+
+        build_input_fingerprint's fast path only applies when there are no
+        kwargs (build_input_fingerprint:217), so the pytree-flatten path
+        (exercised here with a kwarg) is the one primarily exercised by
+        real callers of nested_compile_region.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(*, inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(inp=RegionInput(out))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_nested_pytree_arg(self):
+        """Reuse must work for multi-level nested pytree structures.
+
+        Exercises the recursive `flatten(child)` call for a dict containing
+        a tuple of a tensor and a registered dataclass, rather than only a
+        depth-1 structure.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Wrapper:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            Wrapper,
+            lambda value: ([value.hidden], None),
+            lambda children, _: Wrapper(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, Wrapper)
+
+        @nested_compile_region
+        def gn(d):
+            b_tensor, wrapper = d["b"]
+            return d["a"].sin() + b_tensor.cos() + wrapper.hidden.relu()
+
+        def fn(x, y, z):
+            out = x
+            for _ in range(4):
+                out = gn({"a": out, "b": (y, Wrapper(z))})
+            return out
+
+        x, y, z = torch.randn(8), torch.randn(8), torch.randn(8)
+        ref = fn(x, y, z)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_unsupported_leaf(self):
+        """An arg containing an opaque/unregistered object must not crash.
+
+        build_input_fingerprint's has_unknown flag is set instead, which
+        gates reuse off for that call (the region is simply retraced) rather
+        than raising or misclassifying the object.
+        """
+
+        class Opaque:
+            def __init__(self, v):
+                self.v = v
+
+        @nested_compile_region
+        def gn(pair):
+            t, _opaque = pair
+            return t.sin()
+
+        def fn(pair):
+            out = pair[0]
+            for _ in range(4):
+                out = gn((out, pair[1]))
+            return out
+
+        opaque = Opaque(1)
+        x = torch.randn(8)
+        ref = fn((x, opaque))
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
+
+        # has_unknown must actually be reached: every call retraces rather
+        # than misclassifying Opaque as something reusable.
+        self.assertEqual(count(), 4)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_registry_change_stays_correct(self):
+        """Correctness must hold even if the pytree registry changes
+        between calls to an already-compiled function.
+
+        build_fingerprint_with_pytree's fast path no longer installs a
+        guard on the pytree registry itself for plain-function flatten_fns
+        (see its docstring), on the theory that the registry can't change
+        mid-trace, and a stale/changed registry can only affect whether a
+        subgraph gets reused at compile time -- never the values the
+        compiled graph actually computes. This pins that: after
+        deregistering the pytree node the compiled artifact was built
+        against, calling that artifact again (whether or not it triggers a
+        recompile) must still produce correct results.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        pytree.register_pytree_node(
+            RegionInput,
+            lambda value: ([value.hidden], None),
+            lambda children, _: RegionInput(*children),
+        )
+        self.addCleanup(self._cleanup_pytree_registration, RegionInput)
+
+        @nested_compile_region
+        def gn(inp):
+            return inp.hidden.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn(RegionInput(out))
+            return out
+
+        x1 = torch.randn(8)
+        ref1 = fn(x1)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(ref1, compiled(x1))
+
+        # Deregister the pytree node the compiled artifact was built
+        # against, then call it again -- via the same compiled wrapper, not
+        # a fresh torch.compile call, so this exercises whatever guard
+        # check (or lack thereof) protects the existing compiled artifact.
+        self._cleanup_pytree_registration(RegionInput)
+
+        x2 = torch.randn(8)
+        ref2 = fn(x2)
+        self.assertEqual(ref2, compiled(x2))
 
     def test_subgraph_reuse_different_constants_retrace(self):
         """Constant args with different values each require a fresh trace.

@@ -82,6 +82,7 @@
 #ifdef USE_MEM_EFF_ATTENTION
 #ifndef USE_ROCM
 // MemoryEfficient Attention Specific Imports for CUDA
+#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
@@ -1427,8 +1428,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   TORCH_CHECK(key.size(1) == value.size(1));
 
   // Num heads
-  TORCH_CHECK(query.size(2) == key.size(2));
-  TORCH_CHECK(query.size(2) == value.size(2));
+  const int64_t num_heads = query.size(2);
+  const int64_t num_heads_kv = key.size(2);
+  TORCH_CHECK(num_heads_kv == value.size(2));
+#ifdef USE_ROCM
+  TORCH_CHECK(num_heads == num_heads_kv);
+#else
+  TORCH_CHECK(
+      (num_heads == 0 && num_heads_kv == 0) ||
+          (num_heads > 0 && num_heads_kv > 0 &&
+           num_heads % num_heads_kv == 0),
+      "Number of heads in key/value must divide number of heads in query");
+#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -1462,7 +1473,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   int64_t B = query.size(0);
   int64_t M = query.size(1);
   int64_t N = key.size(1);
-  int64_t num_heads = query.size(-2);
   int64_t K = query.size(-1);
   int64_t Kv = value.size(-1);
 
@@ -1739,6 +1749,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          num_heads,
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
+    if (num_heads == 0) {
+      return;
+    }
     typename Kernel::Params p;
     p.query_ptr = (const scalar_t*)query.const_data_ptr();
     p.key_ptr = (const scalar_t*)key.const_data_ptr();
@@ -1766,6 +1779,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
 
     p.num_heads = num_heads;
+    p.q_heads_per_kv = num_heads / num_heads_kv;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = max_seqlen_q;
@@ -1904,8 +1918,9 @@ __global__ void rand_uniform_kernel(
 
   const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
 
-  const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
-      head_id * (n_queries * n_keys);
+  // See NOTE [Mem-efficient attention dropout RNG offset]
+  const int64_t dropout_seq_start = gemm_kernel_utils::dropout_rng_offset(
+      batch_id, head_id, n_heads, n_queries, n_keys);
   const int64_t query_start_idx = query_idx * n_keys;
 
   curandStatePhilox4_32_10_t curand_state;
@@ -1915,7 +1930,7 @@ __global__ void rand_uniform_kernel(
       offset + dropout_seq_start + query_start_idx,
       &curand_state);
 
-  for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
+  for (int64_t key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
     float4 rand_quad = curand_uniform4(&curand_state);
 
 #pragma unroll
