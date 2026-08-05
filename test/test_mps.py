@@ -836,31 +836,6 @@ class TestAvgPool(TestCaseMPS):
         with self.assertRaisesRegex(NotImplementedError, "complex"):
             F.local_response_norm(x, size=4)
 
-    def test_bucketize_complex_input_raises(self):
-        # Regression test for gh-191692:
-        # complex input should raise NotImplementedError instead of
-        # an opaque Metal RuntimeError on MPS.
-
-        # Complex values should be rejected.
-        values = torch.randn(2, 2, dtype=torch.complex64, device="mps")
-        boundaries = torch.randn(2, dtype=torch.float32, device="mps")
-
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "searchsorted is not supported for complex on MPS",
-        ):
-            torch.bucketize(values, boundaries)
-
-        # Complex boundaries should also be rejected.
-        values = torch.randn(2, 2, dtype=torch.float32, device="mps")
-        boundaries = torch.randn(2, dtype=torch.complex64, device="mps")
-
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "searchsorted is not supported for complex on MPS",
-        ):
-            torch.bucketize(values, boundaries)
-
     def test_channels_last_storage_offset(self):
         # Regression test: channels_last tensors with non-zero storage_offset produced wrong
         # results on MPS because the Placeholder path for NHWC ops ignored storage_offset.

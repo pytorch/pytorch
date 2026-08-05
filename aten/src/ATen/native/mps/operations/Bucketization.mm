@@ -84,11 +84,7 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
 
   TORCH_CHECK_NOT_IMPLEMENTED(
-      !c10::isComplexType(self.scalar_type()),
-      "searchsorted is not supported for complex on MPS");
-
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !c10::isComplexType(sorted_sequence.scalar_type()),
+      !c10::isComplexType(self.scalar_type()) && !c10::isComplexType(sorted_sequence.scalar_type()),
       "searchsorted is not supported for complex on MPS");
 
   resize_output(result, self.sizes());
