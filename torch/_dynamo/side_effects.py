@@ -756,6 +756,16 @@ class SideEffects:
             mutation_type_cls=AttributeMutationExisting,
         )
 
+    def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
+        """Register a sourceless VT (e.g. a synthetic exception) as a new
+        attribute-mutation object so its attribute mutations are codegen'd.
+        Keyed by the VT's id since there is no backing Python object."""
+        if id(variable) in self.id_to_variable:
+            return
+        variable.mutation_type = AttributeMutationNew()
+        self.id_to_variable[id(variable)] = variable
+        self.keepalive.append(variable)
+
     def track_object_new(
         self,
         cls_source: Source | None,
@@ -778,7 +788,7 @@ class SideEffects:
 
         from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
-        from .variables.user_defined import is_forbidden_context_manager
+        from .variables.user_defined import is_generic_ctx_manager_cls
 
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
@@ -787,19 +797,15 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif (
-            hasattr(user_cls, "__enter__")
-            and hasattr(user_cls, "__exit__")
-            and not is_forbidden_context_manager(user_cls)
-        ):
+        elif is_generic_ctx_manager_cls(user_cls):
             variable_cls = GenericContextWrappingVariable
         elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            variable_cls = variables.OrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
@@ -1207,6 +1213,14 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.ExceptionVariable):
+                # Exceptions cannot be built via object.__new__ (CPython rejects
+                # it), so reconstruct() constructs by calling the type. Cache
+                # the result so later references load the single instance; any
+                # __dict__ attributes replay in codegen_update_mutated.
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)

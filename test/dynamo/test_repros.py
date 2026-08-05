@@ -8494,6 +8494,214 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_swap_tensors_after_discarded_attempt(self):
+        # Issue #186796: a discarded restart/skip attempt fakifies the real
+        # params and builds guards on them, leaving weakrefs on the real params
+        # (guard TensorWeakRef, tensor_to_context WeakIdRef, fake-mode describer
+        # WeakIdRef) that block torch.utils.swap_tensors after compile.
+        # _cleanup_output_graph must drop those weakrefs.
+        def assert_swappable(param):
+            # Raises "Cannot swap ... has weakref" if any observational weakref
+            # is left on the real param.
+            torch.utils.swap_tensors(param, nn.Parameter(torch.zeros_like(param.data)))
+
+        # Axis 1: SpeculationRestartAnalysis - a graph break after the param is
+        # fakified discards the first attempt.
+        torch._dynamo.reset()
+
+        class RestartMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                y = x @ self.weight
+                torch._dynamo.graph_break()
+                return y + 1
+
+        m1 = RestartMod()
+        torch.compile(m1, backend="eager")(torch.randn(2, 4))
+        assert_swappable(m1.weight)
+
+        # Axis 2: SkipFrame - reading the param but tracing no ops skips the
+        # frame after the param is fakified.
+        torch._dynamo.reset()
+
+        class SkipMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.weight.shape[0]
+
+        m2 = SkipMod()
+        torch.compile(m2, backend="eager")(torch.randn(2, 4))
+        assert_swappable(m2.weight)
+
+        # Axis 3: TensorifyScalarRestartAnalysis (backend-raised restart). By
+        # the time cleanup runs, tracing_context.fake_mode has been swapped to a
+        # fresh backend fake_mode and the tracing describer holding the real
+        # params lives on _old_fake_mode, so cleanup must clear BOTH. We assert
+        # both describers are emptied on the discarded attempt: without clearing
+        # _old_fake_mode its describer still pins the real-param WeakIdRefs
+        # (whether they still block swap depends on non-deterministic GC).
+        import math
+
+        from torch._dynamo.output_graph import DynamoTracerOutput
+
+        records = []
+        orig_cleanup = DynamoTracerOutput._cleanup_output_graph
+
+        def recording_cleanup(tracer_self):
+            orig_cleanup(tracer_self)
+            og = tracer_self.output_graph_for_cleanup
+            if og is None:
+                return
+
+            def describer_len(fake_mode):
+                if fake_mode is None:
+                    return None
+                d = fake_mode.fake_tensor_converter.meta_converter.describer
+                return len(d.lookup_tensor) + len(d.lookup_storage)
+
+            old_fake_mode = getattr(og, "_old_fake_mode", None)
+            records.append(
+                (
+                    describer_len(og.tracing_context.fake_mode),
+                    describer_len(old_fake_mode),
+                )
+            )
+
+        class TensorifyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(8, 8))
+
+            def forward(self, x, y):
+                return math.floor(y**2) * (x @ self.weight)
+
+        torch._dynamo.reset()
+        m3 = TensorifyMod()
+        x = torch.randn(4, 8)
+        # specialize_float=False is required for the scalar-tensorify restart to
+        # fire: the dynamic-shapes test variant sets specialize_float=True, which
+        # constant-folds the float so no symfloat (and no tensorify restart) is
+        # produced. Pin it here so axis 3 deterministically triggers the restart
+        # under both the default config and the dynamic-shapes variant.
+        with (
+            torch._dynamo.config.patch(specialize_float=False),
+            mock.patch.object(
+                DynamoTracerOutput, "_cleanup_output_graph", recording_cleanup
+            ),
+        ):
+            cm3 = torch.compile(m3, backend="aot_eager")
+            cm3(x, 2.0)
+            cm3(x, 3.0)  # automatic dynamic -> symfloat -> tensorify restart
+            cm3(x, 4.0)
+
+        # At least one discarded attempt must have had _old_fake_mode set (the
+        # tensorify restart raised after the backend fake_mode swap).
+        self.assertTrue(
+            any(old is not None for _, old in records),
+            "expected a discarded attempt with _old_fake_mode set",
+        )
+        # Cleanup must empty BOTH describers on every discarded attempt.
+        for cur, old in records:
+            if cur is not None:
+                self.assertEqual(cur, 0)
+            if old is not None:
+                self.assertEqual(old, 0)
+        assert_swappable(m3.weight)
+
+    def test_grid_sampler_2d_cpu_fallback_captured(self):
+        # torch._grid_sampler_2d_cpu_fallback used to have no meta kernel, so
+        # running it under FakeTensorMode hard-errored ("data is not allocated
+        # yet") and Dynamo could not capture it. Regression test for the
+        # NGB-enabled failure of test_nn.py TestNN.test_grid_sample: with the
+        # meta registrations it captures with no graph break.
+        def fn(inp, grid):
+            out = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            return out + 1
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        expected = fn(inp, grid)
+
+        cnt = CompileCounter()
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(inp, grid)
+        self.assertEqual(out, expected)
+        # Both the fallback and the add are captured into one graph.
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_grid_sampler_2d_cpu_fallback_backward(self):
+        # The backward also needs a meta kernel, or AOTAutograd fails to trace
+        # it. Grads must match eager.
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True).sum()
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+
+        i_ref, g_ref = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        fn(i_ref, g_ref).backward()
+
+        i_test, g_test = inp.clone().requires_grad_(), grid.clone().requires_grad_()
+        torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            i_test, g_test
+        ).backward()
+
+        self.assertEqual(i_test.grad, i_ref.grad)
+        self.assertEqual(g_test.grad, g_ref.grad)
+
+    def test_grid_sampler_2d_cpu_fallback_inductor(self):
+        # The op has no inductor lowering, so once it is capturable inductor
+        # must auto-fall-back to the aten op and infer the output layout from
+        # the meta kernel. Check values and strides against eager, including a
+        # channels_last input (where the meta returning contiguous must match
+        # what the real kernel allocates).
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+
+        from torch._inductor.utils import run_and_get_code
+
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        for inp in (
+            torch.randn(2, 3, 4, 5),
+            torch.randn(2, 3, 4, 5).contiguous(memory_format=torch.channels_last),
+        ):
+            expected = fn(inp, grid)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, (code,) = run_and_get_code(opt_fn, inp, grid)
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+            # fullgraph plus this keep the test from passing via an eager
+            # fallback, which would return the same values and strides.
+            self.assertIn("_grid_sampler_2d_cpu_fallback", code)
+
+    def test_grid_sampler_2d_cpu_fallback_dynamic_shapes(self):
+        # The meta kernels run check_grid_sampler_common/_2d, so their
+        # torch._check calls must stay symint-safe: changing the dynamic dims
+        # must not add guards that force a recompile.
+        def fn(inp, grid):
+            return torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        torch._dynamo.mark_dynamic(inp, 2)
+        torch._dynamo.mark_dynamic(grid, 1)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(inp, grid), fn(inp, grid))
+
+        inp2 = torch.randn(2, 3, 9, 5)
+        grid2 = torch.rand(2, 11, 7, 2) * 2 - 1
+        self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()

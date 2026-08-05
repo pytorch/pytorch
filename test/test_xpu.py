@@ -179,11 +179,10 @@ class TestXpu(TestCase):
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
-        if int(torch.version.xpu) >= 20260000:
-            self.assertEqual(
-                device_properties.is_integrated_gpu,
-                device_capability["is_integrated_gpu"],
-            )
+        self.assertEqual(
+            device_properties.is_integrated_gpu,
+            device_capability["is_integrated_gpu"],
+        )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
@@ -3530,6 +3529,16 @@ class TestXpuAutocast(TestAutocast):
         with torch.amp.autocast("xpu"):
             result = torch.mm(mat0_fp32, mat1_fp32)
             self.assertEqual(result.dtype, torch.float16)
+
+    def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("xpu")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")

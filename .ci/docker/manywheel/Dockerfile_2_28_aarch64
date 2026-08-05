@@ -94,6 +94,11 @@ COPY ./common/install_acl.sh install_acl.sh
 RUN bash ./install_acl.sh && rm -f install_acl.sh
 
 
+# Build and install llvm-bolt from source
+FROM base as llvm
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm -f install_llvm_tools.sh
+
 FROM base as cuda
 ARG BASE_CUDA_VERSION
 # Install CUDA
@@ -150,6 +155,8 @@ COPY --from=cuda   /usr/local/cupti-headers-13.3         /usr/local/cupti-header
 COPY --from=magma  /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=nvpl   /opt/nvpl/lib/                       /usr/local/lib/
 COPY --from=nvpl   /opt/nvpl/include/                   /usr/local/include/
+
+COPY --from=llvm  /llvm/install/                          /usr/local/
 
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH

@@ -504,6 +504,16 @@
       ]
     }
   ],
+  "GB2444": [
+    {
+      "Gb_type": "MAKE_CELL on a free variable name",
+      "Context": "MAKE_CELL {inst.argval}",
+      "Explanation": "An inlined comprehension creates a cell whose name `{inst.argval}` is also a free variable of the enclosing function.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
@@ -1014,6 +1024,16 @@
       "Context": "",
       "Explanation": "This is not supported.",
       "Hints": []
+    }
+  ],
+  "GB9493": [
+    {
+      "Gb_type": "C-implemented special method without VariableTracker model",
+      "Context": "name={name}, type={self.python_type_name()}, attr={type_attr}",
+      "Explanation": "'{self.python_type_name()}' implements '{name}' in C and Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0068": [
@@ -3792,6 +3812,16 @@
       ]
     }
   ],
+  "GB3069": [
+    {
+      "Gb_type": "Custom op missing fake impl during tracing",
+      "Context": "{node.target}",
+      "Explanation": "A custom operator was defined and register_fake'd inside the compiled function, then called before the register_fake side effect was applied.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0249": [
     {
       "Gb_type": "bad device argument to torch.accelerator.current_stream",
@@ -5416,6 +5446,17 @@
       "Explanation": "Dynamo cannot safely evaluate COW state from a FakeTensor because COW state is not represented in FakeTensor metadata.",
       "Hints": [
         "Avoid checking COW state inside torch.export regions."
+      ]
+    }
+  ],
+  "GB5687": [
+    {
+      "Gb_type": "min/max with non-constant key",
+      "Context": "str(keyval)",
+      "Explanation": "Cannot compute {self.fn.__name__}() whose key comparison is not a compile-time constant. Key type: {keyval.python_type()}. Most notably, Tensor or SymInt keys are unsupported, but ints work.",
+      "Hints": [
+        "Use something else as the key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
