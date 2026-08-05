@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
+import torch
+
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -20,6 +22,7 @@ from .triton import TritonScheduling
 
 
 log = logging.getLogger(__name__)
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 if TYPE_CHECKING:
@@ -28,7 +31,6 @@ if TYPE_CHECKING:
 
     from sympy import Expr
 
-    import torch
     from torch.utils._ordered_set import OrderedSet
 
     from .common import BackendFeature
@@ -269,10 +271,13 @@ class CUDACombinedScheduling(BaseScheduling):
             try:
                 call(args)
             except Exception as e:
-                log.debug(
-                    "Exception (%s) in compiling NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel compilation failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel compilation failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             device = V.graph.get_current_device_or_throw()
@@ -282,10 +287,13 @@ class CUDACombinedScheduling(BaseScheduling):
                     device=device,
                 )
             except Exception as e:
-                log.debug(
-                    "Exception (%s) while benchmarking NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel benchmark failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel benchmark failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             return ms, module.__file__ or ""

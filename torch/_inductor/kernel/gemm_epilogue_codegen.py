@@ -143,17 +143,22 @@ class GemmEpilogueCuteDSLBody:
 class GemmEpilogueCuteDSLCSE:
     def __init__(self) -> None:
         self.index = 0
+        self.cache: dict[str, CuteDSLCSEVariable] = {}
 
     def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        if expr in self.cache:
+            return self.cache[expr]
         name = f"tmp{self.index}"
         self.index += 1
         body.writeline(f"{name} = {expr}")
-        return CuteDSLCSEVariable(
+        value = CuteDSLCSEVariable(
             name,
             ValueRanges.unknown() if bounds is None else bounds,
             dtype=dtype,
             shape=shape,
         )
+        self.cache[expr] = value
+        return value
 
 
 class GemmEpilogueCuteDSLKernel:

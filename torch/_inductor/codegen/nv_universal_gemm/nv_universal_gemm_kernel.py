@@ -43,6 +43,7 @@ from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionArguments,
 )
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -85,21 +86,29 @@ class _CuTeDSLEpilogueSource(str):  # noqa: SLOT000
         return value
 
 
+@functools.cache
+def _cutedsl_epilogue_names(epilogue_fn: str) -> tuple[str, ...]:
+    from cutlass.operators.fusion import trace_in_out
+
+    inputs, outputs = trace_in_out(epilogue_fn)
+    return tuple(
+        name
+        for name in dict.fromkeys((*inputs, *outputs))
+        if name != GEMM_ACCUMULATOR_ARG_NAME
+    )
+
+
 class CuTeDSLEpilogueArguments:
     """Epilogue arguments for direct CuTeDSL functions that bypass EVT tracing."""
 
     _is_direct_cutedsl = True
 
     def __init__(self, epilogue_fn: str, **kwargs: Any) -> None:
-        from cutlass.operators.fusion import trace_in_out
-
         import torch
 
-        inputs, outputs = trace_in_out(epilogue_fn)
-        names = dict.fromkeys((*inputs, *outputs))
-        names.pop(GEMM_ACCUMULATOR_ARG_NAME, None)
-        unexpected = kwargs.keys() - names.keys()
-        missing = names.keys() - kwargs.keys()
+        names = _cutedsl_epilogue_names(epilogue_fn)
+        unexpected = kwargs.keys() - OrderedSet(names)
+        missing = OrderedSet(names) - kwargs.keys()
         if missing or unexpected:
             raise ValueError(
                 f"CuTeDSL epilogue argument mismatch: missing={missing}, "

@@ -41,7 +41,7 @@ from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 from ..cutlass.python_evt import CutlassEVTCodegen
 from .epilogue_lowering import NVGemmEpilogueCapture, NVGemmEpilogueLowering
-from .nv_universal_gemm import NVUniversalGemmCaller
+from .nv_universal_gemm import GemmVariant, NVUniversalGemmCaller
 
 
 if TYPE_CHECKING:
@@ -488,20 +488,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     def can_fuse_reduction_chain(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        if not any(
-            isinstance(node.node, ComputedBuffer)
-            and isinstance(node.node.data, Reduction)
-            for node in node1.get_nodes()
-        ):
-            return False
-        for read in node1.read_writes.reads:
-            producer = V.graph.try_get_buffer(read.name)
-            if not isinstance(producer, Buffer) or not self._has_nvgemm_choice(
-                producer
-            ):
-                continue
-            capture = NVGemmEpilogueCapture.from_nodes(producer, (node1, node2))
-            return bool(self._feed_main_config(capture, allow_softmax=False))
+        # Keep standalone chains materialized until the NVGEMM template owns them.
         return False
 
     def get_fusion_pair_priority(
@@ -789,6 +776,13 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         pointwise_nodes,
                         removed_buffers_with_gemm,
                     )
+                    if (
+                        ctb.variant == GemmVariant.SCALED_GEMM
+                        and len(lowered_epilogue.writes) > 1
+                    ):
+                        raise NotImplementedError(
+                            "NVGEMM block-scaled multi-store epilogues are unsupported"
+                        )
                     if feeds_main and reduction_plan is not None:
                         d_buf = lowered_epilogue.renames.get("D")
                         if isinstance(d_buf, str):
