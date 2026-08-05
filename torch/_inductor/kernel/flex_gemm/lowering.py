@@ -62,6 +62,41 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
+def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
+    graph = graph_module.graph
+    changed = False
+    for node in list(graph.nodes):
+        if node.target not in (
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.baddbmm.default,
+        ):
+            continue
+        bias, mat1, mat2 = node.args[:3]
+        alpha = node.kwargs.get("alpha", 1.0)
+        beta = node.kwargs.get("beta", 1.0)
+        gemm_target = (
+            torch.ops.aten.mm.default
+            if node.target is torch.ops.aten.addmm.default
+            else torch.ops.aten.bmm.default
+        )
+        with graph.inserting_before(node):
+            result = graph.call_function(gemm_target, (mat1, mat2))
+            if alpha != 1:
+                result = graph.call_function(torch.ops.aten.mul.Tensor, (result, alpha))
+            if beta != 0:
+                if beta != 1:
+                    bias = graph.call_function(torch.ops.aten.mul.Tensor, (bias, beta))
+                result = graph.call_function(torch.ops.aten.add.Tensor, (result, bias))
+        result.meta = node.meta
+        node.replace_all_uses_with(result)
+        graph.erase_node(node)
+        changed = True
+    if changed:
+        graph.eliminate_dead_code()
+        graph.lint()
+        graph_module.recompile()
+
+
 def flex_gemm_tensor_placeholders(
     graph_module: torch.fx.GraphModule,
 ) -> list[torch.fx.Node]:
@@ -199,11 +234,9 @@ def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_
             raise AssertionError("FlexGEMM expects at most one local-reduce output")
 
 
-def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
+def flex_gemm_local_reduce_metas(store) -> tuple[Any, ...]:
     """Return metadata for the optional compressed local-reduce output."""
-    if local_reduce is None or local_reduce.store is None:
-        return ()
-    return (local_reduce.store.output_node.meta["val"],)
+    return () if store is None else (store.node.meta["val"],)
 
 
 def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
@@ -435,7 +468,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
 
-    from torch._inductor.kernel.flex_gemm.epilogue import (
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
@@ -533,13 +566,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             else LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
         )
         raise NotImplementedError(error)
-    local_reduce_store = (
-        None if outputs.local_reduce is None else outputs.local_reduce.store
-    )
+    local_reduce_store = outputs.local_reduce_store
     local_reduce_layout = (
         None if local_reduce_store is None else local_reduce_store.output_layout
     )
-    output_meta = outputs.main.meta.get("val")
+    output_meta = outputs.output.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
@@ -559,7 +590,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, physical_output_size
     )
-    local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
+    local_reduce_metas = flex_gemm_local_reduce_metas(local_reduce_store)
     output_stride = ir.convert_shape_to_inductor(output_meta.stride())
     if main_transform is not None:
         # Grouped-main uses TMA stores, whose outer strides must be 16-byte aligned.
@@ -592,7 +623,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     zero_init_local_reduce = False
     if local_reduce_store is not None and local_reduce_store.output_layout is not None:
         zero_init_local_reduce = not statically_known_equal(
-            local_reduce_store.output_node.meta["val"].numel(),
+            local_reduce_store.node.meta["val"].numel(),
             local_reduce_store.value_node.meta["val"].numel(),
         )
     if zero_init_local_reduce:
@@ -660,7 +691,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         lowering_name=subgraph.name,
     )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce, local_reduce_out_index, swap_ab=explicit_swap_ab
+        outputs.local_reduce,
+        local_reduce_out_index,
+        output_layout=local_reduce_layout,
+        swap_ab=explicit_swap_ab,
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
@@ -777,6 +811,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     if backend == "NVGEMM":
+        decompose_nvgemm_additive_gemm(subgraph.graph_module)
         with config.patch(
             max_autotune=True,
             max_autotune_gemm_backends="NVGEMM",
