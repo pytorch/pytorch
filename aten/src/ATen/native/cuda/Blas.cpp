@@ -482,8 +482,17 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
       // We do not copy bias only when we need the bias ptr
     if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
+      // alpha == 0 must not take this path. When alpha is 0 and beta is 1 the
+      // operation reduces to D = C, and cuBLASLt then skips the write entirely:
+      // a valid shortcut while C had already been copied into D and the two
+      // pointers aliased, but it silently drops the term once they are
+      // distinct. cuBLASLt does write beta * C for every other beta, so only
+      // beta == 1 is actually affected; excluding all of alpha == 0 costs
+      // nothing (there is no matmul to overlap with the avoided copy) and does
+      // not rely on which algorithm the heuristic happens to return.
       const bool distinct_c_and_d_candidate =
           result.numel() != 0 && activation == Activation::None &&
+          alpha.toComplexDouble() != 0.0 &&
           canUseAddmmCudaLtWithDistinctCAndD(
               result, self, mat1, mat2, disable_addmm_cuda_lt_for_device);
       if (distinct_c_and_d_candidate) {
