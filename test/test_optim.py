@@ -2543,7 +2543,7 @@ class TestOptimRenewed(TestCase):
             # Simulate bf16 storage: after each ref step, quantize states to
             # bf16 and back so the reference matches the mixed-precision kernel.
             tracker = TensorTracker()
-            for _i in range(7):
+            for _ in range(7):
                 ref_optim.step()
                 bf16_optim.step()
                 for p in params:

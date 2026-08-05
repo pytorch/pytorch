@@ -3027,7 +3027,7 @@ class ReducerTest(TestCase):
         reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
         loss_fn = nn.CrossEntropyLoss()
 
-        for _i in range(3):
+        for _ in range(3):
             input = torch.rand([10, 2], dtype=torch.double)
             target = torch.LongTensor([random.randrange(4) for _ in range(10)])
 
@@ -3073,7 +3073,7 @@ class ReducerTest(TestCase):
         )
         loss_fn = nn.CrossEntropyLoss()
 
-        for _i in range(3):
+        for _ in range(3):
             input = torch.rand([10, 2], dtype=torch.double)
             target = torch.LongTensor([random.randrange(4) for _ in range(10)])
 
