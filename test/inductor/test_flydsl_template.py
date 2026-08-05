@@ -352,7 +352,7 @@ class TestFlyDSLTemplate(TestCase):
         else:
             get_properties.assert_not_called()
 
-    def test_precompile_metadata_requires_template_inputs(self):
+    def test_precompile_metadata_requires_defined_signature(self):
         scheduling = FlyDSLScheduling(scheduler=None)
         kernel = SimpleNamespace(
             _template_signature_defined=False,
@@ -373,18 +373,22 @@ class TestFlyDSLTemplate(TestCase):
 
     def test_precompile_metadata_supports_inputless_template(self):
         scheduling = FlyDSLScheduling(scheduler=None)
-        kernel = SimpleNamespace(
-            _template_signature_defined=True,
-            _template_input_args=[],
+        layout = FixedLayout(torch.device("cpu"), torch.float32, [1], [1])
+        kernel = FlyDSLTemplateKernel(
+            kernel_name="inputless",
+            input_nodes=[],
+            output_node=Buffer(name="output", layout=layout),
         )
-        layout = SimpleNamespace(
-            size=[1],
-            stride=[1],
-            dtype=torch.float32,
-            device=torch.device("cpu"),
+        graph = SimpleNamespace(
+            removed_buffers=OrderedSet(),
+            scheduler=None,
         )
 
-        with mock.patch("torch.cuda.is_available", return_value=False):
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            kernel.def_kernel()
             metadata = scheduling._build_precompile_metadata(
                 kernel, SimpleNamespace(layout=layout)
             )
