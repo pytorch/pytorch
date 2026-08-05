@@ -30,11 +30,19 @@
 
 namespace at::native { namespace {
 
-// The barebones unsigned types have no Vectorized specialization, and gcc-13
-// ICEs auto-vectorizing the vec_base.h emulation for fixed-length SVE.
+// gcc-13 ICEs auto-vectorizing the vec_base.h Vectorized<T> emulation under fixed-length SVE. 
+// The barebones unsigned types have no SVE specialization, so they are the ones that land on that path.
+// Not every 13.x build is affected, so the bound covers the series rather than a point release. 
+// Remove once the aarch64 wheels require gcc-14 or newer.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14 && \
+    (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE128))
 template <typename scalar_t>
 constexpr bool use_vectorized_clamp =
     !isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
+#else
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp = true;
+#endif
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 inline void compare_base_kernel_core(
