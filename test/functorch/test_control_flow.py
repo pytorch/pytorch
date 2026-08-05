@@ -7414,25 +7414,37 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    def test_cond_free_parent_block_in_child_graph_errors(self):
-        g = torch.cuda.CUDAGraph()
-        pred = torch.tensor(True, device="cuda")
+    def test_cond_child_output_can_be_freed_in_parent_capture(self):
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        operand = torch.full((), 4.0, device="cuda")
         side_stream = torch.cuda.Stream()
 
-        torch.cuda.synchronize()
-        with torch.cuda.stream(side_stream):
-            g.capture_begin()
-            T = torch.ones(64, device="cuda")
-            cg = torch.cuda.CUDAGraph.get_currently_capturing_graph()
-            cg.begin_capture_to_if_node(pred)
-            _ = T + 1
-            del T
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "parent CUDA graph capture.*conditional node",
-            ):
-                cg.end_capture_to_conditional_node()
-            g.capture_end()
+        def run_cond():
+            return torch.cond(
+                pred,
+                lambda value: value + 1,
+                lambda value: value - 1,
+                [operand],
+            )
+
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            run_cond()
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            intermediate_output = run_cond()
+            final_output = 2 * intermediate_output
+            del intermediate_output
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+        for take_true_branch, expected in ((True, 10.0), (False, 6.0)):
+            pred.fill_(take_true_branch)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(final_output, torch.full_like(final_output, expected))
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
