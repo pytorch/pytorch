@@ -1385,8 +1385,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "Only supported on ROCm MI300 or newer",
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
     )
     @xfailIfSM89PreCUDA13
     @parametrize("dense_input_shape", [(256, 128)])
@@ -1411,8 +1415,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "Only supported on ROCm MI300 or newer",
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
     )
     @xfailIfSM89PreCUDA13
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
@@ -1442,8 +1450,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "Only supported on ROCm MI300 or newer",
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
     )
     @xfailIfSM89PreCUDA13
     @parametrize(
@@ -1773,8 +1785,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
 
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ (gfx942/gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     def test_cslt_compress_fp8(self, device):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
@@ -1784,8 +1800,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         self.assertEqual(compressed.dtype, fp8_dtype)
 
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ (gfx942/gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     @parametrize("dense_input_shape", [(256, 128)])
     def test_cslt_sparse_mm_fp8_to_fp32(self, dense_input_shape, device):
@@ -1804,8 +1824,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-1, atol=1e-1)
 
     @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12",
+    )
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ (gfx942/gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific out_dtype restriction")
     @parametrize(
