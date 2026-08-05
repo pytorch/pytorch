@@ -604,6 +604,9 @@ def sparse_compressed_constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+    if "size" not in new_kwargs:
+        # without an explicit size, it is inferred from plain_indices.max()
+        raise DataDependentOutputException(func)
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else new_kwargs["values"].device
     new_kwargs["device"] = torch.device("meta")
