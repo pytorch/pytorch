@@ -47,8 +47,10 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
-        if getattr(V.graph, "cpp_wrapper", False):
-            return NotImplementedError("FlyDSL does not support C++ wrappers")
+        if getattr(V.graph, "cpp_wrapper", False) or getattr(
+            V.graph, "aot_mode", False
+        ):
+            return NotImplementedError("FlyDSL does not support AOT wrappers")
         if not flydsl_utils.runtime_available():
             return NotImplementedError("FlyDSL runtime is unavailable")
         try:
