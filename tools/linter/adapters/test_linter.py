@@ -51,10 +51,8 @@ from typing import NamedTuple
 
 
 LINTER_CODE = "TEST_LINTER"
-HW_CLASSIFICATION_ATTR = "hw_classification"  # class attribute name to check
-INSTANTIATE_FN_NAME = (
-    "instantiate_device_type_tests"  # function name to check for test instantiation
-)
+HW_CLASSIFICATION_ATTR = "hw_classification"
+INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
 
 _KWARG_UNKNOWN = object()  # sentinel: kwarg present but not a literal
 
@@ -144,9 +142,11 @@ def _is_test_class(node: ast.ClassDef) -> bool:
 def _get_hw_classification(
     node: ast.ClassDef,
 ) -> HardwareClassification | None:
-    """Return the `HardwareClassification` enum member declared on *node*.
+    """Parse the `hw_classification` attribute from *node*.
 
-    Only accepts the exact forms::
+    The value is returned as a `HardwareClassification` enum member.
+
+    Only accepts the exact forms:
 
         hw_classification = HardwareClassification.<MEMBER>
         hw_classification: HardwareClassification = HardwareClassification.<MEMBER>
@@ -155,22 +155,27 @@ def _get_hw_classification(
     supported forms.
     """
     for stmt in node.body:
-        targets: list[ast.expr]
-        value: ast.expr | None
-
         if isinstance(stmt, ast.Assign):
-            targets = stmt.targets
+            if len(stmt.targets) != 1:
+                continue
+            target = stmt.targets[0]
+            if not (
+                isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR
+            ):
+                continue
             value = stmt.value
         elif isinstance(stmt, ast.AnnAssign):
-            targets = [stmt.target]
+            target = stmt.target
+            if not (
+                isinstance(target, ast.Name)
+                and target.id == HW_CLASSIFICATION_ATTR
+                and isinstance(stmt.annotation, ast.Name)
+                and stmt.annotation.id == HardwareClassification.__name__
+                and stmt.value is not None
+            ):
+                continue
             value = stmt.value
         else:
-            continue
-
-        if not any(
-            isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR
-            for target in targets
-        ):
             continue
 
         if (
@@ -189,7 +194,7 @@ def _get_hw_classification(
 
 
 def _get_instantiation_call(tree: ast.Module, class_name: str) -> ast.Call | None:
-    """Find the ``instantiate_device_type_tests(ClassName, ...)`` call node."""
+    """Find a top-level instantiate_device_type_tests call for a class."""
     for stmt in tree.body:
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             call = stmt.value
@@ -232,7 +237,7 @@ def _get_call_kwarg_value(
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
             ]
 
-            # list contains non-string or empty
+            # list contains non-string elements
             if len(result) != len(node.elts):
                 return _KWARG_UNKNOWN
             return result
