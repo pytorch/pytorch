@@ -275,7 +275,7 @@ elseif(BLAS STREQUAL "APL")
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+  if("$ENV{GENERIC_BLAS_LIBRARIES}" STREQUAL "")
     set(GENERIC_BLAS "blas")
   else()
     set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
@@ -332,7 +332,7 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
-  set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
+  set(POCKETFFT_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/third_party/pocketfft/")
   if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
     message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
   elseif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
@@ -1117,13 +1117,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
-    if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
-    endif()
-
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
@@ -1202,6 +1195,11 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+if(USE_CUDA AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-deprecated-literal-operator")
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
@@ -1221,6 +1219,11 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # tensorpipe_cuda pulls in the same libnop headers via the host compiler and
+    # is only built under USE_CUDA, so it needs the same suppression.
+    if(USE_CUDA)
+      target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
+    endif()
     # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
     # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
     # But are used only once during shutdown
@@ -1267,10 +1270,6 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
-      if(USE_DISTRIBUED AND USE_TENSORPIPE)
-        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
-        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
-      endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
 
       # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
@@ -1451,6 +1450,7 @@ if(NOT INTERN_BUILD_MOBILE)
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")

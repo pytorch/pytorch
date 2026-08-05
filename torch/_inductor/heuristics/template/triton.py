@@ -2231,7 +2231,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # usable selection, so restrict origami to fully static problems and let
         # symbolic shapes fall through to the regular config generator below.
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
-        if origami is not None and not mnk_static:
+        if (
+            origami is not None
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
         # `origami is not None` encodes the module-load gate (see top of file);
         # only DEFAULT search space is supported here.
@@ -2735,20 +2739,20 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
-        # dp=2 splits a 256-row tile into two 128-row MMA partitions
-        if dp == 2 and block_m != 256:
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        if dp == 2 and block_m not in (128, 256):
             return False
         if template_kwargs.get("TWO_CTAS", False):
             # 2-CTA deadlocks without the TMA epilogue store to drive the cluster
-            # barrier, and needs a 128-row MMA tile per partition with BLOCK_N >= 128
+            # barrier.
             if not (has_two_ctas() and config.triton.enable_template_tma_store):
                 return False
-            if block_m // dp != 128 or block_n < 128:
-                return False
-            # fb-triton's cross-CTA 2-CTA sync barrier is single-buffered
-            # (phase = iter % 2 in Insert2CTASync), so a pipeline deeper than 2
-            # stages wraps the phase and hangs on mbarrier.try_wait
-            if template_kwargs["num_stages"] > 2:
+            # The 2-CTA MMA pairs CTAs across M and halves B along N, so each CTA
+            # needs a full 128x128 MMA tile. Smaller tiles hang on the cluster
+            # barrier rather than failing to compile, which would wedge autotuning,
+            # so only the 256x256 tile is allowed.
+            if block_m != 256 or block_n != 256:
                 return False
         return True
 
@@ -2790,7 +2794,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                                             separate_epilogue_store=separate_epilogue_store,
                                             two_ctas=two_ctas,
                                             warp_specialize=True,
-                                            flatten=True,
+                                            flatten=False,
                                         )
                                     )
         return configs

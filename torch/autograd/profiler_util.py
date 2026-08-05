@@ -146,7 +146,7 @@ class EventList(list):
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
 
-        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would make [0, 10]
         be a parent of two other intervals.
 
         If for any reason two intervals intersect only partially, this function
@@ -304,15 +304,16 @@ class EventList(list):
             for evt in self:
                 if evt.trace_name is None:
                     continue
+                name_json = json.dumps(evt.trace_name)
                 f.write(
-                    '{{"name": "{}", '
+                    '{{"name": {}, '
                     '"ph": "X", '
                     '"ts": {}, '
                     '"dur": {}, '
                     '"tid": {}, '
                     '"pid": "CPU functions", '
                     '"args": {{}}}}, '.format(
-                        evt.trace_name,
+                        name_json,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -324,7 +325,7 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        f'{{"name": "{evt.trace_name}", '
+                        f'{{"name": {name_json}, '
                         '"ph": "s", '
                         f'"ts": {evt.time_range.start}, '
                         f'"tid": {evt.thread}, '
