@@ -19,6 +19,7 @@ from cutlass.operators.status import Status
 from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     DENSE_GEMM_REDUCTION_CAPABILITIES,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
 from torch._inductor.kernel.gemm_epilogue_codegen import GemmReductionCompileConfig
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
@@ -72,6 +73,9 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         max_group = self.cta_tile_m if axis == 0 else self.cta_tile_n
         if group <= 1 or group > max_group:
             return Status.fail("Dense EFC local reduction group exceeds its tile")
+        descriptor = GemmReductionDescriptor.parse(reduction.reduction_type)
+        if axis == 1 and group > 32 and descriptor.kind == "mean":
+            return Status.fail("Dense EFC cross-fragment mean is unsupported")
         if reduction.feeds_main and axis == 0 and self.cta_tile_n > 32:
             return Status.fail("Dense M-axis feed-main requires a 32-column tile")
         if not DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(reduction):
