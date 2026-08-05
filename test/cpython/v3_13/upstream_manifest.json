@@ -101,8 +101,8 @@
       "upstream": "Lib/test/test_dictcomps.py"
     },
     "test_enum.py": {
-      "sha256": "c656b79b79a6706b54e47b4e9dcb36034f5e16f80b69dc3508acdb714d6c5809",
-      "tag": "v3.13.12",
+      "sha256": "702e746d19c77dbeb5434fb692b369f0ebe10f68dc81ad6041e57a1be65d801a",
+      "tag": "v3.13.5",
       "upstream": "Lib/test/test_enum.py"
     },
     "test_exception_variations.py": {
@@ -167,7 +167,7 @@
     },
     "test_isinstance.py": {
       "sha256": "2a1e36a89336d2a266ee56a5e725312ca19d86138e6414bd89f2ded6bbecf102",
-      "tag": "v3.13.13",
+      "tag": "v3.13.5",
       "upstream": "Lib/test/test_isinstance.py"
     },
     "test_iter.py": {

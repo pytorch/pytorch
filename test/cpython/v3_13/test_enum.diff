@@ -9,7 +9,7 @@ diff --git a/test/cpython/v3_13/test_enum.py b/test/cpython/v3_13/test_enum.py
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.12/Lib/test/test_enum.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_enum.py
 +
 +import torch
 +import torch._dynamo.test_case
@@ -37,7 +37,7 @@ diff --git a/test/cpython/v3_13/test_enum.py b/test/cpython/v3_13/test_enum.py
 -                optionflags=doctest.ELLIPSIS|doctest.NORMALIZE_WHITESPACE,
 -                ))
 -    howto_tests = os.path.join(REPO_ROOT, 'Doc/howto/enum.rst')
--    if os.path.exists(howto_tests) and sys.float_repr_style == 'short':
+-    if os.path.exists(howto_tests):
 -        tests.addTests(doctest.DocFileSuite(
 -                howto_tests,
 -                module_relative=False,

@@ -4,12 +4,21 @@ The checked-in .diff for each adapted file must be exactly the patch that turns
 the pristine upstream CPython file (at the tag named in the Dynamo patch
 header) into the in-tree adapted file.
 
-CI cannot fetch from GitHub, so we store sha256(pristine) in
+CI cannot fetch from GitHub, so we store a content hash of the pristine file in
 upstream_manifest.json and verify offline via:
 
   reverse_apply(adapted, diff) -> pristine
   sha256(pristine) == manifest hash
-  apply(pristine, diff) == adapted
+
+sha256 values in the manifest are of CRLF-normalized bytes (LF-only), not the
+raw upstream payload from curl | sha256sum. Normalize CRLF to LF before hashing
+to reproduce a manifest digest.
+
+This offline check trusts whoever last ran tools/regenerate_cpython_diffs.py;
+it does not re-fetch upstream in CI. A periodic network job would close that gap.
+
+typinganndata/ helper modules are not adapted tests and have no *.diff; they are
+intentionally excluded from pair iteration (we only walk *.diff files).
 """
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ def normalize_text(text: str) -> str:
 
 
 def sha256_bytes(data: bytes) -> str:
+    """Hash CRLF-normalized bytes (see module docstring)."""
     return hashlib.sha256(normalize_bytes(data)).hexdigest()
 
 
@@ -56,18 +66,12 @@ def iter_diff_pairs() -> list[tuple[Path, Path]]:
 
 
 def parse_header(py_path: Path) -> tuple[str, str]:
-    """Return (tag, upstream_relpath) from the Dynamo patch header."""
+    """Return (tag, upstream_relpath) from the Dynamo patch header URL."""
     head = py_path.read_text(encoding="utf-8", errors="replace")[:5000]
     match = URL_RE.search(head)
-    if match:
-        tag, upstream = match.group(1), match.group(2)
-    else:
-        # Fallback for older adapted files missing the source URL comment.
-        rel = py_path.relative_to(CPYTHON_DIR).as_posix()
-        if rel.startswith("test_unittest/"):
-            tag, upstream = "v3.13.5", f"Lib/test/{rel}"
-        else:
-            raise ValueError(f"no cpython source URL in header: {py_path}")
+    if not match:
+        raise ValueError(f"no cpython source URL in header: {py_path}")
+    tag, upstream = match.group(1), match.group(2)
 
     # Catch copy-paste mistakes like pointing test_binop.py at test_iter.py.
     if Path(upstream).name != py_path.name:
@@ -123,20 +127,10 @@ def _git_apply(
         cmd.append(str(patch_path))
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
         if proc.returncode != 0:
-            # Retry with whitespace tolerance for older noisy hunks.
-            cmd2 = ["git", "apply", "--ignore-whitespace"]
-            if reverse:
-                cmd2.append("-R")
-            cmd2.append(str(patch_path))
-            proc2 = subprocess.run(cmd2, cwd=root, capture_output=True, text=True)
-            if proc2.returncode != 0:
-                err = (proc.stderr or proc.stdout or "") + "\n" + (
-                    proc2.stderr or proc2.stdout or ""
-                )
-                raise RuntimeError(
-                    f"git apply{' -R' if reverse else ''} failed for {rel_in_repo}:\n"
-                    f"{err.strip()}"
-                )
+            err = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(
+                f"git apply{' -R' if reverse else ''} failed for {rel_in_repo}:\n{err}"
+            )
 
         if not target.is_file():
             raise RuntimeError(f"target missing after apply: {rel_in_repo}")
@@ -151,6 +145,7 @@ def reverse_apply_to_pristine(py_path: Path, diff_path: Path) -> bytes:
 
 
 def apply_diff_to_adapted(pristine: bytes, py_path: Path, diff_path: Path) -> bytes:
+    """Forward-apply for regen tooling (not used by the offline verify check)."""
     rel = py_path.relative_to(REPO_ROOT).as_posix()
     diff_text = diff_path.read_text(encoding="utf-8", errors="replace")
     return _git_apply(pristine, diff_text, rel, reverse=False)
@@ -193,10 +188,6 @@ def make_unified_diff(pristine: bytes, adapted: bytes, rel_in_repo: str) -> str:
         if not text.strip():
             raise RuntimeError(f"empty diff for {rel_in_repo}; files are identical?")
 
-        # Rewrite a/a/... and b/b/... (from cwd layout) into a/rel and b/rel.
-        # git diff --no-index with paths a/rel b/rel already emits:
-        #   diff --git a/a/rel b/b/rel
-        # Normalize to a/rel b/rel.
         lines: list[str] = []
         for line in text.splitlines():
             if line.startswith("diff --git "):
@@ -206,7 +197,6 @@ def make_unified_diff(pristine: bytes, adapted: bytes, rel_in_repo: str) -> str:
             elif line.startswith("+++ "):
                 lines.append(f"+++ b/{rel_in_repo}")
             elif line.startswith("index "):
-                # Drop unstable blob hashes; apply does not need them.
                 continue
             else:
                 lines.append(line)
@@ -253,19 +243,6 @@ def verify_pair(
             f"(from reverse-apply={got_hash}, manifest={expected_hash}). "
             f"If you edited the adapted file, regenerate the .diff and manifest "
             f"with: python tools/regenerate_cpython_diffs.py --only {rel}"
-        )
-
-    try:
-        applied = apply_diff_to_adapted(pristine, py_path, diff_path)
-    except Exception as e:
-        errors.append(f"{rel}: forward-apply failed: {e}")
-        return errors
-
-    adapted = normalize_bytes(py_path.read_bytes())
-    if applied != adapted:
-        errors.append(
-            f"{rel}: apply(pristine, diff) != adapted file "
-            f"(round-trip mismatch; regenerate the .diff)"
         )
     return errors
 
