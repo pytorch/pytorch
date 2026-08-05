@@ -6114,16 +6114,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            unimplemented(
-                gb_type="failed to bind arguments when attempting to inline",
-                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
-                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
-                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-                from_exc=e,
-            )
+            # bind_args mirrors CPython argument binding, so a bind failure is the
+            # same TypeError eager raises at the call site. Surface it as an
+            # observed exception (attributed to the parent's CALL) so user code
+            # can catch it, matching eager, instead of graph-breaking.
+            raise_observed_exception(TypeError, parent, args=[str(e)])
 
         if sub_locals is None:
             raise AssertionError("expected sub_locals is not None to be true")
