@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import typing
+import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
@@ -255,7 +256,7 @@ class CUDAGraph(_CUDAGraph):
     # Read-only property exposed from the C++ _CUDAGraph base via pybind;
     # annotated (not assigned) so the type checker sees it without shadowing it.
     _has_graph_exec: bool
-    # Stays None unless maybe_stamp_capture_graph_id stamps it during capture_end
+    # Stays None unless maybe_stamp_capture_root stamps it at capture_begin
     # (requires annotations enabled and cudaGraphNodeGetToolsId available).
     _capture_graph_id: int | None
     # Exec graph id the recorded annotations are currently keyed to, or None
@@ -551,14 +552,11 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         self.capture_end_pre()
-        # Run the in-window work (stamp, then user capture-end hooks) while the
-        # template is live (both keep_graph modes). Errors here are unexpected
-        # (stamp) or user bugs (hooks) and propagate -- we deliberately don't
-        # wrap them in a finally that calls capture_end_post(), since a failing
-        # finalize would mask the real error.
-        from torch.cuda._graph_annotations import maybe_stamp_capture_graph_id
-
-        maybe_stamp_capture_graph_id(self)
+        # Run the user capture-end hooks while the template is live (both keep_graph
+        # modes). The capture graph id is NOT read here: maybe_stamp_capture_root already
+        # stamped it at capture_begin, and the template keeps that id for its whole life.
+        # Errors are user bugs and propagate -- we deliberately don't wrap them in a finally
+        # that calls capture_end_post(), since a failing finalize would mask the real error.
         for hook in list(self._capture_end_hooks.values()):
             hook(self)
         if not self._keep_graph:
@@ -726,6 +724,12 @@ class CUDAGraph(_CUDAGraph):
         is a true dependency (encoded in the graph) or a fake dependency
         caused by mapping of independent streams to the same hardware
         channel.
+
+        Child-graph and conditional nodes are reported as nodes in their own
+        right, but this walk does not descend into their bodies (those are
+        separate ``cudaGraph_t`` objects), so the work inside them is absent
+        from ``nodes`` and a warning is issued. The ids that *are* reported
+        stay valid: the exec graph preserves top-level node ids.
         """
         # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
         if self._instantiate_graph_data is not None:
@@ -754,7 +758,14 @@ class CUDAGraph(_CUDAGraph):
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
         }
+        # Node types whose work lives in a separate cudaGraph_t (see the warning below).
+        nested_graph_types = {
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+        }
+        nested_node_types: set[str] = set()
 
         raw = self.raw_cuda_graph()
 
@@ -771,6 +782,8 @@ class CUDAGraph(_CUDAGraph):
             handle_to_idx[int(node)] = i
 
             ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            if ntype in nested_graph_types:
+                nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
             graph_id = tools_id >> 32
             node_id = tools_id & 0xFFFFFFFF
@@ -821,6 +834,18 @@ class CUDAGraph(_CUDAGraph):
         for info in node_infos:
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
+
+        if nested_node_types:
+            # What is returned stays correct: the exec graph preserves top-level node
+            # ids and numbers the nested ones after them. Those nested nodes do execute
+            # and do show up in a profiler trace (under this exec graph id, with the
+            # appended node ids), they are just missing from the topology below.
+            warnings.warn(
+                f"get_graph_data: this graph contains {sorted(nested_node_types)} "
+                "nodes; the work inside them is in a separate cudaGraph_t that this "
+                "walk does not descend into, so it is absent from the returned nodes",
+                stacklevel=2,
+            )
 
         data = {
             "exec_graph_id": exec_graph_id,
@@ -987,7 +1012,11 @@ class graph:
         # Pick the annotation backend before capture_begin, so that failing to obtain CUPTI
         # raises without a capture already underway.
         from torch.cuda import _graph_node_callbacks
-        from torch.cuda._graph_annotations import _set_annotations_enabled
+        from torch.cuda._graph_annotations import (
+            _set_annotation_backend,
+            _set_annotations_enabled,
+            maybe_stamp_capture_root,
+        )
 
         backend = "edge_walk"
         if self._enable_annotations and self._annotation_backend != "edge_walk":
@@ -1016,6 +1045,11 @@ class graph:
                     "dependent-edge walk instead."
                 )
 
+        # Scope annotation recording to this capture: the capture-root stamp and
+        # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
+        # set before capture_begin so maybe_stamp_capture_root below is not a no-op.
+        _set_annotations_enabled(self._enable_annotations)
+
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
@@ -1028,17 +1062,20 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
+        # The capture stream is now capturing into the top-level graph, and this is the only
+        # point where its id is readable (the cudaGraph_t itself does not exist until
+        # capture_end). One read serves everything downstream: mark_kernels telling a
+        # conditional-node body apart from this graph, the CUPTI backend's body-node filter,
+        # and the stamp remap_to_exec_graph later rekeys from.
+        maybe_stamp_capture_root(self.cuda_graph)
 
-        # Enabling the callback needs the capture live: it snapshots the top-level capture
-        # graph so body nodes can be filtered out. If that does not work out, settle on the
-        # edge walk before any mark_kernels scope runs rather than recording keys that would
-        # match nothing.
-        if backend == "cupti" and not _graph_node_callbacks.arm(self.capture_stream):
+        # Arming needs the capture live. If it does not work out, settle on the edge walk
+        # before any mark_kernels scope runs rather than recording keys that would match
+        # nothing -- which is why the backend is published only now.
+        if backend == "cupti" and not _graph_node_callbacks.arm():
             _graph_node_callbacks.disarm()
             backend = "edge_walk"
-        # Scope annotation recording to this capture: stamp/mark_kernels gate on this flag,
-        # and __exit__ always clears it.
-        _set_annotations_enabled(self._enable_annotations, backend)
+        _set_annotation_backend(backend)
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks

@@ -361,6 +361,28 @@ inline common_dtype<T, U> div(const T x, const U y) {
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return ::metal::fma(x, y, z);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return z + mul(x, y);
+}
+
 // Remainder operator
 template <
     typename T,

@@ -44,6 +44,7 @@ control (e.g. resolving once before remapping several graphs).
 from __future__ import annotations
 
 import importlib.metadata
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
@@ -108,34 +109,74 @@ _annotation_backend: str = "edge_walk"
 # information from graph topology after the fact.
 _active_scopes: list[dict[str, Any]] = []
 
+# Id of the top-level capture graph of the active capture, read once at capture_begin (see
+# maybe_stamp_capture_root) and then used by everyone who needs it: mark_kernels compares
+# against it to detect a scope inside a conditional-node body, the CUPTI backend filters out
+# body nodes the same way, and the graph object is stamped with it for the later remap.
+_capture_root_graph_id: int | None = None
 
-def _set_annotations_enabled(enabled: bool, backend: str = "edge_walk") -> None:
-    """Set whether annotation recording is active, and how scopes discover their nodes.
-    Used by ``torch.cuda.graph`` to scope annotations to a capture; not a public API."""
-    global _annotations_enabled, _annotation_backend
+
+def capture_root_graph_id() -> int | None:
+    """The active capture's top-level graph id, or ``None`` outside a capture that recorded
+    one. Not a public API."""
+    return _capture_root_graph_id
+
+
+# The merge of _active_scopes, maintained whenever that stack changes rather than derived
+# per node: scopes are entered and left orders of magnitude less often than nodes are
+# created, and merging per node would also hand every node its own equal-but-distinct dict.
+_current_annotation: dict[str, Any] | None = None
+
+
+def _refresh_current_annotation() -> None:
+    """Recompute the merged annotation after ``_active_scopes`` changes.
+
+    Nested scopes merge key-by-key with the inner scope winning, matching what the edge walk
+    produces via ``resolve_pending_annotations``. A single scope is used as-is, so every node
+    it covers shares one dict -- as they do for nested scopes too."""
+    global _current_annotation
+    if not _active_scopes:
+        _current_annotation = None
+    elif len(_active_scopes) == 1:
+        _current_annotation = _active_scopes[0]
+    else:
+        merged: dict[str, Any] = {}
+        for annotation in reversed(_active_scopes):
+            for key, value in annotation.items():
+                merged.setdefault(key, value)
+        _current_annotation = merged
+
+
+def _set_annotations_enabled(enabled: bool) -> None:
+    """Set whether annotation recording is active. Used by ``torch.cuda.graph``
+    to scope annotations to a capture; not a public API."""
+    global _annotations_enabled, _capture_root_graph_id
     _annotations_enabled = enabled
-    _annotation_backend = backend
     if not enabled:
+        _capture_root_graph_id = None
         # A capture that raised mid-scope would otherwise leak its scopes into the next one.
         _active_scopes.clear()
+        _refresh_current_annotation()
+
+
+def _set_annotation_backend(backend: str) -> None:
+    """Set how ``mark_kernels`` scopes discover their nodes for this capture.
+
+    Separate from :func:`_set_annotations_enabled` because the two are decided at different
+    points: recording is enabled before ``capture_begin`` (``maybe_stamp_capture_root`` is
+    gated on it), while the backend is only final once the CUPTI callback has actually been
+    armed, which needs the capture live. Not a public API."""
+    global _annotation_backend
+    _annotation_backend = backend
 
 
 def current_annotation() -> dict[str, Any] | None:
     """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None``
     when none are.
 
-    Nested scopes merge key-by-key with the inner scope winning, matching what the edge
-    walk produces via ``resolve_pending_annotations``. Read by the CUPTI node-creation
-    handler; not a public API."""
-    if not _active_scopes:
-        return None
-    if len(_active_scopes) == 1:
-        return _active_scopes[0]
-    merged: dict[str, Any] = {}
-    for annotation in reversed(_active_scopes):
-        for key, value in annotation.items():
-            merged.setdefault(key, value)
-    return merged
+    A bare read of state maintained by :func:`_refresh_current_annotation`, because the CUPTI
+    node-creation handler calls this once per node on the capture thread. Not a public API."""
+    return _current_annotation
 
 
 def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
@@ -145,6 +186,44 @@ def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
     backends are remapped to exec-graph ids by ``remap_to_exec_graph`` identically. Not a
     public API."""
     _kernel_annotations[tools_id].append(annotation)
+
+
+def _graph_id(graph: Any) -> int:
+    """The driver's unique id for a ``cudaGraph_t``.
+
+    Identifies a graph across its whole lifetime, unlike the handle itself: that is a
+    pointer, so a graph created after another is destroyed can reuse the value and
+    compare equal to it."""
+    return _check_cuda_bindings(
+        _cuda_runtime.cudaGraphGetId(graph)  # pyrefly: ignore[missing-attribute]
+    )
+
+
+def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Record the top-level capture graph of the capture just begun, and stamp it on the
+    graph for the later remap.
+
+    Called by ``torch.cuda.graph`` right after ``capture_begin``, while the current stream is
+    still capturing into the top-level graph. It has to go through the stream because the
+    ``cudaGraph_t`` does not exist until ``capture_end`` -- ``raw_cuda_graph()`` raises before
+    then -- but the template graph keeps that one id for its whole life, so this single read
+    serves every consumer: the conditional-body checks in ``mark_kernels``, the CUPTI
+    backend's body-node filter, and ``remap_to_exec_graph`` via the stamp below. Not a public
+    API."""
+    global _capture_root_graph_id
+    _capture_root_graph_id = None
+    if not _annotations_enabled or _is_tools_id_unavailable():
+        return
+    stream_handle = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
+        init_value=torch.cuda.current_stream().cuda_stream
+    )
+    state = _get_capture_state(stream_handle)
+    if state is None:
+        return
+    _capture_root_graph_id = _graph_id(state[0])
+    torch_cuda_graph._capture_graph_id = _capture_root_graph_id
+    # Fresh capture: annotations are keyed by this capture id until remapped.
+    torch_cuda_graph._remapped_exec_id = None
 
 
 def _probe_tools_id() -> bool:
@@ -315,6 +394,12 @@ _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 # import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
+# The same set as raw driver enum values, for callers handed a plain int rather than a
+# CUgraphNodeType (CUPTI reports ``GraphData.node_type`` that way). Derived from
+# _get_annotatable_types so the membership is defined in exactly one place; cached because
+# the CUPTI backend consults it once per node created.
+_ANNOTATABLE_TYPE_VALUES: frozenset[int] | None = None
+
 
 def _get_annotatable_types() -> set[Any]:
     global _ANNOTATABLE_TYPES
@@ -327,6 +412,34 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
         }
     return _ANNOTATABLE_TYPES
+
+
+def _get_annotatable_type_values() -> frozenset[int]:
+    """:func:`_get_annotatable_types` as raw driver enum values."""
+    global _ANNOTATABLE_TYPE_VALUES
+    if _ANNOTATABLE_TYPE_VALUES is None:
+        _ANNOTATABLE_TYPE_VALUES = frozenset(int(t) for t in _get_annotatable_types())
+    return _ANNOTATABLE_TYPE_VALUES
+
+
+# Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
+# bodies). The dependent-edge walk does not descend into such a node, and the nodes
+# inside are numbered in the body graph's id space, which remap_to_exec_graph never
+# rekeys -- so annotations there would be silently lost. See mark_kernels. Initialized
+# lazily, like _ANNOTATABLE_TYPES above: _cuda_driver is None when cuda.bindings is
+# absent, so reading the enum at import time would break `import torch`.
+_NESTED_GRAPH_TYPES: set[Any] | None = None
+
+
+def _get_nested_graph_types() -> set[Any]:
+    global _NESTED_GRAPH_TYPES
+    if _NESTED_GRAPH_TYPES is None:
+        node_types = _cuda_driver.CUgraphNodeType  # pyrefly: ignore[missing-attribute]
+        _NESTED_GRAPH_TYPES = {
+            node_types.CU_GRAPH_NODE_TYPE_GRAPH,
+            node_types.CU_GRAPH_NODE_TYPE_CONDITIONAL,
+        }
+    return _NESTED_GRAPH_TYPES
 
 
 # Pending scopes: (annotation, toolsIds discovered for the scope).
@@ -377,9 +490,13 @@ def _end_kernel_scope(scope: _KernelScope) -> list[int]:
         scope_nodes = _collect_descendants(new_roots, include_start_nodes=True)
 
     annotatable = _get_annotatable_types()
+    nested = _get_nested_graph_types()
+    nested_seen: set[str] = set()
     tools_ids: list[int] = []
     for node in scope_nodes.values():
         node_type = _get_node_type(node)
+        if node_type in nested:
+            nested_seen.add(node_type.name)
         if node_type not in annotatable:
             continue
         tools_ids.append(
@@ -388,6 +505,16 @@ def _end_kernel_scope(scope: _KernelScope) -> list[int]:
                     node
                 )
             )
+        )
+
+    if nested_seen:
+        # The annotations recorded above are still correct -- the exec graph preserves
+        # top-level node ids -- they just do not cover the nested body.
+        warnings.warn(
+            f"mark_kernels: this scope contains {sorted(nested_seen)} nodes; the work "
+            "inside them is in a separate cudaGraph_t that this walk does not descend "
+            "into, so it is left unannotated",
+            stacklevel=4,
         )
     return tools_ids
 
@@ -425,6 +552,18 @@ def mark_kernels(annotation: str | dict[str, Any]):
         already-capturing stream must be synchronized with the current
         stream first.
 
+    .. note::
+        Child-graph and conditional nodes have bodies in a separate
+        ``cudaGraph_t`` that this walk does not descend into, so their work is
+        left unannotated and a warning is issued. Descending is possible
+        (``cudaGraphNodeGetParams`` exposes the body graphs), but would not be
+        enough on its own: a body's nodes are numbered in that graph's id space
+        and are renumbered again when the exec graph inlines them, and nothing
+        exposes that renumbering, so :func:`remap_to_exec_graph` could not key
+        the annotations to what a profiler reports. For the same reason a scope
+        *inside* a conditional body (``torch.cond`` / ``torch.while_loop``)
+        records nothing at all.
+
     .. warning::
         This API is in prototype and may change in future releases.
 
@@ -449,6 +588,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
         # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
         # per enclosing scope.
         _active_scopes.append(annotation)
+        _refresh_current_annotation()
         try:
             yield
         finally:
@@ -458,10 +598,29 @@ def mark_kernels(annotation: str | dict[str, Any]):
                 if _active_scopes[i] is annotation:
                     del _active_scopes[i]
                     break
+            _refresh_current_annotation()
         return
 
     scope = _begin_kernel_scope()
     if scope is None:
+        yield
+        return
+
+    if (
+        _capture_root_graph_id is not None
+        and _graph_id(scope.graph) != _capture_root_graph_id
+    ):
+        # Inside a conditional node's body: torch.cond / torch.while_loop capture into a
+        # separate cudaGraph_t. Its node ids are in that graph's id space and are
+        # renumbered again in the exec graph, so anything recorded here would be a key
+        # that matches nothing in a trace. Record nothing rather than dead keys.
+        warnings.warn(
+            "mark_kernels: this scope is inside a CUDA graph conditional-node body "
+            "(torch.cond / torch.while_loop), which is captured into a separate "
+            "cudaGraph_t whose node ids are never remapped to the exec graph; "
+            "nothing is annotated for it",
+            stacklevel=3,
+        )
         yield
         return
 
@@ -470,32 +629,6 @@ def mark_kernels(annotation: str | dict[str, Any]):
     tools_ids = _end_kernel_scope(scope)
     if tools_ids:
         _pending_scopes.append((annotation, tools_ids))
-
-
-def maybe_stamp_capture_graph_id(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Record the captured graph's id on the graph object for later remap.
-
-    Called from ``capture_end`` in the window after capture ends and before the
-    graph is finalized, where the template ``cudaGraph_t`` is live for both
-    ``keep_graph`` modes (and reachable via ``raw_cuda_graph``). ``remap_to_exec_graph``
-    later matches this graph's annotations to its exec id via this stamp, without
-    relying on call ordering. No-op if annotations are disabled or
-    ``cudaGraphNodeGetToolsId`` is unavailable. Harmless when no ``mark_kernels``
-    regions run: the annotation map stays empty so resolve and remap are no-ops.
-    """
-    if not _annotations_enabled or _is_tools_id_unavailable():
-        return
-    # Past the _is_tools_id_unavailable() guard cuda-bindings is present and the
-    # driver supports the toolsId API (same version gate as cudaGraphGetId), so
-    # any error here is unexpected: error-check and let it raise. cudaGraphGetId
-    # accepts the raw cudaGraph_t handle (int) directly.
-    torch_cuda_graph._capture_graph_id = _check_cuda_bindings(
-        _cuda_runtime.cudaGraphGetId(  # pyrefly: ignore[missing-attribute]
-            torch_cuda_graph.raw_cuda_graph()
-        )
-    )
-    # Fresh capture: annotations are keyed by this capture id until remapped.
-    torch_cuda_graph._remapped_exec_id = None
 
 
 def resolve_pending_annotations() -> None:
@@ -536,7 +669,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     This function rewrites the keys so annotations match the trace.
 
     The graph's capture id is read from the ``_capture_graph_id`` stamped on it
-    by ``maybe_stamp_capture_graph_id`` in the capture_end window, so only the annotations
+    by ``maybe_stamp_capture_root`` at capture_begin, so only the annotations
     belonging to this graph are rekeyed. This is order-independent and correct
     when several graphs are captured in sequence: call once per graph. Graphs
     captured with annotations disabled have no capture id and are skipped.

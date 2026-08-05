@@ -1332,10 +1332,19 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertGreater(stats["buffers_completed"], 0)
 
 
-# CUPTI callback domain/cbid used by the registry tests. Graph-node creation is the
-# motivating consumer, and RESOURCE callbacks need no CUDA work beyond building a graph.
-_RESOURCE_DOMAIN = 3  # CUpti_CallbackDomain.CUPTI_CB_DOMAIN_RESOURCE
-_CBID_GRAPHNODE_CREATED = 13  # CUPTI_CBID_RESOURCE_GRAPHNODE_CREATED
+def _graph_node_created_key():
+    """The ``(domain, cbid)`` the registry tests exercise: RESOURCE / GRAPHNODE_CREATED.
+
+    Graph-node creation is the motivating consumer, and RESOURCE callbacks need no CUDA work
+    beyond building a graph. Resolved from cupti-python rather than hardcoded, and lazily
+    because this module must import without it.
+    """
+    from cupti.cupti import (  # pyrefly: ignore[missing-import]
+        CallbackDomain,
+        CallbackIdResource,
+    )
+
+    return int(CallbackDomain.RESOURCE), int(CallbackIdResource.GRAPHNODE_CREATED)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -1364,7 +1373,7 @@ class TestCuptiCallbackRegistry(TestCase):
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_register_unregister_handler(self):
         monitor = self._monitor()
-        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        key = _graph_node_created_key()
         first = monitor.register_callback_handler(*key, lambda *a: None)
         second = monitor.register_callback_handler(*key, lambda *a: None)
         self.addCleanup(monitor.unregister_callback_handler, second)
@@ -1381,7 +1390,7 @@ class TestCuptiCallbackRegistry(TestCase):
         # Two consumers scoping the same callback to different windows must not disable
         # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
         monitor = self._monitor()
-        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        key = _graph_node_created_key()
         handler = monitor.register_callback_handler(*key, lambda *a: None)
         self.addCleanup(monitor.unregister_callback_handler, handler)
 
@@ -1412,7 +1421,7 @@ class TestCuptiCallbackRegistry(TestCase):
         # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
         # the others (order-independent, so check both orderings).
         monitor = self._monitor()
-        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        key = _graph_node_created_key()
         seen = []
 
         def boom(*_args):
@@ -1434,7 +1443,7 @@ class TestCuptiCallbackRegistry(TestCase):
         self.assertIsNone(monitor._subscriber)
 
         handler = monitor.register_callback_handler(
-            _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+            *_graph_node_created_key(), lambda *a: None
         )
         self.assertIsNotNone(monitor._subscriber)
         # No user-defined records and no decode worker: the activity path stayed off.
@@ -1453,7 +1462,7 @@ class TestCuptiCallbackRegistry(TestCase):
 
         monitor = self._monitor()
         handler = monitor.register_callback_handler(
-            _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+            *_graph_node_created_key(), lambda *a: None
         )
         obs = monitor.register(
             {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
@@ -1482,7 +1491,7 @@ class TestCuptiCallbackRegistry(TestCase):
         with patch.object(cupti_python, "_NOOP_CB", other):
             monitor = self._monitor()
             handler = monitor.register_callback_handler(
-                _RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED, lambda *a: None
+                *_graph_node_created_key(), lambda *a: None
             )
             self.addCleanup(monitor.unregister_callback_handler, handler)
             self.assertIsNotNone(monitor._callback_trampoline)
@@ -1492,7 +1501,7 @@ class TestCuptiCallbackRegistry(TestCase):
     def test_graph_node_callback_fires_during_capture_only(self):
         # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
         # armed during a capture, and not at all once disarmed (so replay pays nothing).
-        key = (_RESOURCE_DOMAIN, _CBID_GRAPHNODE_CREATED)
+        key = _graph_node_created_key()
         n_kernels = 4
         monitor = self._monitor()
         fired = []
