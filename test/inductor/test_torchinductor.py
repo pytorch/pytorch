@@ -5935,9 +5935,11 @@ for dtype in (torch.int32, torch.int64):
         x3d = torch.randn(1, 1, 1, 1, 1, device=self.device)
         self.common(Unpool3d().to(self.device), (x3d, x3d.long()))
 
-    def test_max_unpool2d_channels_last_stride_cpu(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("CPU max_unpool2d preserves channels-last layout")
+    def test_max_unpool2d_channels_last_stride(self):
+        if self.device not in ("cpu", "xpu"):
+            raise unittest.SkipTest(
+                "only CPU and XPU max_unpool2d preserve channels-last layout"
+            )
 
         def fn(x, indices):
             return F.max_unpool2d(x, indices, kernel_size=2, stride=2)
