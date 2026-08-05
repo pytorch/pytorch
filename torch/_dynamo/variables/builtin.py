@@ -126,6 +126,7 @@ from .object_protocol import (
     pynumber_multiply,
     pynumber_negative,
     pynumber_positive,
+    pynumber_tobase,
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
@@ -1838,6 +1839,24 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if (
+            name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+            and len(args) == 2
+            and not kwargs
+            and isinstance(self.fn, type)
+            and args[0].is_python_constant()
+            and args[1].is_python_constant()
+        ):
+            # Unbound rich-comparison dunder, e.g. complex.__eq__(1+1j, 2).
+            # Invoke only the left type's slot on the constants, mirroring
+            # CPython (returns NotImplemented rather than falling back to the
+            # reflected operation when the operands are incompatible).
+            lval = args[0].as_python_constant()
+            if isinstance(lval, self.fn):
+                return ConstantVariable.create(
+                    getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
+
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
@@ -1913,6 +1932,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return pynumber_float(tx, arg)
+
+    def call_bin(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 2)
+
+    def call_oct(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 8)
+
+    def call_hex(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_tobase(tx, arg, 16)
 
     def call_bool(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -3503,6 +3537,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
+                variables.DequeVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -3745,14 +3780,18 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args and not kwargs:
+                # list.__new__ (PyType_GenericNew) ignores extra args -- only
+                # the first arg (the type) matters. Pass init_args=[] so
+                # reconstruction emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
-                    args[1:],
+                    [],
                     tx=tx,
                 )
 
