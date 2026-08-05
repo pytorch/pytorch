@@ -1,7 +1,9 @@
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 FlyDSL Project Contributors
+"""FlyDSL plain RMSNorm forward kernel and its PyTorch wrapper.
 
-"""Vendored FlyDSL plain RMSNorm forward kernel and PyTorch wrapper."""
+The kernel builder below is specialized per (N, dtype, arch) and compiled on
+first dispatch; flydsl_rmsnorm_impl.py owns the dispatcher predicate that
+decides when it is worth using over ATen.
+"""
 
 import math
 
@@ -24,7 +26,14 @@ VEC_WIDTH = 8
 
 
 def get_warp_size(arch: str) -> int:
-    """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs."""
+    """Return wave64 for CDNA GPUs and wave32 for RDNA GPUs.
+
+    The dispatcher currently admits gfx950 only, so the wave32 answer -- and
+    with it the RED_SLOTS > 1 branch of block_reduce_add that a 32-lane wave
+    forces at every block size -- is unreachable and untested. It is kept
+    because the wave size is baked into the reduction: whoever widens
+    _SUPPORTED_ARCHES must not have to notice that this was hardcoded.
+    """
     return 32 if is_rdna_arch(arch) else 64
 
 
@@ -365,6 +374,18 @@ def rmsnorm_fwd(
     if n is None:
         raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
 
+    device_index = input.device.index
+    arch = _resolve_rocm_arch(device_index)
+    if arch is None:
+        # The dispatcher predicate resolves the arch too and declines when it
+        # cannot, so this only fires for direct callers. The arch selects the
+        # wave size baked into the reduction, so guessing would be silently
+        # wrong rather than merely slow.
+        raise RuntimeError(
+            f"Could not determine the ROCm arch of device {device_index}; "
+            "set FLYDSL_GPU_ARCH to build the FlyDSL RMSNorm kernel"
+        )
+
     rows_m = input.numel() // n
     input_shape = input.shape
 
@@ -375,12 +396,11 @@ def rmsnorm_fwd(
         rstd_flat = torch.empty(rows_m, device=input.device, dtype=torch.float32)
 
         stream = torch.cuda.current_stream()
-        device_index = input.device.index
 
         compiled = _compile_rmsnorm_fwd(
             n,
             _dtype_str(input.dtype),
-            _resolve_rocm_arch(device_index),
+            arch,
             flyc.compile_backend_name(),
             device_index,
             compile_args=(

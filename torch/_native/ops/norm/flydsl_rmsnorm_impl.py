@@ -15,7 +15,6 @@ from .flydsl_rmsnorm_utils import normalized_shape_1d, SUPPORTED_DTYPES
 _SUPPORTED_ARCHES = ("gfx950",)
 _HIP_AVAILABLE = torch.version.hip is not None
 _is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-_rmsnorm_fwd = None
 
 
 @functools.cache
@@ -89,20 +88,7 @@ def _fused_rms_norm_cond(
         return False
     if not _common_supported(input, n, weight):
         return False
-    if eps is None:
-        return False
     return _fused_rms_norm_fwd_perf_wins(input, n)
-
-
-def _get_rmsnorm_fwd():
-    # Imported on first dispatch, not at module scope: the kernel module pulls
-    # in flydsl, which must stay out of `import torch`.
-    global _rmsnorm_fwd
-    if _rmsnorm_fwd is None:
-        from .flydsl_rmsnorm_fwd import rmsnorm_fwd
-
-        _rmsnorm_fwd = rmsnorm_fwd
-    return _rmsnorm_fwd
 
 
 def _fused_rms_norm_impl(
@@ -111,18 +97,31 @@ def _fused_rms_norm_impl(
     weight: torch.Tensor | None,
     eps: float | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    # The predicate guarantees both values are present. Keeping the checks here
-    # makes failures clear if the implementation is ever called directly.
-    if weight is None or eps is None:
-        raise RuntimeError("FlyDSL RMSNorm requires explicit weight and eps")
+    # The predicate guarantees weight is present. Keeping the check here makes
+    # failures clear if the implementation is ever called directly.
+    if weight is None:
+        raise RuntimeError("FlyDSL RMSNorm requires an explicit weight")
+    if eps is None:
+        # nn.RMSNorm defaults eps to None, so this is the common path rather
+        # than an edge case. Match aten/src/ATen/native/cuda/layer_norm_kernel.cu:
+        # aten picks eps from the *accumulator* dtype, which is float32 for
+        # every dtype in SUPPORTED_DTYPES.
+        eps = torch.finfo(torch.float32).eps
 
-    rmsnorm_fwd = _get_rmsnorm_fwd()
+    # Imported on first dispatch, not at module scope: the kernel module pulls
+    # in flydsl, which must stay out of `import torch`.
+    from .flydsl_rmsnorm_fwd import rmsnorm_fwd
+
     return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
 
 
 def register_flydsl_rmsnorm_overrides() -> None:
     # QuACK registers against this symbol too, for NVIDIA. Both registrations
-    # coexist: the predicates are mutually exclusive (ROCm versus NVIDIA).
+    # coexist: the predicates are mutually exclusive (ROCm versus NVIDIA), so
+    # the order the two are registered in -- last registered is consulted
+    # first, see torch/_native/README.md -- does not decide anything today.
+    # Whoever makes either predicate accept the other's hardware has to pick
+    # an order in ops/norm/__init__.py deliberately.
     fu.register_op_override(
         "aten",
         "_fused_rms_norm",

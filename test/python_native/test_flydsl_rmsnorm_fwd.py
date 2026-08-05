@@ -23,12 +23,34 @@ BACKWARD_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 KERNEL_PATH_NS = (4096, 12288, 24576, 114688, 4097, 4103, 8193, 16385, 32769, 98305)
 
 
-def _flydsl_rmsnorm_registered() -> bool:
-    try:
-        operations = set(pn.get_dsl_operations("flydsl"))
-        return "_fused_rms_norm" in operations
-    except Exception:
-        return False
+def _unsupported_environment_reason() -> str | None:
+    """Why this machine cannot exercise the override, or None if it can.
+
+    Only environmental facts belong here. Whether the override actually
+    registered on a machine that satisfies all of them is a property of the
+    gate and the registry, so it is asserted by a test rather than folded in
+    here -- a regression there must fail, not quietly skip this whole class.
+    """
+    if not TEST_CUDA or torch.version.hip is None:
+        return "ROCm required"
+
+    from torch._native import flydsl_utils as fu
+
+    if fu.check_native_jit_disabled():
+        return "native DSL overrides are disabled via TORCH_DISABLE_NATIVE_JIT"
+    if not fu.runtime_available():
+        return "FlyDSL runtime is not installed"
+    if not fu._version_is_ok():
+        return f"FlyDSL {fu.runtime_version()} is outside the supported release"
+
+    from torch._native.ops.norm.flydsl_rmsnorm_impl import _is_supported_arch
+
+    if not _is_supported_arch(torch.cuda.current_device()):
+        return "FlyDSL RMSNorm override requires gfx950"
+    return None
+
+
+_UNSUPPORTED_REASON = _unsupported_environment_reason()
 
 
 class TestFlyDSLRMSNormArch(TestCase):
@@ -59,10 +81,45 @@ class TestFlyDSLRMSNormArch(TestCase):
             self.assertEqual(arch_is_supported(0), expected)
 
 
-@unittest.skipUnless(TEST_CUDA and torch.version.hip is not None, "ROCm required")
-@unittest.skipUnless(
-    _flydsl_rmsnorm_registered(), "FlyDSL RMSNorm overrides are not registered"
-)
+class TestFlyDSLRMSNormHelpers(TestCase):
+    """Helpers that touch neither flydsl nor a device.
+
+    These run everywhere, including the machines where the kernel tests below
+    are skipped for lack of a gfx950 device.
+    """
+
+    @parametrize(
+        "normalized_shape,expected",
+        (
+            (128, 128),
+            ([128], 128),
+            ((128,), 128),
+            # More than one normalized dimension: the kernel flattens only the
+            # last one, so these decline rather than guess.
+            ([2, 64], None),
+            ([], None),
+            # Not a sequence, and a one-element sequence that is not an int.
+            (None, None),
+            (["n"], None),
+        ),
+    )
+    def test_normalized_shape_1d(self, normalized_shape, expected):
+        from torch._native.ops.norm.flydsl_rmsnorm_utils import normalized_shape_1d
+
+        self.assertEqual(normalized_shape_1d(normalized_shape), expected)
+
+    def test_impl_without_weight_raises(self):
+        # The predicate declines weight=None, so reaching the impl means a
+        # caller bypassed it. The error has to name the missing argument
+        # instead of surfacing from somewhere inside the kernel wrapper.
+        from torch._native.ops.norm.flydsl_rmsnorm_impl import _fused_rms_norm_impl
+
+        x = make_tensor((8, 128), device="cpu", dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "requires an explicit weight"):
+            _fused_rms_norm_impl(x, [128], None, EPS)
+
+
+@unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
 class TestFlyDSLRMSNorm(TestCase):
     def setUp(self):
         super().setUp()
@@ -91,6 +148,14 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(torch.isinf(actual), torch.isinf(expected))
         finite = torch.isfinite(expected)
         self.assertEqual(actual[finite], expected[finite])
+
+    def test_override_is_registered(self):
+        # This class only runs where every precondition the gate checks is
+        # already satisfied, so a missing registration means the gate or the
+        # registry regressed. The rest of the class would then silently
+        # compare aten against aten, which is why this is asserted rather
+        # than made a skip condition.
+        self.assertIn("_fused_rms_norm", pn.get_dsl_operations("flydsl"))
 
     @parametrize("dtype", BACKWARD_DTYPES)
     def test_backward_through_override_matches_aten(self, dtype):
@@ -230,6 +295,22 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
 
+    @parametrize("m,n", ((8192, 4096), (4096, 8192), (2048, 16384)))
+    def test_band_minimum_dispatches(self, m, n):
+        # The smallest (rows, N) each band in _fused_rms_norm_fwd_perf_wins
+        # accepts. The OpInfo variant deliberately carries only one shape this
+        # large, so the other bands are covered here instead of in the general
+        # op_db where every TestCommon test would pay for them.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_inputs(m, n, DISPATCH_DTYPE)
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (n,), weight, EPS)
+        got = torch.rms_norm(x, (n,), weight, EPS)
+
+        self.assertEqual(got, ref)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
     def test_runtime_eps_dispatches_and_reuses_cache(self):
         from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
 
@@ -244,6 +325,54 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(info.misses, 1)
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
+
+    def test_nn_rmsnorm_default_eps_dispatches(self):
+        # nn.RMSNorm leaves eps at None and passes it straight through, so this
+        # is the shape of call a real model makes. Declining eps=None in the
+        # predicate would make the override unreachable from nn.RMSNorm while
+        # every explicit-eps test here still passed.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        module = torch.nn.RMSNorm(DISPATCH_N, device="cuda", dtype=DISPATCH_DTYPE)
+        self.assertIsNone(module.eps)
+        with torch.no_grad():
+            module.weight.copy_(
+                make_tensor((DISPATCH_N,), device="cuda", dtype=DISPATCH_DTYPE)
+            )
+        x = make_tensor((DISPATCH_M, DISPATCH_N), device="cuda", dtype=DISPATCH_DTYPE)
+
+        with pn.flydsl.disabled():
+            ref = module(x)
+        got = module(x)
+
+        self.assertEqual(got, ref)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+    def test_multi_dim_normalized_shape_raises(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_fwd
+
+        x, weight = self._make_inputs(8, 128, torch.float16)
+        with self.assertRaisesRegex(ValueError, "one normalized dimension"):
+            rmsnorm_fwd(x.view(8, 8, 16), [8, 16], weight, EPS)
+
+    def test_unsupported_dtype_raises(self):
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_fwd
+
+        x, weight = self._make_inputs(8, 128, torch.float64)
+        with self.assertRaisesRegex(TypeError, "unsupported RMSNorm dtype"):
+            rmsnorm_fwd(x, [128], weight, EPS)
+
+    def test_unresolvable_arch_raises(self):
+        # The arch selects the wave size baked into the reduction, so a missing
+        # answer has to be an error rather than a guess.
+        from torch._native.ops.norm import flydsl_rmsnorm_fwd
+
+        x, weight = self._make_inputs(16, 128, torch.float16)
+        with patch.object(flydsl_rmsnorm_fwd, "_resolve_rocm_arch", return_value=None):
+            with self.assertRaisesRegex(
+                RuntimeError, "Could not determine the ROCm arch"
+            ):
+                flydsl_rmsnorm_fwd.rmsnorm_fwd(x, [128], weight, EPS)
 
     def test_n_above_upper_bound_falls_back_without_compiling(self):
         # 114688 is the largest N the dispatcher accepts.
@@ -350,6 +479,7 @@ class TestFlyDSLRMSNorm(TestCase):
 
 
 instantiate_parametrized_tests(TestFlyDSLRMSNormArch)
+instantiate_parametrized_tests(TestFlyDSLRMSNormHelpers)
 instantiate_parametrized_tests(TestFlyDSLRMSNorm)
 
 

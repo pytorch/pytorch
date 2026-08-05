@@ -4760,22 +4760,28 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
     # The FlyDSL override only fires on ROCm for large N with enough rows to
-    # amortize the launch, so most of these shapes sit inside that window:
-    # N in [4096, 8192) needs >= 8192 rows, [8192, 16384) needs >= 4096, and
-    # N >= 16384 needs >= 2048.
+    # amortize the launch: N in [4096, 8192) needs >= 8192 rows, [8192, 16384)
+    # needs >= 4096, and N >= 16384 needs >= 2048.
+    #
+    # Exactly one dispatching shape is listed, and it is the smallest of them.
+    # Any such shape is 64 MB per fp32 tensor, and every TestCommon test pays
+    # for it -- test_noncontiguous_samples copies it, test_compare_cpu runs the
+    # reference on CPU, test_multiple_devices repeats it per device. The other
+    # two bands, and the kernel's internal paths, are covered far more cheaply
+    # by test/python_native/test_flydsl_rmsnorm_fwd.py. No memory guard: this
+    # variant is already gated to gfx950, which has hundreds of GB of HBM, and
+    # largeTensorTest's own gc.collect() + empty_cache() per test costs an
+    # order of magnitude more here than the samples it would protect.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     cases = (
-        # One shape per band, so no band is left to the dedicated RMSNorm test
-        # alone -- these are what test_ops/test_ops_gradients/export exercise.
-        ((8192, 4096), (4096,), {'eps': 1e-5}),
-        ((4096, 8192), (8192,), {'eps': 1e-5}),
-        # This also exercises the scalar tail of the vectorized path.
-        ((2048, 16385), (16385,), {'eps': 1e-5}),
+        # eps omitted, which is what nn.RMSNorm passes, so this covers both the
+        # kernel and the accumulator-epsilon substitution the override does in
+        # aten's place.
+        ((8192, 4096), (4096,), {}),
         # Below the row threshold and below the N threshold: both fall through
         # to aten, which the override must leave numerically untouched.
         ((64, 4096), (4096,), {'eps': 1e-5}),
         ((8, 128), (128,), {'eps': 1e-5}),
-        # eps=None reaches the same aten fallback for the accumulator epsilon.
         ((8, 128), (128,), {}),
     )
     for input_shape, normalized_shape, kw in cases:
