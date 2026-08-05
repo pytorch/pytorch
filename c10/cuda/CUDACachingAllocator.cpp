@@ -1468,8 +1468,6 @@ class DeviceCachingAllocator {
   // allocated in an already-ended conditional child capture.
   struct CaptureState {
     MempoolId_t mempool_id;
-    CaptureId_t capture_id{0};
-    cudaStream_t primary_capture_stream{};
     std::optional<CaptureId_t> parent_capture_id;
     CaptureId_t root_capture_id{0};
     bool is_active{true};
@@ -1477,7 +1475,6 @@ class DeviceCachingAllocator {
   };
 
   ska::flat_hash_map<CaptureId_t, CaptureState> capture_states;
-  ska::flat_hash_map<cudaStream_t, CaptureId_t> primary_stream_to_capture_id;
   ska::flat_hash_map<Block*, CaptureId_t> block_allocation_capture_ids;
 
   // Incremental reverse-traversal state cached per graph.
@@ -1706,37 +1703,44 @@ class DeviceCachingAllocator {
     return block;
   }
 
-  // Resolve the allocator state for an actively capturing stream. The exact
-  // map covers each capture's primary stream without a CUDA query. A capture
-  // may also contain auxiliary streams joined with events, so fall back to
-  // CUDA's capture ID and match it against the registered capture states.
-  std::optional<CaptureId_t> active_capture_id_for_stream(
-      cudaStream_t stream) const {
-    auto capture_it = primary_stream_to_capture_id.find(stream);
-    if (capture_it != primary_stream_to_capture_id.end()) {
-      return capture_it->second;
-    }
+  // Resolve a stream's active capture state only when it belongs to a capture
+  // registered by CUDAGraph. CUDA assigns the same ID to the primary stream and
+  // every auxiliary stream joined to that capture.
+  auto active_capture_for_stream(cudaStream_t stream) {
     if (C10_LIKELY(num_active_captures_ == 0)) {
-      return std::nullopt;
+      return capture_states.end();
     }
-    auto info = stream_get_capture_info(stream);
-    if (info.status == cudaStreamCaptureStatusActive &&
-        capture_states.find(info.capture_id) != capture_states.end()) {
-      return info.capture_id;
+    auto capture_id = c10::cuda::captureIdMayInitCtx(stream);
+    if (!capture_id.has_value()) {
+      return capture_states.end();
     }
-    return std::nullopt;
+    auto capture_it = capture_states.find(capture_id.value());
+    if (capture_it != capture_states.end() && capture_it->second.is_active) {
+      return capture_it;
+    }
+    return capture_states.end();
   }
 
   void record_block_allocation_capture(
       Block* block,
       cudaStream_t request_stream) {
-    auto capture_id = active_capture_id_for_stream(request_stream);
-    if (capture_id.has_value()) {
-      block_allocation_capture_ids[block] = capture_id.value();
+    auto capture_it = active_capture_for_stream(request_stream);
+    if (capture_it != capture_states.end()) {
+      block_allocation_capture_ids[block] = capture_it->first;
     }
   }
 
-  bool is_valid_capture_free(
+  // A free is valid when the free capture is the allocation capture itself or
+  // one of its ancestors. Walk parent links from the allocation capture toward
+  // the root until the free capture is found.
+  //
+  // Allocation capture  Free capture       Result
+  // root                root               allow
+  // child               same child         allow
+  // child               parent or root     allow
+  // parent or root      child              reject
+  // child A             sibling child B    reject
+  bool is_free_in_allocation_capture_or_ancestor(
       CaptureId_t allocation_capture_id,
       CaptureId_t free_capture_id) const {
     while (true) {
@@ -2511,29 +2515,29 @@ class DeviceCachingAllocator {
       stats.oversize_allocations.decrease(1);
 
     // Reject a free performed from a capture that does not enclose the block's
-    // allocation capture. Querying block->stream is unsafe here because a
-    // conditional child's primary capture stream may already be destroyed.
-    // The recorded allocation capture is sufficient to validate the lifetime
-    // without querying that stream.
-    auto block_allocation_capture_it = block_allocation_capture_ids.find(block);
-    if (C10_UNLIKELY(
-            block_allocation_capture_it !=
-            block_allocation_capture_ids.end())) {
-      auto current_stream = c10::cuda::getCurrentCUDAStream(block->device);
-      auto current_capture_id =
-          active_capture_id_for_stream(current_stream.stream());
-      if (current_capture_id.has_value()) {
-        const CaptureId_t allocation_capture_id =
-            block_allocation_capture_it->second;
-        if (!is_valid_capture_free(
-                allocation_capture_id, current_capture_id.value())) {
-          auto current_capture_it =
-              capture_states.find(current_capture_id.value());
-          TORCH_INTERNAL_ASSERT(current_capture_it != capture_states.end());
-          ++current_capture_it->second.invalid_capture_free_count;
+    // allocation capture. A conditional child capture may have ended before
+    // its block is freed in an enclosing capture, so querying block->stream
+    // cannot recover the allocation's capture ID.
+    if (C10_UNLIKELY(!block_allocation_capture_ids.empty())) {
+      auto block_allocation_capture_it =
+          block_allocation_capture_ids.find(block);
+      if (block_allocation_capture_it != block_allocation_capture_ids.end()) {
+        auto current_stream = c10::cuda::getCurrentCUDAStream(block->device);
+        auto current_capture_it =
+            active_capture_for_stream(current_stream.stream());
+        if (current_capture_it != capture_states.end()) {
+          const CaptureId_t allocation_capture_id =
+              block_allocation_capture_it->second;
+          if (!is_free_in_allocation_capture_or_ancestor(
+                  allocation_capture_id, current_capture_it->first)) {
+            // Storage destruction reaches this path through a non-throwing
+            // deleter. Record the violation here and report it from the
+            // explicit conditional capture-end call instead of throwing.
+            ++current_capture_it->second.invalid_capture_free_count;
+          }
         }
+        block_allocation_capture_ids.erase(block_allocation_capture_it);
       }
-      block_allocation_capture_ids.erase(block_allocation_capture_it);
     }
 
     // If the block has been used on more than one stream, handle accordingly.
@@ -3317,8 +3321,6 @@ class DeviceCachingAllocator {
 
     CaptureState capture_state{
         .mempool_id = registration.mempool_id,
-        .capture_id = registration.capture_id,
-        .primary_capture_stream = registration.primary_capture_stream,
         .parent_capture_id = registration.parent_capture_id,
         .root_capture_id = registration.capture_id,
     };
@@ -3335,8 +3337,6 @@ class DeviceCachingAllocator {
     }
 
     capture_states.emplace(registration.capture_id, capture_state);
-    primary_stream_to_capture_id[registration.primary_capture_stream] =
-        registration.capture_id;
     num_active_captures_++;
   }
 
@@ -3356,10 +3356,20 @@ class DeviceCachingAllocator {
         "markCaptureEnd called for an unknown or inactive capture");
     const CaptureState ended_capture = capture_it->second;
     capture_it->second.is_active = false;
-    primary_stream_to_capture_id.erase(ended_capture.primary_capture_stream);
     num_active_captures_--;
 
-    if (!ended_capture.parent_capture_id.has_value()) {
+    if (ended_capture.parent_capture_id.has_value()) {
+      auto parent_it =
+          capture_states.find(ended_capture.parent_capture_id.value());
+      TORCH_INTERNAL_ASSERT(
+          parent_it != capture_states.end() && parent_it->second.is_active,
+          "Conditional capture parent is not active");
+      // If the caller catches the child-end error, every enclosing capture is
+      // still unsafe to replay. Carry the violation to the root so its teardown
+      // also rejects the graph.
+      parent_it->second.invalid_capture_free_count +=
+          ended_capture.invalid_capture_free_count;
+    } else {
       for (auto it = block_allocation_capture_ids.begin();
            it != block_allocation_capture_ids.end();) {
         auto allocation_capture_it = capture_states.find(it->second);
@@ -3372,7 +3382,6 @@ class DeviceCachingAllocator {
       }
       for (auto it = capture_states.begin(); it != capture_states.end();) {
         if (it->second.root_capture_id == capture_id) {
-          primary_stream_to_capture_id.erase(it->second.primary_capture_stream);
           it = capture_states.erase(it);
         } else {
           ++it;
@@ -3381,7 +3390,6 @@ class DeviceCachingAllocator {
     }
 
     return {
-        .mempool_id = ended_capture.mempool_id,
         .invalid_capture_free_count = ended_capture.invalid_capture_free_count,
     };
   }
@@ -5531,18 +5539,6 @@ CaptureEndResult markCaptureEnd(
     current_allocator->markCaptureEnd(device);
     return {};
   }
-}
-
-void finalizeCaptureEnd(c10::DeviceIndex, const CaptureEndResult& result) {
-  TORCH_CHECK(
-      result.invalid_capture_free_count == 0,
-      "Freed ",
-      result.invalid_capture_free_count,
-      " tensor(s) allocated in a parent CUDA graph capture or a sibling "
-      "capture inside a conditional node's child graph. This would cause data "
-      "corruption at replay time if the conditional branch does not execute. "
-      "Hold tensors alive through both branches (e.g., pass as operands to "
-      "torch.cond) and free them after the conditional node completes.");
 }
 
 namespace CudaMallocAsync {
