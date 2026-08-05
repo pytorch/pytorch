@@ -329,7 +329,7 @@ def make_strided_sdpa_input(
     return tensor.detach().requires_grad_(requires_grad)
 
 
-class TestTransformers(NNTestCase):
+class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
@@ -560,7 +560,7 @@ class TestTransformersCUDA(NNTestCase):
                 )[0]
 
 
-class TestTransformersDevice(NNTestCase):
+class TestTransformersAccelerator(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
@@ -2403,13 +2403,15 @@ def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
     return padded_tensor, last_dim_size
 
 
-class TestSDPA(NNTestCase):
+class TestSDPAGeneric(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
     Summary:
         If you are adding a new test to this class, make sure that it runs
         for both cpu and cuda. If you're test is only applicable to cuda,
-        add it to TestSDPAGpuOnly.
+        add it to TestSDPAAccelerator.
     """
+    hw_classification = HardwareClassification.GENERIC
+
     @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
@@ -2573,8 +2575,9 @@ class TestSDPA(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
-class TestSDPACpuOnly(NNTestCase):
+class TestSDPACPU(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
+    hw_classification = HardwareClassification.CPU
 
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
@@ -2957,8 +2960,7 @@ class TestSDPACpuOnly(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
-
-class TestSDPAGpuOnly(NNTestCase):
+class TestSDPAAccelerator(NNTestCase):
     """ Used to test GPU only functionality of scaled_dot_product_attention.
     Generalized from TestSDPACudaOnly; CUDA-specific tests remain guarded by
     PLATFORM_SUPPORTS_* gates that are False on non-CUDA accelerators.
@@ -2973,6 +2975,7 @@ class TestSDPAGpuOnly(NNTestCase):
     """
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
@@ -3187,6 +3190,7 @@ class TestSDPAGpuOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @skipIfRocm
+    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize(
@@ -3270,6 +3274,7 @@ class TestSDPAGpuOnly(NNTestCase):
             )
 
     @skipIfRocm
+    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_gqa_dropout(self, device):
         """GQA should preserve query-head dropout and mask semantics."""
@@ -3345,6 +3350,7 @@ class TestSDPAGpuOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=4e-4, rtol=3e-4)
 
     @skipIfRocm
+    @skipIfXpu(msg="aten::_efficient_attention_forward not supported on XPU")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_gqa_split_key(self, device):
         """Split-key backward should reduce per-query-head KV gradients."""
@@ -3416,6 +3422,7 @@ class TestSDPAGpuOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
     @skipIfRocm
+    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
         """Zero-head low-level attention should return empty outputs and gradients."""
@@ -3466,17 +3473,19 @@ class TestSDPAGpuOnly(NNTestCase):
             self.assertEqual(grad.shape, source.shape)
             self.assertEqual(grad.numel(), 0)
 
+    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @parametrize(
         "fused_kernel",
-        [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
+        [SDPBackend.FLASH_ATTENTION, ] if TEST_XPU else [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
     )
-    def test_mqa_singleton_head_broadcast_native_cuda(self, device, fused_kernel):
+    def test_mqa_singleton_head_broadcast_native_cuda(self, device, fused_kernel: SDPBackend):
         """Native GQA backends should accept implicit MQA broadcasting."""
         if fused_kernel == SDPBackend.FLASH_ATTENTION and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.skipTest("Flash attention is not supported on this system")
         if fused_kernel == SDPBackend.CUDNN_ATTENTION and not PLATFORM_SUPPORTS_CUDNN_ATTENTION:
             self.skipTest("cuDNN attention is not supported on this system")
-
+        import pdb
+        pdb.set_trace()
         query = torch.randn(2, 8, 16, 32, device=device, dtype=torch.float16)
         key = torch.randn(2, 1, 32, 32, device=device, dtype=torch.float16)
         value = torch.randn(2, 1, 32, 32, device=device, dtype=torch.float16)
@@ -4107,6 +4116,7 @@ class TestSDPAGpuOnly(NNTestCase):
         self.assertEqual(actual_grad, expected_grad)
 
     @skipIfRocm
+    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_efficient_attention_vmap_gqa_backward(self, device):
         """Exercise GQA backward with a per-query-head mask under vmap."""
@@ -5617,9 +5627,9 @@ class TestSDPAGpuOnly(NNTestCase):
 
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
-    Mostly migrate from TestSDPACUDAOnly in test/test_transformers.py
+    Mostly migrate from TestSDPAAccelerator in test/test_transformers.py
     """
-
+    hw_classification = HardwareClassification.XPU
 
     @parametrize("type", ["dense"])
     @parametrize("dropout", [0.0, 0.7])
@@ -5872,7 +5882,7 @@ class TestSDPAXpuOnly(NNTestCase):
         mask_type,
         train,
     ):
-        # Migrate from TestSDPACpuOnly
+        # Migrate from TestSDPACPU
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
@@ -6108,6 +6118,7 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
 class TestAttnBias(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def run_test(
         self,
@@ -6273,11 +6284,11 @@ if TEST_XPU:
     device_types += ("xpu", )
 
 
-instantiate_device_type_tests(TestTransformersDevice, globals(), only_for=device_types, allow_xpu=True)
+instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAGpuOnly, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
-instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
+instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
