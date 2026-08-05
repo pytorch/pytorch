@@ -253,14 +253,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "histc": {f16},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {
-        b8,
-        f16,
-        f32,
-        f64,
-        i32,
-        i64,
-    },  # Sparse tensor outputs are not supported by torch.compile fullgraph.
     "view_as_complex": {f16},
 }
 
@@ -270,14 +262,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64, f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {
-        b8,
-        f16,
-        f32,
-        f64,
-        i32,
-        i64,
-    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
 inductor_expected_failures_single_sample["xpu"] = {
@@ -286,14 +270,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {
-        b8,
-        f16,
-        f32,
-        f64,
-        i32,
-        i64,
-    },  # align with cuda.
 }
 
 
