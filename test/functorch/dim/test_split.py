@@ -12,7 +12,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-
 class TestSplit(TestCase):
     hw_classification = HardwareClassification.GENERIC
     """Comprehensive tests for first-class dimension split operations."""
@@ -451,6 +450,7 @@ class TestSplit(TestCase):
             self.assertTrue(isinstance(part, torch.Tensor))
             self.assertFalse(hasattr(part, "dims"))  # Should be regular tensor
 
+
 class TestSplitDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -470,6 +470,7 @@ class TestSplitDevice(TestCase):
                 self.assertEqual(ordered.device, torch.device(device))
                 self.assertEqual(ordered.shape[0], 3)
                 self.assertEqual(ordered.shape[2], 5)
+
 
 instantiate_device_type_tests(TestSplitDevice, globals())
 

@@ -90,12 +90,14 @@ def build_constraint(constraint_fn, args, device="cpu"):
     if not args:
         return constraint_fn
     return constraint_fn(
-        *(torch.tensor(x, dtype=torch.double, device=device)
-          if isinstance(x, list)
-          else x
-          for x in args
+        *(
+            torch.tensor(x, dtype=torch.double, device=device)
+            if isinstance(x, list)
+            else x
+            for x in args
         )
     )
+
 
 class TestConstraints(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -159,6 +161,7 @@ class TestConstraints(TestCase):
         y2 = t(x2)
         if not torch.allclose(y, y2):
             raise AssertionError(f"Error in transform_to({constraint}) pseudoinverse")
+
 
 instantiate_device_type_tests(TestConstraints, globals())
 
