@@ -751,9 +751,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
 
-        with self.assertRaisesRegex(
-            ValueError, "The `submodules` argument has been removed"
-        ):
+        with self.assertRaises(TypeError):
             get_model_state_dict(model, submodules={model.l})
 
         with self.assertRaisesRegex(ValueError, "Passing model_state_dict as a"):

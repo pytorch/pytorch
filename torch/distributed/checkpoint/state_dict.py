@@ -265,18 +265,11 @@ def _verify_options(
     optims: tuple[torch.optim.Optimizer, ...],
     optim_only: bool,
     *,
-    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> _StateDictInfo:
     """
     Verify the model and options passed by the user and generates _StateDictInfo.
     """
-    if submodules:
-        raise ValueError(
-            "The `submodules` argument has been removed. "
-            "This feature can be achieved by manually filtering "
-            "the state_dict returned from get_state_dict."
-        )
     if optim_only and not optims:
         raise RuntimeError(
             "Optimizers are not passed in but optim_only is set to True."
@@ -1148,7 +1141,6 @@ def _load_optim_state_dict(
 def get_model_state_dict(
     model: nn.Module,
     *,
-    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> dict[str, ValueType]:
     """
@@ -1158,8 +1150,6 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1174,7 +1164,6 @@ def get_model_state_dict(
             model,
             (),
             optim_only=False,
-            submodules=submodules,
             options=options,
         )
         model_state_dict = _get_model_state_dict(model, info)
@@ -1186,7 +1175,6 @@ def get_optimizer_state_dict(
     model: nn.Module,
     optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
-    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> OptimizerStateType:
     """
@@ -1198,8 +1186,6 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1219,7 +1205,6 @@ def get_optimizer_state_dict(
             model,
             optimizers,
             optim_only=True,
-            submodules=submodules,
             options=options,
         )
         optim_state_dict = _get_optim_state_dict(model, optimizers, info)
@@ -1231,7 +1216,6 @@ def get_state_dict(
     model: nn.Module,
     optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
-    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> tuple[dict[str, ValueType], OptimizerStateType]:
     """
@@ -1287,8 +1271,6 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1309,7 +1291,6 @@ def get_state_dict(
             model,
             optimizers,
             optim_only=False,
-            submodules=submodules,
             options=options,
         )
         model_state_dict = _get_model_state_dict(model, info)
