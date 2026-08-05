@@ -13704,6 +13704,22 @@ def ___make_guard_fn():
         self.assertEqual(x.untyped_storage().size(), 0)
         self.assertIs(s, x.untyped_storage())
 
+    def test_storage_cdata_use_count(self):
+        # https://github.com/pytorch/pytorch/issues/156059: `_cdata` is a raw
+        # StorageImpl pointer. Tracing left it as a lazy attribute access; it
+        # was the bytecode generated at the graph break that read the pointer
+        # out and only then ran the DELETE_FAST dropping the last reference to
+        # the tensor, so the use count was read back off freed memory.
+        def fn():
+            a = torch.randn(10)
+            return torch._C._storage_Use_Count(a.untyped_storage()._cdata)
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), fn())
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "UntypedStorage._cdata"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:

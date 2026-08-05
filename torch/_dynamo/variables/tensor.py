@@ -3461,6 +3461,29 @@ class UntypedStorageVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.UntypedStorage
 
+    # `_cdata` is a raw StorageImpl pointer, so the int it produces is only
+    # meaningful while something else keeps the storage alive. Dynamo drops dead
+    # locals as soon as the graph returns, which frees the storage before the
+    # generated code gets to use the pointer, so letting the access through
+    # yields a dangling pointer rather than the value eager would compute.
+    # Break instead: LOAD_ATTR is not wrapped in break_graph_if_unsupported, so
+    # this unwinds to step(), which either restarts tracing from the last
+    # checkpoint at which the Python stack was empty, or -- with no usable
+    # checkpoint -- skips the frame altogether. Either way the code reading
+    # `_cdata` ends up running as uninstrumented CPython, under normal
+    # object lifetimes.
+    def _get_cdata(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="Attempted to access UntypedStorage._cdata",
+            context=f"{self}._cdata",
+            explanation="Dynamo does not preserve the lifetime of the traced "
+            "storage, so the raw pointer `_cdata` returns could dangle by the "
+            "time the compiled code uses it.",
+            hints=[*graph_break_hints.FUNDAMENTAL],
+        )
+
+    tp_getset = {"_cdata": GetSet(_get_cdata, None)}
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",

@@ -605,6 +605,16 @@
       ]
     }
   ],
+  "GB4440": [
+    {
+      "Gb_type": "Attempted to access UntypedStorage._cdata",
+      "Context": "{self}._cdata",
+      "Explanation": "Dynamo does not preserve the lifetime of the traced storage, so the raw pointer `_cdata` returns could dangle by the time the compiled code uses it.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0043": [
     {
       "Gb_type": "Encountered non-PT2-compliant op",
