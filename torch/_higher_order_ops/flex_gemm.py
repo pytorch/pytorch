@@ -147,17 +147,6 @@ def normalize_mx_scale_rounding(rounding: str | None) -> str:
             )
 
 
-def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
-    """Resolve the NVFP4 scale-rounding recipe."""
-    match rounding:
-        case None | "nearest":
-            return "nearest"
-        case _:
-            raise ValueError(
-                f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
-            )
-
-
 def validate_scale_max_value(op_name: str, max_value: float) -> None:
     """Require a finite positive quantized-type maximum."""
     if (
@@ -245,45 +234,6 @@ def _(
     validate_scale_max_value("mx_e8m0_scale", max_value)
     normalize_mx_scale_rounding(rounding)
     return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
-
-
-@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
-def nvfp4_e4m3_scale(
-    amax: torch.Tensor,
-    max_value: float = 6.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    """Encode an NVFP4 per-block E4M3 scale using nearest rounding.
-
-    Args:
-        amax: Nonnegative absolute block maxima to encode.
-        max_value: Maximum magnitude of the quantized element type. The default
-            preserves the symmetric E2M1 recipe.
-        rounding: Scale calculation recipe. Only ``"nearest"`` is supported.
-
-    Returns:
-        E4M3 scale values with the same shape as ``amax``.
-    """
-    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
-    normalize_nvfp4_scale_rounding(rounding)
-    scale = amax.to(torch.float32) / max_value
-    scale = torch.clamp(
-        scale,
-        min=torch.finfo(torch.float8_e4m3fn).tiny,
-        max=torch.finfo(torch.float8_e4m3fn).max,
-    )
-    return scale.to(torch.float8_e4m3fn)
-
-
-@nvfp4_e4m3_scale.register_fake
-def _(
-    amax: torch.Tensor,
-    max_value: float = 6.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
-    normalize_nvfp4_scale_rounding(rounding)
-    return torch.empty_like(amax, dtype=torch.float8_e4m3fn)
 
 
 def validate_nvfp4_pack_input(input: torch.Tensor) -> None:
