@@ -52,10 +52,12 @@ const ActivityTypeMap kCudaTypes{
 const ActivityTypeMap kXpuTypes{
     {libkineto::ActivityType::GPU_MEMCPY,            "GPU_MEMCPY"},
     {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
+    {libkineto::ActivityType::GPU_USER_ANNOTATION,   "GPU_USER_ANNOTATION"},
     {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
     // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
     {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
+    {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
 };
 
 const ActivityTypeMap kMtiaTypes{
@@ -509,12 +511,12 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
+    case libkineto::ActivityType::GPU_USER_ANNOTATION:
 #if defined(USE_XPU)
       return device_type_privateuse1_or(c10::DeviceType::XPU);
 #endif
       [[fallthrough]];
     case libkineto::ActivityType::CUDA_SYNC:
-    case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
       return device_type_privateuse1_or(c10::DeviceType::CUDA);
     // TODO: T151322015
