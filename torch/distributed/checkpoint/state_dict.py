@@ -835,7 +835,7 @@ def _unflatten_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 # If a parameter is shared, only one of the FQN will be used.
                 # So we need to verify which if this fqn is actually used in
                 # the state_dict.
@@ -1018,7 +1018,7 @@ def _split_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 if fqn in info.shared_params_mapping:
                     in_params = False
                     for loaded_param_group in cast(
