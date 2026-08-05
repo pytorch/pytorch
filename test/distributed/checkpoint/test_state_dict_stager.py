@@ -804,12 +804,12 @@ class TestStateDictStager(TestCase):
                 # Verify pinned memory status
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
-                    pin_memory,
+                    stager.pin_memory,
                     lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
-                    pin_memory,
+                    stager.pin_memory,
                     lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
 
