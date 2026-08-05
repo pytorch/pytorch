@@ -124,13 +124,11 @@ TEST(XPUCachingAllocatorTest, NoSplitPool) {
   // Use a fixed user-created pool id that won't collide with any MemPool
   // created by other tests.
   const c10::MempoolId_t pool_id{0, 9999};
-  c10::xpu::XPUCachingAllocator::createOrIncrefPool(device, pool_id);
 
   // Step 1: pre-fill the pool cache with a 20 MB block.
   const size_t _20mb = 20 * 1024 * 1024;
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
   void* large_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_20mb);
-  c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
   c10::xpu::XPUCachingAllocator::raw_delete(large_ptr);
 
   // Step 2: mark pool as no-split.
@@ -139,7 +137,6 @@ TEST(XPUCachingAllocatorTest, NoSplitPool) {
   // Step 3: allocate a smaller block (10 MB); the 20 MB cached block must not
   // be split.
   const size_t _10mb = 10 * 1024 * 1024;
-  c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
   void* small_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
 
@@ -174,13 +171,11 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   // Use a fixed user-created pool id that won't collide with any MemPool
   // created by other tests.
   const c10::MempoolId_t pool_id{0, 99999};
-  c10::xpu::XPUCachingAllocator::createOrIncrefPool(device, pool_id);
 
   // Step 1: pre-fill the OOM pool cache with a 20 MB block.
   const size_t _20mb = 20 * 1024 * 1024;
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
   void* oom_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_20mb);
-  c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
   c10::xpu::XPUCachingAllocator::raw_delete(oom_ptr);
 
   // Step 2: register the pool as the OOM fallback.
@@ -189,6 +184,7 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   // Step 3: set a near-zero memory fraction so alloc_block always fails for new
   // device allocations, forcing the allocator into try_mempool_fallback.
   c10::xpu::XPUCachingAllocator::setMemoryFraction(1e-9, device);
+  c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
 
   // Step 4: so this must be served by the OOM pool's cached 20 MB block.
   const size_t _10mb = 10 * 1024 * 1024;
@@ -202,8 +198,8 @@ TEST(XPUCachingAllocatorTest, UseOnOOMPool) {
   c10::xpu::XPUCachingAllocator::setMemoryFraction(orig_fraction, device);
 
   c10::xpu::XPUCachingAllocator::raw_delete(ptr);
-  c10::xpu::XPUCachingAllocator::setUseOnOOM(device, pool_id, false);
   c10::xpu::XPUCachingAllocator::emptyCache();
+  c10::xpu::XPUCachingAllocator::releasePool(device, pool_id);
 }
 
 int main(int argc, char* argv[]) {
