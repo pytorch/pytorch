@@ -174,6 +174,7 @@ _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
     bool: frozenset({"__new__", "from_bytes"}),
     float: frozenset({"fromhex", "hex"}),
+    bytes: frozenset({"fromhex", "maketrans"}),
 }
 if sys.version_info >= (3, 14):
     _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
@@ -563,6 +564,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             ascii,
             bin,
             bool,
+            bytes,
             callable,
             chr,
             complex,
@@ -1934,6 +1936,77 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_str(tx, arg)
+
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        # ref: bytes_new https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L2679
+        params = ("source", "encoding", "errors")
+        if len(args) > len(params):
+            raise_type_error(
+                tx, f"bytes() takes at most 3 arguments ({len(args)} given)"
+            )
+        bound = dict(zip(params, args))
+        for name, value in kwargs.items():
+            if name not in params:
+                raise_type_error(
+                    tx, f"bytes() got an unexpected keyword argument '{name}'"
+                )
+            if name in bound:
+                raise_type_error(
+                    tx,
+                    f"argument for bytes() given by name ('{name}') and position ({params.index(name) + 1})",
+                )
+            bound[name] = value
+        source, encoding, errors = (bound.get(name) for name in params)
+
+        # PyArg_ParseTupleAndKeywords("|Oss") validates both before anything else
+        for name in params[1:]:
+            value = bound.get(name)
+            if value is not None and not issubclass(maybe_get_python_type(value), str):
+                raise_type_error(
+                    tx,
+                    f"bytes() argument '{name}' must be str, not {value.python_type_name()}",
+                )
+
+        if source is None:
+            if encoding is not None:
+                raise_type_error(tx, "encoding without a string argument")
+            if errors is not None:
+                raise_type_error(tx, "errors without a string argument")
+            return ConstantVariable.create(b"")
+
+        source_is_str = issubclass(maybe_get_python_type(source), str)
+        if encoding is not None:
+            if not source_is_str:
+                raise_type_error(tx, "encoding without a string argument")
+            encode_args = [encoding] if errors is None else [encoding, errors]
+            return source.call_method(tx, "encode", encode_args, {})
+        if source_is_str:
+            raise_type_error(tx, "string argument without an encoding")
+        if errors is not None:
+            raise_type_error(tx, "errors without a string argument")
+
+        if source.is_python_constant():
+            # An int, a buffer or a constant sequence: constant folding runs the
+            # real `bytes` and so gets CPython's exact result and errors.
+            return None
+
+        # Builtin iterator types define none of the __bytes__/buffer/__index__
+        # slots CPython prefers over iteration, so unpacking matches eager.
+        items = unpack_iterable(tx, source)
+        if not all(item.is_python_constant() for item in items):
+            return None
+
+        try:
+            return ConstantVariable.create(
+                bytes([item.as_python_constant() for item in items])
+            )
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:

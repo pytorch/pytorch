@@ -274,7 +274,8 @@ class ConstantVariable(VariableTracker):
             try:
                 result = search in self.value
                 return ConstantVariable.create(result)
-            except TypeError as e:
+            except (TypeError, ValueError) as e:
+                # bytes/bytearray raise ValueError for an int outside range(256)
                 raise_observed_exception(
                     type(e),
                     tx,
@@ -340,14 +341,16 @@ class ConstantVariable(VariableTracker):
         if name == "__iter__":
             return self.tp_iter_impl(tx)
 
-        if isinstance(self.value, str) and name in str.__dict__:
+        if isinstance(self.value, (str, bytes)) and name in (
+            str.__dict__ if isinstance(self.value, str) else bytes.__dict__
+        ):
             method = getattr(self.value, name)
             try:
                 result = method(*const_args, **const_kwargs)
             except Exception as e:
-                raise_observed_exception(type(e), tx)
-            # str.split/rsplit/splitlines return a fresh caller-owned list;
-            # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            # split/rsplit/splitlines return a fresh caller-owned list; mark it
+            # mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
@@ -381,9 +384,6 @@ class ConstantVariable(VariableTracker):
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
                         raise_observed_exception(type(e), tx, args=list(e.args))
-        elif isinstance(self.value, bytes) and name == "decode":
-            method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
         elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
