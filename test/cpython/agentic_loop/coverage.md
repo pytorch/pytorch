@@ -1,22 +1,15 @@
 # CPython Dynamo Agentic Coverage Plan
 
-Status: Cycle 2 top-10 exhausted (G11-G20). G13/G14/G18/G19/G20 landed
-(G15/G16/G17 were G14 collateral); G11/G12 were triaged and DEFERRED (CPython
-C-implementation-detail / object-lifetime-GC internals, sentinels left in
-place). G19 (`test_deque-TestBasic.test_basics`) landed via deque `__init__`
-support. G20 (`test_range-RangeTest.test_range_iterators`) landed via `object()`
-support on top of the native itertools iterator-variable stack (chain /
-zip_longest / islice), which also makes that otherwise-pathological test
-practical under Dynamo. The relevance CSVs were regenerated per the README (32
-landed/collateral rows dropped, deferred rows kept and tagged). The new
-actionable top-10 is Cycle 3, G21-G30, drawn from the re-ranked CSV. G21
-(`test_range-RangeTest.test_user_index_method`) landed via `__index__`
-coercion in `range()` and slice subscript. G22
-(`test_sort-TestDecorateSortUndecorate.test_reverse_stability`) was triaged and
-DEFERRED (data-dependent sort over dynamic random values; needs random -> SymInt
-routing or data-dependent sort support; sentinel left in place). G23
-(`test_list-ListTest.test_init`, relevance 78.4) is the next unworked actionable
-gate.
+Status: Cycles 2-5 worked (G11-G30, Cycle4 E-H, Cycle5 A-H); see the per-gate
+sections below for each disposition. The relevance CSVs were reconciled against
+ground truth -- the expected-failure sentinels under
+`test/dynamo_expected_failures/` -- per the README: 97 rows whose sentinel had
+been removed (the test now passes) were dropped from both CSVs,
+`test_collections-TestChainMap.test_basics` was tagged `deferred` (Cycle5-H, out
+of scope), and both files were re-ranked contiguous by descending relevance
+(2030 -> 1933 rows). The new actionable top-10 is Cycle 6, G31-G40, drawn from
+the re-ranked CSV. G31 (`test_tuple-TupleTest.test_free_after_iterating`,
+relevance 76.7) is the next unworked actionable gate.
 
 Goal: improve `PYTORCH_TEST_WITH_DYNAMO=1` coverage for CPython tests by
 working the highest-value expected failures first. The actionable gates come
@@ -3152,6 +3145,286 @@ graph-broke on `_thread.get_ident`; converting that break into a
 constant-returning traced call can only reduce (never increase) hard graph
 breaks, and the returned value is identical to eager under single-threaded
 tracing.
+
+## Gates (Cycle 6: actionable top-10, G31-G40)
+
+These are the ten highest-ranked rows whose `deferred` column is empty in the
+reconciled `cpython_dynamo_expected_failure_relevance.csv`. Gate numbers
+continue from G30. Work them in order; triage each for in-scope vs deferred per
+`CPYTHON_MIRRORING.md` before implementing. Each gate is one focused commit:
+remove only the proven sentinel, add focused Dynamo regression coverage when the
+fix is semantic, target test passes under `PYTORCH_TEST_WITH_DYNAMO=1`, affected
+CPython file has no new real failures, CPU fast validation (affected-file
+substitute) passes modulo baseline, exactly one gate commit.
+
+Seven of these ten share the `Attempted to call function marked as skipped`
+baseline (a skipfile graph break, six of them the dict/tuple/list iterator
+`__reduce__`/`__reduce_ex__` pickling path); triage whether the reached callee
+is a genuine object-protocol gap or an out-of-scope skip before touching source.
+
+### G31: Tuple Free After Iterating
+
+Target sentinel:
+
+```
+CPython313-test_tuple-TupleTest.test_free_after_iterating
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_tuple.py::TupleTest::test_free_after_iterating
+```
+
+Relevance score: 76.7. Baseline failure kind: Attempted to call function marked as skipped.
+
+Triage note: sibling `test_list-ListTest.test_free_after_iterating` is DEFERRED
+(object-lifetime / GC internals, out of scope); confirm this tuple variant is
+not the same class before implementing.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/lists.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G32: Dict Item-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_itemiterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_itemiterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G33: Dict Key-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_iterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_iterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G34: Dict Reverse Item-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_reverseitemiterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_reverseitemiterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G35: Dict Reverse Key-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_reverseiterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_reverseiterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G36: Dict Reverse Values-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_reversevaluesiterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_reversevaluesiterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G37: Dict Values-Iterator Pickling
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_valuesiterator_pickling
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_valuesiterator_pickling
+```
+
+Relevance score: 76.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/iter.py
+torch/_dynamo/trace_rules.py
+```
+
+### G38: List Preallocation
+
+Target sentinel:
+
+```
+CPython313-test_list-ListTest.test_preallocation
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_list.py::ListTest::test_preallocation
+```
+
+Relevance score: 75.1. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/lists.py
+torch/_dynamo/variables/builtin.py
+torch/_dynamo/trace_rules.py
+```
+
+### G39: Counter Update
+
+Target sentinel:
+
+```
+CPython313-test_collections-TestCounter.test_update
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_collections.py::TestCounter::test_update
+```
+
+Relevance score: 75.0. Baseline failure kind: failed to bind arguments when attempting to inline.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/user_defined.py
+torch/_dynamo/polyfills/__init__.py
+```
+
+### G40: Dict Splittable setdefault
+
+Target sentinel:
+
+```
+CPython313-test_dict-DictTest.test_splittable_setdefault
+```
+
+Target test:
+
+```bash
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/cpython/v3_13/test_dict.py::DictTest::test_splittable_setdefault
+```
+
+Relevance score: 74.6. Baseline failure kind: Attempted to call function marked as skipped.
+
+Likely source areas:
+
+```
+torch/_dynamo/variables/dicts.py
+torch/_dynamo/variables/builtin.py
+torch/_dynamo/trace_rules.py
+```
 
 ## Proposed Gate Changes Awaiting Human Approval
 
