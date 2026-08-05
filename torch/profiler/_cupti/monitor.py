@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import numpy as np
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -77,6 +77,27 @@ def _deref_cstr(ptr: int) -> str:
         return ""
     value = ctypes.cast(ptr, ctypes.c_char_p).value
     return value.decode(errors="replace") if value is not None else ""
+
+
+# A CUPTI subscriber callback, identified by its (domain, cbid) pair, and the handlers
+# registered for one. See CuptiMonitor.register_callback_handler / _dispatch_callback.
+_CallbackKey = tuple[int, int]
+_CallbackFns = tuple[Callable[..., None], ...]
+
+
+class _CallbackHandler(NamedTuple):
+    """A registered consumer of one CUPTI *subscriber callback*: the ``(domain, cbid)`` it
+    wants and the ``fn(domain, cbid, cbdata)`` to invoke.
+
+    Subscriber callbacks are a separate axis from activity records: they fire synchronously
+    on the application thread that made the CUDA call, not on the decode worker, and carry a
+    raw ``CUpti_CallbackData`` pointer rather than decoded columns. Returned by
+    ``CuptiMonitor.register_callback_handler``; hand it back to unregister, mirroring
+    ``register`` / ``unregister`` for activity observers."""
+
+    domain: int
+    cbid: int
+    fn: Callable[..., None]
 
 
 class _Observer:
@@ -322,6 +343,18 @@ class CuptiMonitor:
         self._lock = threading.Lock()
         self._started = False
         self._callbacks_registered = False
+        # --- subscriber callbacks: a second axis, independent of activity records ---
+        # Handlers keyed by (domain, cbid). _dispatch_callback runs on the application
+        # thread inside the CUDA call, so it must not take self._lock (register and
+        # _apply_selection hold that): it reads the immutable tuple values below, which
+        # mutation replaces wholesale under _callback_lock.
+        self._callback_handlers: dict[_CallbackKey, _CallbackFns] = {}
+        # Per-(domain, cbid) arm refcount, so consumers wanting the same callback over
+        # different windows don't disable each other. Enabled on 0->1, disabled on 1->0.
+        self._callback_armed: dict[_CallbackKey, int] = {}
+        self._callback_lock = threading.Lock()
+        # Our single CUpti_CallbackFunc trampoline; must outlive the subscription.
+        self._callback_trampoline: Any = None
         self._drain_stop = threading.Event()
         self._drain_and_dispatch_thread: threading.Thread | None = None
         # Serializes _drain_and_dispatch: the native decoder accumulates columns
@@ -381,9 +414,16 @@ class CuptiMonitor:
         # foreground is tearing it down (concurrent decode on one collector is unsafe).
         self._pm_lock = threading.Lock()
 
-    def register_callbacks(self) -> None:
-        if self._callbacks_registered:
-            return
+    def _ensure_subscribed(self) -> int:
+        """Take the process's one CUPTI subscription if we don't already hold it, and return
+        the handle.
+
+        Shared by the activity path (:meth:`register_callbacks`) and the subscriber-callback
+        path, which needs the subscription but none of the user-defined-record machinery --
+        so a callback-only consumer pays for neither UDR mode nor the decode worker.
+        """
+        if self._subscriber is not None:
+            return self._subscriber
         version = self._cupti.get_version()
         if version < cupti_python.LIBCUPTI_MIN_VERSION:
             raise RuntimeError(
@@ -391,21 +431,24 @@ class CuptiMonitor:
                 f"{cupti_python.LIBCUPTI_MIN_VERSION}; loaded "
                 f"{cupti_python.LIBCUPTI_SONAME} reports {version}"
             )
-        native = _cupti_monitor_native
-        request_addr = native.buffer_request_callback_address()
-        complete_addr = native.buffer_complete_callback_address()
-        # The activity API is subscription-scoped: subscribe, turn on user-defined
-        # records, and register the v2 buffer callbacks. (A prior consumer that left
-        # CUPTI attached -- e.g. Kineto -- can make cuptiSubscribe_v2 fail with
-        # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS; run such consumers with TEARDOWN_CUPTI=1
-        # so they release CUPTI on teardown rather than us finalizing global state.)
-        # Subscribe solo only when the timestamp callback is opted in: CUPTI honors it only
-        # while multiple subscribers are NOT allowed. Otherwise allow coexistence (default).
+        # CUPTI allows exactly one callback per subscriber, so we always install our own
+        # switchboard and fan out from there. Passing it explicitly -- rather than letting
+        # subscribe() fall back to the module-level no-op -- keeps a consumer that swaps that
+        # global from clobbering our dispatch.
+        self._callback_trampoline = cupti_python._CB_FUNC(self._dispatch_callback)
+        # (A prior consumer that left CUPTI attached -- e.g. Kineto -- can make
+        # cuptiSubscribe_v2 fail with CUPTI_ERROR_MULTIPLE_SUBSCRIBERS; run such consumers
+        # with TEARDOWN_CUPTI=1 so they release CUPTI on teardown rather than us finalizing
+        # global state.) Subscribe solo only when the timestamp callback is opted in: CUPTI
+        # honors it only while multiple subscribers are NOT allowed. Otherwise allow
+        # coexistence (default).
         try:
             self._subscriber = self._cupti.subscribe(
-                allow_multiple=not self._timestamp_callback_enabled
+                allow_multiple=not self._timestamp_callback_enabled,
+                callback=self._callback_trampoline,
             )
         except cupti_python.CuptiError as e:
+            self._callback_trampoline = None
             if self._timestamp_callback_enabled:
                 # We requested sole-subscriber mode only because the approx-clock timestamp
                 # callback needs it; another CUPTI consumer is likely attached. Point the user
@@ -418,14 +461,140 @@ class CuptiMonitor:
                 ) from e
             raise
         # Arm the per-subscriber approx-clock timestamp callback right after subscribe, before
-        # arming UDR, so it is in effect before any user-defined record is produced.
+        # any user-defined record can be produced. It stays armed for the life of the
+        # subscription (see _release_subscriber_if_idle), not just the activity session.
         self._timestamp_callback_active = self._try_arm_approx_timestamp_callback(
             self._subscriber
         )
-        self._cupti.arm_user_defined_records(
-            self._subscriber, request_addr, complete_addr
-        )
+        return self._subscriber
+
+    def register_callbacks(self) -> None:
+        if self._callbacks_registered:
+            return
+        native = _cupti_monitor_native
+        request_addr = native.buffer_request_callback_address()
+        complete_addr = native.buffer_complete_callback_address()
+        # The activity API is subscription-scoped: subscribe, turn on user-defined
+        # records, and register the v2 buffer callbacks.
+        subscriber = self._ensure_subscribed()
+        self._cupti.arm_user_defined_records(subscriber, request_addr, complete_addr)
         self._callbacks_registered = True
+
+    # --- subscriber callbacks ----------------------------------------------
+
+    def _dispatch_callback(
+        self, _userdata: int, domain: int, cbid: int, cbdata: int
+    ) -> None:
+        """The subscription's single ``CUpti_CallbackFunc``: fan out to the handlers
+        registered for ``(domain, cbid)``.
+
+        Runs synchronously on the application thread that made the CUDA call, so it takes no
+        lock -- registration swaps in a fresh immutable tuple rather than mutating one in
+        place -- and lets no exception escape: a raise would propagate into CUPTI's C
+        dispatch, and one failing handler must not silence the others.
+        """
+        for fn in self._callback_handlers.get((domain, cbid), ()):
+            try:
+                fn(domain, cbid, cbdata)
+            except Exception:
+                logger.exception(
+                    "CUPTI callback handler failed (domain=%d cbid=%d)", domain, cbid
+                )
+
+    def register_callback_handler(
+        self, domain: int, cbid: int, fn: Callable[..., None]
+    ) -> _CallbackHandler:
+        """Register ``fn(domain, cbid, cbdata)`` for one CUPTI ``(domain, cbid)`` subscriber
+        callback; returns a token for :meth:`unregister_callback_handler`.
+
+        Registering brings the shared subscription up and holds it, exactly as registering an
+        activity observer does, so a callback-only consumer can keep CUPTI open with no
+        observers present. It does NOT enable the callback -- call :meth:`arm_callback` for
+        that, so a consumer can scope delivery to a window (a CUDA-graph capture, say) while
+        staying registered across it.
+
+        ``fn`` runs on the application thread inside the CUDA call, so it must be cheap and
+        non-blocking; ``cbdata`` is the raw ``CUpti_CallbackData`` pointer as an int.
+        Exceptions are logged and swallowed.
+        """
+        handler = _CallbackHandler(domain, cbid, fn)
+        self._ensure_subscribed()
+        with self._callback_lock:
+            key = (domain, cbid)
+            self._callback_handlers[key] = self._callback_handlers.get(key, ()) + (fn,)
+        return handler
+
+    def unregister_callback_handler(self, handler: _CallbackHandler) -> None:
+        """Remove a handler from :meth:`register_callback_handler`. Idempotent.
+
+        When the last handler for a ``(domain, cbid)`` goes away the callback is disabled
+        outright, whatever its arm refcount was -- delivering to nobody would cost the
+        application thread for nothing. Releases the shared subscription once no handlers and
+        no activity observers remain.
+        """
+        key = (handler.domain, handler.cbid)
+        with self._callback_lock:
+            remaining = tuple(
+                f for f in self._callback_handlers.get(key, ()) if f is not handler.fn
+            )
+            if remaining:
+                self._callback_handlers[key] = remaining
+            elif self._callback_handlers.pop(key, None) is not None:
+                self._callback_armed.pop(key, None)
+                if self._subscriber is not None:
+                    self._cupti.enable_callback(self._subscriber, *key, False)
+        self._release_subscriber_if_idle()
+
+    def arm_callback(self, domain: int, cbid: int) -> None:
+        """Enable one ``(domain, cbid)`` callback, refcounted: CUPTI is told to enable on the
+        first arm and to disable on the last :meth:`disarm_callback`, so consumers scoping the
+        same callback to different windows don't disable each other."""
+        subscriber = self._ensure_subscribed()
+        with self._callback_lock:
+            key = (domain, cbid)
+            count = self._callback_armed.get(key, 0)
+            self._callback_armed[key] = count + 1
+            if count == 0:
+                self._cupti.enable_callback(subscriber, domain, cbid, True)
+
+    def disarm_callback(self, domain: int, cbid: int) -> None:
+        """Drop one arm refcount for ``(domain, cbid)``, disabling the callback at zero.
+        No-op when it is not armed."""
+        with self._callback_lock:
+            key = (domain, cbid)
+            count = self._callback_armed.get(key, 0)
+            if count == 0:
+                return
+            if count > 1:
+                self._callback_armed[key] = count - 1
+                return
+            del self._callback_armed[key]
+            if self._subscriber is not None:
+                self._cupti.enable_callback(self._subscriber, domain, cbid, False)
+
+    def _release_subscriber_if_idle(self) -> None:
+        """Unsubscribe once neither activity observers nor callback handlers need CUPTI.
+
+        The subscription is shared, so it outlives the activity session in both directions:
+        ``stop()`` disarms user-defined records but leaves the handle up while a handler holds
+        it, and a handler registered before any profiling keeps it up for a later ``start()``.
+        """
+        if self._observers or self._started:
+            return
+        with self._callback_lock:
+            subscriber = self._subscriber
+            if self._callback_handlers or subscriber is None:
+                return
+            for key in self._callback_armed:
+                self._cupti.enable_callback(subscriber, *key, False)
+            self._callback_armed.clear()
+            # Restore CUPTI's default CPU timer before releasing the subscription.
+            if self._timestamp_callback_active:
+                self._cupti.disarm_approx_timestamp_callback(subscriber)
+                self._timestamp_callback_active = False
+            self._cupti.unsubscribe(subscriber)
+            self._subscriber = None
+            self._callback_trampoline = None
 
     def start(self) -> None:
         if self._started:
@@ -519,30 +688,27 @@ class CuptiMonitor:
         self.flush(sync=True)
         _cupti_monitor_native.stop_decoder()
         self._drain_and_dispatch()
-        # Clear the timestamp callback (restore CUPTI's default timer) before unsubscribe.
-        if self._timestamp_callback_active and self._subscriber is not None:
-            self._cupti.disarm_approx_timestamp_callback(self._subscriber)
-            self._timestamp_callback_active = False
-        # Disable everything we enabled, then tear down the subscription.
+        # Disable everything we enabled, then tear down the activity session.
         self._disable(self._enabled.keys())
         self._enabled = {}
         if self._subscriber is not None:
             # Release CUPTI without poisoning it for the next session: turn
             # user-defined-record mode back off (it changes CUPTI's record layout),
-            # then unsubscribe. Crucially this does NOT call cuptiFinalize -- on this
-            # libcupti a finalize poisons CUPTI for the rest of the process (a
-            # subsequent monitor subscribe stops delivering buffers, and a classic
-            # Kineto session records nothing), so disarm + unsubscribe is the only
-            # clean teardown. This lets the monitor be started and stopped repeatedly
+            # then unsubscribe (in _release_subscriber_if_idle below). Crucially this does
+            # NOT call cuptiFinalize -- on this libcupti a finalize poisons CUPTI for the
+            # rest of the process (a subsequent monitor subscribe stops delivering buffers,
+            # and a classic Kineto session records nothing), so disarm + unsubscribe is the
+            # only clean teardown. This lets the monitor be started and stopped repeatedly
             # in one process. (Switching to a classic consumer after the monitor is a
             # separate libcupti limitation -- once the process has used UDR/v2 it
             # cannot downgrade without the poisonous finalize.)
             self._cupti.disarm_user_defined_records(self._subscriber)
-            self._cupti.unsubscribe(self._subscriber)
-        self._subscriber = None
-        # Force a fresh subscribe on a subsequent start().
+        # Force a fresh arm of user-defined records on a subsequent start().
         self._callbacks_registered = False
         self._started = False
+        # The subscription itself is shared, so it is released only once no callback handler
+        # holds it either -- a handler must survive an activity session ending.
+        self._release_subscriber_if_idle()
         self._final_allocated_buffers = _cupti_monitor_native.allocated_buffers()
         _cupti_monitor_native.reset_buffers()
         self._clock.reset()
@@ -1301,6 +1467,10 @@ def get_config() -> dict[str, Any]:
         "background_drain_period_s": CuptiMonitor._background_drain_period_s,
         "use_approx_timestamps": CuptiMonitor._use_approx_timestamps,
         "configured": CuptiMonitor._configured,
+        # Capability flag, not a setting: lets a consumer detect the shared
+        # subscriber-callback registry (CuptiMonitor.register_callback_handler) and stop
+        # taking a CUPTI subscription of its own, without hasattr-probing.
+        "supports_callback_handlers": True,
     }
 
 
