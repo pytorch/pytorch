@@ -23,7 +23,9 @@
 #include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
+#include <ATen/native/cuda/GroupedBlas.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
+#include <ATen/native/cuda/ScaledBlas.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
@@ -74,30 +76,22 @@ using scaled_blas::convert_int_to_enum;
 
 namespace at::native {
 
-namespace {
-
-bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
-#ifdef USE_ROCM
-  static const std::vector<std::string> archs = {
-    "gfx942",
-#if ROCM_VERSION >= 60300
-    "gfx1200", "gfx1201",
+bool _scaled_grouped_mm_allowed_device() {
+#ifdef _WIN32
+  return false;
+#elif defined(USE_ROCM)
+#ifdef USE_MSLK
+  return at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
+#else
+  return false;
 #endif
-#if ROCM_VERSION >= 60500
-    "gfx950"
-#endif
-};
-  return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
-
-  if (sm90_only || sm100_only) {
-    return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
-  } else {
-    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
-  }
+  return dprops->major == 9 || dprops->major == 10;
 #endif
 }
+
+namespace {
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 bool should_use_cublaslt_grouped_gemm(
@@ -525,8 +519,10 @@ _scaled_grouped_mm_cuda(
         const std::optional<at::Tensor>& scale_result,
         std::optional<c10::ScalarType> out_dtype,
         bool use_fast_accum) {
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-  TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+  bool allowed_device = _scaled_grouped_mm_allowed_device();
+  TORCH_CHECK_VALUE(
+      allowed_device,
+      "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
@@ -645,8 +641,10 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-  TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+  bool allowed_device = _scaled_grouped_mm_allowed_device();
+  TORCH_CHECK_VALUE(
+      allowed_device,
+      "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");

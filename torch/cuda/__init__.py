@@ -275,6 +275,38 @@ def is_tf32_supported() -> bool:
     return is_bf16_supported(including_emulation=False)
 
 
+def is_scaled_mm_supported(device: Device = None) -> bool:
+    r"""Return whether ``torch._scaled_mm`` supports the CUDA or ROCm device.
+
+    This checks device-level availability only. Individual dtype, scaling,
+    layout, and output combinations may have additional restrictions.
+
+    Args:
+        device: Device for which to query support. Uses the current device when
+            unspecified.
+    """
+    if not is_available():
+        return False
+    device_index = _get_device_index(device, optional=True)
+    return bool(torch._C._cuda_isScaledMMAllowed(device_index))
+
+
+def is_scaled_grouped_mm_supported(device: Device = None) -> bool:
+    r"""Return whether ``torch._scaled_grouped_mm`` supports the CUDA or ROCm device.
+
+    This checks device-level and build availability only. Individual dtype,
+    scaling, layout, and output combinations may have additional restrictions.
+
+    Args:
+        device: Device for which to query support. Uses the current device when
+            unspecified.
+    """
+    if not is_available():
+        return False
+    device_index = _get_device_index(device, optional=True)
+    return bool(torch._C._cuda_isScaledGroupedMMAllowed(device_index))
+
+
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
@@ -2192,6 +2224,8 @@ __all__ = [
     "is_bf16_supported",
     "is_current_stream_capturing",
     "is_initialized",
+    "is_scaled_grouped_mm_supported",
+    "is_scaled_mm_supported",
     "is_tf32_supported",
     "jiterator",
     "list_gpu_processes",

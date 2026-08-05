@@ -1210,6 +1210,26 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyCUDA
+    def test_is_scaled_mm_supported(self, device) -> None:
+        self.assertEqual(
+            torch.cuda.is_scaled_mm_supported(device),
+            bool(PLATFORM_SUPPORTS_FP8),
+        )
+
+    @onlyCUDA
+    def test_is_scaled_grouped_mm_supported(self, device) -> None:
+        if IS_WINDOWS:
+            expected = False
+        elif torch.version.hip:
+            expected = bool(PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)
+        else:
+            expected = torch.cuda.get_device_capability(device)[0] in (9, 10)
+        self.assertEqual(
+            torch.cuda.is_scaled_grouped_mm_supported(device),
+            expected,
+        )
+
+    @onlyCUDA
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -1219,7 +1239,12 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         self.assertRaisesRegex(
             RuntimeError,
-            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
+            (
+                r"torch\.\_scaled\_mm is only supported on CUDA devices with "
+                r"compute capability \>\= 9\.0 or 8\.9, ROCm gfx942, "
+                r"ROCm 6\.3\+ gfx1200/gfx1201, ROCm 7\.0\+ gfx950, or ROCm "
+                r"7\.14\+ gfx1250"
+            ),
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
