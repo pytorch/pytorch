@@ -239,6 +239,23 @@ class AbstractCollectivesTest(C10dBackendTest):
         self._init_pg()
         self._test_transport_matrix(self._test_all_gather)
 
+    def test_all_gather_uneven(self):
+        if not self.supports_uneven_all_gather:
+            self.skipTest(f"{self.backend_name} does not support uneven all-gather")
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                input = self._tensor(sizes[self.rank], torch.float32)
+                outputs = [torch.empty(size, device=self.device) for size in sizes]
+                work = dist.all_gather(outputs, input, async_op=async_op)
+                self._wait(work, async_op)
+                for rank, output in enumerate(outputs):
+                    self.assertEqual(
+                        output,
+                        torch.full_like(output, self._value(rank, output.dtype)),
+                    )
+
     def test_all_gather_mixed_devices(self):
         if self.device_type != "cuda":
             self.skipTest(f"{self.backend_name} does not use CUDA")
@@ -532,6 +549,29 @@ class AbstractCollectivesTest(C10dBackendTest):
                             self.assertEqual(
                                 output, self._expected_reduce(count, dtype, op)
                             )
+
+    def test_reduce_scatter_uneven(self):
+        self._init_pg()
+        sizes = [rank + 1 for rank in range(self.world_size)]
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                inputs = [self._tensor(size, torch.float32) for size in sizes]
+                output = torch.empty(
+                    sizes[self.rank], dtype=torch.float32, device=self.device
+                )
+                work = dist.reduce_scatter(
+                    output,
+                    inputs,
+                    op=dist.ReduceOp.SUM,
+                    async_op=async_op,
+                )
+                self._wait(work, async_op)
+                self.assertEqual(
+                    output,
+                    self._expected_reduce(
+                        sizes[self.rank], torch.float32, dist.ReduceOp.SUM
+                    ),
+                )
 
     def test_reduce_scatter_single(self):
         self._init_pg()
