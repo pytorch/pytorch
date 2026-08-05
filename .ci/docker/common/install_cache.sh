@@ -101,5 +101,5 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  echo "Skipping sccache wrapping for TheRock ROCm"
+  echo "Deferring TheRock ROCm compiler wrapping to the PyTorch build"
 fi

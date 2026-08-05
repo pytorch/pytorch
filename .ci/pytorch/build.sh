@@ -245,6 +245,23 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUI
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
+ROCM_SCCACHE_WRAPPED=0
+restore_rocm_sccache() {
+  if [[ "${ROCM_SCCACHE_WRAPPED}" == "1" ]]; then
+    sudo python3 .ci/pytorch/setup_sccache_rocm.py --rocm-path "${ROCM_HOME}" --restore
+    ROCM_SCCACHE_WRAPPED=0
+  fi
+}
+
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] && command -v sccache >/dev/null; then
+  : "${ROCM_HOME:?ROCM_HOME must be set for ROCm sccache wrapping}"
+  sudo python3 .ci/pytorch/setup_sccache_rocm.py \
+    --rocm-path "${ROCM_HOME}" \
+    --sccache-path "$(command -v sccache)"
+  ROCM_SCCACHE_WRAPPED=1
+  trap_add restore_rocm_sccache EXIT
+fi
+
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
@@ -269,6 +286,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
+  restore_rocm_sccache
 
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
@@ -341,18 +359,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     sudo rm -f /opt/cache/bin/c++
     sudo rm -f /opt/cache/bin/gcc
     sudo rm -f /opt/cache/bin/g++
-    # Restore original clang compilers that were backed up during sccache wrapping.
-    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-    if [[ -d /opt/rocm/llvm/bin ]]; then
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
 
     # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
     # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
