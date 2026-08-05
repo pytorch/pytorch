@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import typing
+import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
@@ -45,6 +46,11 @@ __all__ = [
     "make_graphed_callables",
     "export_dot",
     "export_graph_data",
+    "register_graph_instantiate_hook",
+    "run_graph_instantiate_hooks",
+    "register_graph_destroy_hook",
+    "run_graph_destroy_hooks",
+    "graph_destroy_hooks_active",
 ]
 
 
@@ -155,6 +161,69 @@ class _RetainedCallbacks:
         self.objects.clear()
 
 
+# Global CUDA-graph lifecycle hooks (the module-level counterpart of the per-graph
+# _post_instantiate_hooks). A consumer (e.g. a profiler observer) registers a hook that fires
+# for every graph, so the graph code stays free of consumer knowledge; registering a hook is
+# the opt-in. Keyed by RemovableHandle id. Instantiate hooks run at the end of instantiate()
+# with the freshly instantiated graph.
+_global_instantiate_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = OrderedDict()
+
+
+def register_graph_instantiate_hook(
+    fn: Callable[[CUDAGraph], None],
+) -> RemovableHandle:
+    """Register a hook run with each CUDA graph right after it is instantiated. Returns a
+    RemovableHandle; call ``.remove()`` to unregister."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_global_instantiate_hooks)
+    _global_instantiate_hooks[handle.id] = fn
+    return handle
+
+
+def run_graph_instantiate_hooks(torch_cuda_graph: CUDAGraph) -> None:
+    """Run every registered instantiate hook with the graph. Errors are swallowed so one
+    consumer cannot break instantiate() for another."""
+    for fn in list(_global_instantiate_hooks.values()):
+        try:
+            fn(torch_cuda_graph)
+        except Exception:
+            pass
+
+
+# Graph-destroy hooks, each handed the destroyed graph's exec ids (tools_id >> 32) so a
+# consumer can purge its per-graph state. A CUDAGraph arms a single destroy callback (only
+# while a hook is registered, see graph_destroy_hooks_active) that fans out here.
+_global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
+
+
+def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHandle:
+    """Register ``fn(exec_ids)`` to run when a CUDA graph is destroyed. Returns a handle whose
+    ``remove()`` unregisters it."""
+    from torch.utils.hooks import RemovableHandle
+
+    handle = RemovableHandle(_global_destroy_hooks)
+    _global_destroy_hooks[handle.id] = fn
+    return handle
+
+
+def graph_destroy_hooks_active() -> bool:
+    """True when any graph-destroy hook is registered -- the gate a CUDAGraph checks before
+    arming its destroy callback."""
+    return bool(_global_destroy_hooks)
+
+
+def run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
+    """Invoke every registered hook with the destroyed exec graph ids, swallowing per-hook
+    errors so one failure does not abort the rest (matching the destroy-callback fire
+    semantics). The single entry point a graph's destroy callback calls."""
+    for fn in list(_global_destroy_hooks.values()):
+        try:
+            fn(exec_graph_ids)
+        except Exception:
+            pass
+
+
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
@@ -194,10 +263,21 @@ class CUDAGraph(_CUDAGraph):
     # before the first remap. Lets a re-instantiate (which produces a fresh exec
     # id) rekey annotations from the previous exec id to the new one.
     _remapped_exec_id: int | None
+    # Exec graph ids a consumer has recorded per-graph state under (one per
+    # instantiate). Handed to the graph-destroy hooks on destruction so consumers
+    # can purge that state and their maps do not grow across the run.
+    _recorded_exec_ids: set[int]
     _keep_graph: bool
     # User hooks fired by capture_end / instantiate (see register_*_hook).
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
     _post_instantiate_hooks: dict[int, Callable[[CUDAGraph], None]]
+    # Transient get_graph_data() cache shared across a single instantiate()'s
+    # post-instantiate hooks, so multiple consumers (dependency recording, an
+    # export_graph_data dump) query the topology once instead of once each.
+    # Only populated while _caching_graph_data is set; dropped right after the
+    # hooks run so the topology is not retained for the graph's lifetime.
+    _caching_graph_data: bool
+    _instantiate_graph_data: dict | None
     # Replay lifecycle hooks, fired around each replay (hot path -- only iterated
     # when non-empty). See register_replay_start_hook / register_replay_end_hook.
     _replay_start_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -213,10 +293,13 @@ class CUDAGraph(_CUDAGraph):
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
+        instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_end_hooks = OrderedDict()
         instance._post_instantiate_hooks = OrderedDict()
+        instance._caching_graph_data = False
+        instance._instantiate_graph_data = None
         instance._replay_start_hooks = OrderedDict()
         instance._replay_end_hooks = OrderedDict()
         instance._retained_finalizer = None
@@ -231,6 +314,16 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
+        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # hooks, arm the per-graph state purge for this capture cycle. The callback
+        # captures the exec-id SET OBJECT (empty now, filled as this graph
+        # records/instantiates) and the module fan-out function, never self and never
+        # a hook: a closure reachable to the graph would pin it past collection so it
+        # never fires. reset() re-arms a fresh holder, so this re-registers per cycle;
+        # a graph that records nothing just fires on an empty set (a no-op).
+        if graph_destroy_hooks_active():
+            exec_ids = self._recorded_exec_ids
+            self.register_destroy_callback(lambda: run_graph_destroy_hooks(exec_ids))
 
     def register_capture_end_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -370,6 +463,11 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
         remap_to_exec_graph(self)
+        # Record the exec id we remapped to so the destroy callback (armed in
+        # capture_end_post) hands it to the graph-destroy hooks for per-graph state
+        # cleanup. A re-instantiate mints a fresh exec id, so the set accumulates each.
+        if self._remapped_exec_id is not None:
+            self._recorded_exec_ids.add(self._remapped_exec_id)
 
     def _release_python_resources(self) -> None:
         # Single source of truth for GC-critical Python resources released by
@@ -479,8 +577,18 @@ class CUDAGraph(_CUDAGraph):
         """
         super().instantiate()
         self._maybe_remap_annotations()
-        for hook in list(self._post_instantiate_hooks.values()):
-            hook(self)
+        # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
+        # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
+        # get_graph_data() is cached for the duration of the hooks so several consumers share
+        # one query; the cache is dropped afterwards so nothing is retained for the graph.
+        self._caching_graph_data = True
+        try:
+            run_graph_instantiate_hooks(self)
+            for hook in list(self._post_instantiate_hooks.values()):
+                hook(self)
+        finally:
+            self._caching_graph_data = False
+            self._instantiate_graph_data = None
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
@@ -517,6 +625,9 @@ class CUDAGraph(_CUDAGraph):
         self._retained.fire()
         if self._retained_finalizer is not None:
             self._retained_finalizer.detach()
+        # Start a fresh id set BEFORE re-arming: _arm_retained captures it into the
+        # next cycle's destroy callback. The just-fired holder dropped the old one.
+        self._recorded_exec_ids = set()
         self._arm_retained()
         # Reset-only state: scrubbed here because the object is reused after
         # reset(); on death these ints die with the object.
@@ -616,7 +727,16 @@ class CUDAGraph(_CUDAGraph):
         is a true dependency (encoded in the graph) or a fake dependency
         caused by mapping of independent streams to the same hardware
         channel.
+
+        Child-graph and conditional nodes are reported as nodes in their own
+        right, but this walk does not descend into their bodies (those are
+        separate ``cudaGraph_t`` objects), so the work inside them is absent
+        from ``nodes`` and a warning is issued. The ids that *are* reported
+        stay valid: the exec graph preserves top-level node ids.
         """
+        # Serve the shared cache when instantiate() has it live (see _caching_graph_data).
+        if self._instantiate_graph_data is not None:
+            return self._instantiate_graph_data
         from torch.cuda._graph_annotations import _is_tools_id_unavailable
 
         _require_cuda_bindings()
@@ -641,7 +761,14 @@ class CUDAGraph(_CUDAGraph):
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord: "event_record",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemAlloc: "mem_alloc",
             _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemFree: "mem_free",
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional: "conditional",
         }
+        # Node types whose work lives in a separate cudaGraph_t (see the warning below).
+        nested_graph_types = {
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
+            _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
+        }
+        nested_node_types: set[str] = set()
 
         raw = self.raw_cuda_graph()
 
@@ -658,6 +785,8 @@ class CUDAGraph(_CUDAGraph):
             handle_to_idx[int(node)] = i
 
             ntype = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetType(node))
+            if ntype in nested_graph_types:
+                nested_node_types.add(node_type_names.get(ntype, ntype))
             tools_id = _check_cuda_bindings(_cuda_runtime.cudaGraphNodeGetToolsId(node))
             graph_id = tools_id >> 32
             node_id = tools_id & 0xFFFFFFFF
@@ -709,10 +838,25 @@ class CUDAGraph(_CUDAGraph):
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
             info["graph_id"] = exec_graph_id
 
-        return {
+        if nested_node_types:
+            # What is returned stays correct: the exec graph preserves top-level node
+            # ids and numbers the nested ones after them. Those nested nodes do execute
+            # and do show up in a profiler trace (under this exec graph id, with the
+            # appended node ids), they are just missing from the topology below.
+            warnings.warn(
+                f"get_graph_data: this graph contains {sorted(nested_node_types)} "
+                "nodes; the work inside them is in a separate cudaGraph_t that this "
+                "walk does not descend into, so it is absent from the returned nodes",
+                stacklevel=2,
+            )
+
+        data = {
             "exec_graph_id": exec_graph_id,
             "nodes": node_infos,
         }
+        if self._caching_graph_data:
+            self._instantiate_graph_data = data
+        return data
 
 
 def _dump_graph_dot(cuda_graph: CUDAGraph, path: str, *, verbose: bool = True) -> None:
@@ -868,6 +1012,11 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
+        # The capture stream is now capturing into the top-level graph; remember it so
+        # mark_kernels can tell a conditional-node body apart from this graph.
+        from torch.cuda._graph_annotations import maybe_stamp_capture_root
+
+        maybe_stamp_capture_root(torch.cuda.current_stream())
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda._graph_annotations import (

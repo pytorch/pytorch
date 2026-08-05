@@ -182,11 +182,11 @@ static std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   auto iter = TensorIteratorConfig()
     .add_output(output)
-    .add_input(input)
-    .add_input(mean)
-    .add_input(invstd)
-    .add_input(w)
-    .add_input(b)
+    .add_const_input(input)
+    .add_const_input(mean)
+    .add_const_input(invstd)
+    .add_const_input(w)
+    .add_const_input(b)
     .check_all_same_dtype(false)
     .promote_inputs_to_common_dtype(false)
     .build();
@@ -254,7 +254,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   auto channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
-      .add_input(input)
+      .add_const_input(input)
       .resize_outputs(false)
       .declare_static_shape(input.sizes(), /*squash_dims=*/1)
       .check_all_same_dtype(false)
@@ -394,7 +394,7 @@ static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       binary_iter.build(
           TensorIteratorConfig()
           .add_output(grad_input)
-          .add_input(grad_input)
+          .add_const_input(grad_input)
           .add_const_input(grad_out_)
           .resize_outputs(false)
           .declare_static_shape(input.sizes(), /*squash_dims=*/1));
@@ -1018,7 +1018,7 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
       norm : at::empty(norm.sizes(), self.options());
   auto iter = TensorIteratorConfig()
       .add_output(factor)
-      .add_input(norm)
+      .add_const_input(norm)
       .set_check_mem_overlap(false)
       .cast_common_dtype_to_outputs(true)
       .build();
