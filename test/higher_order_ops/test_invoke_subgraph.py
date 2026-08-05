@@ -4423,7 +4423,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_hidden_: "i64[]"):
             add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
             return (add,)
-""",  # noqa: B950
+""",
             )
         finally:
             _reuse_test_global = None
