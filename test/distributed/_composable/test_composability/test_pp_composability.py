@@ -28,14 +28,14 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
     MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -45,14 +45,6 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
-
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 # MLP Layer
@@ -84,15 +76,26 @@ class MLPModuleEven(torch.nn.Module):
         return x
 
 
-class ComposabilityTest(MultiProcContinuousTest):
+class ComposabilityTestBase(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+    def _resolved_device_type(cls) -> str:
+        # MultiProcContinuousTest subprocesses run tests without calling
+        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
+        # "privateuse1" token; resolve it to the registered backend name.
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
 
     @classmethod
-    def device_type(cls) -> str:
-        return device_type
+    def backend_str(cls) -> str:
+        return torch.distributed.get_default_backend_for_device(
+            cls._resolved_device_type()
+        )
+
+
+class ComposabilityTest(ComposabilityTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 8
 
@@ -100,7 +103,6 @@ class ComposabilityTest(MultiProcContinuousTest):
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     def test_pp_and_dcp(self):
@@ -183,7 +185,6 @@ class ComposabilityTest(MultiProcContinuousTest):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -211,7 +212,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         num_microbatches = 8
         dp_size = self.world_size // (tp_size * pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self._resolved_device_type(),
             mesh_shape=(dp_size, pp_size, tp_size),
             mesh_dim_names=("dp", "pp", "tp"),
         )
@@ -326,7 +327,6 @@ class ComposabilityTest(MultiProcContinuousTest):
             for optimizer in optimizers:
                 optimizer.step()
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -353,7 +353,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self._resolved_device_type(),
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
@@ -510,7 +510,6 @@ class ComposabilityTest(MultiProcContinuousTest):
             for ref_optimizer in ref_optimizers:
                 ref_optimizer.step()
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -530,7 +529,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self._resolved_device_type(),
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
@@ -758,7 +757,12 @@ class ComposabilityTest(MultiProcContinuousTest):
             )
 
 
-instantiate_parametrized_tests(ComposabilityTest)
+instantiate_device_type_tests(
+    ComposabilityTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
