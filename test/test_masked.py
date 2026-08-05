@@ -8,11 +8,17 @@ import torch
 from typing import Any
 from functools import wraps
 import unittest
-from torch.testing._internal.common_utils import skipIfTorchDynamo
 
-
-from torch.testing._internal.common_utils import \
-    (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfTorchDynamo,
+    suppress_warnings,
+    _TestParametrizer,
+    run_tests,
+)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
@@ -264,6 +270,7 @@ class mask_layouts(_TestParametrizer):
 
 
 class TestMasked(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def assertEqualMasked(self, actual, expected, mask):
         strided = to_strided(actual)
@@ -316,6 +323,10 @@ class TestMasked(TestCase):
                 outmask = torch.masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
+
+
+class TestMaskedGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
@@ -432,6 +443,7 @@ class TestMasked(TestCase):
 
 
 instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
+instantiate_parametrized_tests(TestMaskedGeneric)
 
 if __name__ == "__main__":
     run_tests()
