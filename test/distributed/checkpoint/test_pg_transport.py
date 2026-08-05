@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
-import logging
 import unittest
+import logging
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
@@ -24,15 +24,18 @@ from torch.distributed.checkpoint._pg_transport import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
-from torch.testing._internal.common_distributed import (
-    at_least_x_gpu,
-    HAS_ACCELERATOR,
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_ACCELERATOR,
+    TEST_MULTIACCELERATOR,
     TestCase,
 )
 
@@ -205,6 +208,8 @@ def _test_pg_transport_with_sharded_tensor(self, device) -> None:
 
 
 class PgTransportCPU(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CPU
+
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
 
@@ -230,42 +235,65 @@ class PgTransportCPU(MultiProcContinuousTest):
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
-@skip_but_pass_in_sandcastle_if(not at_least_x_gpu(2), "test requires 2+ accelerators")
+@skip_but_pass_in_sandcastle_if(
+    not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+)
 class PgTransportGPU(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
 
     @classmethod
+    def _device_type_str(cls) -> str:
+        # `MultiProcContinuousTest` defines `device_type` as a classmethod, but in
+        # the class `instantiate_device_type_tests` generates, `PrivateUse1TestBase`
+        # sits earlier in the MRO and shadows it with a string class attribute.
+        # Accept either form; calling the string would raise
+        # "'str' object is not callable". `MultiProcContinuousTest`
+        # `._ensure_processes_spawned` makes the same accommodation.
+        device_type_attr = cls.device_type
+        return device_type_attr() if callable(device_type_attr) else device_type_attr
+
+    @classmethod
     def backend_str(cls) -> str | None:
-        return dist.get_default_backend_for_device(cls.device_type())
+        return dist.get_default_backend_for_device(cls._device_type_str())
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"{self.device_type()}:{self.rank}")
+        return torch.device(f"{self._device_type_str()}:{self.rank}")
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport(self, device) -> None:
         _test_pg_transport(self, self.device)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport_with_mixed_content(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport_with_mixed_content(self, device) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport_with_sharded_tensor(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport_with_sharded_tensor(self, device) -> None:
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
 class TestCastTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cast_tensor_different_dtypes(self):
         """Test casting tensors of different dtypes."""
         dtypes = [torch.float32, torch.float64, torch.int32, torch.int64, torch.bool]
@@ -310,6 +338,8 @@ class TestCastTensor(TestCase):
 
 
 class TestPrepareTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prepare_tensor_basic(self):
         """Test basic tensor preparation."""
         tensor = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
@@ -357,6 +387,8 @@ class TestPrepareTensor(TestCase):
 
 
 class TestPrepareStateDict(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prepare_state_dict_basic(self):
         """Test basic state dict preparation."""
         state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
@@ -413,6 +445,8 @@ class TestPrepareStateDict(TestCase):
 
 
 class TestPGTransportMocked(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.device = torch.device("cpu")
@@ -572,6 +606,8 @@ class TestPGTransportMocked(TestCase):
 
 
 class TestPGTransportEdgeCases(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.device = torch.device("cpu")
@@ -586,7 +622,14 @@ class TestPGTransportEdgeCases(TestCase):
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    # This was gated on `HAS_ACCELERATOR`, which is
+    # `TEST_CUDA or TEST_HPU or TEST_XPU` and so does not recognise PrivateUse1.
+    # No capability is declared in its place: the test mocks the process group
+    # outright, so what it needs is an accelerator device to exist, not a working
+    # distributed backend. `instantiate_device_type_tests(..., except_for="cpu")`
+    # below already guarantees that, generating this test only for accelerator
+    # device classes.
+    @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
     def test_send_checkpoint_with_cpu_tensors(self):
         """Test send_checkpoint with CPU tensors when device is accelerator."""
         device = torch.device(f"{device_type}:0")
@@ -612,5 +655,11 @@ class TestPGTransportEdgeCases(TestCase):
         self.assertGreaterEqual(self.mock_work.wait.call_count, 4)
 
 
+instantiate_device_type_tests(
+    PgTransportGPU, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPGTransportEdgeCases, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
