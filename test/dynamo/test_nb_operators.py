@@ -8,6 +8,7 @@ import functools
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -169,6 +170,8 @@ _INPLACE_COMBOS = {
 
 
 class TestNbOr(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -869,6 +872,8 @@ class _RSubReturnsMarker:
 
 
 class TestNbSub(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -1348,6 +1353,8 @@ class _InheritedSubAdd(_BaseWithAdd):
 
 
 class TestNbAdd(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
