@@ -119,6 +119,8 @@ C10_XPU_API void setNoSplit(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+// Register/unregister a pool as an OOM fallback. Callers must explicitly
+// call setUseOnOOM(..., false) before releasing the pool.
 C10_XPU_API void setUseOnOOM(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id,
