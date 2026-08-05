@@ -2014,7 +2014,7 @@ command = [
 ]
 
 [[linter]]
-code = 'HW_CLASSIFICATION'
+code = 'TEST_LINTER'
 include_patterns = [
     'test/**/test_*.py',
     'test/**/*_test.py',
@@ -2025,7 +2025,7 @@ exclude_patterns = [
 ]
 command = [
     'python3',
-    'tools/linter/adapters/hw_classification_linter.py',
+    'tools/linter/adapters/test_linter.py',
     '--',
     '@{{PATHSFILE}}',
 ]
