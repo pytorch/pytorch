@@ -2342,7 +2342,6 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
 
 class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
-    @unittest.skipIf(TEST_XPU, "XPU does not support due to torch-xpu-ops#2004")
     def _generate_st_from_chunk_local_tensor(self, st_size, sharding_spec):
         tensor_meta = sharding_spec.build_metadata(st_size, TensorProperties())
         pg = dist.distributed_c10d._get_default_group()
@@ -2356,9 +2355,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             )
             rank_to_metadata[rank] = shard_metadata
             if rank == self.rank:
-                local_tensor = torch.rand(shard_metadata.shard_sizes).to(
-                    torch.device(device)
-                )
+                local_tensor = torch.rand(shard_metadata.shard_sizes).cuda(device)
                 local_shard_metadata = shard_metadata
 
         # TODO: figure out what the API should behave when some rank have no shard
@@ -2377,9 +2374,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
         # Verify local shard.
         local_shard = st.local_shards()[0]
         self.assertEqual(st.local_tensor(), local_tensor)
-        self.assertEqual(
-            torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.tensor.device
-        )
+        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
 
         # Verify local shard metadata.
         self.assertEqual(
@@ -2410,9 +2405,9 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
                     )
 
     @skipIfRocm
-    @with_comms(backend=BACKEND)
+    @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_init_from_local_tensor(self):
         chunk_specs = _chunk_sharding_specs_list_for_test([0, 1, 1, 0], seed=31)
         for spec in chunk_specs:
