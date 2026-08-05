@@ -10,15 +10,25 @@ from torch._dynamo.test_minifier_common import (
     MinifierTestBase,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import set_cwd, skipIfNNModuleInlined
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    set_cwd, 
+    skipIfNNModuleInlined,
+)
 
 
 class MinifierTests(MinifierTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_decode_subprocess_output_handles_non_utf8_bytes(self):
         self.assertEqual(
             _decode_subprocess_output(b"readable output\xb1continues"),
             "readable output\ufffdcontinues",
         )
+
+
+class MinifierTestsDevice(MinifierTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd
     def _test_after_dynamo(self, device, backend, expected_error):
@@ -298,6 +308,8 @@ class TestDynamoMinifierBackend(torch._dynamo.test_case.TestCase):
 
 
 class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _make_options(
         self, accuracy="", autocast=False, backend="eager", only_fwd=True
     ):
@@ -311,9 +323,6 @@ class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
         )
 
     def test_repro_minify_autocast_uses_tensor_device(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("device detection only meaningful for non-CPU devices")
-
         from torch._dynamo.repro.after_dynamo import repro_minify
 
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -339,9 +348,6 @@ class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
         mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
 
     def test_repro_run_accuracy_branch_autocast_uses_tensor_device(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("device detection only meaningful for non-CPU devices")
-
         from torch._dynamo.repro.after_dynamo import repro_run
 
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -362,10 +368,14 @@ class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
         mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
 
 
-instantiate_device_type_tests(TestAutocastDeviceDetection, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestAutocastDeviceDetection, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class ReproGenerationTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_after_dynamo_repro_uses_constructor_for_fake_quant_with_child_repr(self):
         from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
         from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
@@ -535,7 +545,7 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
         self.assertIn("self.submod = <lambda>()", code)
 
 
-instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)
+instantiate_device_type_tests(MinifierTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
