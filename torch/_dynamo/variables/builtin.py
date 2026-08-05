@@ -3503,6 +3503,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
+                variables.DequeVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
