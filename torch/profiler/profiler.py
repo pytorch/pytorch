@@ -380,9 +380,13 @@ class _KinetoProfile:
                 ),
                 # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
                 # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
-                # CUDA_EVENT + SYNCHRONIZATION record kinds.
+                # CUDA_EVENT record kind.
                 enable_event_node_ids=bool(
                     self._custom_profiler_config.get("enable_event_node_ids")
+                ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
                 ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,

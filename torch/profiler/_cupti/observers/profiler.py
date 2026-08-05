@@ -255,8 +255,11 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         pm_metrics: Iterable[str] | None = None,
         enable_graph_dependencies: bool = False,
         enable_event_node_ids: bool = False,
+        pftrace_compression_level: int = 1,
     ) -> None:
         self._lock = threading.Lock()
+        # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+        self._pftrace_compression_level = pftrace_compression_level
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
         # dicts), so window bucketing is a mask and the build is vectorized. Timed frames
         # (with a start_ns column) bucket into windows by start time.
@@ -501,7 +504,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped; the writer keys gzip off the .gz suffix.
+            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
         self._maybe_write(window_id)
@@ -615,7 +619,13 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             built, cpu, out = w["built"], w["cpu"], w["out"]
             del self._windows[window_id]
         try:
-            merge_trace_window_into_chrome_trace(cpu, out, built, trace_name=out)
+            merge_trace_window_into_chrome_trace(
+                cpu,
+                out,
+                built,
+                trace_name=out,
+                pftrace_compression_level=self._pftrace_compression_level,
+            )
         finally:
             with contextlib.suppress(OSError):  # the CPU trace is a throwaway snapshot
                 os.remove(cpu)
