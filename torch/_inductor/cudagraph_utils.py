@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
@@ -358,11 +359,16 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
-    if (
-        len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
-    ):
-        return None
+    if len(device_node_mapping) == 1:
+        device = next(iter(device_node_mapping.keys()))
+        try:
+            interface = get_interface_for_device(device.type)
+        except NotImplementedError:
+            # Devices without a registered DeviceInterface fall through to the
+            # skip message below, matching the previous hardcoded behavior.
+            interface = None
+        if interface is not None and interface.is_graph_capture_supported():
+            return None
 
     keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")

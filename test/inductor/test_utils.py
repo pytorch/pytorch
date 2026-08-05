@@ -13,9 +13,15 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo import device_interface
+from torch._dynamo.device_interface import (
+    DeviceInterface,
+    register_interface_for_device,
+)
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.cudagraph_utils import check_multiple_devices_or_any_cpu_nodes
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
     count_flops_fx,
@@ -1144,6 +1150,57 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+class _FakeDevice:
+    """Duck-typed stand-in for torch.device: the cudagraph eligibility gate
+    only reads ``.type`` on the mapping keys, and out-of-tree device types
+    cannot be constructed via torch.device() without renaming the PrivateUse1
+    backend."""
+
+    def __init__(self, device_type: str) -> None:
+        self.type = device_type
+
+
+class _AccInterface(DeviceInterface):
+    """Fake out-of-tree accelerator interface that opts into graph capture."""
+
+    @classmethod
+    def is_graph_capture_supported(cls) -> bool:
+        return True
+
+
+class TestCheckMultipleDevicesOrAnyCpuNodes(TestCase):
+    def test_single_cuda_device_is_eligible(self):
+        # No CUDA runtime needed: the gate only consults the capability bit.
+        mapping = {torch.device("cuda"): None}
+        self.assertIsNone(check_multiple_devices_or_any_cpu_nodes(mapping))
+
+    def test_single_device_without_capability_is_skipped(self):
+        # Registered in-tree interfaces inherit the safe default (False).
+        for device_type in ("xpu", "mps"):
+            mapping = {torch.device(device_type): None}
+            msg = check_multiple_devices_or_any_cpu_nodes(mapping)
+            self.assertIsNotNone(msg)
+            self.assertIn("multiple devices", msg)
+
+    def test_out_of_tree_backend_with_capability_is_eligible(self):
+        register_interface_for_device("acc", _AccInterface)
+        try:
+            mapping = {_FakeDevice("acc"): None}
+            self.assertIsNone(check_multiple_devices_or_any_cpu_nodes(mapping))
+        finally:
+            # There is no unregister API; drop the throwaway entry directly.
+            device_interface.device_interfaces.pop("acc", None)
+
+    def test_unregistered_device_is_skipped_without_raising(self):
+        # "acc" is not registered here: get_interface_for_device raises
+        # NotImplementedError internally, which the gate must swallow and
+        # turn into the same skip message as before.
+        mapping = {_FakeDevice("acc"): None}
+        msg = check_multiple_devices_or_any_cpu_nodes(mapping)
+        self.assertIsNotNone(msg)
+        self.assertIn("multiple devices", msg)
 
 
 if __name__ == "__main__":
