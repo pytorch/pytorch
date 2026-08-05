@@ -427,6 +427,10 @@ class Op:
             "rcclx",
             "mccl",
             "hccl",
+            # Entries recorded by c10d's FlightRecorderHook rather than by a
+            # backend's own integration. The hook attaches to any backend, so
+            # it always writes "c10d" instead of a comm library name.
+            "c10d",
         }
         if comm_lib_backend not in _SUPPORTED_BACKENDS:
             raise AssertionError(

@@ -195,6 +195,19 @@ struct FlightRecorder {
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_;
   std::string comm_lib_version_;
+  // Global rank of this process, or -1 if nothing has set it. The recorder is
+  // a process-wide singleton and DebugInfoWriter names its output file
+  // <prefix><rank>, so a dump triggered from somewhere that has no process
+  // group in hand (the control plane) needs the rank from here.
+  std::atomic<int> rank_{-1};
+
+  void setRank(int rank) {
+    rank_.store(rank, std::memory_order_relaxed);
+  }
+
+  int getRank() const {
+    return rank_.load(std::memory_order_relaxed);
+  }
 
   struct TraceIdentifier {
     std::optional<size_t> id;
@@ -262,11 +275,18 @@ struct FlightRecorder {
   but care should be taken to avoid computing duration in any function that must
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
+  wall_clock_fallback is for callers that retire an entry when its collective is
+  issued rather than when it completes (the c10d hooks): the end event has
+  almost never signalled yet, so instead of leaving duration_ unset it is filled
+  in from the host clock. See wallClockDurationMs - that value is an upper
+  bound, not kernel time, so it is opt-in and off for the watchdog callers that
+  do get real device durations.
   */
   TORCH_API void retire_id(
       std::optional<size_t> id,
       std::optional<size_t> reset_epoch,
-      bool compute_duration = true);
+      bool compute_duration = true,
+      bool wall_clock_fallback = false);
 
   TORCH_API void retire_id(
       std::optional<size_t> id,
@@ -328,4 +348,35 @@ TORCH_API std::string dump_fr_trace(
 TORCH_API std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive);
+
+// Dumps the fr traces to the file the registered DebugInfoWriter points at
+// (<TORCH_FR_DUMP_TEMP_FILE><rank> by default), in the same pickled format as
+// dump_fr_trace. This is the backend-agnostic counterpart of
+// ProcessGroupNCCL::dumpDebuggingInfo.
+TORCH_API void dump_fr_trace_file(
+    int rank,
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// dump_fr_trace_file for the rank the recorder was told about at hook attach.
+// Returns false without writing anything if the recorder is off or no rank was
+// ever set, which also means nothing was recorded.
+//
+// Callers outside libtorch_cpu must use this instead of reaching into
+// FlightRecorder<c10::Event>::get() themselves: get()'s function-local static
+// is not an exported symbol, so every shared library that instantiates the
+// template ends up with a private, empty recorder of its own. Only code linked
+// into libtorch_cpu -- where the hooks and the gloo backend record -- sees the
+// instance that actually holds the trace.
+TORCH_API bool try_dump_fr_trace_file(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// Drops everything recorded so far, so a subsequent dump only shows what came
+// after. Backend-agnostic counterpart of reset_nccl_trace. Same cross-DSO
+// caveat as try_dump_fr_trace_file: callers outside libtorch_cpu must go
+// through this instead of FlightRecorder<c10::Event>::get().
+TORCH_API void reset_fr_trace();
 } // namespace c10d
