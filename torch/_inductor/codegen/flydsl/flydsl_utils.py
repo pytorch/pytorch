@@ -1,70 +1,47 @@
 import functools
 import logging
 from importlib.machinery import PathFinder
+from importlib.metadata import PackageNotFoundError, version as _distribution_version
 from importlib.util import find_spec
-from pathlib import Path
-from platform import system
-from subprocess import run
 
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.backends import cuda as _cuda
 
 
 log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
+_FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
-    flydsl_spec = find_spec("flydsl")
+    try:
+        flydsl_spec = find_spec("flydsl")
+    except (ImportError, ValueError):
+        flydsl_spec = None
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:
         return "missing optional dependency `flydsl`"
 
     # Query the package paths directly so this availability check does not
     # import flydsl as a side effect during regular torch imports.
-    mlir_spec = _pathfinder_find_spec(
-        "_mlir",
-        list(flydsl_spec.submodule_search_locations),
-    )
+    try:
+        mlir_spec = _pathfinder_find_spec(
+            "_mlir",
+            list(flydsl_spec.submodule_search_locations),
+        )
+    except (ImportError, ValueError):
+        mlir_spec = None
     if mlir_spec is None:
-        return "missing optional dependency `flydsl._mlir`"
+        return "missing optional dependency `flydsl._mlir` (runtime is not built)"
 
-    if mlir_spec.submodule_search_locations:
-        mlir_paths = [Path(path) for path in mlir_spec.submodule_search_locations]
-    elif mlir_spec.origin:
-        mlir_paths = [Path(mlir_spec.origin).parent]
-    else:
-        return "could not locate optional dependency `flydsl._mlir`"
-
-    runtime_candidates = [
-        path / "_mlir_libs" / "libfly_jit_runtime.so" for path in mlir_paths
-    ]
-    runtime_so = next(
-        (candidate for candidate in runtime_candidates if candidate.exists()),
-        runtime_candidates[0],
-    )
-    if not runtime_so.exists():
-        return f"missing FlyDSL runtime shared library `{runtime_so}`"
-
-    if system() == "Linux":
-        try:
-            ldd = run(
-                ["ldd", str(runtime_so)],
-                capture_output=True,
-                check=False,
-                text=True,
-            )
-        except OSError as e:
-            return f"could not inspect FlyDSL runtime shared library dependencies: {e}"
-
-        ldd_output = f"{ldd.stdout}\n{ldd.stderr}"
-        if ldd.returncode != 0 or "not found" in ldd_output:
-            return (
-                "unresolved FlyDSL runtime shared library dependencies: "
-                + "; ".join(
-                    line.strip()
-                    for line in ldd_output.splitlines()
-                    if "not found" in line
-                )
-            )
+    try:
+        flydsl_version = Version(_distribution_version("flydsl"))
+    except (PackageNotFoundError, InvalidVersion, TypeError):
+        return "missing or invalid FlyDSL version metadata"
+    if flydsl_version.release[:2] != _FLYDSL_SUPPORTED_RELEASE:
+        supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
+        return (
+            f"unsupported FlyDSL version `{flydsl_version}` (expected `{supported}.x`)"
+        )
 
     return None
 
