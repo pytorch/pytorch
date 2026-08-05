@@ -313,13 +313,13 @@ def gemm_gfx950_kernel(
     elem_dtype = _elem_dtype(param)
 
     tid = fx.thread_idx.x
-    num_pid_m = (m + block_m - 1) // block_m
-    num_pid_n = (n + block_n - 1) // block_n
+    num_pid_m = (m - 1) // block_m + 1
+    num_pid_n = (n - 1) // block_n + 1
     block_swizzle = BlockSwizzle(
         NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     )
     bid_m, bid_n = block_swizzle.swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
-    k_tiles = (k + block_k - 1) // block_k
+    k_tiles = (k - 1) // block_k + 1
 
     @fx.struct
     class SharedABStorage:
@@ -591,13 +591,13 @@ def gemm_hti_gfx950_kernel(
 
     tid = fx.thread_idx.x
     wid = tid // GFX950_WAVE_SIZE
-    num_pid_m = (m + block_m - 1) // block_m
-    num_pid_n = (n + block_n - 1) // block_n
+    num_pid_m = (m - 1) // block_m + 1
+    num_pid_n = (n - 1) // block_n + 1
     block_swizzle = BlockSwizzle(
         NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     )
     bid_m, bid_n = block_swizzle.swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
-    k_tiles = (k + block_k - 1) // block_k
+    k_tiles = (k - 1) // block_k + 1
 
     @fx.struct
     class SharedABStorage:
@@ -993,8 +993,8 @@ def gemm_gfx950(
             ),
         ),
     )
-    num_pid_m = (m + param.block_m - 1) // param.block_m
-    num_pid_n = (n + param.block_n - 1) // param.block_n
+    num_pid_m = (m - 1) // param.block_m + 1
+    num_pid_n = (n - 1) // param.block_n + 1
     kernel_impl = (
         gemm_hti_gfx950_kernel
         if param.use_half_tile_interleaved

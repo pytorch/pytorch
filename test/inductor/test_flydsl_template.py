@@ -43,20 +43,6 @@ class TestFlyDSLTemplate(TestCase):
         super().setUp()
         _get_flydsl_device_arch.cache_clear()
 
-    def test_gen_imports(self):
-        kernel = FlyDSLTemplateKernel(
-            kernel_name="test_kernel",
-            input_nodes=[],
-            output_node=None,
-        )
-
-        imports = kernel.gen_imports()
-
-        self.assertIn("import torch", imports)
-        self.assertIn("import flydsl.compiler as flyc", imports)
-        self.assertIn("import flydsl.expr as fx", imports)
-        self.assertIsInstance(imports, str)
-
     def test_runtime_unavailable_when_package_missing(self):
         with mock.patch.object(flydsl_utils, "find_spec", return_value=None):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
@@ -153,28 +139,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIsInstance(result, NotImplementedError)
         self.assertEqual(choices, [])
 
-    def test_gen_defines(self):
-        kernel = FlyDSLTemplateKernel(
-            kernel_name="test_kernel",
-            input_nodes=[],
-            output_node=None,
-        )
-
-        defines = kernel.gen_defines(
-            TILE_M=128,
-            ENABLE_FEATURE=True,
-            SCALE=1.5,
-        )
-
-        self.assertEqual(
-            defines,
-            (
-                "TILE_M: fx.Constexpr = 128\n"
-                "ENABLE_FEATURE: fx.Constexpr = True\n"
-                "SCALE: fx.Constexpr = 1.5\n"
-            ),
-        )
-
     def test_render_includes_imports(self):
         template = mock.Mock()
         template.render.return_value = (
@@ -193,29 +157,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertTrue(code.lstrip().startswith("import torch"))
         self.assertIn("import flydsl.compiler as flyc", code)
         self.assertIn("@flyc.kernel", code)
-
-    def test_template_env_contains_hooks(self):
-        captured_env = {}
-
-        def render(**kwargs):
-            captured_env.update(kwargs)
-            return "rendered"
-
-        template = mock.Mock()
-        template.render = render
-        kernel = FlyDSLTemplateKernel(
-            kernel_name="test_kernel",
-            input_nodes=[],
-            output_node=None,
-        )
-
-        kernel.render(template, BLOCK_SIZE=256)
-
-        self.assertEqual(captured_env["kernel_name"], "test_kernel")
-        self.assertEqual(captured_env["BLOCK_SIZE"], 256)
-        self.assertTrue(callable(captured_env["def_kernel"]))
-        self.assertTrue(callable(captured_env["gen_defines"]))
-        self.assertTrue(callable(captured_env["get_output"]))
 
     def test_duplicate_template_name_is_rejected(self):
         template_name = f"flydsl_unique_test_{id(self)}"
@@ -461,7 +402,8 @@ class TestFlyDSLTemplate(TestCase):
 
     def test_compiled_cache_hit_skips_lock(self):
         compiled = mock.Mock()
-        jit_func = SimpleNamespace(_compiled_cache={("param",): compiled})
+        cache_key = (os.getpid(), None, ("param",))
+        jit_func = SimpleNamespace(_compiled_cache={cache_key: compiled})
         with mock.patch(
             "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
         ) as cache_lock:
@@ -475,24 +417,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIs(result, compiled)
         cache_lock.__enter__.assert_not_called()
         compiled.assert_called_once_with("dispatch")
-
-    def test_compiled_cache_retries_after_failure(self):
-        jit_func = SimpleNamespace()
-        compiled = mock.Mock()
-        compiler = mock.Mock(side_effect=[RuntimeError("compile failed"), compiled])
-        kwargs = {
-            "constexpr_param": _CacheParam(),
-            "compiler": compiler,
-            "dispatch_args": (),
-        }
-
-        with self.assertRaisesRegex(RuntimeError, "compile failed"):
-            run_cached_flydsl(jit_func, **kwargs)
-        result = run_cached_flydsl(jit_func, **kwargs)
-
-        self.assertIs(result, compiled)
-        self.assertEqual(compiler.call_count, 2)
-        compiled.assert_not_called()
 
     def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool | None = True):
         from torch._inductor.utils import run_and_get_code

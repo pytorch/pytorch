@@ -23,7 +23,7 @@ def fits_int32_buffer_span(
         and 0 < cols <= int32_max
         and row_stride is not None
         and 0 <= row_stride <= int32_max
-        and ((rows - 1) * row_stride + cols) * itemsize <= 1 << 32
+        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
     )
 
 
@@ -42,13 +42,19 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
         return "missing optional dependency `flydsl._mlir`"
 
     if mlir_spec.submodule_search_locations:
-        mlir_path = Path(next(iter(mlir_spec.submodule_search_locations)))
+        mlir_paths = [Path(path) for path in mlir_spec.submodule_search_locations]
     elif mlir_spec.origin:
-        mlir_path = Path(mlir_spec.origin).parent
+        mlir_paths = [Path(mlir_spec.origin).parent]
     else:
         return "could not locate optional dependency `flydsl._mlir`"
 
-    runtime_so = mlir_path / "_mlir_libs" / "libfly_jit_runtime.so"
+    runtime_candidates = [
+        path / "_mlir_libs" / "libfly_jit_runtime.so" for path in mlir_paths
+    ]
+    runtime_so = next(
+        (candidate for candidate in runtime_candidates if candidate.exists()),
+        runtime_candidates[0],
+    )
     if not runtime_so.exists():
         return f"missing FlyDSL runtime shared library `{runtime_so}`"
 
