@@ -4403,9 +4403,10 @@ class GraphModule(torch.nn.Module):
             # call site: it is not a user arg, so reuse would re-resolve its
             # recorded source, and on the second call the right value is an
             # intermediate that no source names.
-            self.assertExpectedInline(
-                normalize_gm(backend.graphs[0].print_readable(False)),
-                """\
+            if not TEST_WITH_CROSSREF:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(False)),
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_hidden_: "i64[]"):
         l_hidden_ = L_hidden_
@@ -4423,7 +4424,7 @@ class GraphModule(torch.nn.Module):
             add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
             return (add,)
 """,
-            )
+                )
         finally:
             _reuse_test_global = None
 
@@ -4517,6 +4518,31 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(count(), 2)
         finally:
             _reuse_test_global = None
+
+    def test_subgraph_reuse_closure_item_mutated_to_intermediate(self):
+        """A region reading a closed-over list slot set to a graph intermediate.
+
+        Reads through a closure cell are not recorded in traced_sources, so
+        unlike the global in the test above, the mutation check does not see
+        the write and the region reaches the lifted-freevar check instead.
+        Before that check existed this raised "Freevar has no source".
+        """
+        buf = [torch.tensor(0.0)]
+
+        @nested_compile_region
+        def gn(x):
+            return x + buf[0]
+
+        def fn(x):
+            buf[0] = x.sin()
+            return gn(x) + gn(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_global_written_once_before_loop(self):
         """Conservative: a global written once, before any region runs, blocks reuse.
