@@ -46,7 +46,6 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install rocm
 ARG ROCM_VERSION
-ARG ROCM_PIP_SPEC
 ARG THEROCK_INDEX_URL
 ARG USE_MSLK
 ENV ROCM_VERSION=${ROCM_VERSION}

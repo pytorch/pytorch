@@ -19,18 +19,25 @@ install_rocm() {
     # install root via `rocm-sdk path` and export it through /etc/rocm_env.sh.
     : "${THEROCK_INDEX_URL:?THEROCK_INDEX_URL must be set}"
     : "${ROCM_VERSION:?ROCM_VERSION must be set}"
-    : "${ROCM_PIP_SPEC:?ROCM_PIP_SPEC must be set}"
+
+    # Release lines track the latest patch, while preview builds stay pinned to
+    # their fully specified alpha version.
+    local rocm_pip_version="${ROCM_VERSION}"
+    if [[ "${ROCM_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        rocm_pip_version="${ROCM_VERSION}.*"
+    fi
+    local rocm_pip_spec="rocm[libraries,devel,device-all]==${rocm_pip_version}"
 
     echo "=============================================="
     echo "ROCm Multi-Arch Wheel Installation (TheRock)"
     echo "Index URL:  ${THEROCK_INDEX_URL}"
     echo "ROCm version: ${ROCM_VERSION}"
-    echo "ROCm spec:  ${ROCM_PIP_SPEC}"
+    echo "ROCm spec:  ${rocm_pip_spec}"
     echo "=============================================="
 
     # device-all pulls kernels for every supported gfx target (multi-arch wheel);
     # libraries+devel provide the runtime libs + headers/hipcc to compile against ROCm.
-    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "${ROCM_PIP_SPEC}"
+    python3 -m pip install --index-url "${THEROCK_INDEX_URL}" "${rocm_pip_spec}"
 
     # Discover the real install root/bin via the rocm-sdk CLI (rocm-sdk-core wheel).
     local rocm_home rocm_bin
