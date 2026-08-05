@@ -5,6 +5,7 @@
 import ctypes
 import json
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -376,6 +377,63 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
         else:
             time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dumped_on_timeout(self) -> None:
+        # The dump is written by the abort hook c10d::FlightRecorderHook
+        # registers, which nccl2 runs when it detects the timeout. NoHandling
+        # both keeps the process alive so the test can read the artifact back,
+        # and is the configuration where abortProcess() returns without running
+        # any hook -- so this only passes if the hooks fire at detection.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+        }
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+            self._check_all_reduce(pg)
+
+            path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            if self.rank == 0:
+                # Nobody else joins, so this can never complete and the
+                # watchdog trips on it.
+                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                # Healthy collectives must not have dumped anything, or the
+                # artifact below would not be evidence of the timeout.
+                self.assertFalse(os.path.exists(path))
+                # The watchdog wakes once a second; poll until the file is
+                # there and complete -- it reads back empty mid-write.
+                dump = None
+                deadline = time.time() + 60
+                while dump is None and time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            dump = pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                self.assertIn("version", dump)
+                self.assertIn("pg_config", dump)
+                self.assertIn("pg_status", dump)
+                # The collective that hung has to be in the trace -- that is the
+                # whole point of the post-mortem. timeout_ms pins it to the
+                # subgroup that timed out rather than the default group.
+                hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
+                self.assertEqual(len(hung), 1)
+                self.assertEqual(hung[0]["profiling_name"], "c10d:all_reduce")
+                self.assertEqual(hung[0]["timeout_ms"], 5000)
+            else:
+                # A rank that saw no failure must not have written a trace.
+                time.sleep(30)
+                self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()

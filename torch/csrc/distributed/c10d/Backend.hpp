@@ -246,7 +246,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Abort hooks are invoked before the backend aborts on a timeout or error,
   // letting users capture debug information. Hooks are keyed by an opaque
-  // hook_id so they can be individually unregistered.
+  // hook_id so they can be individually unregistered. Backends that implement
+  // them must advertise it via supportsAbortHooks, so a caller can tell "this
+  // backend has no abort hooks" from a registration that genuinely failed.
+  virtual bool supportsAbortHooks() const {
+    return false;
+  }
+
   virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
     TORCH_CHECK(
         false,

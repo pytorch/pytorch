@@ -145,7 +145,18 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
-  for (const auto& [_, hook] : abortHooks_) {
+  // Snapshot rather than hold the lock across the hooks: a hook may
+  // unregister itself, and the FlightRecorder hook blocks other threads for the
+  // length of its dump, which must not also block an unrelated unregister.
+  std::vector<::c10d::AbortHook> hooks;
+  {
+    std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
+    hooks.reserve(abortHooks_.size());
+    for (const auto& [_, hook] : abortHooks_) {
+      hooks.push_back(hook);
+    }
+  }
+  for (const auto& hook : hooks) {
     try {
       hook();
     } catch (const std::exception& e) {
@@ -159,10 +170,12 @@ void ProcessGroupNCCL::runAbortHooks() {
 void ProcessGroupNCCL::registerAbortHook(
     int64_t hook_id,
     ::c10d::AbortHook hook) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.emplace(hook_id, std::move(hook));
 }
 
 void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
+  std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.erase(hook_id);
 }
 

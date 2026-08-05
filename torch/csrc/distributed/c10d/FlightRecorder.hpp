@@ -335,6 +335,13 @@ static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {
 static std::vector<std::string> TORCH_INCLUDE_ONLY_ACTIVE = {
     "TORCH_INCLUDE_ONLY_ACTIVE"};
 
+// Whether to dump the trace to disk when a collective times out or fails
+// (default true). The TORCH_NCCL_ alias is what stock ProcessGroupNCCL reads
+// and what existing users set, so it must keep working.
+static std::vector<std::string> TORCH_FR_DUMP_ON_TIMEOUT = {
+    "TORCH_FR_DUMP_ON_TIMEOUT",
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
+
 // Dumps the fr traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_fr_trace(
@@ -361,9 +368,11 @@ TORCH_API void dump_fr_trace_file(
 
 // dump_fr_trace_file for the rank the recorder was told about at hook attach.
 // Returns false without writing anything if the recorder is off or no rank was
-// ever set, which also means nothing was recorded.
+// ever set, which also means nothing was recorded. Used by
+// FlightRecorderHook's abort hook, whose whole job is a best-effort dump on a
+// failure that may have happened before any group was attached.
 //
-// Callers outside libtorch_cpu must use this instead of reaching into
+// Callers outside libtorch_cpu must also use this instead of reaching into
 // FlightRecorder<c10::Event>::get() themselves: get()'s function-local static
 // is not an exported symbol, so every shared library that instantiates the
 // template ends up with a private, empty recorder of its own. Only code linked

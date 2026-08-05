@@ -22,6 +22,11 @@
 // _dump_fr_trace{,_json,_file} APIs or the "fr_dump_file" control plane
 // handler. attach() also tells the recorder this process's global rank, which
 // is what names the per-rank dump file.
+//
+// attach() additionally registers an abort hook on backends that support one,
+// which writes the trace to disk when the backend detects a timeout or an
+// error. That is the single trigger for a dump-on-failure: backends do not dump
+// themselves, they only run their abort hooks.
 
 #pragma once
 
@@ -69,12 +74,18 @@ class TORCH_API FlightRecorderHook
   explicit FlightRecorderHook(c10::intrusive_ptr<ProcessGroup> pg);
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
+  // Dumps the trace to disk, at most once per process. Deliberately takes no
+  // hook lock; see the definition.
+  void onAbort();
   // Retires op's entry, optionally recording its end event first. Caller must
   // hold mutex_ and must not free op's events before this returns.
   void retire(InflightOp& op, bool record_end);
 
   c10::intrusive_ptr<ProcessGroup> pg_;
   int64_t hook_id_;
+  // Whether attach() got an abort hook registered; false for backends that
+  // have none (gloo), whose unregister call would throw just as loudly.
+  bool abort_hook_registered_{false};
   size_t pg_id_;
   std::shared_ptr<ProcessGroupStatus> pg_status_;
   std::chrono::milliseconds timeout_{kBackendDefaultTimeout};

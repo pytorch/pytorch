@@ -2942,6 +2942,10 @@ Arguments:
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Create a new one-sided communication window")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::ProcessGroup::supportsAbortHooks,
+              "(test whether the process group supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -3100,6 +3104,10 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
               "Create a new one-sided communication window")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::Backend::supportsAbortHooks,
+              "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,

@@ -55,6 +55,14 @@ using PostHook = std::function<void(const PostHookArgs&)>;
 
 // Abort hook - called before aborting when a collective times out or fails.
 // This allows users to capture debug information before the abort.
+//
+// A single failure may invoke the hook more than once: it is observed by the
+// backend's watchdog and again by the next collective, and a backend may run
+// its hooks both where the failure is detected and where it tears down. Make
+// the hook idempotent. Deduplicating at the call site instead is unsafe -- the
+// thread that terminates the process is not the thread that detects the
+// failure, so a hook that returned early on "already ran" would let the process
+// die mid-capture. The hook's own one-shot has to block, not skip.
 using AbortHook = std::function<void()>;
 
 } // namespace c10d
