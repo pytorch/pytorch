@@ -32,6 +32,62 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# Nested graphs (child-graph and conditional nodes) have no torch API, so the tests
+# below build them through cuda.bindings the way a library embedding one would.
+# cuda.bindings is imported lazily so this module still imports without it.
+def _memset_params(dst: torch.Tensor):
+    from cuda.bindings import runtime as cuda_runtime
+
+    params = cuda_runtime.cudaMemsetParams()
+    params.dst = dst.data_ptr()
+    params.elementSize = 4
+    params.width = dst.numel()
+    params.height = 1
+    params.pitch = 0
+    params.value = 0
+    return params
+
+
+def _add_child_graph_node(graph, deps, dst):
+    from cuda.bindings import runtime as cuda_runtime
+
+    body = _check_cuda_bindings(cuda_runtime.cudaGraphCreate(0))
+    _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddMemsetNode(body, [], 0, _memset_params(dst))
+    )
+    return _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddChildGraphNode(graph, deps, len(deps), body)
+    )
+
+
+def _add_conditional_node(graph, deps, dst):
+    from cuda.bindings import driver, runtime as cuda_runtime
+
+    handle = _check_cuda_bindings(
+        cuda_runtime.cudaGraphConditionalHandleCreate(graph, 1, 1)
+    )
+    params = cuda_runtime.cudaGraphNodeParams()
+    params.type = cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional
+    params.conditional.handle = handle
+    params.conditional.type = driver.CUgraphConditionalNodeType.CU_GRAPH_COND_TYPE_IF
+    params.conditional.size = 1
+    node = _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddNode(graph, deps, None, len(deps), params)
+    )
+    _check_cuda_bindings(
+        cuda_runtime.cudaGraphAddMemsetNode(
+            params.conditional.phGraph_out[0], [], 0, _memset_params(dst)
+        )
+    )
+    return node
+
+
+_NESTED_NODE_ADDERS = {
+    "child_graph": _add_child_graph_node,
+    "conditional": _add_conditional_node,
+}
+
+
 # cuda.bindings is NVIDIA-only; graph annotation APIs have no ROCm equivalent.
 @instantiate_parametrized_tests
 @skipIfRocm
@@ -642,8 +698,77 @@ class TestMarkKernels(TestCase):
         for anns in annotations.values():
             self.assertEqual(anns, [{"name": "tagged"}])
 
+    def test_scope_inside_conditional_body_records_nothing(self):
+        """A scope inside a torch.cond body warns and records no annotations.
+
+        begin_capture_to_if_node captures into a separate cudaGraph_t, so node ids
+        there are in the body graph's id space; remap_to_exec_graph only rekeys the
+        top-level capture id, so anything recorded would be a key matching nothing.
+        """
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2000], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with torch.cuda.graph(g, enable_annotations=True):
+            with mark_kernels("outer_region"):
+                z = x + 1
+            with self.assertWarnsRegex(UserWarning, "conditional-node body"):
+                with _if_body(pred):
+                    with mark_kernels("inside_body"):
+                        _ = z * 2
+        g.instantiate()
+
+        # Only the top-level scope is recorded, and its key matches the exec graph.
+        annotations = get_kernel_annotations()
+        self.assertEqual(
+            [a for anns in annotations.values() for a in anns],
+            [{"name": "outer_region"}],
+        )
+        with self.assertWarns(UserWarning):  # the graph has a conditional node
+            exec_graph_id = g.get_graph_data()["exec_graph_id"]
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    @parametrize("kind", ["child_graph", "conditional"])
+    def test_nested_graph_node_in_scope_warns(self, kind):
+        """A scope containing a nested graph node warns; the rest is annotated.
+
+        The dependent-edge walk stops at such a node, so the work in its body is
+        left unannotated (and its ids, being in the body graph's id space, would
+        never be rekeyed by remap_to_exec_graph). What is recorded stays correct.
+        """
+        from cuda.bindings import runtime as cuda_runtime
+
+        dst = torch.zeros(64, device="cuda")
+        x = torch.zeros([2000], device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with self.assertWarnsRegex(UserWarning, "left unannotated"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, capture_error_mode="relaxed"
+            ):
+                with mark_kernels("region"):
+                    y = x + 1
+                    stream = cuda_runtime.cudaStream_t(
+                        init_value=torch.cuda.current_stream().cuda_stream
+                    )
+                    _s, _i, cap_graph, deps, _e, num = _check_cuda_bindings(
+                        cuda_runtime.cudaStreamGetCaptureInfo(stream)
+                    )
+                    _NESTED_NODE_ADDERS[kind](cap_graph, list(deps[:num]), dst)
+                    _ = y * 2
+
+        # The two elementwise kernels in the scope are still annotated correctly.
+        annotations = get_kernel_annotations()
+        self.assertEqual(len(annotations), 2)
+        for anns in annotations.values():
+            self.assertEqual(anns, [{"name": "region"}])
+
 
 # cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
+@instantiate_parametrized_tests
 @skipIfRocm
 @requires_cuda
 @requires_cuda_python_bindings
@@ -765,6 +890,35 @@ class TestGetGraphData(TestCase):
         after = g.get_graph_data()
         self.assertIsNot(after, seen[0])
         self.assertEqual(after, seen[0])
+
+    @parametrize("kind", ["child_graph", "conditional"])
+    def test_nested_graph_node_warns_but_reports_top_level(self, kind):
+        """A nested cudaGraph_t warns; the top-level nodes are still reported.
+
+        cudaGraphGetNodes does not descend into a child graph or a conditional
+        body, so that work is missing from the result -- but the ids that are
+        reported stay valid, since the exec graph preserves top-level node ids.
+        """
+        dst = torch.zeros(64, device="cuda")
+        x = torch.zeros([2000], device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _ = x + 1
+        _NESTED_NODE_ADDERS[kind](g.raw_cuda_graph(), [], dst)
+        g.instantiate()
+
+        with self.assertWarnsRegex(UserWarning, kind):
+            data = g.get_graph_data()
+
+        # The nested node itself is reported, its body is not: exactly one memset
+        # lives in the body, and it must not appear among the returned nodes.
+        self.assertEqual(len([n for n in data["nodes"] if n["node_type"] == kind]), 1)
+        self.assertEqual(
+            len([n for n in data["nodes"] if n["node_type"] == "memset"]), 0
+        )
+        exec_graph_id = data["exec_graph_id"]
+        for node in data["nodes"]:
+            self.assertEqual(node["tools_id"], (exec_graph_id << 32) | node["node_id"])
 
     def test_keep_graph_false_raises(self):
         g = torch.cuda.CUDAGraph(keep_graph=False)
