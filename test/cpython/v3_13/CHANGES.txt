@@ -1,10 +1,8 @@
 This subdirectory contains a selection of tests from the CPython repository.
-Each adapted file records its exact upstream source tag in the Dynamo patch
-header (e.g. v3.13.5); tags may differ across files. Do not assume a single
-global tag from this note alone.
+Every adapted file pins the same upstream tag in its Dynamo patch header:
 
-Upstream release reference (historical):
-https://github.com/python/cpython/releases/tag/v3.13.0
+  v3.13.5
+  https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/<name>.py
 
 Modifications were made to ensure compatibility with the Dynamo infrastructure:
 + Monkey-patched `unittest.TestCase` to `torch._dynamo.test_case.CPythonTestCase`.
@@ -14,9 +12,10 @@ Modifications were made to ensure compatibility with the Dynamo infrastructure:
 + Adjusted imports to use `import module` instead of `from test import module`.
 
 Each adapted `*.py` has a matching `*.diff` recording the delta from the
-pristine upstream file. Sync is enforced by
-`test/dynamo/test_cpython_diff_sync.py` using hashes in
-`upstream_manifest.json`. After editing an adapted test, regenerate with:
+pristine upstream file. Sync is enforced offline by
+`tools/linter/adapters/cpython_diff_sync_linter.py` (and
+`test/test_cpython_diff_sync.py`) using hashes in `upstream_manifest.json`.
+After editing an adapted test, regenerate with:
 
   python tools/regenerate_cpython_diffs.py
   # or: python tools/regenerate_cpython_diffs.py --only test_foo.py

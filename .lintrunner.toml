@@ -1050,6 +1050,19 @@ command = [
 ]
 
 [[linter]]
+code = 'CPYTHON_DIFF_SYNC'
+include_patterns = [
+    'test/cpython/v3_13/**',
+    'test/cpython/diff_sync.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/cpython_diff_sync_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'TEST_HAS_MAIN'
 include_patterns = [
     'test/**/test_*.py',

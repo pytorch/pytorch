@@ -5,80 +5,44 @@ Usage:
   python tools/regenerate_cpython_diffs.py              # all pairs
   python tools/regenerate_cpython_diffs.py --only test_bool.py
   python tools/regenerate_cpython_diffs.py --check       # verify only (no network)
-  python tools/regenerate_cpython_diffs.py --write-header-assertions
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import sys
+import tempfile
 from pathlib import Path
+from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TEST_ROOT = REPO_ROOT / "test"
-if str(TEST_ROOT) not in sys.path:
-    sys.path.insert(0, str(TEST_ROOT))
-
-from cpython.diff_sync import (  # noqa: E402
-    CPYTHON_DIR,
-    apply_diff_to_adapted,
-    fetch_pristine,
-    iter_diff_pairs,
-    make_unified_diff,
-    normalize_bytes,
-    parse_header,
-    save_manifest,
-    sha256_bytes,
-    verify_all,
-)
 
 
-ASSERTIONS_HEADER_SNIPPET = """\
-# ======= BEGIN Dynamo patch =======
-# Owner(s): ["module: dynamo"]
-
-# ruff: noqa
-# flake8: noqa
-
-# Test copied from
-# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_unittest/test_assertions.py
-
-import sys
-import torch
-import torch._dynamo.test_case
-import unittest
-from torch.testing._internal.common_utils import run_tests
+def _load_diff_sync() -> ModuleType:
+    path = REPO_ROOT / "test" / "cpython" / "diff_sync.py"
+    spec = importlib.util.spec_from_file_location("torch_cpython_diff_sync", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-__TestCase = torch._dynamo.test_case.CPythonTestCase
-"""
-
-
-def fix_assertions_header() -> None:
-    path = CPYTHON_DIR / "test_unittest" / "test_assertions.py"
-    text = path.read_text(encoding="utf-8")
-    if "raw.githubusercontent.com/python/cpython" in text:
-        print("test_assertions.py already has source URL")
-        return
-    # Replace the existing Dynamo patch header block through __TestCase assignment.
-    end_marker = "__TestCase = torch._dynamo.test_case.CPythonTestCase"
-    end = text.find(end_marker)
-    if end < 0:
-        raise RuntimeError("could not find __TestCase assignment in test_assertions.py")
-    end = end + len(end_marker)
-    # Keep a single trailing newline before the rest (redirect imports, etc.)
-    rest = text[end:].lstrip("\n")
-    path.write_text(ASSERTIONS_HEADER_SNIPPET + "\n\n" + rest, encoding="utf-8")
-    print(f"updated header: {path.relative_to(REPO_ROOT)}")
+diff_sync = _load_diff_sync()
 
 
 def regenerate(only: str | None, *, force: bool = False) -> int:
-    """Update manifest for all pairs; rewrite .diff only when stale (or --force)."""
-    from cpython.diff_sync import load_manifest
+    """Update manifest for all pairs; rewrite .diff only when stale (or --force).
 
-    manifest = load_manifest()
-    manifest.setdefault("files", {})
-    pairs = iter_diff_pairs()
+    Fetches / computes everything first, then writes .diff files and the manifest
+    only if every pair succeeded — avoids leaving a half-updated tree on a
+    mid-run network flake.
+    """
+    CPYTHON_DIR = diff_sync.CPYTHON_DIR
+    manifest = diff_sync.load_manifest()
+    files: dict = dict(manifest.get("files", {}))
+    pairs = diff_sync.iter_diff_pairs()
     if only:
         pairs = [
             (py, diff)
@@ -89,55 +53,90 @@ def regenerate(only: str | None, *, force: bool = False) -> int:
             print(f"no pairs matched --only {only!r}", file=sys.stderr)
             return 1
 
+    planned: list[tuple[Path, str | None, str, dict]] = []
+    # (diff_path, new_diff_text_or_None_to_keep, rel, manifest_entry)
     failures = 0
     rewritten = 0
     kept = 0
+    seen: set[str] = set()
+
     for py_path, diff_path in pairs:
         rel = py_path.relative_to(CPYTHON_DIR).as_posix()
         repo_rel = py_path.relative_to(REPO_ROOT).as_posix()
+        seen.add(rel)
         try:
-            tag, upstream = parse_header(py_path)
-            pristine = fetch_pristine(tag, upstream)
-            adapted = normalize_bytes(py_path.read_bytes())
-            digest = sha256_bytes(pristine)
+            tag, upstream = diff_sync.parse_header(py_path)
+            pristine = diff_sync.fetch_pristine(tag, upstream)
+            adapted = diff_sync.normalize_bytes(py_path.read_bytes())
+            digest = diff_sync.sha256_bytes(pristine)
 
             needs_rewrite = force
             if not needs_rewrite:
                 try:
-                    applied = apply_diff_to_adapted(pristine, py_path, diff_path)
+                    applied = diff_sync.apply_diff_to_adapted(
+                        pristine, py_path, diff_path
+                    )
                     needs_rewrite = applied != adapted
                 except Exception:
                     needs_rewrite = True
 
+            new_diff: str | None = None
             if needs_rewrite:
-                new_diff = make_unified_diff(pristine, adapted, repo_rel)
-                diff_path.write_text(new_diff, encoding="utf-8", newline="\n")
-                applied = apply_diff_to_adapted(pristine, py_path, diff_path)
-                if applied != adapted:
-                    raise RuntimeError(
-                        "regenerated diff does not reproduce adapted file"
+                new_diff = diff_sync.make_unified_diff(pristine, adapted, repo_rel)
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_diff = Path(tmp) / "patch.diff"
+                    tmp_diff.write_text(new_diff, encoding="utf-8", newline="\n")
+                    applied = diff_sync.apply_diff_to_adapted(
+                        pristine, py_path, tmp_diff
                     )
+                    if applied != adapted:
+                        raise RuntimeError(
+                            "regenerated diff does not reproduce adapted file"
+                        )
                 rewritten += 1
                 print(f"REWRITE  {rel}  ({tag})")
             else:
                 kept += 1
                 print(f"KEEP     {rel}  ({tag})")
 
-            manifest["files"][rel] = {
-                "tag": tag,
-                "upstream": upstream,
-                "sha256": digest,
-            }
+            planned.append(
+                (
+                    diff_path,
+                    new_diff,
+                    rel,
+                    {"tag": tag, "upstream": upstream, "sha256": digest},
+                )
+            )
         except Exception as e:
             failures += 1
             print(f"FAIL {rel}: {e}", file=sys.stderr)
 
-    save_manifest(manifest)
+    if failures:
+        print(
+            f"NOT writing diffs/manifest ({failures} failure(s)); "
+            f"kept={kept} rewritten={rewritten}",
+            file=sys.stderr,
+        )
+        return 1
+
+    for diff_path, new_diff, rel, entry in planned:
+        if new_diff is not None:
+            diff_path.write_text(new_diff, encoding="utf-8", newline="\n")
+        files[rel] = entry
+
+    if only is None:
+        stale = sorted(set(files) - seen)
+        for rel in stale:
+            del files[rel]
+            print(f"PRUNE    {rel}")
+
+    manifest["files"] = files
+    diff_sync.save_manifest(manifest)
     print(
-        f"done: kept={kept} rewritten={rewritten} failures={failures} "
-        f"manifest_entries={len(manifest['files'])}"
+        f"done: kept={kept} rewritten={rewritten} failures=0 "
+        f"manifest_entries={len(files)}"
     )
-    return 1 if failures else 0
+    return 0
 
 
 def main() -> int:
@@ -153,24 +152,19 @@ def main() -> int:
         action="store_true",
         help="Verify sync offline using upstream_manifest.json (no network)",
     )
-    ap.add_argument(
-        "--write-header-assertions",
-        action="store_true",
-        help="Add missing source URL to test_unittest/test_assertions.py",
-    )
     args = ap.parse_args()
 
-    if args.write_header_assertions:
-        fix_assertions_header()
-        return 0
     if args.check:
-        errors = verify_all()
+        errors = diff_sync.verify_all()
         if errors:
             print("cpython diff sync check FAILED:")
             for err in errors:
                 print(f"  - {err}")
             return 1
-        print(f"OK: {len(list(iter_diff_pairs()))} cpython .py/.diff pairs in sync")
+        print(
+            f"OK: {len(list(diff_sync.iter_diff_pairs()))} "
+            "cpython .py/.diff pairs in sync"
+        )
         return 0
     return regenerate(args.only, force=args.force)
 
