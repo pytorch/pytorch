@@ -709,12 +709,19 @@ class CUDAGraph(_CUDAGraph):
                         "graph_id": int,
                         "node_id": int,
                         "kernel_name": str or None,
+                        "event_ptr": int,
                         "dependencies": [int, ...],
                         "dependents": [int, ...],
                     },
                     ...,
                 ],
             }
+
+        ``event_ptr`` is the ``cudaEvent_t`` handle (as an int) an event-record
+        or event-wait node records / waits on -- these nodes produce no timed
+        CUPTI record, so matching a wait to the record that signals it is the
+        only way to reason about the cross-stream sync it encodes. It is ``0``
+        for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -785,6 +792,26 @@ class CUDAGraph(_CUDAGraph):
                     if err == _cuda_driver.CUresult.CUDA_SUCCESS:
                         kernel_name = name.decode() if isinstance(name, bytes) else name
 
+            # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
+            # capture the handle so a wait node can be matched to the record that signals it.
+            # Not best-effort like the kernel-name lookup above (a name can legitimately be
+            # unavailable): the node type is already established here, so these calls are
+            # expected to succeed. Swallowing a failure would leave event_ptr 0 and make the
+            # record/wait match quietly wrong rather than loud.
+            event_ptr = 0
+            if ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEventRecord:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventRecordNodeGetEvent(node)
+                    )
+                )
+            elif ntype == _cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeWaitEvent:
+                event_ptr = int(
+                    _check_cuda_bindings(
+                        _cuda_runtime.cudaGraphEventWaitNodeGetEvent(node)
+                    )
+                )
+
             node_infos.append(
                 {
                     "index": i,
@@ -793,6 +820,7 @@ class CUDAGraph(_CUDAGraph):
                     "graph_id": graph_id,
                     "node_id": node_id,
                     "kernel_name": kernel_name,
+                    "event_ptr": event_ptr,
                     "dependencies": [],
                     "dependents": [],
                 }

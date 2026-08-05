@@ -260,9 +260,11 @@ def _collect_descendants(
 # toolsId -> list of annotation objects.
 _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 
-# Node types we annotate (kernels, memcpys, memsets, and batch mem ops), as
-# driver node-type enums. Initialized lazily to avoid touching cuda.bindings at
-# import time.
+# Node types we annotate (kernels, memcpys, memsets, batch mem ops, and event
+# record/wait nodes), as driver node-type enums. Event nodes are stream-ordered
+# but do not occupy the device; annotating them lets the profiler place their
+# spans on the intended stream lane. Initialized lazily to avoid touching
+# cuda.bindings at import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
 
@@ -275,6 +277,8 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
             node_types.CU_GRAPH_NODE_TYPE_MEMSET,
             node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
+            node_types.CU_GRAPH_NODE_TYPE_EVENT_RECORD,
+            node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT,
         }
     return _ANNOTATABLE_TYPES
 
