@@ -3191,11 +3191,12 @@ def _max_unpoolnd(
             ),
         )
 
-    # The native CPU kernel preserves the input's memory format
-    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
-    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    # The native CPU kernel (aten/src/ATen/native/MaxUnpooling.cpp) and the XPU
+    # kernel (torch-xpu-ops MaxUnpoolingKernels.cpp) preserve the input's memory
+    # format via suggest_memory_format, while the CUDA kernel and the 3d kernels
+    # always return contiguous output.
     def _restride(t: TensorLike) -> TensorLike:
-        if dim == 2 and self.device.type == "cpu":
+        if dim == 2 and self.device.type in ("cpu", "xpu"):
             return t.contiguous(memory_format=utils.suggest_memory_format(self))
         return t
 

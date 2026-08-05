@@ -896,7 +896,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         self.prefix.writeline_aot(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
                         )
-                        device_type_str = str(tensor_device.type)
+                        device_type_str = tensor_device.type
                         self.prefix.splice_aot(f"""
                                 int32_t {name}_expected_device_type = {expected_device_type};
                                 if ({name}_expected_device_type != {name}_device_type) {{
@@ -2038,6 +2038,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return reduce
 
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
+        return [str(x) for x in inputs]
+
     def _generate_scatter_fallback(
         self,
         output,
@@ -2056,22 +2059,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
-        inputs_wrapped = [str(x) for x in inputs]
+        # str(output) ensures that CppWrapperCpuArrayRef borrows the output tensor
+        args_wrapped = self._generate_scatter_fallback_args((str(output), *inputs))
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
         # surfaces instead of being silently swallowed.
-        line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
+        line = f"{cpp_kernel_name}({','.join(args_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
             line += f", {','.join(kwargs)}"
-        else:
-            if src_is_tensor:
-                if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
-            else:
-                if reduce is not None:
-                    raise AssertionError(
-                        "Expect reduce to be None for aten.scatter_ with scalar src"
-                    )
+        elif src_is_tensor:
+            if reduce:
+                line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
+        elif reduce is not None:
+            raise AssertionError(
+                "Expect reduce to be None for aten.scatter_ with scalar src"
+            )
         line += ")"
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({line});")
 
@@ -2368,7 +2370,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
         device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
         self.used_cached_devices.add(device_str)
-        return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
+        return f"cached_torch_device_type_{device_str}, {device.index or 0}"
 
     def codegen_device_idx(self, device, device_id):
         device_id = device_id.strip()
