@@ -3731,6 +3731,31 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return ([numel], [])
         return ([], [])
 
+    def _get_extern_module_fqn(self) -> str | None:
+        """Derive the FQN annotation string for this extern kernel.
+
+        Separated from codegen() so the Scheduler can pre-populate
+        fx_extern_fqns before any Triton kernel codegen runs, making
+        get_fused_kernel_module_fqn's pass-2 filter order-independent.
+        """
+        from torch._inductor.fx_passes.graph_view import (
+            _clean_stack_name,
+            _strip_instance_suffix,
+        )
+
+        lowering_node = self.node.get_lowering_fx_node()
+        if lowering_node is not None:
+            stack = lowering_node.meta.get("nn_module_stack")
+            if stack:
+                module_path = _clean_stack_name(next(reversed(stack.values()))[0])
+                if module_path:
+                    return (
+                        f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
+                    )
+            return None
+        # lowering_fx_node not set (e.g. convolution); fall back to walking origins.
+        return get_fused_kernel_module_fqn([self])
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
@@ -3739,26 +3764,8 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             and not V.graph.cpp_wrapper
         ):
             from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
-            from torch._inductor.fx_passes.graph_view import (
-                _clean_stack_name,
-                _strip_instance_suffix,
-            )
 
-            module_fqn = None
-            lowering_node = self.node.get_lowering_fx_node()
-            if lowering_node is not None:
-                stack = lowering_node.meta.get("nn_module_stack")
-                if stack:
-                    module_path = _clean_stack_name(next(reversed(stack.values()))[0])
-                    if module_path:
-                        op_name = _strip_instance_suffix(lowering_node.name)
-                        module_fqn = f"L.{module_path}.{op_name}"
-            else:
-                # lowering_fx_node not set for this extern kernel (e.g. convolution);
-                # fall back to walking origins. For ops whose inputs are weights
-                # or placeholders (no nn_module_stack), this produces a clean
-                # single-FQN result without cascading upstream names.
-                module_fqn = get_fused_kernel_module_fqn([self])
+            module_fqn = self._get_extern_module_fqn()
             if module_fqn:
                 V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
                 n_before = len(wrapper.lines)
@@ -12141,6 +12148,21 @@ class Scheduler:
                 multi = [name for name, ss in input_streams.items() if len(ss) > 1]
                 if multi:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
+
+        # Pre-populate fx_extern_fqns for all extern kernels before any Triton
+        # kernel is codegen'd.  get_fused_kernel_module_fqn's pass-2 filter
+        # reads this set to exclude extern-kernel FQNs from Triton annotations;
+        # if an extern kernel is codegen'd after a Triton kernel that shares the
+        # same block, the filter is incomplete and returns None, leaving the
+        # Triton kernel unannotated.  Walking all nodes up front makes the
+        # filter order-independent.
+        if config.triton.cudagraph_kernel_annotations and not V.graph.cpp_wrapper:
+            for node in nodes:
+                for snode in node.get_nodes():
+                    if isinstance(snode, ExternKernelSchedulerNode):
+                        fqn = snode._get_extern_module_fqn()
+                        if fqn:
+                            V.graph.fx_extern_fqns.add(fqn.removeprefix("L."))
 
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
