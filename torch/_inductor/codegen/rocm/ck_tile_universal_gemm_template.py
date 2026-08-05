@@ -10,7 +10,7 @@ from typing import Any
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
-from torch._inductor.codegen.rocm.compile_command import _rocm_system_include_dir
+from torch._inductor.codegen.rocm.compile_command import _rocm_header_search_dirs
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
@@ -25,8 +25,6 @@ log = logging.getLogger(__name__)
 _CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 _STRUCT_ANCHOR = "struct UniversalGemmPipelineProblem"
 _SCHEDULER_PARAM = "GemmPipelineScheduler Scheduler_"
-# ck_tile writes the template parameter list above the struct name.
-_HEADER_TEMPLATE_MAX_BACKWARD = 900
 
 
 def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
@@ -34,9 +32,8 @@ def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
     if pos < 0:
         return None
 
-    template_start = header_text.rfind(
-        "template", max(0, pos - _HEADER_TEMPLATE_MAX_BACKWARD), pos
-    )
+    # ck_tile writes the template parameter list above the struct name.
+    template_start = header_text.rfind("template", 0, pos)
     if template_start < 0:
         return None
 
@@ -55,32 +52,55 @@ def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
     return None
 
 
+def _find_ck_tile_header(rocm_home: str | None, ck_dir: str | None) -> str | None:
+    for include_dir in _rocm_header_search_dirs(rocm_home, ck_dir):
+        header_path = os.path.join(include_dir, _CK_TILE_PIPELINE_PROBLEM_HEADER)
+        if os.path.exists(header_path):
+            return header_path
+    return None
+
+
 @functools.cache
-def _ck_tile_universal_gemm_v2_api(rocm_home: str | None) -> bool:
-    # ck_tile headers are resolved from $ROCM_HOME at kernel compile time, not
-    # from torch.version.hip (frozen at PyTorch build time). Probe the header
-    # hipcc will use; fall back to the HIP version string when unavailable.
+def _ck_tile_universal_gemm_v2_api(rocm_home: str | None, ck_dir: str | None) -> bool:
+    # ck_tile headers come from the compiler's include path at kernel compile
+    # time, not from torch.version.hip, which is frozen when PyTorch is built.
+    # Probe the header the compiler will pick, and say so loudly when we cannot:
+    # the version fallback below is the very signal we are trying to avoid.
     if torch.version.hip is None:
         return False
 
     try:
-        rocm_include = _rocm_system_include_dir(rocm_home)
-        header_path = os.path.join(rocm_include, _CK_TILE_PIPELINE_PROBLEM_HEADER)
-        with open(header_path) as header_file:
-            header_text = header_file.read()
-        header_v2 = _header_has_v2_universal_gemm_pipeline(header_text)
-        if header_v2 is not None:
-            return header_v2
-        log.debug(
-            "Could not determine CK-Tile universal GEMM API from %s; "
-            "falling back to torch.version.hip",
-            header_path,
-        )
-    except OSError:
-        pass
+        header_path = _find_ck_tile_header(rocm_home, ck_dir)
+        if header_path is None:
+            reason = f"{_CK_TILE_PIPELINE_PROBLEM_HEADER} is not on the include path"
+        else:
+            with open(header_path) as header_file:
+                header_v2 = _header_has_v2_universal_gemm_pipeline(header_file.read())
+            if header_v2 is not None:
+                return header_v2
+            reason = f"the template clause in {header_path} was not recognized"
+    except OSError as e:
+        reason = str(e)
 
     # torch.version.hip is the HIP version, conventionally aligned with ROCm.
-    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    try:
+        rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    except ValueError:
+        log.warning(
+            "Could not probe the CK-Tile universal GEMM API (%s) and "
+            "torch.version.hip=%s is unparsable; assuming the legacy API",
+            reason,
+            torch.version.hip,
+        )
+        return False
+
+    log.warning(
+        "Could not probe the CK-Tile universal GEMM API (%s); falling back to "
+        "torch.version.hip=%s, which reflects the ROCm PyTorch was built against "
+        "rather than the headers these kernels compile against",
+        reason,
+        torch.version.hip,
+    )
     return rocm_version >= (7, 14)
 
 
@@ -585,6 +605,21 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
+    def check_epilogue(self, op: "CKTileGemmOperation"):
+        """
+        Pre-v2 CShuffleEpilogueProblem takes a memory_operation_enum argument
+        with no default, which we don't emit, so those instances don't compile.
+        ck_tile dropped it one release after it simplified
+        UniversalGemmPipelineProblem, so a snapshot taken between the two is
+        misclassified as supported here; both shipped ROCm releases are on one
+        side or the other.
+        """
+        if op.epilogue == "CShuffle" and not _ck_tile_universal_gemm_v2_api(
+            config.rocm.rocm_home, config.rocm.ck_dir
+        ):
+            return False
+        return True
+
     def filter_op(self, op: "CKTileGemmOperation"):
         """
         Determines whether a given op definition is suitable for the current
@@ -594,6 +629,8 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
+        if not self.check_epilogue(op):
+            return None
         if not self.check_dtypes(op):
             return None
         if not self.check_layouts(op):
@@ -819,7 +856,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         X, W = self.input_nodes
         Y = self.output_node
 
-        use_v2_api = _ck_tile_universal_gemm_v2_api(config.rocm.rocm_home)
+        use_v2_api = _ck_tile_universal_gemm_v2_api(
+            config.rocm.rocm_home, config.rocm.ck_dir
+        )
         instance_definition = self.emit_ck_instance(op, use_v2_api=use_v2_api)
 
         version_comment = rf"""/**
