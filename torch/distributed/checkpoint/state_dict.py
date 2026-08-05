@@ -125,14 +125,6 @@ class StateDictOptions:
     broadcast_from_rank0: bool = False
     flatten_optimizer_state_dict: bool = False
     dsd_fqn_modifiers: str = "_fqn_modifiers"
-    keep_submodule_prefixes: bool = True
-
-    def __post_init__(self) -> None:
-        if not self.keep_submodule_prefixes:
-            raise ValueError(
-                "The `keep_submodule_prefixes` option has been removed. "
-                "Submodule prefix handling should be done manually."
-            )
 
 
 @dataclass
