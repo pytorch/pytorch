@@ -945,6 +945,39 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
     )
+    def test_reserve_stream_option(self):
+        # reserve_stream is an explicit, per-group opt-in: it defaults off, and a
+        # parent group's opt-in must never be inherited by new_group (which would
+        # silently exhaust the capped stream pool). An explicit opt-in on the
+        # sub-group itself is still honored.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        opts = self.opts()
+        self.assertFalse(opts.reserve_stream)  # default is opt-out
+        opts.reserve_stream = True
+        pg = self._create_process_group_nccl(store, opts)
+        device = self.rank_to_GPU[self.rank][0]
+        dev = torch.device(device)
+        # Trigger lazy comm init so the parent actually reserves a pool stream
+        # (also exercises the destructor's release path at destroy below).
+        pg.allreduce(torch.rand(10, 10, device=device)).wait()
+        self.assertTrue(pg._get_backend(dev).options.reserve_stream)
+
+        # Sub-group created with default options must NOT inherit reserve_stream.
+        inherited = c10d.new_group([0, 1])
+        self.assertFalse(inherited._get_backend(dev).options.reserve_stream)
+
+        # A sub-group that explicitly opts in still keeps reserve_stream set.
+        explicit_opts = self.opts()
+        explicit_opts.reserve_stream = True
+        explicit = c10d.new_group([0, 1], pg_options=explicit_opts)
+        self.assertTrue(explicit._get_backend(dev).options.reserve_stream)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
+    )
     def test_abort_in_destroy_mixed_empty_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())

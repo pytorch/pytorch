@@ -6688,6 +6688,11 @@ def split_group(
         # A deep copy is needed because if the option will be modified inside split
         # and if we split parent pg multiple times, we will run into device out of bound error.
         pg_options = copy.deepcopy(parent_backend.options)
+        # reserve_stream is always an explicit per-group opt-in; never inherit it
+        # from the parent, or one reserved default PG would silently make every
+        # sub-group reserve a stream and exhaust the (small, capped) pool.
+        if pg_options is not None and hasattr(pg_options, "reserve_stream"):
+            pg_options.reserve_stream = False
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)

@@ -511,6 +511,18 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_getStreamsPerPool(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "torch.cuda._get_stream_pool_size(): expected 'int' priority");
+  auto priority = static_cast<int>(THPUtils_unpackLong(arg));
+  return THPUtils_packInt64(c10::cuda::getStreamsPerPool(priority));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2355,6 +2367,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
+    {"_cuda_getStreamsPerPool", THCPModule_getStreamsPerPool, METH_O, nullptr},
     {"_cuda_set_sync_debug_mode",
      THCPModule_cudaSetSyncDebugMode,
      METH_O,

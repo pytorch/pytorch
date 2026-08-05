@@ -1600,6 +1600,17 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
+  // Release any pool reservations taken for this group's streams (opt-in via
+  // Options::reserve_stream), returning the slots to the round-robin pool.
+  // Guarded by the flag: releasing a transient (non-reserved) stream could
+  // clear another holder's reservation bit, so only release what we reserved.
+  if (options_->reserve_stream) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& [_, stream] : ncclStreams_) {
+      at::cuda::releaseReservedStream(stream);
+    }
+  }
+
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
@@ -3206,8 +3217,13 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 
   // Creates the NCCL streams
   bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
-  auto streamVal = at::cuda::getStreamFromPool(
-      options_->is_high_priority_stream || force_high);
+  bool high_priority = options_->is_high_priority_stream || force_high;
+  // Reserve a dedicated pool stream when opted in (Options::reserve_stream) so
+  // this group's collectives do not share a stream/queue with other reserved
+  // streams; otherwise take a transient (round-robin) stream as before.
+  auto streamVal = options_->reserve_stream
+      ? at::cuda::reserveStreamFromPool(high_priority)
+      : at::cuda::getStreamFromPool(high_priority);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -6159,8 +6175,11 @@ void ProcessGroupNCCL::initializeDeviceStateForComm(
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
-  auto stream = at::cuda::getStreamFromPool(
-      options_->is_high_priority_stream || force_high);
+  bool high_priority = options_->is_high_priority_stream || force_high;
+  // See Options::reserve_stream note above.
+  auto stream = options_->reserve_stream
+      ? at::cuda::reserveStreamFromPool(high_priority)
+      : at::cuda::getStreamFromPool(high_priority);
 
   devNCCLCommMap_[key] = comm;
   ncclStreams_.emplace(key, stream);

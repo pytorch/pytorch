@@ -3979,6 +3979,8 @@ Example::
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
       .def_readwrite(
+          "reserve_stream", &::c10d::ProcessGroupNCCL::Options::reserve_stream)
+      .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)

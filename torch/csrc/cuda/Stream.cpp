@@ -22,6 +22,7 @@ static PyObject* THCPStream_pynew(
   const auto current_device = c10::cuda::current_device();
 
   int priority = 0;
+  int reserve = 0;
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
@@ -38,18 +39,20 @@ static PyObject* THCPStream_pynew(
       "device_index",
       "device_type",
       "stream_ptr",
+      "reserve",
       nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iLLLO",
+          "|iLLLOp",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &priority,
           &stream_id,
           &device_index,
           &device_type,
-          &stream_ptr_obj)) {
+          &stream_ptr_obj,
+          &reserve)) {
     return nullptr;
   }
 
@@ -75,6 +78,10 @@ static PyObject* THCPStream_pynew(
     TORCH_CHECK(
         priority == 0, "Priority was explicitly set for an external stream")
   }
+  // reserve only applies to a freshly pooled stream (not unpack/external).
+  const bool from_pool =
+      !(stream_id || device_index || device_type) && !stream_ptr_provided;
+  const bool did_reserve = from_pool && reserve != 0;
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
             stream_id,
@@ -84,13 +91,15 @@ static PyObject* THCPStream_pynew(
                                   // NOLINTNEXTLINE(performance-no-int-to-ptr)
                                   reinterpret_cast<cudaStream_t>(stream_ptr),
                                   current_device)
-                            : at::cuda::getStreamFromPool(priority);
+      : did_reserve ? at::cuda::reserveStreamFromPool(priority)
+                    : at::cuda::getStreamFromPool(priority);
 
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
+  self->holds_reservation = did_reserve;
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
 
   return (PyObject*)ptr.release();
@@ -98,6 +107,9 @@ static PyObject* THCPStream_pynew(
 }
 
 static void THCPStream_dealloc(THCPStream* self) {
+  if (self->holds_reservation) {
+    at::cuda::releaseReservedStream(self->cuda_stream);
+  }
   self->cuda_stream.~CUDAStream();
   THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }

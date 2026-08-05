@@ -279,6 +279,18 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
+def _get_stream_pool_size(priority: int = 0) -> int:
+    r"""Return the number of distinct streams in the pool for ``priority``.
+
+    This is the round-robin wrap point of :func:`torch.cuda.Stream`. On CUDA it is
+    a compile-time constant; on ROCm it is sized per priority to the backing
+    hardware-queue count (``GPU_MAX_HW_QUEUES``, default 4), so each pooled stream
+    gets its own queue. The default-priority pool is one smaller than higher-priority
+    pools because the null stream permanently holds one of its queues.
+    """
+    return torch._C._cuda_getStreamsPerPool(priority)
+
+
 def _extract_arch_version(arch_string: str) -> int:
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_", maxsplit=2)[1]

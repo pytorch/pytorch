@@ -532,6 +532,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
+    // Reserve a dedicated pool stream for this group's collectives, excluded
+    // from the round-robin pool so it does not share a stream (and, on ROCm, an
+    // hsa_queue) with other reserved streams. Opt-in per group; never inherited
+    // by new_group. See reserveStreamFromPool.
+    bool reserve_stream = false;
+
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 

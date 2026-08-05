@@ -31,19 +31,24 @@ class Stream(torch._C._CudaStreamBase):
             If the value falls outside of the allowed priority range, it will automatically be
             mapped to the nearest valid priority (lowest for large positive numbers or
             highest for large negative numbers).
+        reserve(bool, optional): if ``True``, reserve a dedicated stream from the pool
+            rather than a transient one. A reserved stream is excluded from the
+            round-robin pool until it is freed, so reserved streams (across the whole
+            process, at the same priority) never share an underlying stream. Hold this
+            object for as long as you rely on the dedicated stream; the reservation is
+            released when it is garbage collected. By default ``False``.
 
     """
 
-    def __new__(cls, device=None, priority=0, **kwargs):
+    def __new__(cls, device=None, priority=0, reserve=False, **kwargs):
         # Check CUDA availability
         if not torch.backends.cuda.is_built():
             raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
-            return super().__new__(cls, priority=priority, **kwargs)
-        else:
-            with torch.cuda.device(device):
-                return super().__new__(cls, priority=priority, **kwargs)
+            return super().__new__(cls, priority=priority, reserve=reserve, **kwargs)
+        with torch.cuda.device(device):
+            return super().__new__(cls, priority=priority, reserve=reserve, **kwargs)
 
     def wait_event(self, event: Event | torch.Event) -> None:
         r"""Make all future work submitted to the stream wait for an event.

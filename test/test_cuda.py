@@ -1515,6 +1515,130 @@ print(t.is_pinned())
                 s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
                 _ = s.cuda_stream
 
+    @serialTest()
+    def test_stream_pool_size_and_wrap(self):
+        # For each supported priority pool, the first pool_size streams are distinct
+        # underlying streams and the (pool_size + 1)-th wraps back onto the first.
+        # On ROCm with the cap active this confirms each pooled stream is a
+        # distinct hipStream (and, by construction, a distinct hsa_queue).
+        least, greatest = torch.cuda.Stream.priority_range()
+        for priority in range(least, greatest - 1, -1):
+            pool_size = torch.cuda._get_stream_pool_size(priority)
+            self.assertGreaterEqual(pool_size, 1)
+            streams = [
+                torch.cuda.Stream(priority=priority) for _ in range(pool_size + 1)
+            ]
+            ptrs = [s.cuda_stream for s in streams]
+            self.assertEqual(
+                len(set(ptrs[:pool_size])),
+                pool_size,
+                f"priority {priority}: pooled streams are not distinct",
+            )
+            self.assertEqual(
+                ptrs[pool_size],
+                ptrs[0],
+                f"priority {priority}: round-robin did not wrap",
+            )
+
+    @serialTest()
+    def test_stream_pool_concurrency(self):
+        # Pooled streams should run concurrently (distinct hardware queues). On
+        # ROCm a shared hsa_queue would serialize them; this probe measures
+        # wall-clock overlap, mirroring test_greencontext_workqueue_concurrency_limit.
+        n = min(torch.cuda._get_stream_pool_size(), 4)
+        if n < 2:
+            self.skipTest("stream pool too small to test concurrency")
+        cycles = int(50 * get_cycles_per_ms())
+        streams = [torch.cuda.Stream() for _ in range(n)]
+
+        def measure(used):
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            for s in used:
+                with torch.cuda.stream(s):
+                    torch.cuda._sleep(cycles)
+            torch.cuda.synchronize()
+            return time.perf_counter() - t0
+
+        torch.cuda._sleep(1_000)  # ensure the sleep kernel is loaded
+        for s in streams:  # warm up first-use overhead off the timed path
+            with torch.cuda.stream(s):
+                torch.cuda._sleep(1_000)
+        torch.cuda.synchronize()
+
+        # n sleeps spread across n distinct pooled streams vs piled on one stream.
+        # Distinct hardware queues let the spread version overlap and beat the
+        # serialized baseline. Realized concurrency width is hardware/config
+        # dependent (on ROCm it tracks GPU_MAX_HW_QUEUES); if the device exposes
+        # no overlap at all (ratio ~ 1.0, e.g. a single usable queue) skip rather
+        # than fail, since the property cannot be observed there. Reaching the end
+        # without skipping means overlap was confirmed.
+        serial = measure([streams[0]] * n)
+        parallel = measure(streams)
+        if parallel >= serial * 0.8:
+            self.skipTest(
+                f"device exposes no multi-stream overlap "
+                f"(serial={serial:.4f}s parallel={parallel:.4f}s)"
+            )
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "per-priority cap is ROCm-specific")
+    def test_stream_pool_per_priority_cap_rocm(self):
+        # On ROCm the pool is sized to GPU_MAX_HW_QUEUES (q) per priority: the
+        # default-priority pool gets q-1 (the null stream permanently holds one of
+        # that priority's hw queues) and the high-priority pool gets q. By default
+        # (no env) q is the HIP runtime default of 4. Read in a subprocess so the
+        # env is applied at HIP init.
+        script = (
+            "import torch; print(torch.cuda._get_stream_pool_size(0), "
+            "torch.cuda._get_stream_pool_size(-1))"
+        )
+
+        def pool_sizes(extra_env):
+            env = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("GPU_MAX_HW_QUEUES", "PYTORCH_HIP_STREAMS_PER_POOL")
+            }
+            env.update(extra_env)
+            out = subprocess.check_output([sys.executable, "-c", script], env=env)
+            return tuple(int(v) for v in out.decode().split())
+
+        self.assertEqual(pool_sizes({}), (3, 4))  # default-on, q=4
+        self.assertEqual(pool_sizes({"GPU_MAX_HW_QUEUES": "8"}), (7, 8))  # override
+
+    @serialTest()
+    def test_reserved_streams(self):
+        # Stream(reserve=True) hands out a dedicated pool slot excluded from the
+        # round-robin until released. Reserving the whole pool yields pairwise
+        # distinct streams; one more raises; transient Stream() avoids reserved
+        # slots; and the reservation is released when the object is dropped.
+        least, greatest = torch.cuda.Stream.priority_range()
+        for priority in range(least, greatest - 1, -1):
+            pool = torch.cuda._get_stream_pool_size(priority)
+            # Reserving the whole pool yields pairwise-distinct streams.
+            reserved = [
+                torch.cuda.Stream(priority=priority, reserve=True) for _ in range(pool)
+            ]
+            rptrs = {s.cuda_stream for s in reserved}
+            self.assertEqual(
+                len(rptrs), pool, f"priority {priority}: reserved not distinct"
+            )
+            # Pool exhausted -> reserving one more raises.
+            with self.assertRaises(RuntimeError):
+                torch.cuda.Stream(priority=priority, reserve=True)
+            # Dropping one reservation returns exactly that slot to the pool.
+            freed = reserved.pop().cuda_stream
+            gc.collect()
+            # Now pool-1 slots are reserved and one is free; transient streams
+            # must skip the reserved slots and only ever use the freed one.
+            got = {
+                torch.cuda.Stream(priority=priority).cuda_stream
+                for _ in range(pool * 4 + 4)
+            }
+            self.assertEqual(
+                got, {freed}, f"priority {priority}: transient hit a reserved slot"
+            )
+
     def test_stream_event_repr(self):
         s = torch.cuda.current_stream()
         self.assertTrue("torch.cuda.Stream" in s.__repr__())

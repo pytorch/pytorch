@@ -30,6 +30,13 @@
  * last streams requested are actually the same stream (under the covers)
  * and kernels enqueued on them cannot run concurrently.
  *
+ * On ROCm/HIP each per-priority pool is sized to the number of hsa_queue_t the
+ * HIP runtime backs for that priority (GPU_MAX_HW_QUEUES, default 4) so each
+ * pooled stream gets its own hardware queue; the round-robin wrap point is then
+ * that count rather than 32. The default-priority pool uses GPU_MAX_HW_QUEUES-1
+ * (the null stream permanently holds one of its queues) and higher priorities
+ * use GPU_MAX_HW_QUEUES. See Note [HIP Stream Pool] in CUDAStream.cpp.
+ *
  * The third pool is the "high priority" streams. The third pool acts like
  * the second pool except the streams are created with a higher priority.
  *
@@ -206,6 +213,36 @@ C10_CUDA_API CUDAStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
+ * Get the number of distinct streams in the pool for the given priority (the
+ * round-robin wrap point). On CUDA this is a compile-time constant; on ROCm it
+ * may be capped per priority to the backing hsa_queue count. See Note [HIP
+ * Stream Pool].
+ */
+C10_CUDA_API int getStreamsPerPool(int priority = 0);
+
+/**
+ * Reserve a stream from the pool for the given priority. The reserved stream is
+ * excluded from the round-robin getStreamFromPool until releaseReservedStream
+ * is called for it, so streams reserved across the process do not share a slot
+ * (and, on ROCm where each slot is a distinct hsa_queue, run concurrently).
+ * Throws if every slot for that priority is already reserved. See Note [HIP
+ * Stream Pool].
+ */
+C10_CUDA_API CUDAStream
+reserveStreamFromPool(const int priority = 0, DeviceIndex device = -1);
+// Convenience overload mirroring getStreamFromPool(bool); no default arg to
+// disambiguate from the priority overload.
+C10_CUDA_API CUDAStream
+reserveStreamFromPool(const bool isHighPriority, DeviceIndex device = -1);
+
+/**
+ * Release a reservation taken by reserveStreamFromPool, returning the slot to
+ * the round-robin pool. Only the reservation is dropped; the underlying stream
+ * is never destroyed. Safe to call on non-reserved/default/external streams.
+ */
+C10_CUDA_API void releaseReservedStream(CUDAStream stream);
+
+/**
  * Get a CUDAStream from a externally allocated one.
  *
  * This is mainly for interoperability with different libraries where we
@@ -255,6 +292,9 @@ C10_CUDA_API std::ostream& operator<<(
 namespace c10::hip {
 using c10::cuda::getStreamFromExternal;
 using c10::cuda::getStreamFromPool;
+using c10::cuda::getStreamsPerPool;
+using c10::cuda::releaseReservedStream;
+using c10::cuda::reserveStreamFromPool;
 // must use inline wrappers instead of reference aliases due to default args
 inline c10::cuda::CUDAStream getDefaultHIPStream(
     DeviceIndex device_index = -1) {

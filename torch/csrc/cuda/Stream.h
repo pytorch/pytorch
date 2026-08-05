@@ -8,6 +8,10 @@
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THCPStream : THPStream {
   at::cuda::CUDAStream cuda_stream;
+  // True if this Stream was created with reserve=True and therefore holds a
+  // pool reservation that must be released in dealloc. See
+  // reserveStreamFromPool.
+  bool holds_reservation;
 };
 extern PyObject* THCPStreamClass;
 
