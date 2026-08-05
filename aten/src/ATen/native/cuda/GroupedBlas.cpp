@@ -42,6 +42,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_grouped_mm_native.h>
+#include <ATen/ops/_scaled_grouped_mm_native.h>
 #include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
