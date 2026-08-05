@@ -8,6 +8,13 @@ rebuilding the launcher and re-entering FlyDSL's compile path.
 
 This mirrors the call shape of Quack/CuteDSL's ``@jit_cache`` while deliberately
 not copying its persistent ``.o`` cache behavior.
+
+Entries are never evicted: nothing here bounds the cache except the number of
+distinct specializations the caller asks for, and each one holds a compiled
+module alive for the life of the process. That is the right trade for a model
+with a fixed hidden size, which is the case these kernels are dispatched for;
+a caller that sweeps a specialization parameter over an open range should
+``cache_clear()`` rather than expect an eviction policy.
 """
 
 # mypy: allow-untyped-defs
@@ -104,7 +111,10 @@ def flydsl_jit_cache(fn):
     The decorated function should take stable specialization parameters as its
     normal arguments. Runtime sample objects can be passed by callers through the
     reserved ``compile_args=...`` keyword; they are forwarded only on cache miss
-    and do not participate in keying.
+    and do not participate in keying. Declare it keyword-only: the name is
+    stripped from the cache key unconditionally, so a specialization parameter
+    that happened to be called ``compile_args`` would collapse every value of
+    itself onto one entry and hand back a kernel compiled for another.
 
     Deliberately not named ``jit_cache``: the instrumentation coverage scan in
     test_instrumentation.py attributes compile sites by decorator name, and that

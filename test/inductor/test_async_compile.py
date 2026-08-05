@@ -191,7 +191,7 @@ def test_flydsl_loader_main(value, stream):
             with self.assertRaisesRegex(RuntimeError, "FlyDSL runtime is unavailable"):
                 AsyncCompile().flydsl("test_flydsl_loader", "")
 
-    def test_load_kernel_wrapper_names_backend(self):
+    def test_load_flydsl_kernel_wrapper_names_backend(self):
         with patch(
             "torch._inductor.codecache.PyCodeCache.load_by_key_path",
             return_value=object(),
@@ -199,13 +199,12 @@ def test_flydsl_loader_main(value, stream):
             with self.assertRaisesRegex(
                 RuntimeError, "Could not find FlyDSL main kernel function"
             ):
-                AsyncCompile()._load_kernel_wrapper(
+                AsyncCompile()._load_flydsl_kernel_wrapper(
                     "missing",
                     "main",
                     Mock,
                     "key",
                     "path",
-                    backend_name="FlyDSL",
                 )
 
     def test_flydsl_clears_stale_worker_cache_env(self):
@@ -217,6 +216,7 @@ def test_flydsl_loader_main(value, stream):
             ),
             patch.object(AsyncCompile, "use_process_pool", return_value=True),
             patch.object(AsyncCompile, "process_pool", return_value=process_pool),
+            patch("torch._inductor.async_compile._compile_start"),
             patch.dict(os.environ),
         ):
             os.environ.pop("FLYDSL_RUNTIME_CACHE_DIR", None)
