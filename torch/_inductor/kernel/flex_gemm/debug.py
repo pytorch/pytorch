@@ -27,7 +27,9 @@ from torch._logging import LazyString, trace_structured
 if TYPE_CHECKING:
     from torch._inductor import ir
     from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
-    from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueAnalysis
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+        FlexGemmEpilogueAnalysis,
+    )
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -186,7 +188,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     outputs = analysis.outputs
     lines = [
         "outputs:",
-        f"  main: {_format_fx_tensor(outputs.main)}",
+        f"  main: {_format_fx_tensor(outputs.output)}",
         f"  main_transform: {_format_main_transform(outputs.main_transform)}",
     ]
     if outputs.aux_outputs:
@@ -249,7 +251,7 @@ def format_flex_gemm_analysis_details(
     lines: list[str] = []
     for label, values in (
         ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
-        ("grouped_layouts", analysis.local_reduce.grouped_layouts),
+        ("grouped_layouts", analysis.local_reduce.grouped_tensors),
         ("local_reduce_matches", analysis.local_reduce.matches),
         ("grouped_select_indices", analysis.grouped_select_indices),
     ):
