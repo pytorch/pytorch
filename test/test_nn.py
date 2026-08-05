@@ -7368,6 +7368,30 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+
+    def test_grid_sample_backward_error_checking(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        grad_output = torch.empty(1, 1, 1, 1, device=device)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_2d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            invalid_grad_output = torch.empty(2, 1, 1, 1, device=device)
+            torch.ops.aten.grid_sampler_2d_backward(invalid_grad_output, input, grid, 0, 0, False, (True, True))
+
+        input = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 1, 3, device=device)
+        grad_output = torch.empty(1, 1, 1, 1, 1, device=device)
+
+        # assert no error
+        torch.ops.aten.grid_sampler_3d_backward(grad_output, input, grid, 0, 0, False, (True, True))
+
+        with self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            invalid_grad_output = torch.empty(2, 1, 1, 1, 1, device=device)
+            torch.ops.aten.grid_sampler_3d_backward(invalid_grad_output, input, grid, 0, 0, False, (True, True))
+
     def _get_mixed_dtypes(self, device):
         """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
         Returns lower precision for params and higher precision for input to test
