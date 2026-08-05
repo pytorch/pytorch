@@ -132,7 +132,7 @@ struct StreamSegmentSize {
 struct CaptureRegistration {
   MempoolId_t mempool_id;
   CaptureId_t capture_id{0};
-  cudaStream_t primary_capture_stream{};
+  cudaStream_t primary_capture_stream;
   std::optional<CaptureId_t> parent_capture_id;
   std::optional<cudaStream_t> parent_dependency_stream;
 };
@@ -467,13 +467,13 @@ inline void markCaptureEnd(c10::DeviceIndex device) {
 // Capture-registration hooks used by CUDAGraph. These are non-virtual so the
 // existing CUDAAllocator vtable contract remains unchanged. Custom allocators
 // receive the legacy notification; the native allocator additionally records
-// the capture hierarchy and stream roles.
+// the capture hierarchy.
 C10_CUDA_API void markCaptureBegin(
     c10::DeviceIndex device,
     const CaptureRegistration& registration);
 C10_CUDA_API CaptureEndResult
 markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id);
-C10_CUDA_API void finalizeCaptureEnd(
+C10_CUDA_API void cleanupDeferredBlocksAfterCapture(
     c10::DeviceIndex device,
     const CaptureEndResult& result);
 

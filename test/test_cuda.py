@@ -128,6 +128,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
 )
+TEST_CUDA_NATIVE_ALLOCATOR = TEST_CUDA and (
+    torch.cuda.get_allocator_backend() == "native"
+)
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
@@ -3285,6 +3288,45 @@ torch.cuda.synchronize()
             after, baseline, "Leaked CUDA/RNG allocations after failed capture test"
         )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "CUDA-specific capture ID regression")
+    def test_graph_allocator_free_after_joined_stream_capture_invalidation(self):
+        try:
+            for reuse in (False, True):
+                with self.subTest(graph_capture_record_stream_reuse=reuse):
+                    torch.cuda.memory._set_allocator_settings(
+                        f"graph_capture_record_stream_reuse:{reuse}"
+                    )
+                    graph = torch.cuda.CUDAGraph()
+                    root_stream = torch.cuda.Stream()
+                    auxiliary_stream = torch.cuda.Stream()
+
+                    torch.cuda.synchronize()
+                    with torch.cuda.stream(root_stream):
+                        graph.capture_begin()
+                        root_tensor = torch.ones((), device="cuda")
+                        auxiliary_stream.wait_stream(root_stream)
+                        with torch.cuda.stream(auxiliary_stream):
+                            temporary = root_tensor + 1
+                            with self.assertRaises(RuntimeError):
+                                temporary.item()
+                            # The joined stream is now invalidated. Destroying a
+                            # tracked allocation must not throw through the
+                            # storage deleter, including with topology reuse.
+                            del temporary
+                        with self.assertRaises(RuntimeError):
+                            graph.capture_end()
+                    del root_tensor
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "graph_capture_record_stream_reuse:False"
+            )
+
     @skipIfRocmVersionLessThan((7, 14))
     @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
@@ -5452,15 +5494,36 @@ exit(2)
         or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
         "CUDA >= 12.4 required for conditional graph nodes",
     )
-    def test_cuda_graph_many_if_nodes_in_one_graph(self):
-        pred = torch.zeros((), device="cuda", dtype=torch.bool)
-        x = torch.zeros((), device="cuda")
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            for _ in range(40):
-                g.begin_capture_to_if_node(pred)
-                x.add_(1.0)
-                g.end_capture_to_conditional_node()
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    def test_cuda_graph_low_level_if_node_rejects_parent_free_in_child(self):
+        graph = torch.cuda.CUDAGraph()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        root_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            parent_tensor = torch.ones(64, device="cuda")
+            graph.begin_capture_to_if_node(pred)
+            child_output = parent_tensor + 1
+            del parent_tensor
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "enclosing or sibling CUDA graph capture",
+            ):
+                graph.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Invalid capture",
+            ):
+                graph.capture_end()
+        with self.assertRaisesRegex(
+            RuntimeError, r"capture_end\(\) must have been called"
+        ):
+            graph.replay()
+        del child_output
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5535,42 +5598,124 @@ exit(2)
         or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
         "CUDA >= 12.4 required for conditional graph nodes",
     )
-    def test_cuda_graph_if_node_rejects_parent_capture_block_free_on_joined_child_stream(
-        self,
-    ):
-        try:
-            for reuse in (False, True):
-                with self.subTest(graph_capture_record_stream_reuse=reuse):
-                    torch.cuda.memory._set_allocator_settings(
-                        f"graph_capture_record_stream_reuse:{reuse}"
-                    )
-                    graph = torch.cuda.CUDAGraph()
-                    pred = torch.ones((), device="cuda", dtype=torch.bool)
-                    root_stream = torch.cuda.Stream()
-                    auxiliary_stream = torch.cuda.Stream()
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    def test_cuda_graph_if_node_rejects_parent_free_on_joined_child_stream(self):
+        graph = torch.cuda.CUDAGraph()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        root_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
 
-                    torch.cuda.synchronize()
-                    with torch.cuda.stream(root_stream):
-                        graph.capture_begin()
-                        parent_tensor = torch.ones(64, device="cuda")
-                        graph.begin_capture_to_if_node(pred)
-                        child_stream = torch.cuda.current_stream()
-                        auxiliary_stream.wait_stream(child_stream)
-                        with torch.cuda.stream(auxiliary_stream):
-                            child_output = parent_tensor + 1
-                            del parent_tensor
-                        child_stream.wait_stream(auxiliary_stream)
-                        with self.assertRaisesRegex(
-                            RuntimeError,
-                            "parent CUDA graph capture.*conditional node",
-                        ):
-                            graph.end_capture_to_conditional_node()
-                        graph.capture_end()
-                    del child_output
-        finally:
-            torch.cuda.memory._set_allocator_settings(
-                "graph_capture_record_stream_reuse:False"
-            )
+        torch.cuda.synchronize()
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            parent_tensor = torch.ones(64, device="cuda")
+            graph.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            auxiliary_stream.wait_stream(child_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                child_output = parent_tensor + 1
+                del parent_tensor
+            child_stream.wait_stream(auxiliary_stream)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "enclosing or sibling CUDA graph capture",
+            ):
+                graph.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Invalid capture",
+            ):
+                graph.capture_end()
+        with self.assertRaisesRegex(
+            RuntimeError, r"capture_end\(\) must have been called"
+        ):
+            graph.replay()
+        del child_output
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    def test_cuda_graph_if_node_tracks_joined_child_stream_allocations(self):
+        graph = torch.cuda.CUDAGraph()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        root_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            graph.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            auxiliary_stream.wait_stream(child_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                child_for_parent = torch.ones(64, device="cuda")
+                child_for_sibling = torch.ones(64, device="cuda")
+            child_stream.wait_stream(auxiliary_stream)
+            graph.end_capture_to_conditional_node()
+
+            parent_output = child_for_parent + 1
+            del child_for_parent
+
+            graph.begin_capture_to_if_node(pred)
+            del child_for_sibling
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "enclosing or sibling CUDA graph capture",
+            ):
+                graph.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Invalid capture",
+            ):
+                graph.capture_end()
+        with self.assertRaisesRegex(
+            RuntimeError, r"capture_end\(\) must have been called"
+        ):
+            graph.replay()
+        del parent_output
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_nested_if_node_allows_ancestor_frees(self):
+        graph = torch.cuda.CUDAGraph()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        root_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(root_stream):
+            graph.capture_begin()
+            graph.begin_capture_to_if_node(pred)
+            graph.begin_capture_to_if_node(pred)
+            grandchild_output = torch.ones(64, device="cuda")
+            graph.end_capture_to_conditional_node()
+            child_output = grandchild_output + 1
+            del grandchild_output
+            graph.end_capture_to_conditional_node()
+            root_output = child_output + 1
+            del child_output
+            graph.capture_end()
+
+        graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(root_output, torch.full_like(root_output, 3))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5630,6 +5775,91 @@ exit(2)
             torch.cuda.memory._set_allocator_settings(
                 "graph_capture_record_stream_reuse:False"
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    def test_cuda_graph_if_node_keeps_joined_child_stream_reuse_separate(self):
+        try:
+            for reuse in (False, True):
+                with self.subTest(graph_capture_record_stream_reuse=reuse):
+                    torch.cuda.memory._set_allocator_settings(
+                        f"graph_capture_record_stream_reuse:{reuse}"
+                    )
+                    graph = torch.cuda.CUDAGraph()
+                    pred = torch.ones((), device="cuda", dtype=torch.bool)
+                    primary_sink = torch.zeros((), device="cuda")
+                    auxiliary_sink = torch.zeros((), device="cuda")
+                    root_stream = torch.cuda.Stream()
+                    auxiliary_stream = torch.cuda.Stream()
+
+                    torch.cuda.synchronize()
+                    with torch.cuda.stream(root_stream):
+                        graph.capture_begin()
+                        graph.begin_capture_to_if_node(pred)
+                        child_stream = torch.cuda.current_stream()
+
+                        auxiliary_stream.wait_stream(child_stream)
+                        primary_temporary = torch.empty(
+                            LARGE_BUFFER // 4, device="cuda"
+                        )
+                        primary_temporary.fill_(1.0)
+                        primary_sink.add_(primary_temporary[0])
+                        primary_pointer = primary_temporary.data_ptr()
+                        del primary_temporary
+
+                        with torch.cuda.stream(auxiliary_stream):
+                            auxiliary_temporary = torch.empty(
+                                LARGE_BUFFER // 4, device="cuda"
+                            )
+                            auxiliary_temporary.fill_(2.0)
+                            auxiliary_sink.add_(auxiliary_temporary[0])
+                            auxiliary_pointer = auxiliary_temporary.data_ptr()
+                            del auxiliary_temporary
+
+                        child_stream.wait_stream(auxiliary_stream)
+                        graph.end_capture_to_conditional_node()
+                        graph.capture_end()
+
+                    self.assertNotEqual(primary_pointer, auxiliary_pointer)
+                    primary_sink.zero_()
+                    auxiliary_sink.zero_()
+                    graph.replay()
+                    torch.cuda.synchronize()
+                    self.assertEqual(primary_sink.item(), 1.0)
+                    self.assertEqual(auxiliary_sink.item(), 2.0)
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "graph_capture_record_stream_reuse:False"
+            )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_many_if_nodes_in_one_graph(self):
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        x = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            for _ in range(40):
+                g.begin_capture_to_if_node(pred)
+                x.add_(1.0)
+                g.end_capture_to_conditional_node()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5877,8 +6107,13 @@ import multiprocessing
 
 
 def fork_and_check_is_pinned():
+    # Explicitly use the fork context: this test relies on fork semantics
+    # (a forked child inherits the parent's CUDA context state), and Python
+    # 3.14 changed the default start method on non-macOS POSIX to forkserver,
+    # which would try to pickle the local `worker` function below and fail.
+    mp_ctx = multiprocessing.get_context("fork")
     # Create a pipe to communicate between parent and child processes
-    parent_conn, child_conn = multiprocessing.Pipe()
+    parent_conn, child_conn = mp_ctx.Pipe()
 
     def worker(conn):
         try:
@@ -5892,7 +6127,7 @@ def fork_and_check_is_pinned():
         finally:
             conn.close()
     # Fork a new process
-    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p = mp_ctx.Process(target=worker, args=(child_conn,))
     p.start()
     # Receive the result from the child process
     result = parent_conn.recv()
