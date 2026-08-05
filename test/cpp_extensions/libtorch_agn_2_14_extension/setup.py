@@ -53,6 +53,11 @@ def get_extension():
     all_csrc_dirs = [CSRC_DIR, *PREV_CSRC_DIRS]
     mps_available = torch.backends.mps.is_available()
 
+    # Op extension (_C): this version's ops + inherited 2.9-2.13 csrc, minus the
+    # interop module. The op extension is loaded via torch.ops.load_library like
+    # the other libtorch_agn extensions; the interop module must instead be an
+    # importable Python module (its PyMethodDef helpers hold the GIL), so it is
+    # built as a separate extension below.
     op_sources = [
         s
         for d in all_csrc_dirs
