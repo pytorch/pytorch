@@ -114,7 +114,7 @@ class TestModuleTracker(TestCase):
             self.assertEqual(tracker.parents, {"Global"})
 
 
-instantiate_device_type_tests(TestModuleTracker, globals())
+instantiate_device_type_tests(TestModuleTracker, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
