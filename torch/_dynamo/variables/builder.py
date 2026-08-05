@@ -793,6 +793,21 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+def _get_registered_device_tensor_types() -> frozenset[type]:
+    from ..device_interface import get_registered_device_interfaces
+
+    types_set: set[type] = set()
+    for _, iface in get_registered_device_interfaces():
+        tt = getattr(iface, "tensor_types", None)
+        if tt:
+            types_set.update(tt)
+    return frozenset(types_set)
+
+
+def _is_registered_device_tensor_type(value: type) -> bool:
+    return value in _get_registered_device_tensor_types()
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1972,6 +1987,9 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
+
+            if _is_registered_device_tensor_type(value):
+                return TorchInGraphFunctionVariable(value, source=self.source)
 
             if not is_from_closure_source(self.source):
                 # For closure source, the variable comes from LOAD_SUPER_ATTR,
