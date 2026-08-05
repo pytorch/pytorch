@@ -2802,6 +2802,25 @@ def compile_fx_backward(
             static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             static_input_idxs = list(range(fixed))
+
+        # Saved primals that are plain user inputs (not params/buffers/
+        # mark_static_address) get a fresh tensor every call, so they are not
+        # address-stable and may not match the example input's alignment.
+        # Demote them so get_input_idxs_to_check gives them the same runtime
+        # copy_if_misaligned treatment as tangents. Saved activations stay
+        # static: inductor allocates them aligned.
+        context = torch._guards.TracingContext.try_get()
+        if context is not None and context.fw_metadata is not None:
+            fw_static = OrderedSet(context.fw_metadata.static_input_indices)
+            placeholders = gm.graph.find_nodes(op="placeholder")
+
+            def is_static_bw_input(idx: int) -> bool:
+                name = placeholders[idx].name
+                if name.startswith("primals_"):
+                    return int(name[len("primals_") :]) - 1 in fw_static
+                return True
+
+            static_input_idxs = [i for i in static_input_idxs if is_static_bw_input(i)]
         with (
             (
                 config.patch(get_cpp_wrapper_config())
