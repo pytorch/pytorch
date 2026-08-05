@@ -220,6 +220,7 @@ class TestFileSystem(TestCase):
 
     def test_fsspec_async_save(self):
         from concurrent.futures import Future
+
         checkpoint_dir = "memory://test_checkpoint_async"
         state_dict = {"tensor": torch.randn(10)}
 

@@ -1,5 +1,7 @@
 import warnings
-from .fsspec_filesystem import FsspecReader, FsspecWriter, _FileSystem
+
+from .fsspec_filesystem import _FileSystem
+
 
 # Keep old name for backward compatibility
 FileSystem = _FileSystem
