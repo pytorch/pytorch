@@ -184,7 +184,7 @@ class TestFineTuning(DTensorTestBase):
             saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
             dist_cp.save(
                 state_dict=saved_state_dict,
-                storage_writer=dist_cp.FileSystemWriter(finetune_dir, overwrite=True),
+                storage_writer=dist_cp.FileSystemWriter(finetune_dir),
             )
 
     @skip_if_lt_x_gpu(4)
