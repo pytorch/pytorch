@@ -739,8 +739,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   bool try_incref_pyobject() const noexcept final;
 
   virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
-    TORCH_CHECK(
-        false,
+    TORCH_WARN_ONCE(
         c10::str(
             "Backend ",
             getBackendName(),
