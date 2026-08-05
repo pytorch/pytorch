@@ -29,9 +29,9 @@ log = logging.getLogger(__name__)
 
 _FLYDSL_DSL_NAME = "flydsl"
 
-# The kernels this gate protects -- the first is the RMSNorm override in the PR
-# above -- are written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor
-# interface. Other versions fall back to ATen unless a developer explicitly sets
+# The kernels this gate protects -- see ops/norm/flydsl_rmsnorm_fwd.py -- are
+# written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor interface. Other
+# versions fall back to ATen unless a developer explicitly sets
 # TORCH_NATIVE_SKIP_VERSION_CHECK=1.
 _FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
@@ -83,11 +83,16 @@ def runtime_version() -> Version | None:
 
 @functools.cache
 def _version_is_ok() -> bool:
-    _, version = _check_runtime_available()
+    available, version = _check_runtime_available()
+    if not available:
+        # _check_runtime_available already logged why, if there was anything to
+        # say. Falling through would report the absent version as the problem
+        # and send the reader after a package that is not even installed.
+        return False
     if check_native_version_skip():
         return True
     # FlyDSL currently ships as dev tags (0.3.0.dev765 at the time of writing).
-    # Its 0.3.x line is API-compatible with these vendored kernels.
+    # Its 0.3.x line is API-compatible with the kernels under ops/.
     if version is not None and version.release[:2] == _FLYDSL_SUPPORTED_RELEASE:
         return True
 
@@ -111,7 +116,7 @@ def _version_is_ok() -> bool:
     return False
 
 
-@functools.lru_cache
+@functools.cache
 def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the gfx name to compile for, or None if it cannot be determined.
 
