@@ -29,15 +29,26 @@
         strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
-
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_M * grid_n
 
+    {%- if USE_META_WS %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DATA_PARTITION_FACTOR,
+        separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+    ):
+    {%- else %}
     for tile_id in tl.range(
         start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
     ):
+    {%- endif %}
         pid_m, pid_n = _compute_pid(
             tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
         )

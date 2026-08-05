@@ -205,8 +205,8 @@
   - c10/metal/**
   approved_by:
   - malfet
-  - DenisVieriu97
   - kurtamohler
+  - jhavukainen
 
   mandatory_checks_name:
   - EasyCLA
@@ -269,6 +269,7 @@
   - d4l3k
   - shuqiangzhang
   - weifengpy
+  - meetv18
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -466,10 +467,24 @@
   - Lint
   - pull
 
+- name: Higher order operators
+  patterns:
+  - torch/_higher_order_ops/**
+  - torch/_dynamo/variables/higher_order_ops.py
+  - docs/source/higher_order_ops/**
+  approved_by:
+  - bohnstingl
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
   - torch/csrc/dynamo/**
+  - torch/_C/_dynamo/**
+  - test/cpython/**
   - test/dynamo/**
   - test/dynamo_expected_failures/**
   - test/dynamo_skips/**
@@ -477,6 +492,9 @@
   - test/inductor_skips/**
   approved_by:
   - guilhermeleobas
+  - rtimpe
+  - trichmo
+  - hameerabbasi
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -535,6 +553,7 @@
   - aten/src/ATen/detail/PrivateUse1HooksInterface.*
   - docs/source/accelerator/**
   - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  - test/test_accelerator.py
   approved_by:
   - albanD
   - fffrog
@@ -545,11 +564,77 @@
   - Lint
   - pull
 
-- name: superuser
+- name: Metamates
   patterns:
   - '*'
   approved_by:
-  - pytorch/metamates
+  - 8Keep
+  - aditvenk
+  - AmesingFlank
+  - amirafzali
+  - angelayi
+  - anshul-si
+  - aorenste
+  - atalman
+  - blaine-rister
+  - bobrenjc93
+  - BoyuanFeng
+  - choijon5
+  - ColinPeppler
+  - d4l3k
+  - dcci
+  - desertfire
+  - digantdesai
+  - dolpm
+  - drisspg
+  - echen4096
+  - egienvalue
+  - fegin
+  - frgossen
+  - fxdawnn
+  - georgehong
+  - haoyuz
+  - htyu
+  - huydhn
+  - IvanKobzarev
+  - izaitsevfb
+  - jananisriram
+  - janeyx99
+  - jathu
+  - jbschlosser
+  - jeanschmidt
+  - jijunyan
+  - kapilsh
+  - karthickai
+  - kqfu
+  - laithsakka
+  - liangel-02
+  - Microve
+  - mlazos
+  - NicolasHug
+  - njriasan
+  - oulgen
+  - pianpwk
+  - ryanzhang22
+  - sanketpurandare
+  - scotts
+  - seemethere
+  - sevenEng
+  - shawnxu26
+  - SherlockNoMad
+  - slayton58
+  - soulitzer
+  - tianyu-l
+  - tushar00jain
+  - warrendeng
+  - wconstab
+  - weifengpy
+  - williamwen42
+  - xmfan
+  - ydwu4
+  - yushangdi
+  - ZainRizvi
+  - zpcore
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -251,7 +251,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "split_with_sizes_backward",
     "dot",
     "vdot",
-    "cholesky",
     "triangular_solve",
     "mm",
     "_unsafe_view",
@@ -295,6 +294,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
+    "linalg_matrix_sqrth",
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
@@ -597,13 +597,13 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
 
 DECLARE_GRAD_FN = CodeTemplate(
     """\
-std::shared_ptr<${op}> grad_fn;
+c10::intrusive_ptr<${op}> grad_fn;
 """
 )
 
 DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
-std::vector<std::shared_ptr<${op}>> grad_fns;
+std::vector<c10::intrusive_ptr<${op}>> grad_fns;
 """
 )
 
@@ -632,7 +632,7 @@ if (compute_requires_grad( ${args_to_check} )) {
 
 ASSIGN_GRAD_FN = CodeTemplate(
     """\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+grad_fn = c10::make_intrusive<${op}>(${op_ctor});
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
@@ -644,11 +644,11 @@ ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
 for (const auto& i : c10::irange( ${irange} )) {
   const auto ith_requires_grad = compute_requires_grad(${args_with_derivatives});
   check_inplace(self[i], ith_requires_grad);
-  grad_fns.push_back([&]() -> std::shared_ptr<${op}> {
+  grad_fns.push_back([&]() -> c10::intrusive_ptr<${op}> {
       if (!ith_requires_grad) {
           return nullptr;
       } else {
-          auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+          auto grad_fn = c10::make_intrusive<${op}>(${op_ctor});
           grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
           return grad_fn;
       }
@@ -701,6 +701,28 @@ SET_HISTORY = CodeTemplate(
     """\
 if (grad_fn) {
     ${fn}_history(${differentiable_outputs}, grad_fn);
+}
+"""
+)
+
+# rebase_history returns the node actually attached as the new history (the
+# CopySlices node when rebasing through a view). It is captured so that node
+# creation hooks fire on the composed node, not the inner one.
+REBASE_HISTORY = CodeTemplate(
+    """\
+c10::intrusive_ptr<Node> _rebased_fn;
+if (grad_fn) {
+    _rebased_fn = rebase_history(${differentiable_outputs}, grad_fn);
+}
+"""
+)
+
+# Fired at the very end of the function, after saved variables (including
+# saved outputs) have been stored on grad_fn.
+FIRE_NODE_CREATION_HOOKS = CodeTemplate(
+    """\
+if (${node}) {
+    fire_node_creation_hooks(${node});
 }
 """
 )
@@ -937,7 +959,7 @@ def gen_variable_type(
             + f"generated from {fm.template_dir_for_comments()}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
-        num_shards=5,
+        num_shards=10,
         sharded_keys=sharded_keys,
     )
 
@@ -1808,14 +1830,36 @@ def emit_body(
             outs=output_names if not is_inplace_foreach else "self"
         )
         if not is_inplace_foreach:
+            if fn == "rebase":
+                return REBASE_HISTORY.substitute(differentiable_outputs=outs)
             return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
         else:
-            return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
+            decl = ""
+            capture = ""
+            if fn == "rebase":
+                decl = "c10::SmallVector<c10::intrusive_ptr<Node>, 8> _rebased_fns(grad_fns.size());\n"
+                capture = "_rebased_fns[i] = "
+            return decl + LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
                 preamble=(
                     f"auto differentiable_outputs = {outs};\n"
                     f"TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());"
                 ),
-                statements=f"{fn}_history(differentiable_outputs[i], grad_fns[i]);",
+                statements=f"{capture}{fn}_history(differentiable_outputs[i], grad_fns[i]);",
+            )
+
+    def emit_fire_creation_hooks() -> str:
+        rebase = modifies_arguments(f) and view_info is None
+        if not is_inplace_foreach:
+            node = "_rebased_fn" if rebase else "grad_fn"
+            return FIRE_NODE_CREATION_HOOKS.substitute(node=node)
+        else:
+            node = "_rebased_fns[i]" if rebase else "grad_fns[i]"
+            return (
+                "for (const auto& i : c10::irange(grad_fns.size())) {\n"
+                f"    if ({node}) {{\n"
+                f"        fire_node_creation_hooks({node});\n"
+                "    }\n"
+                "}\n"
             )
 
     def emit_save_outputs() -> str:
@@ -2248,6 +2292,9 @@ def emit_body(
     if requires_derivative:
         # Save only after the forward AD has been set up
         body.append(emit_save_outputs())
+        # Fire node creation hooks only once the node is fully populated,
+        # including saved outputs above.
+        body.append(emit_fire_creation_hooks())
 
     if str(f.func.name.name) in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,

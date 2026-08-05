@@ -122,9 +122,9 @@ namespace {
 // Taken from codegened version
 Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
-  std::shared_ptr<Identity> grad_fn;
+  c10::intrusive_ptr<Identity> grad_fn;
   if (compute_requires_grad(self)) {
-    grad_fn = std::make_shared<Identity>();
+    grad_fn = c10::make_intrusive<Identity>();
     grad_fn->set_next_edges(collect_next_edges(self));
   }
 
@@ -136,6 +136,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
 
   if (grad_fn) {
     set_history(flatten_tensor_args(result), grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
   if (isFwGradDefined(self)) {
     // Modified from original codegen
@@ -166,9 +167,9 @@ Tensor _make_dual(
       " is not supported.");
   auto& primal_ = unpack(primal, "primal", 0);
   auto& tangent_ = unpack(tangent, "tangent", 0);
-  std::shared_ptr<ViewBackward0> grad_fn;
+  c10::intrusive_ptr<ViewBackward0> grad_fn;
   if (compute_requires_grad(primal_)) {
-    grad_fn = std::make_shared<ViewBackward0>();
+    grad_fn = c10::make_intrusive<ViewBackward0>();
     grad_fn->self_sym_sizes = primal_.sym_sizes().vec();
     grad_fn->set_next_edges(collect_next_edges(primal_));
   }
@@ -181,6 +182,7 @@ Tensor _make_dual(
 
   if (grad_fn) {
     set_history(flatten_tensor_args(result), grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
 
   TORCH_CHECK(level == 0, "Invalid level given to _make_dual");
@@ -198,12 +200,12 @@ Tensor& copy_(
   // it automatically
   auto& self_ = unpack(self, "self", 0);
   auto& src_ = unpack(src, "src", 1);
-  std::shared_ptr<CopyBackwards> grad_fn;
+  c10::intrusive_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
   check_inplace(self, requires_grad);
   if (requires_grad) {
-    grad_fn = std::make_shared<CopyBackwards>();
+    grad_fn = c10::make_intrusive<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_options = src.options();
   }
@@ -212,7 +214,10 @@ Tensor& copy_(
     at::redispatch::copy_(
         ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
-  rebase_history(self, std::move(grad_fn));
+  auto attached_fn = rebase_history(self, std::move(grad_fn));
+  if (attached_fn) {
+    fire_node_creation_hooks(attached_fn);
+  }
 
   if (isDifferentiableType(self.scalar_type()) &&
       (isFwGradDefined(self) || isFwGradDefined(src))) {
@@ -294,7 +299,6 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
     at::AutoDispatchBelowAutograd guard;
     return at::redispatch::detach(ks & c10::after_autograd_keyset, self_);
   })();
-  namedinference::propagate_names(result, self);
 
   // Detach the forward grads by not setting anything on the result
 

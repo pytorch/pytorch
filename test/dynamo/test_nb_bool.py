@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for nb_bool / generic_bool: bool() via PyObject_IsTrue in Dynamo."""
+"""Tests for nb_bool / generic_is_true: bool() via PyObject_IsTrue in Dynamo."""
 
 import collections
 import enum
@@ -13,9 +13,11 @@ class _Color(enum.Enum):
 
 
 import torch.nn
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
+@torch._dynamo.config.patch("enable_trace_unittest", True)
 class NbBoolTests(TestCase):
     # --- Scalar constants (ConstantVariable path) ---
 
@@ -237,6 +239,23 @@ class NbBoolTests(TestCase):
             TypeError, "__bool__ should return bool, returned Baz"
         ):
             fn(Baz())
+
+    # --- Blocked slot: __bool__ = None ---
+
+    def test_user_defined_bool_none_raises(self):
+        class NoBool:
+            __bool__ = None
+
+        obj = NoBool()
+
+        def fn(x):
+            with self.assertRaises(TypeError):
+                str(bool(obj))
+            return x.sin()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertEqual(result, eager_result)
 
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
 

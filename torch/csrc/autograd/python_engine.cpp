@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -91,7 +92,7 @@ void PythonEngine::thread_init(
 
 void PythonEngine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const std::shared_ptr<Node>& fn,
+    const c10::intrusive_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
   auto python_err = dynamic_cast<python_error*>(&e);
@@ -108,6 +109,11 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
 std::unique_ptr<SavedVariableHooks> PythonEngine::
     get_default_saved_variable_hooks() {
   return PyDefaultSavedVariableHooks::get_hooks();
+}
+
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
@@ -134,7 +140,7 @@ variable_list PythonEngine::execute(
 
 c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
+    c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   try {
     return Engine::execute_with_graph_task(
@@ -153,11 +159,11 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
-  std::shared_ptr<torch::autograd::Node> grad_fn_sp;
+  c10::intrusive_ptr<torch::autograd::Node> grad_fn_sp;
   if (THPFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
+    grad_fn_sp = reinterpret_cast<THPFunction*>(grad_fn)->cdata;
   } else if (THPCppFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
+    grad_fn_sp = reinterpret_cast<THPCppFunction*>(grad_fn)->cdata;
   } else {
     TORCH_CHECK(
         false,
@@ -274,14 +280,6 @@ static PyObject* THPEngine_run_backward(
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = THPVariable_Unpack(grad);
-      if (grad_var.has_names()) {
-        TORCH_WARN(
-            "Autograd was passed a named grad tensor with dims ",
-            grad_var.names(),
-            ". Autograd does not yet support named tensor semantics, so all names ",
-            "will be ignored. In practice all computed gradients will still be correct "
-            "according to regular tensor semantics.");
-      }
       grads.push_back(grad_var);
     } else {
       TORCH_CHECK(
@@ -335,12 +333,12 @@ static PyObject* THPEngine_run_backward(
             "One of the differentiated Tensors does not require grad");
         if (!grad_fn) {
           // NOTE [ Autograd Unreachable Input ]
-          // Since input has no grad_accumulator, its guaranteed to be
+          // Since input has no grad_accumulator, it's guaranteed to be
           // unreachable. We initialize an edge pointing to a non-nullptr Node
           // so nodes in the graph (e.g., mul when an operand is scalar) that
           // have edges pointing to nullptr don't get erroneously assigned
           // `needed = True` in exec_info.
-          output_edges.emplace_back(std::make_shared<Identity>(), 0);
+          output_edges.emplace_back(c10::make_intrusive<Identity>(), 0);
         } else {
           output_edges.emplace_back(grad_fn, output_nr);
         }
@@ -371,8 +369,9 @@ static PyObject* THPEngine_run_backward(
     for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           allow_unreachable || outputs[i].defined(),
-          "One of the "
-          "differentiated Tensors appears to not have been used "
+          "The differentiated Tensor at index ",
+          i,
+          " appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));

@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import sys
 
 import torch
 import torch._dynamo
@@ -80,6 +81,29 @@ class LazyConstantVariableTests(TestCase):
         self.assertTrue(same(eager1, compiled1))
 
         self.assertGreater(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_lazy_constant_int_comparison_becomes_symnode(self):
+        """Test that comparing lazy constant ints works when they realize to
+        SymNodeVariable.
+
+        The compare_by_value handler assumes ConstantVariable args (.value
+        access).  When specialize_int=False makes the lazy int resolve to
+        SymNodeVariable, the lazy_constant_handler must re-dispatch to the
+        symbolic comparison path.
+        """
+
+        def fn(x, n):
+            if n == 2:
+                return x.sum()
+            return x.mean()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3, 4)
+
+        eager = fn(x, 2)
+        compiled = opt_fn(x, 2)
+        self.assertTrue(same(eager, compiled))
 
     def test_slice_indices_unspecialized_ints(self):
         """Test that slice indices work with unspecialized ints.
@@ -326,6 +350,350 @@ class LazyConstantVariableTests(TestCase):
         result4 = opt_fn2(tensor_input)
         self.assertEqual(result4[1], 100)
         self.assertEqual(counter2.frame_count, 1)  # No recompile!
+
+    def test_type_change_does_not_recompile(self):
+        tensor_input = torch.randn(3)
+
+        def fn(t, val):
+            # Just pass through - should not guard on value, only type
+            return t + 1, val
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with int
+        eager1 = fn(tensor_input, 42)
+        compiled1 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different int value - should NOT recompile
+        eager2 = fn(tensor_input, 100)
+        compiled2 = opt_fn(tensor_input, 100)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(eager2[1], compiled2[1])
+        self.assertEqual(counter.frame_count, 1)  # Still 1, no recompile
+
+        # Third call with string
+        eager3 = fn(tensor_input, "hello")
+        compiled3 = opt_fn(tensor_input, "hello")
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(eager3[1], compiled3[1])
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with different string
+        eager4 = fn(tensor_input, "world")
+        compiled4 = opt_fn(tensor_input, "world")
+        self.assertTrue(same(eager4[0], compiled4[0]))
+        self.assertEqual(eager4[1], compiled4[1])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_type_does_not_recompile_on_value_change(self):
+        """Test that type() checks do NOT trigger recompilation on value change.
+
+        When type() is called on a LazyConstantVariable, it only installs a
+        TYPE_MATCH guard (not CONSTANT_MATCH), so different values of the same type
+        do not cause recompilation. This is similar to isinstance() behavior but
+        tests a different code path.
+
+        Note: We use string values here because with specialize_int=False (the default),
+        int values must be realized during handler dispatch to determine if they become
+        ConstantVariable or SymNodeVariable. Strings always become ConstantVariable.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, val):
+            if type(val) is str:
+                return t + 1
+            return t - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with string
+        eager1 = fn(tensor_input, "hello")
+        compiled1 = opt_fn(tensor_input, "hello")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different string - should NOT recompile since
+        # type() only installs TYPE_MATCH guard
+        eager2 = fn(tensor_input, "world")
+        compiled2 = opt_fn(tensor_input, "world")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(counter.frame_count, 1)  # No recompilation!
+
+        # Third call with int - should recompile due to type change
+        eager3 = fn(tensor_input, 42)
+        compiled3 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(counter.frame_count, 2)  # Recompile for type change
+
+    def test_isinstance_does_not_recompile_on_value_change(self):
+        """Test that isinstance checks do NOT trigger recompilation on value change.
+
+        When isinstance() is called on a LazyConstantVariable, it only installs a
+        TYPE_MATCH guard (not CONSTANT_MATCH), so different values of the same type
+        do not cause recompilation.
+
+        Note: We use string values here because with specialize_int=False (the default),
+        int values must be realized during handler dispatch to determine if they become
+        ConstantVariable or SymNodeVariable. Strings always become ConstantVariable.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, val):
+            if isinstance(val, str):
+                return t + 1
+            return t - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with string
+        eager1 = fn(tensor_input, "hello")
+        compiled1 = opt_fn(tensor_input, "hello")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different string - should NOT recompile since
+        # isinstance only installs TYPE_MATCH guard
+        eager2 = fn(tensor_input, "world")
+        compiled2 = opt_fn(tensor_input, "world")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(counter.frame_count, 1)  # No recompilation!
+
+        # Third call with int - should recompile due to type change
+        eager3 = fn(tensor_input, 42)
+        compiled3 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(counter.frame_count, 2)  # Recompile for type change
+
+    def test_container_with_lazy_constant_no_recompile(self):
+        """Test that returning containers with LazyConstantVariables works without realization.
+
+        LazyConstantVariables inside returned containers (list, tuple) should stay
+        lazy and not cause recompilation when the constant value changes.
+        """
+        tensor_input = torch.randn(3)
+
+        # Test returning a list with constants
+        def fn_list(t, val):
+            return [t + 1, val]
+
+        counter_list = CompileCounter()
+        opt_fn_list = torch.compile(fn_list, backend=counter_list)
+
+        eager1 = fn_list(tensor_input, 42)
+        compiled1 = opt_fn_list(tensor_input, 42)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])
+        self.assertEqual(counter_list.frame_count, 1)
+
+        # Different value should NOT recompile
+        eager2 = fn_list(tensor_input, 100)
+        compiled2 = opt_fn_list(tensor_input, 100)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(eager2[1], compiled2[1])
+        self.assertEqual(counter_list.frame_count, 1)
+
+        # Test returning a tuple with constants
+        def fn_tuple(t, val):
+            return (t + 1, val)
+
+        counter_tuple = CompileCounter()
+        opt_fn_tuple = torch.compile(fn_tuple, backend=counter_tuple)
+
+        eager3 = fn_tuple(tensor_input, "hello")
+        compiled3 = opt_fn_tuple(tensor_input, "hello")
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(eager3[1], compiled3[1])
+        self.assertEqual(counter_tuple.frame_count, 1)
+
+        # Different string should NOT recompile
+        eager4 = fn_tuple(tensor_input, "world")
+        compiled4 = opt_fn_tuple(tensor_input, "world")
+        self.assertTrue(same(eager4[0], compiled4[0]))
+        self.assertEqual(eager4[1], compiled4[1])
+        self.assertEqual(counter_tuple.frame_count, 1)
+
+        # Test returning list with multiple constants
+        def fn_multi(t, val1, val2):
+            return [t + 1, val1, val2]
+
+        counter_multi = CompileCounter()
+        opt_fn_multi = torch.compile(fn_multi, backend=counter_multi)
+
+        eager5 = fn_multi(tensor_input, 1, "a")
+        compiled5 = opt_fn_multi(tensor_input, 1, "a")
+        self.assertTrue(same(eager5[0], compiled5[0]))
+        self.assertEqual(eager5[1], compiled5[1])
+        self.assertEqual(eager5[2], compiled5[2])
+        self.assertEqual(counter_multi.frame_count, 1)
+
+        # Different values should NOT recompile
+        eager6 = fn_multi(tensor_input, 2, "b")
+        compiled6 = opt_fn_multi(tensor_input, 2, "b")
+        self.assertTrue(same(eager6[0], compiled6[0]))
+        self.assertEqual(eager6[1], compiled6[1])
+        self.assertEqual(eager6[2], compiled6[2])
+        self.assertEqual(counter_multi.frame_count, 1)
+
+
+class ComputedLazyConstantTests(TestCase):
+    def _check(self, fn, arg_sets, expected_frames):
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        for args in arg_sets:
+            eager = fn(*args)
+            compiled = opt_fn(*args)
+            self.assertTrue(same(eager, compiled))
+        self.assertEqual(counter.frame_count, expected_frames)
+
+    def test_unused_computed_int_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 100, -5)], expected_frames=1)
+
+    def test_unused_computed_ops_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a, b: (t.sin(), a - b), [(t, 5, 2), (t, 9, 3)]),
+            (lambda t, a, b: (t.sin(), a * b), [(t, 5, 2), (t, 9, 3)]),
+            (lambda t, a, b: (t.sin(), a + b), [(t, "x", "y"), (t, "p", "q")]),
+        ]
+        for i, (fn, arg_sets) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_computed_inplace_op_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a += b
+            return t.sin(), a
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
+
+    def test_unused_division_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a / b
+
+        self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
+
+    def test_operand_type_change_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
+
+    def test_chained_computed_constants_do_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), (a + b) * 2 - a
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
+
+    def test_long_left_associated_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = 300
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    def test_recursion_limit_sized_chain_no_recursion_error(self):
+        t = torch.ones(2)
+
+        def fn(t, vals):
+            total = 0
+            for v in vals:
+                total = total + v
+            return t.sin(), total
+
+        n = sys.getrecursionlimit()
+        arg_sets = [(t, list(range(n))), (t, list(range(1, n + 1)))]
+        self._check(fn, arg_sets, expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=2)
+    def test_over_budget_chain_falls_back_to_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a + a + a + a
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
+    @torch._dynamo.config.patch(computed_lazy_constant_max_nodes=0)
+    def test_disabled_computed_lazy_constant_installs_guards(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_computed_constant_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            if a + b > 5:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=2)
+
+    def test_computed_constant_in_tensor_math_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t * (a + b)
+
+        self._check(fn, [(t, 1.5, 2.0), (t, 3.25, 4.0)], expected_frames=2)
+
+    def test_computed_constant_as_dict_key_realizes(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            d = {a + b: t}
+            return d[a + b].sin()
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_computed_constant_as_list_index_realizes(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            lst = [t, t + 1, t + 2]
+            return lst[a + b]
+
+        self._check(fn, [(t, 0, 1), (t, 1, 1)], expected_frames=2)
+
+    def test_computed_constant_type_query_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            c = a + b
+            if isinstance(c, str):
+                return t.sin(), c
+            return t.cos(), c
+
+        self._check(fn, [(t, "a", "b"), (t, "c", "d")], expected_frames=1)
 
 
 if __name__ == "__main__":

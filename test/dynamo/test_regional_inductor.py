@@ -17,12 +17,10 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.fx.passes.regional_inductor_invoke_subgraph import (
-
     regional_inductor_invoke_subgraph,
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -31,8 +29,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchDynamo,
 )
-from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
@@ -245,7 +245,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # once - so in total 2 (1 fwd + 1 bwd)
         self.assertEqual(len(codes), 2)
 
-    @requires_accelerator_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -316,6 +316,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             options = kwargs.get("options", {})
             captured_options.append(options)
 
+            if kwargs.get("donate_graph_module") is not True:
+                raise AssertionError("regional_inductor should donate submodule GMs")
             # Verify config is set as expected from explicit options
             if not inductor_config.max_autotune:
                 raise AssertionError("max_autotune should be True")
@@ -428,7 +430,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         ):
             opt_fn(x, y)
 
-    @requires_accelerator_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
         class FlexAttentionModule(torch.nn.Module):
@@ -519,7 +521,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
         x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
@@ -590,6 +592,192 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch("enable_invoke_subgraph_regional_compile", True)
 @instantiate_parametrized_tests
 class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_normal_inductor_hop_subgraph_uses_nested_post_grad_config(self):
+        outer_pass_targets = []
+        inner_pass_targets = []
+
+        def outer_pass(graph):
+            outer_pass_targets.append(
+                [node.target for node in graph.nodes if node.op == "call_function"]
+            )
+
+        def inner_pass(graph):
+            inner_pass_targets.append(
+                [node.target for node in graph.nodes if node.op == "call_function"]
+            )
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"post_grad_custom_pre_pass": inner_pass}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return g(torch.cos(x)) + 1
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(10)
+
+        with torch._inductor.config.patch(
+            {
+                "post_grad_custom_pre_pass": outer_pass,
+            }
+        ):
+            result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        self.assertEqual(len(inner_pass_targets), 1)
+        self.assertEqual(len(outer_pass_targets), 1)
+
+        inner_target_names = [str(target) for target in inner_pass_targets[0]]
+        outer_target_names = [str(target) for target in outer_pass_targets[0]]
+        self.assertTrue(any("aten.sin.default" in name for name in inner_target_names))
+        self.assertFalse(any("invoke_subgraph" in name for name in inner_target_names))
+        self.assertTrue(any("invoke_subgraph" in name for name in outer_target_names))
+        self.assertFalse(any("aten.sin.default" in name for name in outer_target_names))
+
+    @staticmethod
+    def _generated_fn_body(code, signature):
+        # Slice one function/method body out of generated wrapper code: the
+        # signature line plus every following line indented deeper than it.
+        start = code.index(signature)
+        indent = start - (code.rfind("\n", 0, start) + 1)
+        lines = code[start:].split("\n")
+        body = [lines[0]]
+        for line in lines[1:]:
+            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
+                break
+            body.append(line)
+        return "\n".join(body)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
+    def test_nested_region_inductor_config_multi_kernel_codegen(self):
+        # triton.multi_kernel set only on the region must change the region's
+        # generated code, not the parent's. The region body is emitted as
+        # `repeated_subgraph0` and the parent as `call`. fx_graph_cache is off to
+        # dodge a triton multi-kernel cache-reload issue unrelated to threading.
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.multi_kernel": True}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1) + 1
+
+        def fn(x):
+            y = torch.softmax(x, dim=-1) * 2
+            return g(y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device=device_type)
+        result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
+        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
+        self.assertIn("multi_kernel", region_code)
+        self.assertNotIn("multi_kernel", parent_code)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_inductor_config_persistent_reduction_codegen(self):
+        # triton.persistent_reductions=False set only on the region forces its
+        # reduction to be looped (triton_red_*) while the parent keeps its
+        # persistent kernel (triton_per_*).
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.persistent_reductions": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1) + 1
+
+        def fn(x):
+            y = torch.softmax(x, dim=-1) * 2
+            return g(y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device=device_type)
+        result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
+        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
+        self.assertIn("triton_red_", region_code)
+        self.assertNotIn("triton_per_", region_code)
+        self.assertIn("triton_per_", parent_code)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_separate_fw_bw_inductor_config(self):
+        # A region can compile its forward and backward under different inductor
+        # configs. The forward keeps persistent reductions (default) while the
+        # backward is forced to looped reductions via bw_inductor_config_patches.
+        nested_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches={"triton.persistent_reductions": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1)
+
+        def fn(x):
+            return (g(x) * 3).sum()
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device=device_type, requires_grad=True)
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 2)
+        fw_code, bw_code = codes
+        # Forward region keeps its persistent reduction; the backward region is
+        # looped, so only the backward reflects bw_inductor_config_patches.
+        self.assertIn("triton_per_", fw_code)
+        self.assertIn("triton_red_", bw_code)
+        self.assertNotIn("triton_per_", bw_code)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_fw_bw_inductor_config_both_set(self):
+        # Forward and backward set to different explicit configs: the forward
+        # forces persistent reductions, the backward forces looped ones. Each
+        # direction's own region is compiled under its own config.
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.persistent_reductions": True},
+            bw_inductor_config_patches={"triton.persistent_reductions": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1)
+
+        def fn(x):
+            return (g(x) * 3).sum()
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device=device_type, requires_grad=True)
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 2)
+        fw, bw = codes
+        fw_region = self._generated_fn_body(fw, "def partitioned_fw_subgraph_0_0(")
+        bw_region = self._generated_fn_body(bw, "def partitioned_bw_subgraph_0_0(")
+        # Forward region is persistent; backward region is looped.
+        self.assertIn("triton_per_", fw_region)
+        self.assertNotIn("triton_red_", fw_region)
+        self.assertIn("triton_red_", bw_region)
+        self.assertNotIn("triton_per_", bw_region)
+
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 
@@ -747,6 +935,27 @@ def forward(self, tangents_0):
 
         result, codes = run_fw_bw_and_get_code(lambda: opt_fn(c))
         # self.assertEqual(len(codes), 2)
+        self.assertEqual(result, fn(c))
+
+    @requires_gpu_and_triton
+    def test_unbacked_expr_size_input(self):
+        def fn(c):
+            d = torch.concat([c, c], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                d = d + 1
+            return d
+
+        c = torch.randn((64, 32), device=device_type, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(c))
+        self.assertEqual(len(codes), 1)
         self.assertEqual(result, fn(c))
 
     @parametrize("serialize", [False])
@@ -927,7 +1136,7 @@ def forward(self, arg0_1, arg1_1):
                 ignore_empty_lines=True,
             )
 
-    @requires_accelerator_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -986,14 +1195,10 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8):
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
+    flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  flex_attention = None
-    alias = torch.ops.aten.alias.default(getitem)
-    alias_1 = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
-    alias_2 = torch.ops.aten.alias.default(alias);  alias = None
-    alias_3 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3)""",
+    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )
@@ -1001,11 +1206,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             self.assertExpectedInline(
                 captured_gms[1].code.strip(),
                 """\
-def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3, tangents_0):
+def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1, tangents_0):
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, alias_2, alias_3, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = alias_2 = alias_3 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, None, None, None, None, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
@@ -1022,7 +1227,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         import torch._inductor.config as inductor_config
 
         nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={
+            fw_inductor_config_patches={
                 "max_autotune": True,
                 "triton.cudagraphs": False,
             }
@@ -1087,12 +1292,12 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             "Invalid inductor config key 'invalid_config_key'",
         ):
             get_invoke_subgraph_compile_options(
-                inductor_config_patches={
+                fw_inductor_config_patches={
                     "invalid_config_key": True,
                 }
             )
 
-    @requires_accelerator_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_selective_ac_flex(self, serialize):
         # must decompose the following fallback ops in inductor
@@ -1200,7 +1405,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
         x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
@@ -1309,6 +1514,248 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 original_mincut_partitioner
             )
 
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_multi_invocation_chunked_loss_with_backward(self, serialize):
+        # Single nested_compile_region invoked many times in a for-loop, summed,
+        # then a single outer .backward(). Exercises pairing fw/bw HOPs by
+        # call_id when there are multiple fw calls per region.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, targets_chunks):
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_two_regions_chunked_loss(self, serialize):
+        # Two nested_compile_regions composed in one fwd+bwd: `attn` called per
+        # layer, `chunk_loss` called per chunk. The fw and bw HOP counts per
+        # region differ, so positional zip-pairing fails; call_id pairing works.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def attn(q, k):
+            return (q * k).sum(dim=-1, keepdim=True) + q
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, y, targets_chunks):
+            for _ in range(3):
+                x = attn(x, y)
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), y.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, y, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    def test_one_fw_subgraph_multiple_bw_subgraphs(self, serialize):
+        # Same fw region called 5 times under dynamic batch dim. The tangents
+        # flowing into each call have different strides depending on their
+        # position in the fw graph, so AOTAutograd's lazy-bw cache produces
+        # multiple bw subgraphs for the same fw — bw HOPs end up with args[1]
+        # like `bw_subgraph_0_0`, `bw_subgraph_0_1`, etc., even though all fws
+        # share `fw_subgraph_0`. Each bw has its own joint partitioning, and
+        # call_id pairing routes each bw to the fw call with the matching
+        # primals — gradients must match eager.
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            a = gn(x)
+            a2 = gn(a)
+            b = torch.sin(a2)
+            c = gn(b)
+            c2 = gn(c)
+            return c.sum() + c2.sum() + gn(x).sum()
+
+        x = torch.randn(8, 16, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        x_ref = x.detach().clone().requires_grad_(True)
+        torch._dynamo.mark_dynamic(x_ref, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_nested_compile_region_basic_nesting(self, serialize):
+        # Outer nested_compile_region calls inner nested_compile_region once.
+        # `run_joint_graph_passes_on_hops` only sees the outer HOP at the joint
+        # graph level; inner is inside outer's subgraph and is handled by
+        # recursive regional inductor compilation, not by the joint partitioner.
+        # call_id pairing for the visible (outer) HOP must still hold.
+        @torch.compiler.nested_compile_region
+        def inner(x):
+            return x * 2
+
+        @torch.compiler.nested_compile_region
+        def outer(x):
+            return inner(x) + 1
+
+        def fn(x):
+            return outer(x).sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_nested_compile_region_multi_invocation(self, serialize):
+        # Outer is called multiple times in a Python for-loop; each outer call
+        # also invokes inner. Joint pass sees N outer fws and N outer bws (one
+        # per call); call_id pairs them correctly. Inner HOPs are nested inside
+        # each outer subgraph and not visible to the joint pass.
+        @torch.compiler.nested_compile_region
+        def inner(x, t):
+            return (x - t).pow(2)
+
+        @torch.compiler.nested_compile_region
+        def outer(x, t):
+            return inner(x, t).mean()
+
+        def fn(x, ts):
+            x_d = x.detach().requires_grad_()
+            total = sum(outer(x_d, t) for t in ts)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        ts = [torch.randn(8, 4) for _ in range(3)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), ts)
+        out_loss, out_grad = opt_fn(x, ts)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    def test_invoke_subgraph_functionalize_schema_cache(self):
+        from torch._guards import InvokeSubgraphCache
+        from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+
+        orig_gen_schema = InvokeSubgraphHOP.gen_schema
+        orig_get_schema = InvokeSubgraphCache.get_functionalize_schema_entry
+        orig_add_schema = InvokeSubgraphCache.add_functionalize_schema_entry
+
+        def run(disable_cache):
+            gen_schema_calls = 0
+
+            def counted_gen_schema(self, *args, **kwargs):
+                nonlocal gen_schema_calls
+                gen_schema_calls += 1
+                return orig_gen_schema(self, *args, **kwargs)
+
+            @torch.compiler.nested_compile_region
+            def gn(x):
+                return torch.sin(x) + 1
+
+            def fn(x):
+                out = x
+                for _ in range(4):
+                    out = gn(out)
+                return out.sum()
+
+            try:
+                torch._dynamo.reset()
+                InvokeSubgraphHOP.gen_schema = counted_gen_schema
+                if disable_cache:
+                    InvokeSubgraphCache.get_functionalize_schema_entry = (
+                        lambda self, key: None
+                    )
+                    InvokeSubgraphCache.add_functionalize_schema_entry = (
+                        lambda self, key, schema: None
+                    )
+                x = torch.randn(8, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    opt_fn(x).backward()
+                return gen_schema_calls
+            finally:
+                torch._dynamo.reset()
+                InvokeSubgraphHOP.gen_schema = orig_gen_schema
+                InvokeSubgraphCache.get_functionalize_schema_entry = orig_get_schema
+                InvokeSubgraphCache.add_functionalize_schema_entry = orig_add_schema
+
+        cached_calls = run(disable_cache=False)
+        uncached_calls = run(disable_cache=True)
+        self.assertLess(cached_calls, uncached_calls)
+
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
 
@@ -1367,6 +1814,155 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
 
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
+
+    @requires_gpu_and_triton
+    @parametrize("serialize", [False])
+    def test_comprehensive_padding_saved_tensor_stride(self, serialize):
+        # When an op inside a nested_compile_region produces a tensor whose
+        # natural stride exceeds padding_stride_threshold and is not
+        # 128-byte aligned, Inductor's comprehensive_padding pads its runtime
+        # stride. If that tensor is saved for backward, the bw subgraph
+        # (separately compiled, IR traced with natural strides) asserts the
+        # natural stride and crashes with assert_size_stride. The fix is to
+        # mark all subgraph outputs as user-visible inside
+        # invoke_subgraph_inductor_compile so Inductor preserves their strides.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+        # 2056 is divisible by 8 but not by 64, exceeds padding_stride_threshold (1024),
+        # so bf16 rows pad 2056 -> 2112 elements without the fix.
+        out_features = 2056
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(x, w):
+            logits = torch.nn.functional.linear(x, w)
+            return (logits * logits).sum()
+
+        def fn(x, w):
+            return loss_region(x, w)
+
+        x = torch.randn(
+            64, 32, device=device_type, dtype=torch.bfloat16, requires_grad=True
+        )
+        w = torch.randn(
+            out_features,
+            32,
+            device=device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        ref = fn(x_ref, w_ref)
+        ref.backward()
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+        out = opt_fn(x, w)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_joint_graph_passes_run_on_hop_subgraph(self, serialize):
+        # Inductor's joint-graph passes (e.g. scatter_upon_const_tensor, which
+        # rewrites full+scatter into eq+where to avoid materializing a sparse
+        # buffer) must run on the HOP subgraph's joint graph, not just the
+        # outer one. nll_loss_backward decomposes to full+scatter; without the
+        # rewrite the bw subgraph keeps a (B, V) scatter destination buffer.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(logits_f32, targets):
+            return torch.nn.functional.cross_entropy(
+                logits_f32, targets, reduction="none"
+            )
+
+        def fn(logits, targets):
+            return loss_region(logits.to(torch.float32), targets).sum()
+
+        logits = torch.randn(8, 64, requires_grad=True)
+        targets = torch.randint(0, 64, (8,))
+
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            opt_fn = torch.compile(
+                fn,
+                backend=aot_eager_regional_inductor(
+                    serialize=serialize, on_invoke_subgraph=True
+                ),
+                fullgraph=True,
+            )
+            opt_fn(logits, targets).backward()
+
+        # captured_gms[0] is the fw subgraph and captured_gms[1] is the bw
+        # subgraph. The bw should NOT contain aten.scatter — the joint pass
+        # rewrote full+scatter into eq+where.
+        self.assertExpectedInline(
+            captured_gms[0].code.strip(),
+            """\
+def forward(self, primals_0, primals_1):
+    amax = torch.ops.aten.amax.default(primals_0, [1], True)
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax)
+    exp = torch.ops.aten.exp.default(sub)
+    sum_1 = torch.ops.aten.sum.dim_IntList(exp, [1], True);  exp = None
+    log = torch.ops.aten.log.default(sum_1);  sum_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = None
+    ne = torch.ops.aten.ne.Scalar(primals_1, -100)
+    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where = torch.ops.aten.where.self(ne, primals_1, full_default);  full_default = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(where, 1);  where = None
+    gather = torch.ops.aten.gather.default(sub_1, 1, unsqueeze);  sub_1 = unsqueeze = None
+    squeeze = torch.ops.aten.squeeze.dim(gather, 1);  gather = None
+    neg = torch.ops.aten.neg.default(squeeze);  squeeze = None
+    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_1 = torch.ops.aten.where.self(ne, neg, full_default_1);  ne = neg = full_default_1 = None
+    return (where_1, primals_0, primals_1, amax, log)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+        self.assertExpectedInline(
+            captured_gms[1].code.strip(),
+            """\
+def forward(self, primals_0, primals_1, amax, log, tangents_0):
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
+    full_default_4 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
+    ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
+    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_4);  unsqueeze_2 = full_default_4 = None
+    full_default_2 = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default_2);  ne_2 = unsqueeze_1 = full_default_2 = None
+    iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
+    view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
+    expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
+    eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
+    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None
+    mul = torch.ops.aten.mul.Tensor(where_self, where_3);  where_self = where_3 = None
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax);  primals_0 = amax = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = log = None
+    exp_1 = torch.ops.aten.exp.default(sub_1);  sub_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(mul, [1], True)
+    mul_1 = torch.ops.aten.mul.Tensor(exp_1, sum_2);  exp_1 = sum_2 = None
+    sub_2 = torch.ops.aten.sub.Tensor(mul, mul_1);  mul = mul_1 = None
+    return (sub_2, None)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")

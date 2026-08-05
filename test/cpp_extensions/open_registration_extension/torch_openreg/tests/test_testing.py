@@ -2,9 +2,12 @@
 
 import unittest
 from collections import defaultdict
+from contextlib import contextmanager
 
 import torch
+import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
@@ -35,6 +38,18 @@ class TestBypassDeviceRestrictions(TestCase):
         self.bypass_device_restrictions = True
         super().setUp()
 
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 2
+        actual_runs = cls.executed_count
+        if actual_runs != expected_runs:
+            raise AssertionError(
+                f"Bypass logic failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but only {actual_runs} executed."
+            )
+        super().tearDownClass()
+
     @onlyCUDA
     def test_bypass_only_cuda(self, device):
         type(self).executed_count += 1
@@ -44,19 +59,6 @@ class TestBypassDeviceRestrictions(TestCase):
     def test_bypass_only_on(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
-
-    def test_vaildate_bypass_execution(self, device):
-        # Must run last. The 'v' prefix ensures this sorts after test_bypass_* ('b') alphabetically,
-        # so executed_count has been incremented by both bypass tests before we check it here.
-        expected_runs = 2
-        actual_runs = type(self).executed_count
-        self.assertEqual(
-            actual_runs,
-            expected_runs,
-            f"Bypass logic failed! "
-            f"Expected {expected_runs} tests to run, "
-            f"but only {actual_runs} executed.",
-        )
 
 
 def _make_dummy_op(name, **kwargs):
@@ -81,6 +83,21 @@ op_precision = _make_dummy_op(
     "op_precision",
     decorators=[DecorateInfo(precisionOverride({torch.float32: 1e-5}))],
 )
+
+# Dummy ops for testing combined op_allowlist + op_overrides
+op_combined_supported = _make_dummy_op("op_combined_supported")
+op_combined_skip = _make_dummy_op("op_combined_skip")
+op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
+
+
+@contextmanager
+def _temp_test_configs(obj, **configs):
+    backup = {k: getattr(obj, k, None) for k in configs}
+    obj.set_test_configs(**configs)
+    try:
+        yield
+    finally:
+        obj.set_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -115,7 +132,7 @@ class TestDeviceTypeOpenReg(TestCase):
                 self.precision,
                 1e-2,
                 msg=(
-                    f"Expected op_overrides precisionOverride (1e-2) to win over "
+                    lambda msg: f"{msg}\nExpected op_overrides precisionOverride (1e-2) to win over "
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )
@@ -131,18 +148,6 @@ class TestDeviceTypeOpenReg(TestCase):
         introduced in _apply_op_overrides must silently ignore the missing keys.
         """
         # If we reach here without a KeyError the safety check worked.
-
-
-# Modify PrivateUse1TestBase which is automatically included for OpenReg
-PrivateUse1TestBase.op_overrides = {
-    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
-    "op_skip_f32": [
-        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
-    ],
-    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
-    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
-    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
-}
 
 
 class TestSkippedSpecificTestCases(TestCase):
@@ -173,20 +178,138 @@ class TestSkippedWholeTestClass(TestCase):
         self.fail("This class should not be instantiated for openreg")
 
 
-# PrivateUse1 can skip individual methods or an entire instantiated class.
-PrivateUse1TestBase.test_exclusions = {
-    "TestSkippedSpecificTestCases": ["test_skipped"],
-    "TestSkippedWholeTestClass": "*",
-}
+class TestDtypeAwareExclusions(TestCase):
+    executed_dtypes: dict = defaultdict(list)
 
-instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
+    @classmethod
+    def tearDownClass(cls):
+        expected = {
+            "test_dtype_filter": [torch.float64],
+            "test_dtype_tuple_filter": [(torch.float64, torch.int64)],
+        }
+        if cls.executed_dtypes != expected:
+            raise AssertionError(
+                f"Dtype-aware exclusions failed: expected {expected}, "
+                f"got {cls.executed_dtypes}"
+            )
+        super().tearDownClass()
+
+    @dtypes(torch.float32, torch.float64)
+    def test_dtype_filter(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_filter"].append(dtype)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_all_dtypes_excluded(self, device, dtype):
+        self.assertEqual(torch.device(device).type, "openreg")
+        self.fail("This method should not have any dtype variants for openreg")
+
+    @dtypes((torch.float64, torch.int32), (torch.float64, torch.int64))
+    def test_dtype_tuple_filter(self, device, dtypes):
+        self.assertEqual(torch.device(device).type, "openreg")
+        type(self).executed_dtypes["test_dtype_tuple_filter"].append(dtypes)
+
+
+class TestSupportedOpsWithOverrides(TestCase):
+    """Verify that op_allowlist filtering works together with op_overrides.
+
+    op_allowlist filters which ops generate variants.
+    op_overrides adds decorators to those ops that pass the filter.
+    """
+
+    _executed_combined: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        # op_combined_supported should run (it's in op_allowlist, no skip decorator)
+        if cls._executed_combined["op_combined_supported"] == 0:
+            raise AssertionError("op_combined_supported should have run")
+        # op_combined_skip should NOT run (in op_allowlist but has skip decorator)
+        if cls._executed_combined["op_combined_skip"] != 0:
+            raise AssertionError("op_combined_skip should be skipped by op_overrides")
+        # op_combined_unsupported should NOT run (not in op_allowlist)
+        if cls._executed_combined["op_combined_unsupported"] != 0:
+            raise AssertionError(
+                "op_combined_unsupported should not run (not in op_allowlist)"
+            )
+        super().tearDownClass()
+
+    @ops([op_combined_supported, op_combined_skip, op_combined_unsupported])
+    def test_combined_filter(self, device, dtype, op):
+        type(self)._executed_combined[op.name] += 1
+
+
+OPENREG_OP_OVERRIDES = {
+    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
+    "op_skip_f32": [
+        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
+    ],
+    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
+    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
+}
+with _temp_test_configs(PrivateUse1TestBase, op_overrides=OPENREG_OP_OVERRIDES):
+    instantiate_device_type_tests(
+        TestDeviceTypeOpenReg, globals(), only_for=("openreg",)
+    )
+
 instantiate_device_type_tests(
     TestBypassDeviceRestrictions, globals(), only_for="openreg"
 )
+
+OPENREG_TEST_EXCLUSIONS = {
+    "TestSkippedSpecificTestCases": ["test_skipped"],
+    "TestSkippedWholeTestClass": "*",
+}
+with _temp_test_configs(PrivateUse1TestBase, test_exclusions=OPENREG_TEST_EXCLUSIONS):
+    instantiate_device_type_tests(
+        TestSkippedSpecificTestCases, globals(), only_for="openreg"
+    )
+    instantiate_device_type_tests(
+        TestSkippedWholeTestClass, globals(), only_for="openreg"
+    )
+
+OPENREG_DTYPE_TEST_EXCLUSIONS = {
+    "TestDtypeAwareExclusions": {
+        "test_dtype_filter": {
+            "dtypes": [torch.float32],
+        },
+        "test_all_dtypes_excluded": {
+            "dtypes": [torch.float32, torch.float64],
+        },
+        "test_dtype_tuple_filter": {
+            "dtypes": [torch.int32],
+        },
+    },
+}
+with _temp_test_configs(
+    PrivateUse1TestBase, test_exclusions=OPENREG_DTYPE_TEST_EXCLUSIONS
+):
+    instantiate_device_type_tests(
+        TestDtypeAwareExclusions, globals(), only_for="openreg"
+    )
+
+with _temp_test_configs(
+    PrivateUse1TestBase,
+    op_overrides={
+        "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
+    },
+    op_allowlist=("op_combined_supported", "op_combined_skip"),
+):
+    instantiate_device_type_tests(
+        TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
+    )
+
+
+@unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
+class TestDistributedBackendHook(TestCase):
+    def test_distributed_backend_for_openreg(self, device):
+        self.assertEqual(type(self).distributed_backend(), "occl")
+
+
 instantiate_device_type_tests(
-    TestSkippedSpecificTestCases, globals(), only_for="openreg"
+    TestDistributedBackendHook, globals(), only_for=("openreg",)
 )
-instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
 if __name__ == "__main__":
     run_tests()

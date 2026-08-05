@@ -95,7 +95,8 @@ class MetricsContext:
         At exit, call the provided on_exit function.
         """
         self._level -= 1
-        assert self._level >= 0
+        if self._level < 0:
+            raise AssertionError("MetricsContext level cannot become negative")
         if self._level == 0:
             try:
                 end_time_ns = time.time_ns()
@@ -146,7 +147,7 @@ class MetricsContext:
 
     def set_key_value(self, metric: str, key: str, value: Any) -> None:
         """
-        Treats a give metric as a dictionary and set the k and value within it.
+        Treats a given metric as a dictionary and set the k and value within it.
         Note that the metric must be a dictionary or not present.
 
         We allow this to be called multiple times (i.e. for features, it's not uncommon

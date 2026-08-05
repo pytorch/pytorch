@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -11,7 +12,8 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 
@@ -25,7 +27,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda_and_triton
+@unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -33,14 +35,13 @@ class TestCompilerBisector(TestCase):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
         if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.lib = lib
         return lib
 
@@ -127,7 +128,7 @@ class TestCompilerBisector(TestCase):
             inp = torch.rand([10])
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -164,7 +165,7 @@ class TestCompilerBisector(TestCase):
             inp = torch.rand([10], device=device_type)
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -185,7 +186,7 @@ class TestCompilerBisector(TestCase):
             with preserve_rng_state():
                 out = foo()
             with preserve_rng_state():
-                out_c = torch.compile(foo)()
+                out_c = torch.compile(foo)()  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -231,7 +232,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_close(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))  # noqa: UNSPECIFIED_BACKEND
                 except Exception:
                     return False
                 return True
@@ -253,7 +254,7 @@ class TestCompilerBisector(TestCase):
             torch.manual_seed(0)
             inp = torch.randn(16, 16, 768, dtype=dtype, device=device_type)
             eager_scale = calculate_scale(inp)
-            compile_scale = torch.compile(calculate_scale)(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.equal(eager_scale, compile_scale)
 
@@ -271,7 +272,7 @@ class TestCompilerBisector(TestCase):
 
                 inp = torch.rand([100], device=device_type)
 
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
 
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
@@ -341,13 +342,15 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
+    # XPU doesn't support cudagrah
+    @requires_cuda
     def test_cudagraph_bisect_max(self):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
         from unittest.mock import patch
 
         from torch._dynamo.utils import counters
-        from torch._inductor.compiler_bisector import get_env_val, reset_counters
+        from torch._inductor.compiler_bisector import get_env_val
 
         def foo(x):
             return x + 1
@@ -363,13 +366,13 @@ class TestCompilerBisector(TestCase):
 
         with patch.dict(os.environ, env):
             get_env_val.cache_clear()
-            reset_counters()
+            CompilerBisector.reset_counters()
             torch._dynamo.reset()
             counters.clear()
             CompilerBisector.bisection_enabled = True
             try:
-                foo_c = torch.compile(foo, mode="reduce-overhead")
-                bar_c = torch.compile(bar, mode="reduce-overhead")
+                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 x = torch.randn(10, device=device_type)
                 foo_c(x)
                 bar_c(x)
@@ -379,6 +382,38 @@ class TestCompilerBisector(TestCase):
             finally:
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
+
+    def test_bisect_run_debuginfo(self):
+        import os
+        import subprocess
+        from pathlib import Path
+        from unittest.mock import patch
+
+        test_file = (
+            Path(__file__).resolve().parent / "_test_compiler_bisector_run_helper.py"
+        )
+        # Minimize test runtime by searching only the subsystem that's broken.
+        with patch.dict(
+            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+        ):
+            output = subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "torch._inductor.compiler_bisector",
+                    "run",
+                    "python",
+                    str(test_file),
+                ],
+                stdout=subprocess.PIPE,
+                check=True,
+                text=True,
+                timeout=300,
+            )
+        expected_result = (
+            "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
+        )
+        self.assertIn(expected_result, output.stdout)
 
 
 if __name__ == "__main__":

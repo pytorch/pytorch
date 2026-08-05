@@ -11,6 +11,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 
+#include <limits>
+
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -251,14 +253,14 @@ class Vectorized16 {
     if (count == size())
       return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
 
-    __at_align__ int16_t tmp_values[size()];
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-    for (const auto i : c10::irange(count, size())) {
-      tmp_values[i] = 0;
-    }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    // The contract is 0 <= count <= size(), but the parameter type allows
+    // values that would overflow the fixed-size buffer below; clamp
+    // explicitly so the memcpy bound is provable to gcc-14 (#159962) and
+    // out-of-contract callers stay safe.
+    const int n = std::clamp(static_cast<int>(count), 0, size());
+    // Zero tail past `n`.
+    __at_align__ int16_t tmp_values[size()] = {};
+    std::memcpy(tmp_values, ptr, n * sizeof(int16_t));
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
   }
   void store(void* ptr, int count = size()) const {
@@ -267,7 +269,9 @@ class Vectorized16 {
     } else if (count > 0) {
       __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      // Clamp for the same reason as loadu above.
+      const int n = std::min(count, size());
+      std::memcpy(ptr, tmp_values, n * sizeof(int16_t));
     }
   }
   template <int64_t mask>
@@ -404,7 +408,8 @@ class Vectorized16 {
     cvt_to_fp32<T>(values, lo, hi);
     auto angle_lambda = [](__m256 values_2) {
       const auto zero_vec = _mm256_set1_ps(0.f);
-      const auto nan_vec = _mm256_set1_ps(NAN);
+      const auto nan_vec =
+          _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
       const auto not_nan_mask = _mm256_cmp_ps(values_2, values_2, _CMP_EQ_OQ);
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);

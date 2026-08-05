@@ -71,7 +71,7 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
     // will set the offset and size directly, as opposed to creating and
     // swapping it with a new one
     //
-    // apart from the first allocation when the storage still has the its
+    // apart from the first allocation when the storage still has its
     // allocator-created dataptr (https://fburl.com/code/u7dsspjm) whose
     // deleter is non-null (https://fburl.com/code/7hiwo5zo), this should
     // always be true

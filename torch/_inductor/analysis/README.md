@@ -2,7 +2,7 @@
 Contains scripts for inductor performance analysis.
 
 ## Analysis
-This will analyze a chrome trace to create a table useful for performance work. We mainly care about . Currently, it will add the flops and the memory reads of a kernel via formula (it's not looking at program counters or anything.) These, combined with the kernel duration, can be use to calculate achieved flops, achieved memory bandwidth, and roofline calculations.
+This will analyze a chrome trace to create a table useful for performance work. We mainly care about . Currently, it will add the flops and the memory reads of a kernel via formula (it's not looking at program counters or anything.) These, combined with the kernel duration, can be used to calculate achieved flops, achieved memory bandwidth, and roofline calculations.
 
 ### Usage
 ```
@@ -28,7 +28,7 @@ python profile_analysis.py --diff <json_profile_1> <profile_name_1> <json_profil
  - `name_limit`: The maximum number of characters in the kernel name (they can be quite lengthy and hard to read).
 
 ## Augment
-This mode will add post-hoc analysis to a profile. Currently, it will add the flops and the memory reads of a kernel via formula (it's not looking at program counters or anything.) These, combined with the kernel duration, can be use to calculate achieved flops, achieved memory bandwidth, and roofline calculations.
+This mode will add post-hoc analysis to a profile. Currently, it will add the flops and the memory reads of a kernel via formula (it's not looking at program counters or anything.) These, combined with the kernel duration, can be used to calculate achieved flops, achieved memory bandwidth, and roofline calculations.
 
 ### Usage
 ```

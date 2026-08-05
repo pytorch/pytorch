@@ -3,10 +3,11 @@
 import contextlib
 import copy
 import functools
+import threading
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -28,7 +29,7 @@ from torch._higher_order_ops.utils import (
     saved_values,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -76,6 +77,17 @@ class NestedCompileRegionOptions:
     # Otherwise, the nested region will use this decompositions.
     decompositions: dict[str, Any] | None = None
 
+    # Inductor config patches to apply while compiling this nested region through
+    # Inductor's normal invoke_subgraph lowering path. Also used for the backward
+    # unless bw_inductor_config_patches replaces it.
+    inductor_config_patches: dict[str, Any] | None = None
+
+    # If set, the full inductor config for the backward subgraph, used instead of
+    # inductor_config_patches (a replacement, not merged with it), mirroring
+    # aot_autograd's separate fw_compiler/bw_compiler. If None, the backward
+    # reuses the forward config.
+    bw_inductor_config_patches: dict[str, Any] | None = None
+
 
 def _extract_nested_region_config(fn):
     """
@@ -97,6 +109,145 @@ def _extract_nested_region_config(fn):
         ):
             return gm_to_compile.meta["nested_region_config"].decompositions
     return None
+
+
+def get_backward_nested_region_config(
+    fw_config: NestedCompileRegionOptions | None,
+) -> NestedCompileRegionOptions | None:
+    """Region config for compiling the backward subgraph.
+
+    When the region sets bw_inductor_config_patches, the backward compiles under
+    it (a replacement for inductor_config_patches, not merged with it). Otherwise
+    the forward config is reused unchanged, so the returned object is identical
+    (callers rely on this identity to detect a distinct backward config).
+    """
+    if (
+        isinstance(fw_config, NestedCompileRegionOptions)
+        and fw_config.bw_inductor_config_patches is not None
+    ):
+        return replace(
+            fw_config,
+            inductor_config_patches=fw_config.bw_inductor_config_patches,
+            bw_inductor_config_patches=None,
+        )
+    return fw_config
+
+
+# Per-call id used by downstream graph passes to pair fw and bw
+# invoke_subgraph HOP nodes (e.g. run_joint_graph_passes_on_hops). The
+# autograd Function pushes the id around its fw and bw dispatches; the
+# proxy-mode handler stamps it on the resulting FX nodes via
+# meta["custom"]["call_id"].
+_invoke_subgraph_call_state = threading.local()
+
+
+def _next_invoke_subgraph_call_id() -> int:
+    counter = getattr(_invoke_subgraph_call_state, "counter", 0)
+    _invoke_subgraph_call_state.counter = counter + 1
+    return counter
+
+
+def _current_invoke_subgraph_call_id() -> int | None:
+    return getattr(_invoke_subgraph_call_state, "current", None)
+
+
+@contextlib.contextmanager
+def _set_invoke_subgraph_call_id(call_id: int):
+    prev = getattr(_invoke_subgraph_call_state, "current", None)
+    _invoke_subgraph_call_state.current = call_id
+    try:
+        yield
+    finally:
+        _invoke_subgraph_call_state.current = prev
+
+
+def warn_and_trace_duplicate_backward(
+    identifier: str | None,
+    suffix: int,
+    bw_graph: torch.fx.GraphModule,
+    num_primals: int,
+    tangents: tuple[Any, ...],
+) -> None:
+    if suffix == 0:
+        return
+
+    from torch._dynamo.utils import warn_once
+    from torch._logging import trace_structured
+
+    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+    tangent_summaries: list[dict[str, Any]] = []
+    for idx, tangent in enumerate(tangents):
+        summary: dict[str, Any] = {}
+        backward_input_idx = num_primals + idx
+        if backward_input_idx < len(placeholders):
+            summary["backward_input_name"] = placeholders[backward_input_idx].name
+
+        if not isinstance(tangent, torch.Tensor):
+            summary["type"] = "non-Tensor"
+            tangent_summaries.append(summary)
+            continue
+
+        summary.update(
+            {
+                "shape": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.shape
+                ],
+                "stride": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.stride()
+                ],
+                "dtype": str(tangent.dtype),
+                "device": str(tangent.device),
+            }
+        )
+        tangent_summaries.append(summary)
+
+    warn_once(
+        "invoke_subgraph traced multiple backward graphs for the same forward "
+        f"identifier {identifier!r}. This usually means the incoming backward "
+        "tangent metadata differs across backward invocations. This can happen "
+        "when upstream backward formulas produce gradients with different "
+        "layouts, aliases, or other tensor metadata. This can increase compile "
+        "time and code size. Use tlparse and look for the "
+        "invoke_subgraph_backward_duplicate artifact for tangent details."
+    )
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "invoke_subgraph_backward_duplicate",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {
+            "forward_identifier": identifier,
+            "backward_identifier": f"bw_{identifier}_{suffix}",
+            "new_variant_suffix": suffix,
+            "num_variants_for_identifier": suffix + 1,
+            "new_variant": {
+                "backward_identifier": f"bw_{identifier}_{suffix}",
+                "tangents": tangent_summaries,
+            },
+            "explanation": (
+                "invoke_subgraph caches backward graphs by both the forward "
+                "identifier and tangent metadata. Multiple backward variants "
+                "for one forward identifier usually mean the backward tangents "
+                "have different tensor metadata, commonly stride."
+            ),
+            "common_cause": (
+                "This can happen when equivalent forward invocations receive backward "
+                "tangents from different upstream formulas, or from the same "
+                "formula with different input metadata. For example, an "
+                "upstream backward may return a view, alias, slice, expanded "
+                "tensor, or otherwise non-contiguous gradient whose metadata "
+                "does not match the tangent seen by another use."
+            ),
+            "suggested_action": (
+                "If the duplicate backward graph is undesirable, materialize a "
+                "consistent tangent layout before the nested region backward. "
+                "One model-level workaround is a custom autograd.Function whose "
+                "forward returns the input and whose backward returns "
+                "grad.contiguous()."
+            ),
+        },
+    )
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -128,7 +279,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             isinstance(
                 o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
             )
-            or is_opaque_type(type(o))
+            or is_custom_class(type(o))
             for o in operands
             if o is not None
         ):
@@ -146,11 +297,37 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             check_input_alias_and_mutation_return_outputs,
             materialize_as_graph,
         )
+        from torch._subclasses.functional_tensor import FunctionalTensor
 
         subgraph_decomp_table = _extract_nested_region_config(subgraph)
-        gm: torch.fx.GraphModule = materialize_as_graph(
-            subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+        # When the subgraph is a GraphModule whose captured buffers are
+        # already FunctionalTensors (produced by an enclosing
+        # FunctionalTensorMode, e.g. the non-strict export path or
+        # ``run_decompositions`` on an ExportedProgram that preserved an
+        # ``invoke_subgraph`` HOP), re-tracing through
+        # ``materialize_as_graph`` would pop that mode via
+        # ``_disable_current_modes`` and trigger "FunctionalTensor on its
+        # own" when the inner trace touches the captured constants. In that
+        # case the existing graph has already been functionalized by the
+        # outer pass, so reuse it for schema / mutation analysis.
+        gm: torch.fx.GraphModule | None = None
+        if isinstance(subgraph, FunctionalizeCtxWrapper):
+            candidate = subgraph.subgraph
+        elif isinstance(subgraph, torch.fx.GraphModule):
+            candidate = subgraph
+        else:
+            candidate = None
+        bufs = (
+            list(candidate.buffers())
+            if isinstance(candidate, torch.fx.GraphModule)
+            else []
         )
+        if bufs and all(isinstance(buf, FunctionalTensor) for buf in bufs):
+            gm = candidate
+        if gm is None:
+            gm = materialize_as_graph(
+                subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -246,15 +423,17 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
 
-    if torch.compiler.is_compiling():
+    if torch.compiler.is_exporting():
         # For non-strict export tracing, we still want to go through Dynamo
 
-        def _invoke_subgraph_placeholder_wrapper(func, args):
-            return invoke_subgraph_placeholder(func, *args)
+        def _invoke_subgraph_placeholder_wrapper(func, args, kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
 
         from torch._higher_order_ops.utils import _hop_compile_and_call
 
-        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
+        return _hop_compile_and_call(
+            _invoke_subgraph_placeholder_wrapper, (func, args, kwargs)
+        )
 
     return func(*args, **kwargs)
 
@@ -632,14 +811,18 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._subgraph = subgraph
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
-        # We snapshot the dispatch keys in forward for materializing the
+        ctx._call_id = _next_invoke_subgraph_call_id()
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
         save_values_for_backward(ctx, operands)
 
-        with torch._C._AutoDispatchBelowAutograd():
+        with (
+            torch._C._AutoDispatchBelowAutograd(),
+            _set_invoke_subgraph_call_id(ctx._call_id),
+        ):
             out = invoke_subgraph(
                 subgraph,
                 f"fw_{identifier}",
@@ -788,15 +971,28 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
                 identifier, tangent_metadata, bw_graph
             )
+            warn_and_trace_duplicate_backward(
+                identifier, suffix, bw_graph, len(primals), filtered_grad_outs
+            )
 
-        grads = invoke_subgraph(
-            bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
-        )[: -output_metadata.num_fw_outs]
+        with _set_invoke_subgraph_call_id(ctx._call_id):
+            grads = invoke_subgraph(
+                bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
+            )[: -output_metadata.num_fw_outs]
         return None, None, None, *grads
 
 
 @invoke_subgraph.py_autograd_impl
 def _(subgraph, identifier, *operands):
+    from torch._guards import detect_fake_mode
+
+    # Eager backends run the captured HOP with real tensors and no AOTAutograd
+    # fake mode. Let regular autograd record through the subgraph in that case.
+    if detect_fake_mode(operands) is None:
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        return subgraph(*operands)
+
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
@@ -901,12 +1097,32 @@ def _(ctx, subgraph, identifier, *operands):
 
     unwrapped_operands = ctx.unwrap_tensors(operands)
 
-    hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
+    functionalize_schema = None
+    schema_cache_key = None
+    if invoke_subgraph_cache:
+        schema_cache_key = (
+            id(subgraph),
+            identifier,
+            tuple(type(operand) for operand in operands),
+        )
+        functionalize_schema = invoke_subgraph_cache.get_functionalize_schema_entry(
+            schema_cache_key
+        )
+
+    if functionalize_schema is None:
+        hop_instance = HopInstance.create(
+            invoke_subgraph, subgraph, identifier, *operands
+        )
+        if invoke_subgraph_cache and schema_cache_key is not None:
+            invoke_subgraph_cache.add_functionalize_schema_entry(
+                schema_cache_key, hop_instance._schema
+            )
+    else:
+        hop_instance = HopInstance(invoke_subgraph, functionalize_schema)
+
+    functionalized_identifier = None
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
-        # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
-        # See NOTE [Support input mutation of hops] for the overall design.
-        #
         # invoke_subgraph is special because of its identifier based caching mechanism.
         # In invoke_subgraph's functionalization key implementation, we create a new
         # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
@@ -915,19 +1131,55 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"identifier must be a string for auto_functionalize, got {type(identifier)}"
             )
-        return do_auto_functionalize_v2(
-            ctx.mode,
-            hop_instance,
-            (subgraph, "auto_functionalized_" + identifier, *operands),
-            {},
-        )
 
-    with ctx.redispatch_to_next():
-        # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. It's Dynamo's responsibility to prevent formation
-        # of invoke_subgraph ops if input aliasing/mutation is detected.
-        functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
-        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
+        if ctx.mode._keep_input_mutations:
+            # With keep_input_mutations=True, wrap invoke_subgraph in
+            # auto_functionalized_v2. This allows copy_ epilogues in the subgraph for
+            # Inductor to fuse where useful.
+            # See NOTE [Support input mutation of hops] for the overall design.
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                (subgraph, "auto_functionalized_" + identifier, *operands),
+                {},
+            )
+
+        # With keep_input_mutations=False, the subgraph must not mutate its inputs.
+        # Return updated inputs so AOTAutograd can generate the copy_ epilogue.
+        mutated_operand_indices = tuple(
+            idx
+            for idx, arg in enumerate(hop_instance._schema.arguments[2:])
+            if arg.alias_info is not None and arg.alias_info.is_write
+        )
+        functionalized_subgraph = FunctionalizeCtxWrapper(
+            ctx, subgraph, mutated_input_indices=mutated_operand_indices
+        )
+        functionalized_identifier = "functionalized_" + identifier
+        with ctx.redispatch_to_next():
+            out = invoke_subgraph(
+                functionalized_subgraph,
+                functionalized_identifier,
+                *unwrapped_operands,
+            )
+
+        num_outputs = len(hop_instance._schema.returns)
+        actual_out = out[:num_outputs]
+        mutated_out = out[num_outputs:]
+        for operand_idx, updated_operand in zip(mutated_operand_indices, mutated_out):
+            operand = operands[operand_idx]
+            ctx.replace(operand, updated_operand)
+            ctx.commit_update(operand)
+            ctx.sync(operand)
+        out = actual_out
+    else:
+        with ctx.redispatch_to_next():
+            # NB: There is an assumption that subgraph does not mutate inputs and
+            # there is no aliasing. It's Dynamo's responsibility to prevent formation
+            # of invoke_subgraph ops if input aliasing/mutation is detected.
+            functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
+            out = invoke_subgraph(
+                functionalized_subgraph, identifier, *unwrapped_operands
+            )
 
     if effects:
         (new_token, *out) = out
@@ -947,9 +1199,13 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
             )
-        # Store discovered effects in the cache by identifier
+        # Later passes look up effects using the identifier on the emitted HOP.
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_effects(identifier, discovered_effects)
+            if functionalized_identifier is not None:
+                invoke_subgraph_cache.add_effects(
+                    functionalized_identifier, discovered_effects
+                )
 
     return ctx.wrap_tensors(out)
 
@@ -1072,11 +1328,17 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         ):
             nested_config = gm.meta["nested_region_config"]
             break
-    if nested_config is not None:
+
+    call_id = _current_invoke_subgraph_call_id()
+
+    if nested_config is not None or call_id is not None:
         node = out_proxy.node
         if "custom" not in node.meta:
             node.meta["custom"] = {}
-        node.meta["custom"]["nested_region_config"] = nested_config
+        if nested_config is not None:
+            node.meta["custom"]["nested_region_config"] = nested_config
+        if call_id is not None:
+            node.meta["custom"]["call_id"] = call_id
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
@@ -1106,6 +1368,22 @@ def invoke_subgraph_inductor_compile(
 
     if inductor_config_patches is None:
         inductor_config_patches = {}
+
+    # Saved tensors flow across the HOP boundary into a separately-compiled bw
+    # subgraph whose IR was traced with natural (unpadded) strides. Mark every
+    # output of this subgraph as user-visible so Inductor's comprehensive_padding
+    # leaves their strides alone — otherwise the bw's assert_size_stride on the
+    # incoming saved tensor will fire (e.g. F.linear output padded 200008 -> 200064).
+    from torch._inductor.compile_fx import _recursive_record_user_visible_output_idxs
+
+    output_node = next(iter(gm.graph.find_nodes(op="output")))
+    output_node.meta["user_visible_output_idxs"] = [
+        idx
+        for idx in range(len(output_node.args[0]))
+        if isinstance(output_node.args[0][idx], torch.fx.Node)
+    ]
+    _recursive_record_user_visible_output_idxs(gm)
+
     compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
     compiled_fn_inner = compile_fn(gm, example_inputs)
     if not compiled_fn_inner._boxed_call:
@@ -1132,31 +1410,48 @@ def invoke_subgraph_inductor_compile(
 
 
 def get_invoke_subgraph_compile_options(
-    inductor_config_patches=None,
+    fw_inductor_config_patches=None,
     decompositions=None,
     partitioner="min_cut_rematerialization_partition",
+    *,
+    bw_inductor_config_patches=None,
 ):
-    if inductor_config_patches is None:
-        inductor_config_patches = {"triton.autotune_at_compile_time": True}
-    inductor_compile = functools.partial(
-        invoke_subgraph_inductor_compile,
-        inductor_config_patches=inductor_config_patches,
+    if fw_inductor_config_patches is None:
+        fw_inductor_config_patches = {"triton.autotune_at_compile_time": True}
+
+    # The backward uses bw_inductor_config_patches when set (independently of the
+    # forward), otherwise it reuses the forward config.
+    bw_patches = (
+        bw_inductor_config_patches
+        if bw_inductor_config_patches is not None
+        else fw_inductor_config_patches
     )
 
-    if inductor_config_patches:
-        from torch._inductor import config as inductor_config
+    from torch._inductor import config as inductor_config
 
-        # Validate that all config keys exist
-        for key in inductor_config_patches:
+    # Validate that all config keys exist
+    for patches in (fw_inductor_config_patches, bw_inductor_config_patches):
+        for key in patches or {}:
             if not hasattr(inductor_config, key):
                 raise ValueError(
                     f"Invalid inductor config key '{key}' in get_invoke_subgraph_compile_options. "
                     f"Available config keys can be found in torch._inductor.config"
                 )
 
+    fw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=fw_inductor_config_patches,
+    )
+    bw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=bw_patches,
+    )
+
     return NestedCompileRegionOptions(
-        fw_compiler=inductor_compile,
-        bw_compiler=inductor_compile,
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
         partitioner=partitioner,
         decompositions=decompositions,
+        inductor_config_patches=fw_inductor_config_patches,
+        bw_inductor_config_patches=bw_inductor_config_patches,
     )

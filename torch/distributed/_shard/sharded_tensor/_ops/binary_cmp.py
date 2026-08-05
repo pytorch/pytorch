@@ -14,14 +14,18 @@ def _communicate_result(result, pg):
             torch.accelerator.current_device_index()
         )
     if result:
-        result_tensor = torch.ones(1, device=device)
+        result_tensor = torch.ones(
+            1, device=torch.device(torch.accelerator.current_device_index())
+        )
     else:
-        result_tensor = torch.zeros(1, device=device)
+        result_tensor = torch.zeros(
+            1, device=torch.device(torch.accelerator.current_device_index())
+        )
 
     dist.all_reduce(result_tensor, group=pg)
 
     expected_result = torch.ones(
-        1, device=device
+        1, device=torch.device(torch.accelerator.current_device_index())
     ) * dist.get_world_size(pg)
 
     return torch.equal(result_tensor, expected_result)

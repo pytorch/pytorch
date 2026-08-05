@@ -81,7 +81,7 @@ ViewInfo ViewInfo::chain(
   // [View + Inplace update on view tensor] for more details how we use this
   // function in backward.
   if (view_func) {
-    // both current_view and it's parent have a view_func
+    // both current_view and its parent have a view_func
     if (view_fn_) {
       view_func = std::make_unique<ChainedViewFunc>(
           view_fn_->clone_and_set(), std::move(view_func));
@@ -93,7 +93,7 @@ ViewInfo ViewInfo::chain(
         return prev_rev_fn(temp);
       };
     } else {
-      // current_view has a view_func and but it's parent doesn't have one
+      // current_view has a view_func but its parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
         auto match_base_view_func = create_view_func_matching(base);
         view_func = std::make_unique<ChainedViewFunc>(
@@ -124,7 +124,7 @@ ViewInfo ViewInfo::chain(
       }
     }
   } else if (view_fn_) {
-    // if current_view doesn't have a view_func but it's parent has one
+    // if current_view doesn't have a view_func but its parent has one
     auto match_tensor_view_func = create_view_func_matching(tensor);
     view_func = std::make_unique<ChainedViewFunc>(
         view_fn_->clone_and_set(), std::move(match_tensor_view_func));
@@ -179,8 +179,8 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
 
 static void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
-    const std::shared_ptr<torch::autograd::Node>& old_fn,
-    const std::shared_ptr<torch::autograd::Node>& new_fn) {
+    const c10::intrusive_ptr<torch::autograd::Node>& old_fn,
+    const c10::intrusive_ptr<torch::autograd::Node>& new_fn) {
   // This function is called whenever the grad_fn of the tensor is
   // changed. We assume here that new_fn does not yet have hooks of
   // its own.
@@ -209,7 +209,9 @@ static void update_tensor_hooks_on_new_gradfn(
   }
 }
 
-void rebase_history(const Variable& self, Edge gradient_edge) {
+c10::intrusive_ptr<Node> rebase_history(
+    const Variable& self,
+    Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
   const auto& meta = impl::get_autograd_meta(self);
   auto old_fn = meta != nullptr ? meta->grad_fn_ : nullptr;
@@ -227,7 +229,7 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
         "Functions which modify views in-place must return a single Variable");
     const auto& view_info = diff_view_meta->get_backward_view();
     diff_view_meta->output_nr_ = gradient_edge.input_nr;
-    auto copy_slices = std::make_shared<CopySlices>(
+    auto copy_slices = c10::make_intrusive<CopySlices>(
         view_info.base_,
         at::TensorGeometry(self),
         view_info.has_view_fn() ? view_info.view_fn().clone_and_set() : nullptr,
@@ -237,15 +239,17 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
       torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
           view_info.base_, view_info.base_.grad_fn(), copy_slices);
     }
-    set_gradient_edge(view_info.base_, {std::move(copy_slices), 0});
+    set_gradient_edge(view_info.base_, {copy_slices, 0});
     self.grad_fn(); // trigger an update to the view's grad_fn
-    return;
+    return copy_slices;
   }
 
+  auto fn = gradient_edge.function;
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
   torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
       self, old_fn, self.grad_fn());
+  return fn;
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
@@ -267,12 +271,12 @@ void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
 
 void set_grad_accumulator(
     const Variable& self,
-    std::weak_ptr<Node> grad_accumulator) {
+    c10::weak_intrusive_ptr<Node> grad_accumulator) {
   materialize_autograd_meta(self)->grad_accumulator_ =
       std::move(grad_accumulator);
 }
 
-std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
+c10::intrusive_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   if (get_autograd_meta(self)) {
     return get_autograd_meta(self)->grad_accumulator_.lock();
   } else {
@@ -280,11 +284,11 @@ std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   }
 }
 
-std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+c10::intrusive_ptr<Node> try_get_grad_accumulator(const Variable& self) {
   return try_get_grad_accumulator(get_tensor_base(self));
 }
 
-std::shared_ptr<Node> grad_accumulator(const Variable& self) {
+c10::intrusive_ptr<Node> grad_accumulator(const Variable& self) {
   auto autograd_meta = get_autograd_meta(self);
   if (!autograd_meta) {
     return nullptr;
@@ -297,18 +301,29 @@ std::shared_ptr<Node> grad_accumulator(const Variable& self) {
     return nullptr;
   }
 
-  std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+  c10::intrusive_ptr<Node> result;
+  {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
 
-  auto result = autograd_meta->grad_accumulator_.lock();
-  if (result)
-    return result;
+    result = autograd_meta->grad_accumulator_.lock();
+    if (result)
+      return result;
 
-  c10::raw::intrusive_ptr::incref(self.unsafeGetTensorImpl());
-  auto intrusive_from_this =
-      c10::intrusive_ptr<at::TensorImpl>::reclaim(self.unsafeGetTensorImpl());
-  result = std::make_shared<AccumulateGrad>(
-      Variable(std::move(intrusive_from_this)));
-  autograd_meta->grad_accumulator_ = result;
+    c10::raw::intrusive_ptr::incref(self.unsafeGetTensorImpl());
+    auto intrusive_from_this =
+        c10::intrusive_ptr<at::TensorImpl>::reclaim(self.unsafeGetTensorImpl());
+    result = c10::make_intrusive<AccumulateGrad>(
+        Variable(std::move(intrusive_from_this)));
+    autograd_meta->grad_accumulator_ = c10::weak_intrusive_ptr<Node>(result);
+  }
+  // Fire only when the node is actually created. The result is cached as a
+  // weak ref on the leaf, so an AccumulateGrad already alive from a prior use
+  // of this parameter is returned above without firing again. Well-behaved
+  // code frees the old autograd graph (and thus the acc grad node) between
+  // iterations, so the hook fires consistently on each parameter's first use.
+  // Fired outside the lock: the hook takes the GIL, and elsewhere the GIL is
+  // acquired before this mutex, so firing under it could deadlock.
+  fire_node_creation_hooks(result);
   return result;
 }
 
@@ -644,10 +659,10 @@ const std::string& VariableHooks::name(const at::TensorBase& self) const {
 }
 
 namespace {
-std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
+c10::intrusive_ptr<torch::autograd::Node> singleton_intrusive_ptr;
 }
 
-const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
+const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
     const at::TensorBase& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
@@ -702,8 +717,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         }
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {
-        auto fn =
-            std::make_shared<torch::autograd::generated::AsStridedBackward0>();
+        auto fn = c10::make_intrusive<
+            torch::autograd::generated::AsStridedBackward0>();
         fn->self_geometry = at::TensorGeometry(view_info.base_);
         fn->size = self.sym_sizes().vec();
         fn->stride = self.sym_strides().vec();
@@ -717,6 +732,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             self.unsafeGetTensorImpl()->is_python_dispatch(),
             self.is_nested(),
             self.grad_dtype());
+        torch::autograd::fire_node_creation_hooks(fn);
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
@@ -730,7 +746,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
   if (torch::autograd::impl::get_autograd_meta(self)) {
     return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
   } else {
-    return singleton_shared_ptr;
+    return singleton_intrusive_ptr;
   }
 }
 

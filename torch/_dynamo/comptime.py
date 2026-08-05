@@ -38,7 +38,7 @@ import builtins
 import dis
 import time
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TextIO
 
 import torch
@@ -66,7 +66,7 @@ class ComptimeVar:
     def __init__(self, v: VariableTracker) -> None:
         self.__variable = v
 
-    def as_proxy(self) -> VariableTracker | Sequence[VariableTracker]:
+    def as_proxy(self) -> VariableTracker | list[VariableTracker]:
         """
         Returns an fx.Proxy (or tuple/list of fx.Proxy) representing
         this variable in the FX graph we are assembling to pass
@@ -210,9 +210,10 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert not val.is_dynamic(), (
-            "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
-        )
+        if val.is_dynamic():
+            raise AssertionError(
+                "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+            )
 
     def print_graph(self, *, verbose: bool = True, file: TextIO | None = None) -> None:
         """

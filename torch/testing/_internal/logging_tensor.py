@@ -84,7 +84,10 @@ class LoggingTensor(torch.Tensor):
 
         with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
+        logging.getLogger("LoggingTensor").info(
+            f"{func.__module__}.{func.__name__}",  # noqa: G004
+            extra={"lt_args": args, "lt_kwargs": kwargs, "lt_rs": rs},
+        )
         return rs
 
 class LoggingTensorMode(TorchDispatchMode):
@@ -92,7 +95,10 @@ class LoggingTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         rs = func(*args, **kwargs)
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
+        logging.getLogger("LoggingTensor").info(
+            f"{func.__module__}.{func.__name__}",  # noqa: G004
+            extra={"lt_args": args, "lt_kwargs": kwargs, "lt_rs": rs},
+        )
         return rs
 
 class LoggingTensorReentrant(LoggingTensor):
@@ -132,17 +138,17 @@ class LoggingTensorHandler(logging.Handler):
         args, kwargs, rs = getattr(record, "lt_payload", None) or record.args
         fmt_args = ", ".join(
             itertools.chain(
-                (str(tree_map(self._fmt, a)) for a in args),
-                (f"{k}={str(tree_map(self._fmt, v))}" for k, v in kwargs.items()),
+                (str(tree_map(self._fmt, a)) for a in record.lt_args),
+                (f"{k}={str(tree_map(self._fmt, v))}" for k, v in record.lt_kwargs.items()),
             )
         )
-        fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), rs)
+        fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), record.lt_rs)
         self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
         if self.tracebacks_list is not None:
             self.tracebacks_list.append(record.traceback)
 
 def log_input(name: str, var: object) -> None:
-    logger.info("input", (name,), {}, var)  # noqa: PLE1205
+    logger.info("input", extra={"lt_args": (name,), "lt_kwargs": {}, "lt_rs": var})
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):

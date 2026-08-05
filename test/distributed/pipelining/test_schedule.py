@@ -19,13 +19,17 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
+from torch.distributed.pipelining._utils import (
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
     _batch_p2p,
+    _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
@@ -36,14 +40,20 @@ from torch.distributed.pipelining.schedules import (
     F,
     get_schedule_class,
     I,
+    PipelineScheduleMulti,
     PipelineScheduleSingle,
+    RECV_B,
     RECV_F,
     RESHARD,
     SEND_B,
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
+from torch.distributed.pipelining.stage import (
+    _PipelineStageBase,
+    _RecvInfo,
+    PipelineStage,
+)
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -85,6 +95,57 @@ class MockPipelineStage(_PipelineStageBase):
         pass
 
 
+def _make_adjacency_stage(
+    stage_index, num_stages, group_rank, args_recv_info, act_send_info
+):
+    """Factory for a minimal mock stage used by adjacency-guard tests."""
+
+    class _AdjacencyTestStage(MockPipelineStage):
+        def __init__(self):
+            super().__init__(
+                num_stages=num_stages,
+                group_size=num_stages,
+                group_rank=group_rank,
+            )
+            self.stage_index = stage_index
+            self.device = "cpu"
+
+        def _get_init_p2p_neighbors_ops(self):
+            return []
+
+        def _prepare_forward_infra(self, *args, **kwargs):
+            self.args_recv_info = args_recv_info
+            self.act_send_info = act_send_info
+            return tuple()
+
+        def _prepare_backward_infra(self, *args, **kwargs):
+            return None
+
+        def clear_runtime_states(self):
+            return None
+
+        def get_fwd_recv_ops(self, mb_index):
+            return []
+
+        def get_fwd_send_ops(self, mb_index):
+            return []
+
+        def get_bwd_recv_ops(self, mb_index):
+            return []
+
+        def get_bwd_send_ops(self, mb_index):
+            return []
+
+    return _AdjacencyTestStage()
+
+
+def _run_adjacency_validation(stage, num_stages):
+    """Run one step of PipelineScheduleMulti to trigger adjacency validation."""
+    schedule = PipelineScheduleMulti([stage], n_microbatches=1)
+    schedule.pipeline_order = {i: [None] for i in range(num_stages)}
+    schedule.step()
+
+
 class ScheduleTest(TestCase):
     def test_get_schedule_class(self):
         # List of all expected schedule names
@@ -104,11 +165,12 @@ class ScheduleTest(TestCase):
             with self.subTest(name=name):
                 schedule_class = get_schedule_class(name)
                 self.assertIsNotNone(
-                    schedule_class, f"Class for {name} should not be None"
+                    schedule_class,
+                    lambda msg: f"{msg}\nClass for {name} should not be None",
                 )
                 self.assertTrue(
                     issubclass(schedule_class, _PipelineSchedule),
-                    f"{name} should be a subclass of _PipelineSchedule",
+                    lambda msg: f"{msg}\n{name} should be a subclass of _PipelineSchedule",
                 )
 
         error_case = ["ScheduleThatDoesNotExist"]
@@ -116,6 +178,34 @@ class ScheduleTest(TestCase):
             # Test that the original name is included in the error message
             with self.assertRaisesRegex(ValueError, f"{name}"):
                 get_schedule_class(name)
+
+    def test_adjacency_guard_rejects_nonadjacent_send(self):
+        # Stage 0 sending to stage 2 (skip connection)
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [2]})
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_rejects_nonadjacent_recv(self):
+        # Stage 3 receiving from stage 0 (non-adjacent)
+        stage = _make_adjacency_stage(
+            3,
+            4,
+            3,
+            {0: (_RecvInfo("x", source=0, buffer=None, tensor_meta=None),)},
+            {},
+        )
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            _run_adjacency_validation(stage, 4)
+
+    def test_adjacency_guard_allows_adjacent_send(self):
+        # Stage 0 -> stage 1 is valid
+        stage = _make_adjacency_stage(0, 3, 0, {0: tuple()}, {0: [1]})
+        _run_adjacency_validation(stage, 3)
+
+    def test_adjacency_guard_allows_empty_recv_middle_stage(self):
+        # Middle stage with no recv is fine (no non-adjacent peers)
+        stage = _make_adjacency_stage(1, 3, 1, {0: tuple()}, {0: [2]})
+        _run_adjacency_validation(stage, 3)
 
     @parametrize(
         "ScheduleClass",
@@ -220,10 +310,154 @@ class ScheduleTest(TestCase):
             ScheduleLoopedBFS,
         ],
     )
+    def test_schedule_with_pre_split_inputs(self, ScheduleClass):
+        """
+        Test that schedules can consume pre-split microbatch args, kwargs, and target.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
+
+            class KwargModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(d_hid, d_hid)
+
+                def forward(self, x, y):
+                    return self.linear(torch.relu(x + y))
+
+            auto_mod = KwargModule().to(device)
+            pre_split_mod = copy.deepcopy(auto_mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            def make_schedule(mod):
+                stage = PipelineStage(mod, 0, n_stages, device)
+                if issubclass(ScheduleClass, PipelineScheduleSingle):
+                    stages = stage
+                else:
+                    stages = [stage]
+                return ScheduleClass(
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    scale_grads=False,
+                )
+
+            auto_schedule = make_schedule(auto_mod)
+            pre_split_schedule = make_schedule(pre_split_mod)
+
+            auto_losses = []
+            auto_out = auto_schedule.step(x, y=y, target=target, losses=auto_losses)
+
+            arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+            kwarg_mbs = [
+                {"y": y_mb} for y_mb in torch.tensor_split(y, num_microbatches)
+            ]
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            pre_split_losses = []
+            pre_split_out = pre_split_schedule.step(
+                arg_mbs=arg_mbs,
+                kwarg_mbs=kwarg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, auto_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(auto_losses))
+
+            for (name, pre_split_param), (auto_name, auto_param) in zip(
+                pre_split_mod.named_parameters(),
+                auto_mod.named_parameters(),
+                strict=True,
+            ):
+                self.assertEqual(name, auto_name)
+                self.assertEqual(
+                    pre_split_param.grad,
+                    auto_param.grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_schedule_pre_split_validation(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid = 4
+            device = "cpu"
+            x0 = torch.randn(2, d_hid, device=device)
+            x1 = torch.randn(2, d_hid, device=device)
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, device)
+            schedule = ScheduleGPipe(stage, 2)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split positional inputs through arg_mbs",
+            ):
+                schedule.step(x0, arg_mbs=[(x0,), (x1,)])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unexpected keyword arguments with pre-split inputs: y",
+            ):
+                schedule.step(y=x0, kwarg_mbs=[{}, {}])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, target_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list"):
+                schedule.step(arg_mbs=(x0,))
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 arg_mbs"):
+                schedule.step(arg_mbs=[])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    kwarg_mbs={"y": x0},
+                )
+
+            with self.assertRaisesRegex(TypeError, "arg_mbs must be a list of tuples"):
+                schedule.step(arg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(TypeError, "kwarg_mbs must be a list of dicts"):
+                schedule.step(kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 target_mbs"):
+                schedule.step(
+                    arg_mbs=[(x0,), (x1,)],
+                    target_mbs=[x0],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
     def test_schedule_eval_then_train(self, ScheduleClass):
-        """
-        Test that simply runs evaluation followed by training.
-        """
+        """Test full-batch and pre-split evaluation followed by training."""
         store = FakeStore()
         torch.distributed.init_process_group(
             backend="fake", rank=0, world_size=1, store=store
@@ -252,17 +486,77 @@ class ScheduleTest(TestCase):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
-        # Run eval
-        for _ in range(2):
-            # Zero gradients
-            stage_module.zero_grad()
-            losses = []
-            schedule.eval(x, target=target, losses=losses)
-        # Run training
+        arg_mbs = [(x_mb,) for x_mb in torch.tensor_split(x, num_microbatches)]
+        target_mbs = list(torch.tensor_split(target, num_microbatches))
+
         try:
-            for _ in range(2):
-                losses = []
-                schedule.step(x, target=target, losses=losses)
+            stage_module.zero_grad()
+            full_losses = []
+            full_out = schedule.eval(x, target=target, losses=full_losses)
+            pre_split_losses = []
+            pre_split_out = schedule.eval(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=pre_split_losses,
+            )
+
+            self.assertEqual(pre_split_out, full_out)
+            self.assertEqual(torch.stack(pre_split_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNone(
+                    parameter.grad,
+                    msg=f"eval unexpectedly produced a gradient for {name}",
+                )
+
+            train_losses = []
+            train_out = schedule.step(
+                arg_mbs=arg_mbs,
+                target_mbs=target_mbs,
+                losses=train_losses,
+            )
+            self.assertEqual(train_out, full_out)
+            self.assertEqual(torch.stack(train_losses), torch.stack(full_losses))
+            for name, parameter in stage_module.named_parameters():
+                self.assertIsNotNone(
+                    parameter.grad,
+                    msg=f"training did not produce a gradient for {name}",
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize("rank", [0, 1])
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
+        """
+        With a fake process group, the cross-rank warm-up vote cannot exchange
+        real data, so the schedule must infer the metadata mode locally:
+        STATIC when complete metadata is supplied, and a clear error when
+        dynamic inference would be required.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=rank, world_size=2, store=store
+        )
+        d_hid, batch_size = 16, 8
+        n_stages, num_microbatches = 2, 2
+        device = torch.device("cpu")
+        mod = MultiMLP(d_hid, n_layers=n_stages).get_submodule(f"layers.{rank}")
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
+        try:
+            stage = PipelineStage(
+                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+            )
+            schedule = ScheduleGPipe(stage, num_microbatches)
+            schedule.step(x) if rank == 0 else schedule.step()
+            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+
+            # Without static metadata, dynamic inference is required, which
+            # cannot work over a fake group and must fail loudly.
+            stage_dyn = PipelineStage(mod, rank, n_stages, device)
+            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+            with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
@@ -306,6 +600,7 @@ instantiate_parametrized_tests(ScheduleTest)
 
 class TestSchedulePlan(TestCase):
     def setUp(self):
+        super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         self.test_cases = [
@@ -408,7 +703,6 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -504,7 +798,11 @@ class TestScheduleCsv(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
 
 instantiate_parametrized_tests(TestScheduleCsv)
@@ -576,7 +874,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -615,7 +913,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -650,7 +948,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {merged_sch}"
                 ),
             )
@@ -801,7 +1099,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_comms_sch[rank]}"
                         f"\nActual:   {comms_sch[rank]}"
                     ),
@@ -817,6 +1115,468 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         self.assertEqual(num_steps, test_info["simulated_steps"])
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "schedule": "simple_2_rank_2_stage_no_overlap",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0RECV_B0",
+                        "0B0",
+                        "0RECV_B1",
+                        "0B1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1F1",
+                        "1B1",
+                        "1SEND_B1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0RECV_B0",
+                        "0B0",
+                        "0RECV_B1",
+                        "0B1",
+                    ],
+                    1: [
+                        # Rank 1 > rank 0: SEND before RECV (no flush constraint)
+                        # 1RECV_F0 deferred to before 1F0
+                        # 1RECV_F1 deferred to before 1F1
+                        "1RECV_F0",
+                        "1F0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1RECV_F1",
+                        "1F1",
+                        "1B1",
+                        "1SEND_B1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: stage_idx,
+                "num_stages": 2,
+            },
+            {
+                "schedule": "v_2_rank_4_stage_no_overlap",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1F1",
+                        "2RECV_B0",
+                        "2F1",
+                        "2SEND_F1",
+                        "2B0",
+                        "2RECV_B1",
+                        "1B0",
+                        "1SEND_B0",
+                        "2B1",
+                        "1B1",
+                        "1SEND_B1",
+                        "2W0",
+                        "2W1",
+                        "1W0",
+                        "1W1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # Rank 0 < rank 1: RECV before SEND (flush constraint)
+                        # RECVs already right before consumers, no change
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > rank 0: SEND before RECV (no flush constraint)
+                        # All RECVs deferred to right before their consumers
+                        "1RECV_F0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1RECV_F1",
+                        "1F1",
+                        "2F1",
+                        "2SEND_F1",
+                        "2RECV_B0",
+                        "2B0",
+                        "1B0",
+                        "1SEND_B0",
+                        "2RECV_B1",
+                        "2B1",
+                        "1B1",
+                        "1SEND_B1",
+                        "2W0",
+                        "2W1",
+                        "1W0",
+                        "1W1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
+                "num_stages": 4,
+            },
+            {
+                # Schedule using BACKWARD_INPUT (I) + BACKWARD_WEIGHT (W) split
+                # instead of FULL_BACKWARD (B). Verifies that BACKWARD_INPUT
+                # consumes RECV_B (like FULL_BACKWARD does) and that
+                # BACKWARD_WEIGHT does NOT trigger any RECV flushing.
+                "schedule": "simple_2_rank_2_stage_iw_split",
+                "input": {
+                    0: [
+                        # 0RECV_B0 placed early; flush rule (rank 0 < rank 1)
+                        # should move it to right before the next SEND_F to rank 1.
+                        "0RECV_B0",
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0I0",
+                        "0W0",
+                        "0RECV_B1",
+                        "0I1",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "1I0",
+                        "1SEND_B0",
+                        "1W0",
+                        "1F1",
+                        "1I1",
+                        "1SEND_B1",
+                        "1W1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # 0RECV_B0 deferred until just before 0SEND_F0 (flush
+                        # required: rank 0 < peer rank 1). 0RECV_B1 deferred
+                        # to immediately before its consumer 0I1 (BACKWARD_INPUT
+                        # consumes RECV_B).
+                        "0F0",
+                        "0RECV_B0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0I0",
+                        "0W0",
+                        "0RECV_B1",
+                        "0I1",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > peer rank 0: no flush. RECV_Fs deferred to
+                        # right before their forward consumers. BACKWARD_WEIGHT
+                        # (1W0/1W1) does not consume any RECV.
+                        "1RECV_F0",
+                        "1F0",
+                        "1I0",
+                        "1SEND_B0",
+                        "1W0",
+                        "1RECV_F1",
+                        "1F1",
+                        "1I1",
+                        "1SEND_B1",
+                        "1W1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: stage_idx,
+                "num_stages": 2,
+            },
+            {
+                # Schedule containing an OVERLAP_F_B compound action whose
+                # sub_actions consume both a deferred RECV_F (forward sub) and
+                # a deferred RECV_B (backward sub). Verifies that RECV
+                # flushing iterates over sub_actions correctly.
+                "schedule": "v_2_rank_4_stage_overlap_f_b",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "2RECV_B0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "(1F1;2B0)OVERLAP_F_B",
+                        "2W0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1W0",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # Rank 0 < peer rank 1, but every RECV is already
+                        # adjacent to its consumer; no movement.
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > peer rank 0, no flush. 1RECV_F0 moves to
+                        # before 1F0; 1RECV_F1 and 2RECV_B0 are both flushed
+                        # immediately before the OVERLAP_F_B that consumes
+                        # them via its sub_actions.
+                        "1RECV_F0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1RECV_F1",
+                        "2RECV_B0",
+                        "(1F1;2B0)OVERLAP_F_B",
+                        "2W0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1W0",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
+                "num_stages": 4,
+            },
+        ],
+    )
+    def test_defer_recv_ops(self, test_info):
+        """Tests that _defer_recv_ops defers RECVs with rank-parity ordering."""
+        input_sch = {
+            rank: self._parse_actions(test_info["input"][rank])
+            for rank in test_info["input"]
+        }
+        expected_sch = {
+            rank: self._parse_actions(test_info["expected"][rank])
+            for rank in test_info["expected"]
+        }
+
+        result_sch = _defer_recv_ops(input_sch, test_info["stage_to_rank"])
+        for rank in expected_sch:
+            for i, (expected, actual) in enumerate(
+                zip(expected_sch[rank], result_sch[rank])
+            ):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    (
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
+                        f"\nExpected: {expected_sch[rank]}"
+                        f"\nActual:   {result_sch[rank]}"
+                    ),
+                )
+            self.assertEqual(len(result_sch[rank]), len(expected_sch[rank]))
+
+    def test_defer_recv_ops_no_deadlock(self):
+        """Tests the issue from pytorch/pytorch#172668: RECV_F for stage 2 should not
+        be placed before unrelated compute op 0F1 on the same rank, and the deferred
+        schedule must not introduce deadlocks.
+
+        Deadlock safety is ensured via rank-parity P2P ordering:
+        - Lower rank (rank < peer): RECV before SEND
+        - Higher rank (rank > peer): SEND before RECV
+        """
+        from torch.distributed.pipelining._schedule_visualizer import get_schedule_ops
+
+        schedule_ops_overlap = get_schedule_ops(
+            schedule="Interleaved1F1B",
+            pp_degree=2,
+            num_microbatches=4,
+            with_comms=True,
+            defer_pp_recv=False,
+        )
+        schedule_ops_no_overlap = get_schedule_ops(
+            schedule="Interleaved1F1B",
+            pp_degree=2,
+            num_microbatches=4,
+            with_comms=True,
+            defer_pp_recv=True,
+        )
+
+        rank0_overlap = schedule_ops_overlap[0]
+        rank0_no_overlap = schedule_ops_no_overlap[0]
+
+        def find_action(actions, stage_idx, comp_type, mb_idx):
+            for i, a in enumerate(actions):
+                if (
+                    a is not None
+                    and a.stage_index == stage_idx
+                    and a.computation_type == comp_type
+                    and a.microbatch_index == mb_idx
+                ):
+                    return i
+            return -1
+
+        # With overlap (default): 2RECV_F0 comes before 0F1
+        recv_f0_pos_overlap = find_action(rank0_overlap, 2, RECV_F, 0)
+        f1_pos_overlap = find_action(rank0_overlap, 0, F, 1)
+        self.assertGreater(f1_pos_overlap, recv_f0_pos_overlap)
+
+        # Without overlap (rank 0 < rank 1, so RECV before SEND applies):
+        # RECVs are flushed before SENDs to the same peer, which may interpose
+        # a SEND between the RECV and its compute consumer. So on rank 0 we
+        # only assert that the RECV moved later than in the overlap=True
+        # schedule (i.e. deferral happened), not that it lands immediately
+        # before its consumer.
+        recv_f0_pos_no_overlap = find_action(rank0_no_overlap, 2, RECV_F, 0)
+        self.assertGreater(recv_f0_pos_no_overlap, recv_f0_pos_overlap)
+
+        # On rank 1 (higher rank, no flush constraint) the strict invariant
+        # holds: every standalone RECV is placed immediately before the
+        # compute op that consumes it. Apply the strict
+        # assertEqual(recv_pos, consumer_pos - 1) check that is the core
+        # invariant _defer_recv_ops is supposed to guarantee.
+        rank1_no_overlap = schedule_ops_no_overlap[1]
+        rank1_overlap = schedule_ops_overlap[1]
+
+        # Spot-check a representative pair using the literal find_action style.
+        recv_f0_pos_rank1 = find_action(rank1_no_overlap, 1, RECV_F, 0)
+        f0_pos_rank1 = find_action(rank1_no_overlap, 1, F, 0)
+        self.assertEqual(recv_f0_pos_rank1, f0_pos_rank1 - 1)
+
+        # Generalize: every RECV on rank 1 is immediately followed by its
+        # consumer (handles compound actions like OVERLAP_F_B by inspecting
+        # sub_actions).
+        non_none = [a for a in rank1_no_overlap if a is not None]
+        for i, a in enumerate(non_none):
+            if a.computation_type not in (RECV_F, RECV_B):
+                continue
+            self.assertLess(
+                i,
+                len(non_none) - 1,
+                lambda msg: f"{msg}\nRECV {a} on rank 1 has no following consumer",
+            )
+            consumer = non_none[i + 1]
+            consumer_subs = (
+                consumer.sub_actions
+                if consumer.sub_actions is not None
+                else (consumer,)
+            )
+            if a.computation_type == RECV_F:
+                matched = any(
+                    s.stage_index == a.stage_index
+                    and s.computation_type == F
+                    and s.microbatch_index == a.microbatch_index
+                    for s in consumer_subs
+                )
+            else:
+                matched = any(
+                    s.stage_index == a.stage_index
+                    and s.computation_type in (B, I)
+                    and s.microbatch_index == a.microbatch_index
+                    for s in consumer_subs
+                )
+            self.assertTrue(
+                matched,
+                lambda msg: f"{msg}\nRECV {a} on rank 1 is not immediately followed by its "
+                f"consumer (next action: {consumer})",
+            )
+
+        # Sanity: total RECV count should be unchanged by deferral.
+        recv_count_overlap = sum(
+            1
+            for a in rank1_overlap
+            if a is not None and a.computation_type in (RECV_F, RECV_B)
+        )
+        recv_count_no_overlap = sum(
+            1
+            for a in rank1_no_overlap
+            if a is not None and a.computation_type in (RECV_F, RECV_B)
+        )
+        self.assertEqual(recv_count_overlap, recv_count_no_overlap)
 
     @parametrize("csv_name", ["zb1p_2rank_2stagep"])
     def test_csv(self, csv_name):
@@ -859,7 +1619,11 @@ class TestScheduleLowering(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
         simulated_schedule = _simulate_comms_compute(
             comms_sch,
@@ -1214,11 +1978,17 @@ class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
 
-    def _make_p2p_op(self, op, group_peer=0):
+    def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()
         p.op = op
         p.tensor = torch.zeros(1)
-        p.group = MagicMock()
+        # Ops in a single _batch_p2p call normally share one group; tests pass an
+        # explicit shared group. _batch_p2p splits a list spanning multiple groups
+        # into one batch per group (per-direction PP comms), covered separately.
+        p.group = group if group is not None else MagicMock()
+        # _batch_p2p groups/orders ops by group_name, so give each group a stable
+        # string name (identity-derived) rather than a MagicMock attribute.
+        p.group.group_name = f"pg_{id(p.group)}"
         p.tag = 0
         p.group_peer = group_peer
         return p
@@ -1230,7 +2000,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_all_isend_dispatched_individually(self, mock_isend, mock_batch):
         mock_isend.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_isend, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1246,7 +2019,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     def test_all_irecv_dispatched_individually(self, mock_irecv, mock_batch):
         mock_irecv.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_irecv, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_irecv, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1263,9 +2039,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_use_batch(self, mock_isend, mock_irecv, mock_batch):
         mock_batch.return_value = [MagicMock(), MagicMock()]
+        group = MagicMock()
         ops = [
-            self._make_p2p_op(mock_isend, group_peer=0),
-            self._make_p2p_op(mock_irecv, group_peer=1),
+            self._make_p2p_op(mock_isend, group_peer=0, group=group),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=group),
         ]
 
         result = _batch_p2p(ops)
@@ -1274,6 +2051,31 @@ class TestBatchP2P(TestCase):
         mock_isend.assert_not_called()
         mock_irecv.assert_not_called()
         self.assertEqual(len(result), 2)
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
+        """A mixed op list spanning multiple groups (per-direction PP comms) is
+        issued as one batch_isend_irecv per group, so each direction runs on its
+        own communicator instead of sharing one FIFO."""
+        mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
+        g_fwd, g_bwd = MagicMock(), MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_isend, group_peer=2, group=g_bwd),
+            self._make_p2p_op(mock_irecv, group_peer=2, group=g_bwd),
+        ]
+
+        result = _batch_p2p(ops)
+
+        self.assertEqual(mock_batch.call_count, 2)
+        mock_batch.assert_any_call([ops[0], ops[1]])
+        mock_batch.assert_any_call([ops[2], ops[3]])
+        mock_isend.assert_not_called()
+        mock_irecv.assert_not_called()
+        self.assertEqual(len(result), 4)
 
 
 if __name__ == "__main__":

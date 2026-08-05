@@ -160,7 +160,7 @@ struct TORCH_API CopySlices : public Node {
       const Variable& base_var,
       at::TensorGeometry view_,
       std::unique_ptr<ViewFunc> view_fn_,
-      std::shared_ptr<Node> fn_);
+      c10::intrusive_ptr<Node> fn_);
 
   // common code between apply/apply_with_saved
   template <typename T>
@@ -179,7 +179,7 @@ struct TORCH_API CopySlices : public Node {
   // See Note [View + Inplace update for base tensor] for details.
   at::TensorGeometry view;
   std::unique_ptr<ViewFunc> view_fn;
-  std::shared_ptr<Node> fn;
+  c10::intrusive_ptr<Node> fn;
 };
 
 } // namespace torch::autograd

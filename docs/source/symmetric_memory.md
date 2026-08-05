@@ -194,6 +194,29 @@ https://github.com/meta-pytorch/kraken/blob/main/kraken to see additional
 utilities and examples of using symmetric memory to implement common patterns in
 Triton.
 
+## One-sided get
+
+Symmetric memory also exposes a small one-sided `get` API for copying data from
+a peer's symmetric allocation into a local tensor:
+
+```python
+src = symm_mem.empty(1024, device=device)
+hdl = symm_mem.rendezvous(src, group)
+
+if dist.get_rank(group) == 0:
+    dst = torch.empty((512,), device=device)
+    # Copy the last 512 elements of the peer's allocation into dst.
+    symm_mem.get(dst, hdl, peer=1, offset=512)
+```
+
+`hdl` is the symmetric memory handle returned by `rendezvous`; the remote
+source is the peer's allocation backing that handle. The number of elements
+copied is inferred from `dst`, so pass a view (e.g. `dst[:n]`) to fill only
+part of a tensor; `offset` is given in elements of `dst`'s dtype and defaults
+to `0`. `dst` may be a regular CUDA tensor or another symmetric tensor; it must
+be on the same device as `hdl` and backed by contiguous memory. The copy is
+issued on the current CUDA stream.
+
 ## Scale out
 
 Large language models distribute experts onto more than 8 GPUs, hence requiring
@@ -241,7 +264,7 @@ In the example below, tensor `x` will be created from symmetric memory:
     mempool = symm_mem.get_mem_pool(device)
 
     with torch.cuda.use_mem_pool(mempool):
-        x = torch.arange(128, device=device)
+        x = torch.arange(128, device=device, dtype=torch.float32)
 
     torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
 ```
@@ -283,7 +306,7 @@ To use CE collectives, you need to:
 3. Allocate tensors using symmetric memory
 4. Register the tensors with symmetric memory via rendezvous
 
-Once set up, standard collective functions like {func}`all_gather_into_tensor` and
+Once set up, standard collective functions like {func}`all_gather_single` and
 {func}`all_to_all_single` will automatically use the copy engines when operating
 on symmetric memory tensors.
 
@@ -315,7 +338,7 @@ symm_mem.rendezvous(out, group=group_name)
 
 # Perform collective operation using copy engines
 # This now runs on DMA engines instead of SMs
-work = dist.all_gather_into_tensor(out, inp, async_op=True)
+work = dist.all_gather_single(out, inp, async_op=True)
 work.wait()
 ```
 
@@ -378,6 +401,51 @@ supported domains only; other collectives (e.g., ``all_gather``) and
 inter-node communication are not affected.
 :::
 
+## Rendezvous at Scale
+
+By default, `rendezvous` exchanges metadata via the TCPStore. Each rank in the
+symmetric memory group issues one store set and N-1 store gets (where N is the
+group size, typically 8–72 for NVLink domains). At large world sizes the
+TCPStore (~200k QPS capacity) becomes a bottleneck: for example, with 72-rank
+NVLink groups at 10k total ranks, a single rendezvous takes ~3.6s via TCPStore;
+at 100k ranks this grows to ~36s.
+
+To use the process group's NCCL allgather instead, set
+`use_pg_for_symm_mem_rendezvous` in the process group options:
+
+```python
+opts = dist.ProcessGroupNCCL.Options()
+opts.use_pg_for_symm_mem_rendezvous = True
+pg = dist.new_group(ranks, pg_options=opts)
+
+t = symm_mem.empty(size, device=device)
+hdl = symm_mem.rendezvous(t, group=pg)
+```
+
+If the process group is only used for symmetric memory and won't be used for
+regular collectives afterwards (e.g., an expert-parallelism group), you can
+release the NCCL communicator after rendezvous via ``abort()``. The symmetric
+memory handle remains usable since it only depends on the mapped memory, not the
+communicator:
+
+```python
+opts = dist.ProcessGroupNCCL.Options()
+opts.use_pg_for_symm_mem_rendezvous = True
+ep_pg = dist.new_group(ep_ranks, pg_options=opts)
+
+t = symm_mem.empty(size, device=device)
+hdl = symm_mem.rendezvous(t, group=ep_pg)
+
+# Release the NCCL communicator since ep_pg won't be used for collectives.
+# The symm_mem handle is still usable — it only needs the mapped memory.
+ep_pg.abort()
+```
+
+:::{note}
+Enabling `use_pg_for_symm_mem_rendezvous` will lazily create the NCCL
+communicator for the process group if it doesn't already exist.
+:::
+
 ## API Reference
 
 ```{eval-rst}
@@ -390,6 +458,10 @@ inter-node communication are not affected.
 
 ```{eval-rst}
 .. autofunction:: rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: get
 ```
 
 ```{eval-rst}
@@ -408,11 +480,31 @@ inter-node communication are not affected.
 .. autofunction:: get_mem_pool
 ```
 
+```{eval-rst}
+.. autofunction:: is_symm_mem_tensor
+```
+
+```{eval-rst}
+.. autofunction:: set_signal_pad_size
+```
+
+```{eval-rst}
+.. autofunction:: get_signal_pad_size
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
 them directly via `torch.ops.symm_mem.<op_name>`.
 :::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._symmetric_memory
+```
+
+```{eval-rst}
+.. autofunction:: reduce_scatter_offset
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.ops.symm_mem
@@ -425,6 +517,14 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     requires hardware support for multimem operations. On NVIDIA GPUs, NVLink
     SHARP is required.
 
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. The kernels synchronize ranks using a shared signal pad
+        indexed by block ID with no per-stream isolation; issuing concurrent
+        launches from different streams on the same group will cause a deadlock.
+        To use symm_mem collectives from multiple streams, serialize them onto
+        one dedicated stream using ``stream.wait_stream()`` / ``current_stream.wait_stream()``.
+
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
     :param str group_name: Name of the group to perform all-reduce on.
@@ -433,6 +533,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: multimem_all_gather_out(input: Tensor, group_name: str, out: Tensor) -> Tensor
 
     Performs a multimem all-gather operation on the input tensor. This operation requires hardware support for multimem operations. On NVIDIA GPUs, NVLink SHARP is required.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-gather on.
     :param str group_name: Name of the group to perform all-gather on.
@@ -443,6 +547,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     Performs a one-shot all-reduce operation on the input tensor.
 
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
+
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
     :param str group_name: Name of the group to perform all-reduce on.
@@ -451,6 +559,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: one_shot_all_reduce_out(input: Tensor, reduce_op: str, group_name: str, out: Tensor) -> Tensor
 
     Performs a one-shot all-reduce operation based on the input tensor and writes the result to the output tensor.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
@@ -461,6 +573,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: two_shot_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
 
     Performs a two-shot all-reduce operation on the input tensor.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.

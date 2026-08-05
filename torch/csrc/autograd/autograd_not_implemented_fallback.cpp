@@ -142,7 +142,7 @@ static void basicAutogradNotImplementedFallbackImpl(
   // by putting it after the requires_grad checks.
   any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
-  std::shared_ptr<WarnNotImplemented> grad_fn;
+  c10::intrusive_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
     // NB: It is standard to collect edges from all tensors
     // (see generated/VariableTypeEverything.cpp for examples)
@@ -154,9 +154,8 @@ static void basicAutogradNotImplementedFallbackImpl(
         stack,
         stack_start,
         num_arguments);
-    grad_fn = std::shared_ptr<WarnNotImplemented>(
-        new WarnNotImplemented(op_name, all_tensors_on_stack.size()),
-        deleteNode);
+    grad_fn = c10::make_intrusive<WarnNotImplemented>(
+        op_name, all_tensors_on_stack.size());
     grad_fn->set_next_edges(collect_next_edges(all_tensors_on_stack));
   }
 
@@ -168,6 +167,7 @@ static void basicAutogradNotImplementedFallbackImpl(
     // we don't expect many existing operators to do this because of the amount
     // of technical expertise necessary (you would need to manually register an
     // autograd kernel without using autograd.Function)
+    bool grad_fn_attached = false;
     _foreach_tensor(
         [&](size_t _, size_t idx_ret, const at::Tensor& t) {
           if (!isDifferentiableType(t.scalar_type())) {
@@ -225,11 +225,16 @@ static void basicAutogradNotImplementedFallbackImpl(
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
             set_history(t, grad_fn);
+            grad_fn_attached = true;
           }
         },
         stack,
         stack->size() - num_returns,
         num_returns);
+    // grad_fn is shared across outputs; fire once after the loop.
+    if (grad_fn_attached) {
+      fire_node_creation_hooks(grad_fn);
+    }
   }
 }
 
@@ -340,10 +345,9 @@ static void autogradNotImplementedFallbackImpl(
       stack_start,
       num_arguments);
 
-  std::shared_ptr<NotImplemented> grad_fn;
+  c10::intrusive_ptr<NotImplemented> grad_fn;
   if (any_requires_grad) {
-    grad_fn = std::shared_ptr<NotImplemented>(
-        new NotImplemented(op_name), deleteNode);
+    grad_fn = c10::make_intrusive<NotImplemented>(op_name);
     grad_fn->set_next_edges(
         collect_next_edges(tensors_requiring_grad_on_stack));
   }
@@ -470,19 +474,35 @@ static void autogradNotImplementedFallbackImpl(
 #endif
 
   if (any_requires_grad) {
+    bool grad_fn_attached = false;
     _foreach_tensor(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              rebase_history(t, grad_fn);
+              auto attached_fn = rebase_history(t, grad_fn);
+              if (attached_fn == grad_fn) {
+                // Non-view in-place output: grad_fn was attached directly;
+                // it is shared across outputs, so defer to the single fire
+                // after the loop.
+                grad_fn_attached = true;
+              } else {
+                // View in-place output: attached_fn is a fresh CopySlices
+                // node created just for t; fire it here.
+                fire_node_creation_hooks(attached_fn);
+              }
             } else {
               set_history(t, grad_fn);
+              grad_fn_attached = true;
             }
           }
         },
         stack,
         stack->size() - num_returns,
         num_returns);
+    // grad_fn is shared across outputs; fire once after the loop.
+    if (grad_fn_attached) {
+      fire_node_creation_hooks(grad_fn);
+    }
   }
 }
 

@@ -42,6 +42,15 @@ def empty_host_cache() -> None:
     torch._C._accelerator_emptyHostCache()
 
 
+def _flatten_stats(result: list[tuple[str, Any]], prefix: str, value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            nested_prefix = f"{prefix}.{key}" if prefix else key
+            _flatten_stats(result, nested_prefix, nested_value)
+    else:
+        result.append((prefix, value))
+
+
 def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device index.
 
@@ -109,15 +118,7 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     stats = torch._C._accelerator_getDeviceStats(device_index)
     flat_stats = []
 
-    def flatten(prefix: str, value: Any) -> None:
-        if isinstance(value, dict):
-            for k, v in value.items():
-                nested_prefix = f"{prefix}.{k}" if prefix else k
-                flatten(nested_prefix, v)
-        else:
-            flat_stats.append((prefix, value))
-
-    flatten("", stats)
+    _flatten_stats(flat_stats, "", stats)
     flat_stats.sort()
     # pyrefly: ignore [no-matching-overload]
     return OrderedDict(flat_stats)
@@ -208,6 +209,8 @@ def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetAccumulatedStats(device_index)
 
@@ -225,6 +228,8 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetPeakStats(device_index)
 
@@ -246,3 +251,27 @@ def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
     device_index = _get_device_index(device_index, optional=True)
     # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getMemoryInfo(device_index)
+
+
+def _snapshot(device=None, augment_with_fx_traces: bool = False):
+    r"""Return a snapshot of the current :ref:`accelerator<accelerators>` memory allocator state.
+
+    Requires :func:`_record_memory_history` on the appropriate device module
+    (e.g., :func:`torch.cuda.memory._record_memory_history`) to have been called.
+
+    Args:
+        device: the device to snapshot. If not given, uses the current device.
+        augment_with_fx_traces (bool, optional): if True, augment stack traces
+            with FX graph information. Default: ``False``.
+
+    Returns:
+        dict: a dictionary containing memory allocator state information.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type == "xpu":
+        return torch.xpu.memory._snapshot(
+            device, augment_with_fx_traces=augment_with_fx_traces
+        )
+    return torch.cuda.memory._snapshot(
+        device, augment_with_fx_traces=augment_with_fx_traces
+    )

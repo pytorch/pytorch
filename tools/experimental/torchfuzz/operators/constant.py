@@ -15,15 +15,24 @@ class ConstantOperator(Operator):
 
     def __init__(self):
         super().__init__("constant")
-        self.template = "default"  # Track template for DTensor compatibility
+        # Active FuzzTemplate instance (set via set_template) used to delegate
+        # device-specific tensor wrapping in codegen.  None until set_template
+        # is called.
+        self.template = None
 
     @property
     def torch_op_name(self) -> str | None:
         """Constant is not a torch operation, it generates constant values."""
         return None
 
-    def set_template(self, template: str):
-        """Set the template for context-aware code generation."""
+    def set_template(self, template):
+        """Set the active :class:`FuzzTemplate` instance for codegen.
+
+        ``ops_fuzzer._get_template_filtered_operators`` calls this with the
+        instance that ``convert_graph_to_python_code`` will subsequently use,
+        so the operator's ``codegen`` can defer device-specific wrapping
+        (``DTensor.from_local`` etc.) to ``template.codegen_constant``.
+        """
         self.template = template
 
     def can_produce(self, output_spec: Spec) -> bool:
@@ -115,19 +124,11 @@ class ConstantOperator(Operator):
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
 
-            # For DTensor templates, constants are created outside the function
-            if self.template in ["dtensor", "dtensor_placements"]:
-                # For dtensor_placements, constants are handled in args_codegen
-                # For dtensor, use the global placements variable
-                if self.template == "dtensor_placements":
-                    return f"# {output_name} is created globally"
-                else:
-                    return (
-                        f"{output_name}_local = {tensor_creation}.to('cuda')\n"
-                        f"{output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
-                    )
-            else:
-                return f"{output_name} = {tensor_creation}"
+            # Delegate device-specific wrapping (cuda placement, DTensor, etc.) to the
+            # active template; falls back to a plain assignment when no template is set.
+            if self.template is not None:
+                return self.template.codegen_constant(output_name, tensor_creation)
+            return f"{output_name} = {tensor_creation}"
 
         else:
             return f"# Unknown output spec type for constant: {type(output_spec)}"

@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 # A workflow that deletes branches of closed PRs
 
 name: Delete old branches
@@ -18,7 +19,7 @@ permissions:
 jobs:
   delete:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repo

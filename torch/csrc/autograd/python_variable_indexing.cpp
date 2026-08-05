@@ -88,14 +88,16 @@ static bool sequence_has_torch_function(PyObject* seq) {
   return false;
 }
 
-static int64_t count_specified_dimensions(PyObject* index) {
+static int64_t count_specified_dimensions(
+    PyObject* index,
+    bool skip_torch_function) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
   auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
-    if (check_has_torch_function(obj)) {
+    if (!skip_torch_function && check_has_torch_function(obj)) {
       return -1;
     }
 
@@ -111,7 +113,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
       // Check sequences for __torch_function__ (top-level only)
       // NB: do NOT use PySequence_Check, that will grab things like Numpy
       // arrays
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
+      if (!skip_torch_function && (PyTuple_Check(obj) || PyList_Check(obj))) {
         if (sequence_has_torch_function(obj)) {
           return -1; // Signal torch function handling needed
         }
@@ -150,7 +152,14 @@ inline Variable valueToTensor(
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    scalar = Scalar(THPUtils_unpackLong(value));
+    // uint64 values above INT64_MAX must not go through signed long long unpack
+    // (e.g. x[0] = 1 << 63). See
+    // https://github.com/pytorch/pytorch/issues/191458
+    if (options.dtype().toScalarType() == at::kUInt64) {
+      scalar = Scalar(THPUtils_unpackUInt64(value));
+    } else {
+      scalar = Scalar(THPUtils_unpackLong(value));
+    }
   } else if (PyFloat_Check(value)) {
     scalar = Scalar(THPUtils_unpackDouble(value));
   } else if (PyComplex_Check(value)) {
@@ -389,7 +398,8 @@ static THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  const bool skip_torch_function = consume_should_skip_torch_function();
+  if (!skip_torch_function && check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -434,7 +444,8 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  int64_t specified_dims = count_specified_dimensions(holder.get());
+  int64_t specified_dims =
+      count_specified_dimensions(holder.get(), skip_torch_function);
   if (specified_dims == -1) {
     return handle_torch_function_indexing(self, index);
   }
@@ -486,8 +497,10 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
   }
-  if ((check_has_torch_function(self)) ||
-      (check_has_torch_function(py_value))) {
+  const bool skip_torch_function = consume_should_skip_torch_function();
+  if (!skip_torch_function &&
+      ((check_has_torch_function(self)) ||
+       (check_has_torch_function(py_value)))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;
@@ -561,7 +574,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  int64_t specified_dims = count_specified_dimensions(holder.get());
+  int64_t specified_dims =
+      count_specified_dimensions(holder.get(), skip_torch_function);
   if (specified_dims == -1) {
     py::object val = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));

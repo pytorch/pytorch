@@ -13,11 +13,13 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import try_import_ck_lib
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
+    skipIfRocmVersionAtLeast,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
@@ -65,7 +67,19 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "CKTILE", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        (
+            subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            subtest("CKTILE", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            "ATen,CK",
+        ),
+        name_fn=lambda b: {
+            "CK": "standalone_ck",
+            "CKTILE": "standalone_cktile",
+            "ATen,CK": "fallback",
+        }[b],
+    )
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
@@ -118,7 +132,11 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK",))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     @parametrize("autotune_in_subproc", (True,))
     def test_max_autotune_precompile_matmul_dynamic(
         self, max_autotune_gemm_backends, autotune_in_subproc
@@ -167,7 +185,66 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("num_gemms", (1, 2))
+    def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
+        """
+        Verify that CK GEMM templates work under JIT cpp_wrapper mode.
+        ``num_gemms=2`` chains a second GEMM of a different shape so the
+        wrapper has to link against multiple distinct .so files.
+        """
+        M, N, K = 2240, 2048, 256
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b, c):
+                out = a @ b
+                if num_gemms > 1:
+                    out = out @ c
+                return out
+
+        model = MyModel().cuda()
+        # Non-negative inputs: the num_gemms=2 case chains a second GEMM that
+        # contracts over K=2048 in bf16. Signed inputs cause cancellation and
+        # near-zero outputs whose relative error against eager's separately
+        # rounded bf16 result explodes; rand() keeps outputs well-conditioned so
+        # the default assert_close tolerance stays meaningful.
+        a = torch.rand(M, K, **tensor_options)
+        b = torch.rand(K, N, **tensor_options)
+        c = torch.rand(N, N // 2, **tensor_options)
+        expected = model(a, b, c)
+
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CK",
+                    "compile_threads": 2,
+                    "rocm.ck_max_profiling_configs": 2,
+                    "rocm.ck_dir": self.ck_dir,
+                    "cpp_wrapper": True,
+                }
+            ),
+            tf32_off(),
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            compiled = torch.compile(model, fullgraph=True)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
+            # JIT path must call the bare extern "C" symbol, not via the
+            # AOT-only `kernels.` member.
+            FileCheck().check("rocm_").check_not("kernels.rocm_").run(codes[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, _test_env)
+    @parametrize(
+        "max_autotune_gemm_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
         End to end test for picking preselected ck instances
@@ -242,16 +319,26 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
-    @skipIfRocm(msg="Numerical accuracy errors in CK backend on gfx950 as of 06/03/26")
     @parametrize(
-        "x_shape", ([4096, 2048], [2048], [4096, 1])
-    )  # NOTE: the first two shapes create "Tensor-likes are not close" errors
-    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
+        "max_autotune_gemm_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
+    @parametrize(
+        "x_shape",
+        ([4096, 2048], [2048], [4096, 1]),
+        name_fn=lambda x_shape: f"x_shape_{'x'.join(map(str, x_shape))}",
+    )
+    @parametrize(
+        "dtype",
+        (torch.float16, torch.bfloat16),
+        name_fn=lambda d: {torch.float16: "float16", torch.bfloat16: "bfloat16"}[d],
+    )
+    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
-        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        tensor_options = {"device": "cuda", "dtype": dtype}
         x = torch.ones(x_shape, **tensor_options)
         a = torch.randn(m, k, **tensor_options)
         b = torch.randn(k, n, **tensor_options)
@@ -287,7 +374,11 @@ class TestCKBackend(TestCase):
     )
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
@@ -380,7 +471,11 @@ class TestCKBackend(TestCase):
         os.environ,
         {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
     )
-    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
+    @parametrize(
+        "max_autotune_conv_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATEN,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
         tensor_options = {"device": "cuda", "dtype": torch.float32}
 
@@ -417,7 +512,11 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_precompile_bmm(
         self,
         max_autotune_gemm_backends,

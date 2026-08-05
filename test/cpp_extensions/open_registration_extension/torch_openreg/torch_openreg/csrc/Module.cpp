@@ -7,11 +7,10 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-#include <pybind11/chrono.h>
 #include <pybind11/pybind11.h>
 
 #if USE_DISTRIBUTED
-#include <distributed/c10d/ProcessGroupOCCL.hpp>
+#include "distributed/init.hpp"
 #endif
 #include <runtime/OpenRegFunctions.h>
 
@@ -120,23 +119,9 @@ extern "C" OPENREG_EXPORT PyObject* initOpenRegModule(void) {
 
   namespace py = pybind11;
   py::module m = py::reinterpret_borrow<py::module>(mod);
-  // Expose the OCCL process group to Python only when distributed is enabled.
-  // The intrusive_ptr template arg tells pybind11 how to manage lifetime of
-  // C++ shared state when returned to Python, and we list Backend as a base
-  // so Python recognizes the inheritance hierarchy.
+
 #if USE_DISTRIBUTED
-  py::class_<c10d::ProcessGroupOCCL, c10d::Backend, c10::intrusive_ptr<c10d::ProcessGroupOCCL>>( // NOLINT(bugprone-unused-raii)
-      m,
-      "ProcessGroupOCCL");
-  m.def(
-      // Factory used by Python to construct the OCCL process group from a
-      // Store, rank, world size, and timeout.
-      "_createProcessGroupOCCL",
-      &c10d::createProcessGroupOCCL,
-      py::arg("store"),
-      py::arg("rank"),
-      py::arg("size"),
-      py::arg("timeout"));
+  initProcessGroupBindings(m);
 #endif
 
   return mod;

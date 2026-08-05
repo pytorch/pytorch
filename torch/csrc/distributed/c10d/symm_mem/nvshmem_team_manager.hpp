@@ -49,7 +49,7 @@ class TeamManager {
       const std::vector<int>& global_ranks) {
     auto [team_pool, pool_updated] =
         group_to_team_pool(group_name, global_ranks, 1);
-    // Return the fist available team
+    // Return the first available team
     return team_pool[0];
   }
 

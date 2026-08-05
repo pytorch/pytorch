@@ -9,6 +9,7 @@ from numpy.testing import assert_array_equal
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -529,6 +530,40 @@ class DTensorTest(DTensorTestBase):
                 raise AssertionError(
                     "Expected local_no_grad to be sharded_tensor._local_tensor"
                 )
+
+    @with_comms
+    def test_to_local_preserves_parameter(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166156:
+        # nn.Parameter wrapping a DTensor must remain isinstance(nn.Parameter)
+        # after calling .to_local() (both with and without grad enabled), and
+        # autograd must continue to flow back into the DTensor parameter.
+        device_mesh = self.build_device_mesh()
+        global_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
+        dtensor_param = nn.Parameter(
+            distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+        )
+        self.assertTrue(isinstance(dtensor_param, nn.Parameter))
+
+        local = dtensor_param.to_local()
+        self.assertTrue(isinstance(local, nn.Parameter))
+        # requires_grad must follow the DTensor parameter.
+        self.assertTrue(local.requires_grad)
+        # Internal storage must not be mutated into a Parameter.
+        self.assertFalse(getattr(dtensor_param._local_tensor, "_is_param", False))
+
+        # Gradient must still propagate through the returned local Parameter
+        # back into the DTensor parameter (to_local is differentiable).
+        local.sum().backward()
+        self.assertIsNotNone(dtensor_param.grad)
+
+        with torch.no_grad():
+            local_no_grad = dtensor_param.to_local()
+        self.assertTrue(isinstance(local_no_grad, nn.Parameter))
+        self.assertFalse(getattr(dtensor_param._local_tensor, "_is_param", False))
+
+        # A plain DTensor (not a Parameter) must NOT become a Parameter.
+        plain = distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+        self.assertFalse(isinstance(plain.to_local(), nn.Parameter))
 
     @with_comms
     def test_to_local_grad_hint(self):
@@ -1467,6 +1502,36 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(result.size(), dtensor.size())
         self.assertEqual(result.stride(), dtensor.stride())
         self.assertEqual(result.to_local(), dtensor.to_local())
+
+    @with_comms
+    def test_as_strided_permutation(self):
+        # AOTAutograd regenerates an output aliasing an input with as_strided,
+        # so a compiled function returning a transposed view lands here.
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, 8, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        for dims in ((1, 0, 2), (2, 1, 0), (0, 2, 1)):
+            expected = dtensor.permute(dims)
+            result = dtensor.as_strided(
+                expected.size(), expected.stride(), expected.storage_offset()
+            )
+            self.assertEqual(result.placements, expected.placements)
+            self.assertEqual(result.full_tensor(), expected.full_tensor())
+
+    @with_comms
+    def test_as_strided_non_permutation_errors(self):
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        # Not reachable by permuting the base dims.
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 3), (6, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 6), (6, 1), 1)
 
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(

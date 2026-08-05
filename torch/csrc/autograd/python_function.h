@@ -10,6 +10,8 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 
+#include <c10/util/SmallVector.h>
+
 #include <c10/core/DeviceGuard.h>
 #include <optional>
 
@@ -24,10 +26,11 @@ namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+//
+// Ownership: THPFunction holds an owning intrusive_ptr<Node> (cdata).
+// PyNode points back to its THPFunction via pyobj_slot(), managed by the
+// kHasPyObject machinery (same pattern as TensorImpl ↔ THPVariable).
 struct PyNode : public Node {
-  PyNode(THPObjectPtr obj) : obj(obj.release()) {}
-
   PyObject* to_py_args(
       const variable_list& inputs,
       at::OptionalDeviceGuard* device_guard);
@@ -51,19 +54,9 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
-  // THPFunction this Function is wrapping.  Owning!
-  PyObject* obj;
-
-  // NOLINTNEXTLINE(bugprone-exception-escape)
-  ~PyNode() override {
-    // Can't use THPObjectPtr as a field in this class; destructor won't take
-    // out GIL!  When I forgot to do this by hand
-    // TestAutograd.test_inplace_view_python called me out about it.
-    // If python is already dead, leak the wrapped python objects
-    if (Py_IsInitialized()) {
-      pybind11::gil_scoped_acquire gil;
-      Py_DECREF(obj);
-    }
+  // Returns the THPFunction Python object for this node.
+  PyObject* pyobj() const noexcept {
+    return pyobj_slot()->load_pyobj();
   }
 };
 
@@ -77,6 +70,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
   PyObject* tuple = PyTuple_New(1);
   if (!tuple)
+    // NOLINTNEXTLINE(hicpp-exception-baseclass)
     throw python_error();
   PyTuple_SET_ITEM(tuple, 0, obj.release());
   obj = tuple;
@@ -90,6 +84,10 @@ struct THPFunction {
   PyObject_HEAD
 
   PyObject* needs_input_grad;
+  // Lazily stores the default ctx.needs_input_grad values until the Python
+  // tuple is first requested. needs_input_grad is authoritative once set,
+  // either by materialization or direct Python assignment.
+  std::optional<c10::SmallVector<bool, 24>> needs_input_grad_bits;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were
@@ -143,18 +141,11 @@ struct THPFunction {
   bool saved_tensors_accessed_and_cleared;
 
   PyObject* saved_for_forward;
-  // The actual PyNode (in the autograd graph) that this data was
-  // saved for.  This field may be NULL (because a user can construct
-  // a THPFunction directly from Python), but when this field is non-NULL,
-  // it is guaranteed that cdata.lock()->obj == this
-  //
-  // In most ordinary use, this field should always be non-NULL; e.g.,
-  // when we allocate a THPFunction because we are running Node.apply,
-  // after constructing a THPFunction, we immediately allocate a PyNode
-  // for it.  We can't enforce this directly in the constructor of
-  // THPFunction though, because there's no way to keep it live long enough
-  // to save an owning reference to PyNode into the grad_fn of a Variable.
-  std::weak_ptr<torch::autograd::PyNode> cdata;
+  // The C++ PyNode for this THPFunction. Ownership follows the same
+  // pattern as TensorImpl/THPVariable: THPFunction holds a strong
+  // intrusive_ptr, and PyNode points back via pyobj_slot() with
+  // kHasPyObject managing the cycle.
+  c10::intrusive_ptr<torch::autograd::Node> cdata;
 };
 
 bool THPFunction_initModule(PyObject* module);
