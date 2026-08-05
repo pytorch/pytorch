@@ -31,17 +31,17 @@ from ...utils import ceildiv, has_free_symbols
 from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     flex_gemm_local_reduce_config_error,
     flex_gemm_output_config_supported,
-    FlexGemmGroupedMainOutputTransform,
-    grouped_main_capture_supported,
-    grouped_main_output_config_supported,
+    FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
+    FlexGemmOutputContraction,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
+    output_contraction_capture_supported,
+    output_contraction_config_supported,
     statically_known_multiple,
     statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
@@ -284,7 +284,7 @@ def flex_gemm_config_keys(
     n: int,
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
-    main_transform: FlexGemmGroupedMainOutputTransform | None = None,
+    output_contraction: FlexGemmOutputContraction | None = None,
     explicit_config: dict[str, Any] | None = None,
     swap_ab_alignment: int = 1,
     local_reduce_output_layout: FlexGemmOutputStorageLayout | None = None,
@@ -296,17 +296,17 @@ def flex_gemm_config_keys(
     Every grouped geometry constrains the config the same way, whether it backs
     a runtime local-reduce plan or a plan-less grouped TensorSSA fragment
     reshape in the generated epilogue: swap_ab reorients the accumulator
-    fragment and non-divisible tiles split groups across fragments. Contracted
-    main stores additionally require tile_n not to oversubscribe physical N and
+    fragment and non-divisible tiles split groups across fragments. Output
+    contractions additionally require tile_n not to oversubscribe physical N and
     a single CTA along N until QuACK predicates those layouts correctly. Explicit
     config fields constrain the candidate set; untuned selection fills omitted
     fields from the normal default, while tuned selection benchmarks the matches.
     """
-    if main_transform is not None:
-        main_transform.validate_quack(torch.cuda.get_device_capability(device)[0])
+    if output_contraction is not None:
+        output_contraction.validate_quack(torch.cuda.get_device_capability(device)[0])
         if has_free_symbols((n,)):
             raise NotImplementedError(
-                "FlexGEMM grouped main outputs require statically known physical N"
+                "FlexGEMM output contractions require statically known physical N"
             )
 
     from torch._inductor.heuristics.template.flex_gemm import (
@@ -336,13 +336,13 @@ def flex_gemm_config_keys(
             "FlexGEMM QUACK swap_ab configs require output N "
             f"divisible by {swap_ab_alignment}"
         )
-    if main_transform is not None:
+    if output_contraction is not None:
         candidate_configs = tuple(
             config for config in candidate_configs if not config.swap_ab
         )
         if not candidate_configs:
             raise NotImplementedError(
-                "FlexGEMM grouped main outputs do not support swap_ab configs"
+                "FlexGEMM output contractions do not support swap_ab configs"
             )
     candidate_configs = tuple(
         config
@@ -372,7 +372,7 @@ def flex_gemm_config_keys(
             default_config,
             n,
             local_reduce_geometries,
-            main_transform,
+            output_contraction,
             local_reduce_output_layout,
             local_reduce_output_geometry,
             allow_local_reduce_swap_ab=allow_local_reduce_swap_ab,
@@ -380,17 +380,17 @@ def flex_gemm_config_keys(
             return (default_key,)
 
     configs = candidate_configs
-    if main_transform is not None:
+    if output_contraction is not None:
         configs = filter_gemm_configs(
             configs,
-            lambda config: grouped_main_output_config_supported(config, n),
+            lambda config: output_contraction_config_supported(config, n),
             explicit_config=explicit_config,
             explicit_error=(
                 "FlexGEMM explicit QUACK config constraints are incompatible with "
-                "grouped main output"
+                "the output contraction"
             ),
             inferred_error=(
-                "FlexGEMM grouped main output physical N is smaller than every "
+                "FlexGEMM output-contraction physical N is smaller than every "
                 "validated QuACK tile_n"
             ),
         )
@@ -561,8 +561,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         and gemm_op is not torch.ops.aten.mm.default
     ):
         error = (
-            FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR
-            if outputs.main_transform is not None
+            FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR
+            if outputs.output_contraction is not None
             else LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
         )
         raise NotImplementedError(error)
@@ -580,10 +580,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         *gemm_args[mat1_index].get_size()[:-1],
         gemm_args[mat2_index].get_size()[-1],
     ]
-    main_transform = outputs.main_transform
+    output_contraction = outputs.output_contraction
     if (
-        main_transform is not None
-        and main_transform.chunked
+        output_contraction is not None
+        and output_contraction.chunked
         and gemm_args[mat2_index].get_stride()[-1] == 1
     ):
         raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
@@ -592,8 +592,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     local_reduce_metas = flex_gemm_local_reduce_metas(local_reduce_store)
     output_stride = ir.convert_shape_to_inductor(output_meta.stride())
-    if main_transform is not None:
-        # Grouped-main uses TMA stores, whose outer strides must be 16-byte aligned.
+    if output_contraction is not None:
+        # Output contractions use TMA stores with 16-byte-aligned outer strides.
         output_alignment = max(16 // output_meta.dtype.itemsize, 1)
         output_stride[-2] = (
             ceildiv(logical_output_size[-1], output_alignment) * output_alignment
@@ -664,11 +664,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
         gemm_op, epilogue_input_nodes, physical_output_size
     )
-    if main_transform is not None and any(
-        not grouped_main_capture_supported(kind, arg.get_dtype() is torch.bool)
+    if output_contraction is not None and any(
+        not output_contraction_capture_supported(kind, arg.get_dtype() is torch.bool)
         for arg, kind in zip(epilogue_input_nodes, epilogue_arg_kinds, strict=True)
     ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR)
     log_flex_gemm_artifact(
         "lowering_plan",
         lambda: format_flex_gemm_lowering_plan(
@@ -715,7 +715,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         gemm_args[mat2_index].get_size()[-1],
         epilogue_analysis.required_geometries,
         tuned,
-        main_transform,
+        output_contraction,
         explicit_config,
         swap_ab_alignment=swap_ab_alignment,
         local_reduce_output_layout=local_reduce_layout,
@@ -761,7 +761,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 outputs=FlexGemmEpilogueOutputConfig(
                     aux_out_indices=aux_out_indices,
                     local_reduce=template_local_reduce,
-                    main_transform=main_transform,
+                    output_contraction=output_contraction,
                 ),
             ),
         )
