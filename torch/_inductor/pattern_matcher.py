@@ -2113,8 +2113,6 @@ def _serialize_pattern(
 
         file_template = textwrap.dedent(
             """\
-            # mypy: ignore-errors
-
             # noqa: F401, E501
             {msg}
             import torch
