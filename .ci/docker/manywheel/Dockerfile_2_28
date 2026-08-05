@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:experimental
-ARG BASE_CUDA_VERSION=11.8
+ARG BASE_CUDA_VERSION=12.6
 ARG GPU_IMAGE=amd64/almalinux:8
 FROM quay.io/pypa/manylinux_2_28_x86_64 as base
 
