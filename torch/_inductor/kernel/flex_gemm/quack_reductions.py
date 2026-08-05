@@ -12,10 +12,10 @@ normalization and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
 
 The main caller is ``materialize_flex_gemm_epilogue`` in ``fx_cutedsl_codegen.py``.
-FlexGEMM lowering first calls ``analyze_flex_gemm_epilogue``, which uses this
-module's layout and reduction-recognition helpers. Materialization then routes
-FX nodes through ``lower_view_or_reshape``, ``lower_prepare_softmax_online``,
-and ``lower_tensorssa_reduce`` to emit CuTeDSL source.
+Shared GEMM epilogue analysis recognizes grouped layouts and reductions;
+materialization wraps accepted geometries in ``GroupedTensorSSALayout`` and
+routes FX nodes through ``lower_view_or_reshape``,
+``lower_prepare_softmax_online``, and ``lower_tensorssa_reduce``.
 """
 
 import dataclasses
@@ -29,7 +29,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
-    LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
@@ -44,16 +43,11 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedSqueeze,
     NormalizedView,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
+from torch._inductor.kernel.gemm_epilogue_utils import normalize_shape
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import guard_int, has_guarding_hint
 from torch.utils._ordered_set import OrderedSet
-
-
-def normalize_shape(shape: Any) -> Any:
-    return tuple(shape) if isinstance(shape, (list, tuple, torch.Size)) else shape
 
 
 @dataclasses.dataclass(frozen=True)
@@ -93,143 +87,6 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
         if self.axis == 1:
             return "((None, 1, None), 1, 1)"
         return "((1, None, None), 1, 1)"
-
-
-def guarded_int(value: Any) -> int | None:
-    """Return an integer after guarding backed symbolic values."""
-    if isinstance(value, torch.fx.Node):
-        value = value.meta.get("val")
-    if isinstance(value, torch.SymInt):
-        if not has_guarding_hint(value):
-            return None
-        # TODO: Defer speculative guards if they become a meaningful source of
-        # recompilation.
-        return guard_int(value)
-    return value if isinstance(value, int) else None
-
-
-def _is_inferred_reshape_dim(value: Any) -> bool:
-    """Return whether a reshape dimension is the literal inferred-size marker."""
-    return isinstance(value, int) and value == -1
-
-
-def _guard_grouped_reshape_group(
-    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
-) -> tuple[Any, ...]:
-    """Specialize a backed group dimension used to recognize a grouped reshape."""
-    if len(shape) != 3:
-        return shape
-    for group_index, kept_index in ((-1, 0), (-2, -1)):
-        if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
-            continue
-        group_value = shape[group_index]
-        symbolic = (
-            group_value.meta.get("val")
-            if isinstance(group_value, torch.fx.Node)
-            else group_value
-        )
-        if not isinstance(symbolic, torch.SymInt):
-            continue
-        group = guarded_int(group_value)
-        if group is not None:
-            result = list(shape)
-            result[group_index] = group
-            return tuple(result)
-    return shape
-
-
-def _syntactic_grouped_tensor_layout(
-    shape: tuple[Any, ...],
-) -> GemmReductionGeometry | None:
-    """Match grouped-reshape syntax before validating source geometry."""
-    if len(shape) not in (3, 4):
-        return None
-    if (
-        isinstance(shape[-1], int)
-        and shape[-1] > 0
-        and _is_inferred_reshape_dim(shape[-2])
-    ):
-        return GemmReductionGeometry(group=shape[-1], axis=1)
-    if (
-        _is_inferred_reshape_dim(shape[-3])
-        and isinstance(shape[-2], int)
-        and shape[-2] > 0
-    ):
-        return GemmReductionGeometry(group=shape[-2], axis=0)
-    return None
-
-
-def _group_count_matches_selected_dim(
-    group_count: Any,
-    selected_size: Any,
-    group: int,
-    kept_size: Any,
-) -> bool:
-    """Match a group count, allowing -1 to infer the selected source dimension."""
-    if _is_inferred_reshape_dim(group_count):
-        return True
-    return statically_known_equal(group_count * group, selected_size) or (
-        not _is_inferred_reshape_dim(kept_size)
-        and statically_known_equal(group_count, selected_size // group)
-    )
-
-
-def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
-    return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
-        kept_size, source_size
-    )
-
-
-def _grouped_layout_matches_source_shape(
-    shape: tuple[Any, ...],
-    source_shape: tuple[Any, ...],
-    layout: GemmReductionGeometry,
-) -> bool:
-    """Require a 2-D GEMM output reshape to split exactly M or N."""
-    if len(shape) != 3:
-        return False
-
-    m, n = source_shape
-    match layout.axis, shape:
-        case 1, (kept_m, group_count, group) if group == layout.group:
-            return _kept_dim_matches_source(
-                kept_m, m
-            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
-        case 0, (group_count, group, kept_n) if group == layout.group:
-            return _kept_dim_matches_source(
-                kept_n, n
-            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
-        case _:
-            return False
-
-
-def grouped_tensor_layout(
-    shape: Any, source_shape: Any | None = None
-) -> GemmReductionGeometry | None:
-    """Recognize grouped M/N geometry, specializing backed group dimensions."""
-    shape = normalize_shape(shape)
-    if not isinstance(shape, tuple):
-        return None
-    if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
-        shape = normalize_shape(shape[0])
-    if source_shape is not None:
-        source_shape = normalize_shape(source_shape)
-        if isinstance(source_shape, tuple) and len(source_shape) == 2:
-            shape = _guard_grouped_reshape_group(shape, source_shape)
-            candidates = []
-            match shape:
-                case (*_, int(group)) if group > 0:
-                    candidates.append(GemmReductionGeometry(group=group, axis=1))
-            match shape:
-                case (*_, int(group), _) if group > 0:
-                    candidates.append(GemmReductionGeometry(group=group, axis=0))
-            for layout in candidates:
-                if _grouped_layout_matches_source_shape(shape, source_shape, layout):
-                    return layout
-            if _syntactic_grouped_tensor_layout(shape) is not None:
-                raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
-            return None
-    return _syntactic_grouped_tensor_layout(shape)
 
 
 def _cute_op_name(target: Any) -> str | None:
@@ -501,7 +358,7 @@ def lower_grouped_n_split(
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
 ) -> tuple[Any, ...] | None:
-    """Split an analyzed grouped-main value into per-lane TensorSSA values."""
+    """Split an analyzed output contraction into grouped TensorSSA values."""
     layout = grouped_tensors.get(node)
     if layout is None or layout.axis != 1:
         return None
@@ -525,7 +382,7 @@ def lower_grouped_n_select(
     env: dict[torch.fx.Node, Any],
     kernel: Any,
 ) -> Any:
-    """Select one analysis-validated grouped-N TensorSSA lane."""
+    """Select one analysis-validated output-contraction group value."""
     source = _cute_arg(normalized.source, env)
     return _generate_like(
         kernel,
