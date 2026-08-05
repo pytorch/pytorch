@@ -7,7 +7,6 @@ Per-type hook implementations (bool_impl, richcompare_impl, getattro_impl,
 etc.) live in their respective VT files.
 """
 
-import _thread
 import abc
 import collections
 import enum
@@ -137,19 +136,14 @@ def type_has_dict(obj_type: type) -> bool:
     the builtin scalar/container bases (int, str, tuple, ...) have neither.
     Both signals are read from the type via __flags__ / __dictoffset__.
 
-    _thread._local is the one type that reports neither yet still has an
-    instance dict: it keeps one dict per thread and passes it to generic
-    getattr from tp_getattro (PyObject_GenericGetAttrWithDict).
-
     Not memoized: caching by type object would hold locally-defined classes
     (and anything their methods close over) alive, leaking compiled models.
-    The computation is a few attribute reads and a bitwise op, so caching buys
+    The computation is two attribute reads and a bitwise op, so caching buys
     nothing.
     """
     return (
         bool(obj_type.__flags__ & _Py_TPFLAGS_MANAGED_DICT)
         or obj_type.__dictoffset__ != 0
-        or issubclass(obj_type, _thread._local)
     )
 
 
