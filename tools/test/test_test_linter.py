@@ -8,18 +8,19 @@ import unittest
 from pathlib import Path
 
 from tools.linter.adapters.test_linter import (
+    check_file,
+    DEVICE_SPECIFIC_CLASSIFICATIONS,
+    error_msg,
     HardwareClassification,
     LintMessage,
-    error_msg,
-    check_file,
 )
+
 
 HC = HardwareClassification
 
 
 def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
-
 
 
 class TestHwClassificationLinter(unittest.TestCase):
@@ -58,6 +59,28 @@ class TestHwClassificationLinter(unittest.TestCase):
             from torch.testing._internal.common_utils import TestCase
             class TestFoo(TestCase):
                 hw_classification = "GENERIC"
+                def test_x(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[hw_classification]",
+                path=msgs[0].path,
+                line=2,
+                description="Test class 'TestFoo' is missing or has an invalid "
+                "hw_classification. Valid declarations:\n"
+                "    hw_classification = HardwareClassification.<MEMBER>\n"
+                "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
+            ),
+        )
+
+    def test_annotation_without_value(self) -> None:
+        src = """\
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            class TestFoo(TestCase):
+                hw_classification: HardwareClassification
                 def test_x(self): pass
         """
         msgs = self._run(src)
@@ -168,7 +191,7 @@ class TestHwClassificationLinter(unittest.TestCase):
     # ==================================================================
 
     def test_valid_device_specific_classification(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_device_type import instantiate_device_type_tests
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
@@ -180,7 +203,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             self.assertEqual(self._run(src), [], f"failed for {cls}")
 
     def test_device_specific_missing_device(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_device_type import instantiate_device_type_tests
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
@@ -203,7 +226,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_classification_not_instantiated(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
                 class TestFoo(TestCase):
@@ -224,7 +247,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_not_instantiated_and_missing_device(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
                 class TestFoo(TestCase):
@@ -255,7 +278,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_missing_only_for(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_device_type import instantiate_device_type_tests
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
@@ -278,7 +301,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_wrong_only_for(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             wrong = "cpu" if cls.value.lower() != "cpu" else "cuda"
             src = f"""\
                 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -303,7 +326,7 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_uses_except_for(self) -> None:
-        for cls in (HC.CPU, HC.CUDA, HC.MPS, HC.XPU):
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             src = f"""\
                 from torch.testing._internal.common_device_type import instantiate_device_type_tests
                 from torch.testing._internal.common_utils import HardwareClassification, TestCase
