@@ -1141,6 +1141,7 @@ def _load_optim_state_dict(
 def get_model_state_dict(
     model: nn.Module,
     *,
+    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> dict[str, ValueType]:
     """
@@ -1150,6 +1151,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
+        submodules: removed, do not use.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1159,6 +1161,12 @@ def get_model_state_dict(
 
     :rtype: typing.Dict[str, ValueType]
     """
+    if submodules is not None:
+        raise ValueError(
+            "The `submodules` argument has been removed. "
+            "This feature can be achieved by manually filtering "
+            "the state_dict returned from get_state_dict."
+        )
     with _gc_context():
         info = _verify_options(
             model,
@@ -1175,6 +1183,7 @@ def get_optimizer_state_dict(
     model: nn.Module,
     optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
+    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> OptimizerStateType:
     """
@@ -1186,6 +1195,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
+        submodules: removed, do not use.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1195,6 +1205,12 @@ def get_optimizer_state_dict(
 
     :rtype: OptimizerStateType
     """
+    if submodules is not None:
+        raise ValueError(
+            "The `submodules` argument has been removed. "
+            "This feature can be achieved by manually filtering "
+            "the state_dict returned from get_state_dict."
+        )
     with _gc_context():
         optimizers = (
             (optimizers,)
@@ -1216,6 +1232,7 @@ def get_state_dict(
     model: nn.Module,
     optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
+    submodules: set[nn.Module] | None = None,
     options: StateDictOptions | None = None,
 ) -> tuple[dict[str, ValueType], OptimizerStateType]:
     """
@@ -1271,6 +1288,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
+        submodules: removed, do not use.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1280,6 +1298,12 @@ def get_state_dict(
 
     :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
+    if submodules is not None:
+        raise ValueError(
+            "The `submodules` argument has been removed. "
+            "This feature can be achieved by manually filtering "
+            "the state_dict returned from get_state_dict."
+        )
 
     with _gc_context():
         optimizers = (
