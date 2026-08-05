@@ -65,14 +65,6 @@ class NcclApi {
       int rank,
       ncclConfig_t* config) = 0;
 
-  [[nodiscard]] virtual ncclResult_t commInitRankScalable(
-      ncclComm_t* comm,
-      int nranks,
-      int rank,
-      int nId,
-      ncclUniqueId* commIds,
-      ncclConfig_t* config) = 0;
-
   [[nodiscard]] virtual ncclResult_t commDestroy(ncclComm_t comm) = 0;
 
   [[nodiscard]] virtual ncclResult_t commAbort(ncclComm_t comm) = 0;
@@ -205,9 +197,11 @@ class NcclApi {
   [[nodiscard]] virtual ncclResult_t groupEnd() = 0;
 
   [[nodiscard]] virtual ncclResult_t commUserRank(
-      ncclComm_t comm,
+      const ncclComm_t comm,
       int* userRank) = 0;
-  [[nodiscard]] virtual ncclResult_t commCount(ncclComm_t comm, int* count) = 0;
+  [[nodiscard]] virtual ncclResult_t commCount(
+      const ncclComm_t comm,
+      int* count) = 0;
 
   [[nodiscard]] virtual ncclResult_t redOpCreatePreMulSum(
       ncclRedOp_t* op,
@@ -304,14 +298,6 @@ class DefaultNcclApi : public NcclApi {
       int nranks,
       ncclUniqueId commId,
       int rank,
-      ncclConfig_t* config) override;
-
-  [[nodiscard]] ncclResult_t commInitRankScalable(
-      ncclComm_t* comm,
-      int nranks,
-      int rank,
-      int nId,
-      ncclUniqueId* commIds,
       ncclConfig_t* config) override;
 
   [[nodiscard]] ncclResult_t commDestroy(ncclComm_t comm) override;
@@ -450,9 +436,10 @@ class DefaultNcclApi : public NcclApi {
   [[nodiscard]] ncclResult_t groupStart() override;
   [[nodiscard]] ncclResult_t groupEnd() override;
 
-  [[nodiscard]] ncclResult_t commUserRank(ncclComm_t comm, int* userRank)
+  [[nodiscard]] ncclResult_t commUserRank(const ncclComm_t comm, int* userRank)
       override;
-  [[nodiscard]] ncclResult_t commCount(ncclComm_t comm, int* count) override;
+  [[nodiscard]] ncclResult_t commCount(const ncclComm_t comm, int* count)
+      override;
 
   [[nodiscard]] ncclResult_t redOpCreatePreMulSum(
       ncclRedOp_t* op,

@@ -6,9 +6,7 @@
 
 #include <memory>
 #include <string>
-#include <string_view>
 #include <unordered_map>
-#include <vector>
 
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
@@ -17,22 +15,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
 namespace c10d::nccl2 {
-
-namespace detail {
-
-inline int getRootIndex(int rank, int numRanks, int numRoots) {
-  const int remainder = numRanks % numRoots;
-  const int ranksPerRoot = numRanks / numRoots;
-  const int largerRootsLimit = remainder * (ranksPerRoot + 1);
-  if (rank < largerRootsLimit) {
-    return rank % (ranksPerRoot + 1) ? -1 : rank / (ranksPerRoot + 1);
-  }
-  return (rank - largerRootsLimit) % ranksPerRoot
-      ? -1
-      : ((rank - largerRootsLimit) / ranksPerRoot) + remainder;
-}
-
-} // namespace detail
 
 class NCCLBootstrap {
  public:
@@ -67,9 +49,6 @@ class NCCLBootstrap {
 
  private:
   ncclUniqueId exchangeUniqueId(std::string_view name);
-  std::vector<ncclUniqueId> exchangeUniqueIds(
-      std::string_view name,
-      int numIds);
 
  private:
   const std::chrono::milliseconds timeout_;
