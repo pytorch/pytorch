@@ -224,6 +224,55 @@ class TestCudagraphFqnAnnotations(TestCase):
             f"missing full-path FQNs for layers {missing}; saw {sorted(set(all_strs))}",
         )
 
+    def test_each_layer_has_fused_triton_and_extern_annotation(self):
+        """Every block must have BOTH a fused-Triton annotation and an extern-mm
+        annotation, each carrying the 'L.' prefix.
+
+        This catches two bugs introduced together during code review:
+
+        1. Extern kernels (cuBLAS mm from nn.Linear) were annotated without
+           the 'L.' anchor prefix, making them inconsistent with Triton kernels.
+
+        2. The last block's fused Triton kernel was silently unannotated.
+           The inductor scheduler codegen'd the last block's extern mm before
+           its Triton fused kernel; at that point the extern FQN was present in
+           fx_extern_fqns, which caused get_fused_kernel_module_fqn to return
+           None for the Triton kernel, suppressing its AnnotatedKernelCallLine.
+
+        OuterModel produces both kernel types per block: nn.Linear -> cuBLAS mm
+        (extern) and silu(h)*h+x -> fused Triton pointwise. The fused Triton
+        annotation is a multi-op '+'-joined string; the extern mm is a single op.
+        """
+        num_layers = 4
+        model = OuterModel(dim=64, num_layers=num_layers).cuda()
+        x = torch.randn(1, 64, device="cuda")
+
+        self._run_inductor_cg(model, x, annotate=True)
+
+        annotations = dict(get_kernel_annotations())
+        self.assertTrue(annotations, "expected non-empty kernel annotations")
+        all_strs = _all_fqn_strings(annotations)
+
+        missing_prefix = [s for s in all_strs if not s.startswith("L.")]
+        self.assertEqual(
+            missing_prefix,
+            [],
+            f"FQNs missing 'L.' prefix (likely extern kernels): {missing_prefix}",
+        )
+
+        for i in range(num_layers):
+            layer_strs = [s for s in all_strs if f"L.model.layers.{i}." in s]
+            fused = [s for s in layer_strs if " + " in s]
+            extern = [s for s in layer_strs if " + " not in s]
+            self.assertTrue(
+                fused,
+                f"layer {i} has no fused-Triton annotation; saw: {layer_strs}",
+            )
+            self.assertTrue(
+                extern,
+                f"layer {i} has no extern-mm annotation; saw: {layer_strs}",
+            )
+
     def test_annotations_disabled_when_flag_off(self):
         model = OuterModel(dim=64, num_layers=4).cuda()
         x = torch.randn(1, 64, device="cuda")
