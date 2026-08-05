@@ -23,11 +23,12 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
+from ..codegen.flydsl.flydsl_utils import fits_int32_buffer_span
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, is_triton, is_unaligned, Layout, PermuteView
+from ..ir import Buffer, ChoiceCaller, is_triton, is_unaligned, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -253,10 +254,7 @@ def get_flydsl_mm_template_kwargs(
 
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
-    # Vectorized loads require GPU-aligned addresses. The vector's contiguous
-    # coordinate is aligned by kernel construction, so require both tensor
-    # origins and every row-to-row increment to preserve GPU alignment.
-    # Unknown symbolic divisibility is rejected instead of guarded.
+    # Require vectorized tensor origins and row increments to stay GPU-aligned.
     itemsize = dtype.itemsize
     aligned_byte_expressions = (
         mat1.get_layout().offset * itemsize,
@@ -285,19 +283,30 @@ def get_flydsl_mm_template_kwargs(
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
-    # The FlyDSL GEMM template consumes the RHS as row-major [N, K].  The
-    # aten.mm lowering sees B.T as a [K, N] view, so template generation creates
-    # an [N, K] view over the same storage while preserving its offset. FlyDSL
-    # reads dimensions and row strides from the runtime tensor layout, so the
-    # JIT cache key remains tile-config based.
+    tensor_spans = (
+        (m_static, mat1_stride[0], k_static),
+        (n_static, mat2_stride[1], k_static),
+        (m_static, out_stride[0], n_static),
+    )
+    if any(
+        not fits_int32_buffer_span(
+            rows,
+            PythonWrapperCodegen.statically_known_int_or_none(stride),
+            cols,
+            itemsize,
+        )
+        for rows, stride, cols in tensor_spans
+    ):
+        return []
+
+    # The wrapper transposes aten.mm's [K, N] RHS view to FlyDSL's [N, K].
     gemm_dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
-    # Config generation validates tile construction without a concrete shape.
-    # Filter shape-incompatible choices before they reach autotuning.
+    # Filter shape-incompatible configs before autotuning.
     return [
         {
             **gemm_config,
             "GEMM_DTYPE_ID": gemm_dtype_id,
-            "MAT2_IS_NK": True,
+            "MAT2_IS_NK": False,
             "GEMM_M": m_static,
             "GEMM_N": n_static,
             "GEMM_K": k_static,
@@ -597,7 +606,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         )
         if flydsl_configs:
             flydsl_input_nodes = list(kernel_inputs.nodes())
-            flydsl_input_nodes[1] = PermuteView.create(flydsl_input_nodes[1], [1, 0])
             for flydsl_kwargs in flydsl_configs:
                 flydsl_mm_template.maybe_append_choice(
                     choices,

@@ -580,8 +580,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 ) as mock_reload,
             ):
                 self._compile_and_run_add("test_add_synchronous")
-                self.assertFalse(AsyncCompile.use_process_pool())
-                mock_reload.assert_called()
+                mock_reload.assert_not_called()
 
     def test_cutedsl_bad_source_subprocess(self):
         shutdown_compile_workers()

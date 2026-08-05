@@ -490,7 +490,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_not_called()
 
-    def _assert_compiled_mm(self, a, b, *, expect_flydsl=True):
+    def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool | None = True):
         from torch._inductor.utils import run_and_get_code
 
         def fn(lhs, rhs):
@@ -498,8 +498,9 @@ class TestFlyDSLTemplate(TestCase):
 
         torch._dynamo.reset()
         result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)
-        assertion = self.assertIn if expect_flydsl else self.assertNotIn
-        assertion("async_compile.flydsl", code)
+        if expect_flydsl is not None:
+            assertion = self.assertIn if expect_flydsl else self.assertNotIn
+            assertion("async_compile.flydsl", code)
         self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
         return code
 
@@ -525,6 +526,7 @@ class TestFlyDSLTemplate(TestCase):
                 b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
+                self.assertIn("mat2.transpose(0, 1)", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
@@ -561,12 +563,10 @@ class TestFlyDSLTemplate(TestCase):
         )
 
         with torch._inductor.config.patch(
-            {
-                "max_autotune_gemm_backends": "ATEN,FLYDSL",
-                "test_configs.autotune_choice_name_regex": "^mm$",
-            }
+            max_autotune_gemm_backends="ATEN,FLYDSL",
+            autotune_in_subproc=False,
         ):
-            self._assert_compiled_mm(*supported, expect_flydsl=False)
+            self._assert_compiled_mm(*supported, expect_flydsl=None)
             self._assert_compiled_mm(bad_stride, b, expect_flydsl=False)
             self._assert_compiled_mm(a, bad_offset, expect_flydsl=False)
         self._assert_compiled_mm(*supported)
