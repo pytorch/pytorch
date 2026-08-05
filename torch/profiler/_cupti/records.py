@@ -26,7 +26,9 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 from torch.profiler._cupti._cupti_stubs import (
     Api,
     CudaEvent,
+    Environment,
     ExternalCorrelation,
+    GraphHostNode,
     Kernel,
     Memcpy,
     Memcpy2,
@@ -46,7 +48,9 @@ __all__ = [
     "Field",
     "Api",
     "CudaEvent",
+    "Environment",
     "ExternalCorrelation",
+    "GraphHostNode",
     "Kernel",
     "Memcpy",
     "Memcpy2",
@@ -80,12 +84,14 @@ _CATALOGS: dict[int, type] = {
     ActivityKind.MEMCPY: Memcpy,
     ActivityKind.MEMCPY2: Memcpy2,
     ActivityKind.MEMSET: Memset,
+    ActivityKind.GRAPH_HOST_NODE: GraphHostNode,
     ActivityKind.RUNTIME: Api,
     ActivityKind.DRIVER: Api,
     ActivityKind.EXTERNAL_CORRELATION: ExternalCorrelation,
     ActivityKind.OVERHEAD: Overhead,
     ActivityKind.CUDA_EVENT: CudaEvent,
     ActivityKind.SYNCHRONIZATION: Synchronization,
+    ActivityKind.ENVIRONMENT: Environment,
 }
 
 # kind -> the fields the v2 monitor selects: all decodable fields of the generated catalog

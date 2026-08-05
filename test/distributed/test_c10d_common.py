@@ -33,6 +33,7 @@ from torch import nn
 from torch._C._distributed_c10d import Backend as C10DBackend
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
@@ -84,6 +85,26 @@ def tearDownModule():
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+class MultiProcContinuousSkipTest(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "gloo"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cpu"
+
+    def test_1_worker_skip(self) -> None:
+        self.skipTest("skip from worker")
+
+    def test_2_worker_continues_after_skip(self) -> None:
+        tensor = torch.tensor(self.rank + 1)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, 3)
 
 
 def gpus_for_rank(world_size):
