@@ -128,11 +128,6 @@ std::ostream& _str(std::ostream& ss, const std::wstring& wString) {
 
 } // namespace detail
 
-std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ':' << loc.line;
-  return out;
-}
-
 size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   if (from.empty()) {
     return 0;

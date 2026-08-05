@@ -10,7 +10,9 @@
 
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <variant>
@@ -22,6 +24,61 @@
 
 namespace c10 {
 
+namespace detail {
+
+/// Backtrace capture for c10::Error, empty by default so that Error stays
+/// header-only; libc10 installs a symbolizing fetcher on load (Logging.cpp).
+/// Without one an Error still carries its message, just no C++ stack.
+///
+/// C10_HEADERONLY_EXPORT is load-bearing: `fetcher` is shared mutable state,
+/// and under -fvisibility-inlines-hidden each DSO would get its own copy,
+/// making libc10's fetcher invisible elsewhere and silently dropping
+/// backtraces. Windows has that gap regardless of annotation; see Logging.cpp.
+C10_HEADERONLY_EXPORT inline std::function<::c10::Backtrace()>&
+getBacktraceFetcher() {
+  static std::function<::c10::Backtrace()> fetcher;
+  return fetcher;
+}
+
+/// Prefixes the backtrace with "Exception raised from <location>". Lazy, so
+/// symbolization only happens if what() is actually called.
+class PyTorchStyleBacktrace : public OptimisticLazyValue<std::string> {
+ public:
+  PyTorchStyleBacktrace(
+      SourceLocation source_location,
+      ::c10::Backtrace backtrace)
+      : backtrace_(std::move(backtrace)), source_location_(source_location) {}
+
+ private:
+  std::string compute() const override {
+    return str(
+        "Exception raised from ",
+        source_location_,
+        " (most recent call first):\n",
+        backtrace_->get());
+  }
+
+  ::c10::Backtrace backtrace_;
+  SourceLocation source_location_;
+};
+
+/// Captures a backtrace for `source_location`, or nullptr when no fetcher has
+/// been installed.
+inline ::c10::Backtrace makeBacktrace(SourceLocation source_location) {
+  const auto& fetcher = getBacktraceFetcher();
+  if (!fetcher) {
+    return nullptr;
+  }
+  ::c10::Backtrace backtrace = fetcher();
+  if (!backtrace) {
+    return nullptr;
+  }
+  return std::make_shared<PyTorchStyleBacktrace>(
+      source_location, std::move(backtrace));
+}
+
+} // namespace detail
+
 /// The primary ATen error class.
 /// Provides a complete error message with source location information via
 /// `what()`, and a more concise message via `what_without_backtrace()`.
@@ -29,7 +86,14 @@ namespace c10 {
 ///
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
-class C10_API Error : public std::exception {
+///
+/// Keep this header-only: TORCH_CHECK throws it, so any c10 header using
+/// TORCH_CHECK would otherwise force its consumers to link libc10.
+///
+/// Hence C10_HEADERONLY_EXPORT rather than C10_API, which is dllimport for
+/// consumers and would reintroduce that dependency on Windows. It still gives
+/// the type a single vtable/typeinfo, so it crosses DSO boundaries.
+class C10_HEADERONLY_EXPORT Error : public std::exception {
  private:
   // The actual error message.
   std::string msg_;
@@ -60,12 +124,24 @@ class C10_API Error : public std::exception {
   const void* caller_;
 
  public:
-  // PyTorch-style Error constructor.  NB: the implementation of this
-  // is actually in Logging.cpp
-  Error(SourceLocation source_location, std::string msg);
+  // Base constructor
+  /* implicit */ Error(
+      std::string msg,
+      Backtrace backtrace = nullptr,
+      const void* caller = nullptr)
+      : msg_(std::move(msg)),
+        backtrace_(std::move(backtrace)),
+        caller_(caller) {
+    refresh_what();
+  }
 
-  // Caffe2-style error message
-  Error(
+  // PyTorch-style Error constructor.
+  Error(SourceLocation source_location, std::string msg)
+      : Error(std::move(msg), detail::makeBacktrace(source_location)) {}
+
+  // Caffe2-style error message. Out-of-line: the only constructor needing
+  // detail::StripBasename(), and only CAFFE_ENFORCE uses it.
+  C10_API Error(
       const char* file,
       const uint32_t line,
       const char* condition,
@@ -73,17 +149,20 @@ class C10_API Error : public std::exception {
       Backtrace backtrace,
       const void* caller = nullptr);
 
-  // Base constructor
-  Error(
-      std::string msg,
-      Backtrace backtrace = nullptr,
-      const void* caller = nullptr);
-
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.
   // WARNING: This method is O(n) in the size of the stack, so don't go
   // wild adding a ridiculous amount of context to error messages.
-  void add_context(std::string msg);
+  void add_context(std::string new_msg) {
+    context_.push_back(std::move(new_msg));
+    // TODO: Calling add_context O(n) times has O(n^2) cost.  We can fix
+    // this perf problem by populating the fields lazily... if this ever
+    // actually is a problem.
+    // NB: If you do fix this, make sure you do it in a thread safe way!
+    // what() is almost certainly expected to be thread safe even when
+    // accessed across multiple threads
+    refresh_what();
+  }
 
   const std::string& msg() const {
     return msg_;
@@ -93,12 +172,25 @@ class C10_API Error : public std::exception {
     return context_;
   }
 
-  const Backtrace& backtrace() const;
+  const Backtrace& backtrace() const {
+    return backtrace_;
+  }
 
   /// Returns the complete error message, including the source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what() const noexcept override;
+  const char* what() const noexcept override {
+    return what_
+        .ensure([this] {
+          try {
+            return compute_what(/*include_backtrace*/ true);
+          } catch (...) {
+            // what() is noexcept, we need to return something here.
+            return std::string{"<Error computing Error::what()>"};
+          }
+        })
+        .c_str();
+  }
 
   const void* caller() const noexcept {
     return caller_;
@@ -112,8 +204,36 @@ class C10_API Error : public std::exception {
   }
 
  private:
-  void refresh_what();
-  std::string compute_what(bool include_backtrace) const;
+  void refresh_what() {
+    // Do not compute what_ eagerly, as it would trigger the computation of the
+    // backtrace. Instead, invalidate it, it will be computed on first access.
+    // refresh_what() is only called by non-const public methods which are not
+    // supposed to be called concurrently with any other method, so it is safe
+    // to invalidate here.
+    what_.reset();
+    what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
+  }
+
+  std::string compute_what(bool include_backtrace) const {
+    std::ostringstream oss;
+
+    oss << msg_;
+
+    if (context_.size() == 1) {
+      // Fold error and context in one line
+      oss << " (" << context_[0] << ')';
+    } else {
+      for (const auto& c : context_) {
+        oss << "\n  " << c;
+      }
+    }
+
+    if (include_backtrace && backtrace_) {
+      oss << '\n' << backtrace_->get();
+    }
+
+    return std::move(oss).str();
+  }
 };
 
 class C10_API Warning {
@@ -237,10 +357,9 @@ struct C10_API WarnAlways {
 
 // Like Error, but we always report the C++ backtrace, instead of only
 // reporting when TORCH_SHOW_CPP_STACKTRACES
-class C10_API ErrorAlwaysShowCppStacktrace : public Error {
+class C10_HEADERONLY_EXPORT ErrorAlwaysShowCppStacktrace : public Error {
  public:
   using Error::Error;
-  ErrorAlwaysShowCppStacktrace(SourceLocation source_location, std::string msg);
   const char* what_without_backtrace() const noexcept override {
     return what();
   }
@@ -249,86 +368,76 @@ class C10_API ErrorAlwaysShowCppStacktrace : public Error {
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
 // IndexError when they cross to Python.
-class C10_API IndexError : public Error {
+class C10_HEADERONLY_EXPORT IndexError : public Error {
  public:
   using Error::Error;
-  IndexError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid values.  These turn into
 // ValueError when they cross to Python.
-class C10_API ValueError : public Error {
+class C10_HEADERONLY_EXPORT ValueError : public Error {
  public:
   using Error::Error;
-  ValueError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid types.  These turn into
 // TypeError when they cross to Python.
-class C10_API TypeError : public Error {
+class C10_HEADERONLY_EXPORT TypeError : public Error {
  public:
   using Error::Error;
-  TypeError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
-class C10_API NotImplementedError : public Error {
+class C10_HEADERONLY_EXPORT NotImplementedError : public Error {
  public:
   using Error::Error;
-  NotImplementedError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
 // an unsupported device.  These turn into BufferError when they cross to
 // Python.
-class C10_API BufferError : public Error {
+class C10_HEADERONLY_EXPORT BufferError : public Error {
  public:
   using Error::Error;
-  BufferError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
-class C10_API EnforceFiniteError : public Error {
+class C10_HEADERONLY_EXPORT EnforceFiniteError : public Error {
  public:
   using Error::Error;
-  EnforceFiniteError(SourceLocation source_location, std::string msg);
 };
 
 // Used in Onnxifi backend lowering.  These turn into
 // ExitException when they cross to Python.
-class C10_API OnnxfiBackendSystemError : public Error {
+class C10_HEADERONLY_EXPORT OnnxfiBackendSystemError : public Error {
  public:
   using Error::Error;
-  OnnxfiBackendSystemError(SourceLocation source_location, std::string msg);
 };
 
 // Used for numerical errors from the linalg module. These
 // turn into LinAlgError when they cross into Python.
-class C10_API LinAlgError : public Error {
+class C10_HEADERONLY_EXPORT LinAlgError : public Error {
  public:
   using Error::Error;
-  LinAlgError(SourceLocation source_location, std::string msg);
 };
 
-class C10_API OutOfMemoryError : public Error {
+class C10_HEADERONLY_EXPORT OutOfMemoryError : public Error {
  public:
   using Error::Error;
-  OutOfMemoryError(SourceLocation source_location, std::string msg);
 };
 
 // Used for handling syntactic errors in input arguments.
 // These turn into SyntaxError when the cross into Python.
-class C10_API SyntaxError : public Error {
+class C10_HEADERONLY_EXPORT SyntaxError : public Error {
  public:
   using Error::Error;
-  SyntaxError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when accelerator API call hits an error.
 // These turn into AcceleratorError when the cross into Python
-class C10_API AcceleratorError : public Error {
+class C10_HEADERONLY_EXPORT AcceleratorError : public Error {
   int32_t error_code;
 
  public:
@@ -341,42 +450,37 @@ class C10_API AcceleratorError : public Error {
 
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
-class C10_API DistError : public Error {
+class C10_HEADERONLY_EXPORT DistError : public Error {
  public:
   using Error::Error;
-  DistError(SourceLocation source_location, std::string msg);
 };
 
 // Used for collective communication library errors from the distributed module.
 // These turn into DistBackendError when they cross into Python.
-class C10_API DistBackendError : public DistError {
+class C10_HEADERONLY_EXPORT DistBackendError : public DistError {
  public:
   using DistError::DistError;
-  DistBackendError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the store.
 // These turn into DistStoreError when they cross into Python.
-class C10_API DistStoreError : public DistError {
+class C10_HEADERONLY_EXPORT DistStoreError : public DistError {
  public:
   using DistError::DistError;
-  DistStoreError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the TCP/IP stack and not from collective
 // libraries. These turn into DistNetworkError when they cross into Python.
-class C10_API DistNetworkError : public DistError {
+class C10_HEADERONLY_EXPORT DistNetworkError : public DistError {
  public:
   using DistError::DistError;
-  DistNetworkError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when a queue is empty and a non-blocking pop is called.
 // Translated to torch.distributed.QueueEmptyError in Python
-class C10_API DistQueueEmptyError : public DistStoreError {
+class C10_HEADERONLY_EXPORT DistQueueEmptyError : public DistStoreError {
  public:
   using DistStoreError::DistStoreError;
-  DistQueueEmptyError(SourceLocation source_location, std::string msg);
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -536,29 +640,40 @@ inline C10_API const char* torchCheckMsgImpl(
 
 namespace c10::detail {
 
-[[noreturn]] C10_API void torchCheckFail(
+// Inline so TORCH_CHECK needs no libc10 at link time; C10_NOINLINE keeps the
+// cold throw path out of the caller, which matters given how many TORCH_CHECK
+// sites ATen has.
+[[noreturn]] C10_NOINLINE inline void torchCheckFail(
     const char* func,
     const char* file,
     uint32_t line,
-    const std::string& msg);
-[[noreturn]] C10_API void torchCheckFail(
+    const std::string& msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  throw ::c10::Error({func, file, line}, msg);
+}
+[[noreturn]] C10_NOINLINE inline void torchCheckFail(
     const char* func,
     const char* file,
     uint32_t line,
-    const char* msg);
+    const char* msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  throw ::c10::Error({func, file, line}, msg);
+}
 
 // The c10::str() call that creates userMsg can have 1 of 3 return
 // types depending on the number and types of arguments passed to
 // TORCH_INTERNAL_ASSERT.  0 arguments will get a
 // CompileTimeEmptyString, 1 const char * will be passed straight
 // through, and anything else will get converted to std::string.
-[[noreturn]] C10_API void torchInternalAssertFail(
+[[noreturn]] C10_NOINLINE inline void torchInternalAssertFail(
     const char* func,
     const char* file,
     uint32_t line,
     const char* condMsg,
-    const char* userMsg);
-[[noreturn]] inline C10_API void torchInternalAssertFail(
+    const char* userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+[[noreturn]] inline void torchInternalAssertFail(
     const char* func,
     const char* file,
     uint32_t line,
@@ -566,12 +681,16 @@ namespace c10::detail {
     ::c10::detail::CompileTimeEmptyString /*userMsg*/) {
   torchCheckFail(func, file, line, condMsg);
 }
-[[noreturn]] C10_API void torchInternalAssertFail(
+// This should never be called. It is provided in case of compilers
+// that don't do any dead code stripping in debug builds.
+[[noreturn]] C10_NOINLINE inline void torchInternalAssertFail(
     const char* func,
     const char* file,
     uint32_t line,
     const char* condMsg,
-    const std::string& userMsg);
+    const std::string& userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
 
 } // namespace c10::detail
 

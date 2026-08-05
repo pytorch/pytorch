@@ -171,7 +171,14 @@ struct C10_API SourceLocation {
   }
 };
 
-std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
+// Inline so the header-only c10::Error can format a SourceLocation without
+// linking libc10.
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const SourceLocation& loc) {
+  out << loc.function << " at " << loc.file << ':' << loc.line;
+  return out;
+}
 
 // unix isprint but insensitive to locale
 [[nodiscard]] inline bool isPrint(char s) {

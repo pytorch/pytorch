@@ -26,12 +26,32 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
+
+// getBacktraceFetcher() defaults to empty so c10::Error stays header-only.
+// Symbolization needs get_lazy_backtrace() from libc10, so install it here:
+// anything linking libc10 gets symbolized backtraces. Callers that install
+// their own (torch's Python-aware one) run later and still win.
+//
+// On Windows an inline function's static local is per-module regardless of
+// annotation, so this only reaches libc10's own c10::Error uses. Other modules
+// see an empty fetcher and get no backtrace at all -- Error::compute_what()
+// skips the section when the pointer is null. That is a regression there
+// against the out-of-line GetFetchStackTrace() this replaced. ELF shares one
+// instance, so no such gap.
+struct InstallDefaultStackTraceFetcher {
+  InstallDefaultStackTraceFetcher() {
+    ::c10::detail::getBacktraceFetcher() = []() {
+      return get_lazy_backtrace(/*frames_to_skip=*/1);
+    };
+  }
+};
+
+const InstallDefaultStackTraceFetcher g_install_default_stack_trace_fetcher;
+
 std::function<::c10::Backtrace()>& GetFetchStackTrace() {
-  static std::function<::c10::Backtrace()> func = []() {
-    return get_lazy_backtrace(/*frames_to_skip=*/1);
-  };
-  return func;
+  return ::c10::detail::getBacktraceFetcher();
 }
+
 } // namespace
 
 void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
@@ -84,93 +104,6 @@ void ThrowEnforceFiniteNotMet(
     const void* caller) {
   ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
 }
-
-namespace {
-
-class PyTorchStyleBacktrace : public OptimisticLazyValue<std::string> {
- public:
-  PyTorchStyleBacktrace(SourceLocation source_location)
-      : backtrace_(GetFetchStackTrace()()), source_location_(source_location) {}
-
- private:
-  std::string compute() const override {
-    return str(
-        "Exception raised from ",
-        source_location_,
-        " (most recent call first):\n",
-        backtrace_->get());
-  }
-
-  ::c10::Backtrace backtrace_;
-  SourceLocation source_location_;
-};
-
-} // namespace
-
-// PyTorch-style error message
-// (This must be defined here for access to GetFetchStackTrace)
-Error::Error(SourceLocation source_location, std::string msg)
-    : Error(
-          std::move(msg),
-          std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
-
-// Explicit constructor definitions for Error subclasses. Required because
-// clang-cl does not emit dllexport symbols for constructors inherited via
-// `using Base::Base;` (llvm/llvm-project#162640), which causes LNK2019 in
-// any DLL that links against c10 from outside (torch_hip.dll, inline C++
-// extensions, etc.). Each definition just delegates to the base class
-// constructor so behavior is unchanged.
-ErrorAlwaysShowCppStacktrace::ErrorAlwaysShowCppStacktrace(
-    SourceLocation loc,
-    std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-IndexError::IndexError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-ValueError::ValueError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-TypeError::TypeError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-NotImplementedError::NotImplementedError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-BufferError::BufferError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-EnforceFiniteError::EnforceFiniteError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-OnnxfiBackendSystemError::OnnxfiBackendSystemError(
-    SourceLocation loc,
-    std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-LinAlgError::LinAlgError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-OutOfMemoryError::OutOfMemoryError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-SyntaxError::SyntaxError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-DistError::DistError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-DistBackendError::DistBackendError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistStoreError::DistStoreError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistNetworkError::DistNetworkError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistQueueEmptyError::DistQueueEmptyError(SourceLocation loc, std::string msg)
-    : DistStoreError(loc, std::move(msg)) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(

@@ -93,6 +93,21 @@
 #define C10_API C10_IMPORT
 #endif
 
+// For header-only entities that must still resolve to a single instance
+// across DSO boundaries: an exception type thrown in one shared library and
+// caught in another (one vtable/typeinfo), or an inline function whose static
+// local is shared state (one copy, despite -fvisibility-inlines-hidden).
+// Same mechanism as FOLLY_EXPORT, spelled here so c10 need not depend on
+// folly.
+//
+// Unlike C10_API this never becomes dllimport/dllexport, so the entity stays
+// usable without linking libc10.
+#if defined(_WIN32) || !defined(__GNUC__)
+#define C10_HEADERONLY_EXPORT
+#else
+#define C10_HEADERONLY_EXPORT __attribute__((__visibility__("default")))
+#endif
+
 // This one is being used by libtorch.so
 #ifdef CAFFE2_BUILD_MAIN_LIB
 #define TORCH_API C10_EXPORT

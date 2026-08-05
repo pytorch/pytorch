@@ -23,16 +23,8 @@ bool IsGoogleLoggingInitialized();
 
 namespace c10 {
 
-Error::Error(std::string msg, Backtrace backtrace, const void* caller)
-    : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
-  refresh_what();
-}
-
-// PyTorch-style error message
-// Error::Error(SourceLocation source_location, const std::string& msg)
-// NB: This is defined in Logging.cpp for access to GetFetchStackTrace
-
-// Caffe2-style error message
+// Caffe2-style error message. The only out-of-line Error constructor: it is
+// the one that needs detail::StripBasename().
 Error::Error(
     const char* file,
     const uint32_t line,
@@ -51,107 +43,6 @@ Error::Error(
               msg),
           std::move(backtrace),
           caller) {}
-
-std::string Error::compute_what(bool include_backtrace) const {
-  std::ostringstream oss;
-
-  oss << msg_;
-
-  if (context_.size() == 1) {
-    // Fold error and context in one line
-    oss << " (" << context_[0] << ')';
-  } else {
-    for (const auto& c : context_) {
-      oss << "\n  " << c;
-    }
-  }
-
-  if (include_backtrace && backtrace_) {
-    oss << '\n' << backtrace_->get();
-  }
-
-  return std::move(oss).str();
-}
-
-const Backtrace& Error::backtrace() const {
-  return backtrace_;
-}
-
-const char* Error::what() const noexcept {
-  return what_
-      .ensure([this] {
-        try {
-          return compute_what(/*include_backtrace*/ true);
-        } catch (...) {
-          // what() is noexcept, we need to return something here.
-          return std::string{"<Error computing Error::what()>"};
-        }
-      })
-      .c_str();
-}
-
-void Error::refresh_what() {
-  // Do not compute what_ eagerly, as it would trigger the computation of the
-  // backtrace. Instead, invalidate it, it will be computed on first access.
-  // refresh_what() is only called by non-const public methods which are not
-  // supposed to be called concurrently with any other method, so it is safe to
-  // invalidate here.
-  what_.reset();
-  what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
-}
-
-void Error::add_context(std::string new_msg) {
-  context_.push_back(std::move(new_msg));
-  // TODO: Calling add_context O(n) times has O(n^2) cost.  We can fix
-  // this perf problem by populating the fields lazily... if this ever
-  // actually is a problem.
-  // NB: If you do fix this, make sure you do it in a thread safe way!
-  // what() is almost certainly expected to be thread safe even when
-  // accessed across multiple threads
-  refresh_what();
-}
-
-namespace detail {
-
-void torchCheckFail(
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const std::string& msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
-  throw ::c10::Error({func, file, line}, msg);
-}
-
-void torchCheckFail(
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
-  throw ::c10::Error({func, file, line}, msg);
-}
-
-void torchInternalAssertFail(
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* condMsg,
-    const char* userMsg) {
-  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
-}
-
-// This should never be called. It is provided in case of compilers
-// that don't do any dead code stripping in debug builds.
-void torchInternalAssertFail(
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* condMsg,
-    const std::string& userMsg) {
-  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
-}
-
-} // namespace detail
 
 namespace WarningUtils {
 
