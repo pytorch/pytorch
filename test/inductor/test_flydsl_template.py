@@ -12,14 +12,19 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     _get_flydsl_device_arch,
     FlyDSLScheduling,
 )
-from torch._inductor.codegen.flydsl.flydsl_template import (
-    _ordered_unique_input_names,
-    FlyDSLTemplate,
-)
+from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import OrderedSet
+from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
+@instantiate_parametrized_tests
 class TestFlyDSLTemplate(TestCase):
     def setUp(self):
         super().setUp()
@@ -39,64 +44,85 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("import flydsl.expr as fx", imports)
         self.assertIsInstance(imports, str)
 
-    def test_runtime_unavailable_reason(self):
-        with mock.patch.object(
-            flydsl_utils.importlib.util, "find_spec", return_value=None
+    def test_runtime_unavailable_when_package_missing(self):
+        with mock.patch.object(flydsl_utils, "find_spec", return_value=None):
+            reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn("missing optional dependency", reason)
+
+    def test_runtime_unavailable_when_mlir_missing(self):
+        package_spec = SimpleNamespace(submodule_search_locations=["package"])
+        with (
+            mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+            mock.patch.object(flydsl_utils, "_pathfinder_find_spec", return_value=None),
         ):
-            self.assertIn(
-                "missing optional dependency",
-                flydsl_utils._flydsl_runtime_unavailable_reason(),
-            )
+            reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn("flydsl._mlir", reason)
 
+    def test_runtime_unavailable_when_library_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            package_spec = SimpleNamespace(submodule_search_locations=[tmp])
-            with mock.patch.object(
-                flydsl_utils.importlib.util,
-                "find_spec",
-                return_value=package_spec,
+            package_spec = SimpleNamespace(submodule_search_locations=["package"])
+            mlir_spec = SimpleNamespace(
+                submodule_search_locations=[str(Path(tmp) / "_mlir")],
+                origin=None,
+            )
+            with (
+                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+                mock.patch.object(
+                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
+                ),
             ):
-                with mock.patch.object(
-                    flydsl_utils.importlib.machinery.PathFinder,
-                    "find_spec",
-                    return_value=None,
-                ):
-                    self.assertIn(
-                        "flydsl._mlir",
-                        flydsl_utils._flydsl_runtime_unavailable_reason(),
-                    )
+                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn("runtime shared library", reason)
 
-                with mock.patch.object(
-                    flydsl_utils.importlib.machinery.PathFinder,
-                    "find_spec",
-                    return_value=object(),
-                ):
-                    self.assertIn(
-                        "runtime shared library",
-                        flydsl_utils._flydsl_runtime_unavailable_reason(),
-                    )
+    def test_runtime_unavailable_when_ldd_dependency_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mlir_path = Path(tmp) / "_mlir"
+            runtime_so = mlir_path / "_mlir_libs" / "libfly_jit_runtime.so"
+            runtime_so.parent.mkdir(parents=True)
+            runtime_so.touch()
+            package_spec = SimpleNamespace(submodule_search_locations=["package"])
+            mlir_spec = SimpleNamespace(
+                submodule_search_locations=[str(mlir_path)],
+                origin=None,
+            )
+            ldd = SimpleNamespace(
+                returncode=0,
+                stdout="libdependency.so => not found",
+                stderr="",
+            )
+            with (
+                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+                mock.patch.object(
+                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
+                ),
+                mock.patch.object(flydsl_utils, "system", return_value="Linux"),
+                mock.patch.object(flydsl_utils, "run", return_value=ldd),
+            ):
+                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn("unresolved", reason)
 
-                    runtime_so = (
-                        Path(tmp) / "_mlir" / "_mlir_libs" / "libfly_jit_runtime.so"
-                    )
-                    runtime_so.parent.mkdir(parents=True)
-                    runtime_so.touch()
-                    ldd = SimpleNamespace(
-                        returncode=0,
-                        stdout="libdependency.so => not found",
-                        stderr="",
-                    )
-                    with (
-                        mock.patch.object(
-                            flydsl_utils.platform, "system", return_value="Linux"
-                        ),
-                        mock.patch.object(
-                            flydsl_utils.subprocess, "run", return_value=ldd
-                        ),
-                    ):
-                        self.assertIn(
-                            "unresolved",
-                            flydsl_utils._flydsl_runtime_unavailable_reason(),
-                        )
+    def test_runtime_uses_resolved_mlir_location(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mlir_path = Path(tmp) / "resolved" / "_mlir"
+            runtime_so = mlir_path / "_mlir_libs" / "libfly_jit_runtime.so"
+            runtime_so.parent.mkdir(parents=True)
+            runtime_so.touch()
+            package_spec = SimpleNamespace(submodule_search_locations=["first"])
+            mlir_spec = SimpleNamespace(
+                submodule_search_locations=[str(mlir_path)],
+                origin=None,
+            )
+            ldd = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+                mock.patch.object(
+                    flydsl_utils, "_pathfinder_find_spec", return_value=mlir_spec
+                ),
+                mock.patch.object(flydsl_utils, "system", return_value="Linux"),
+                mock.patch.object(flydsl_utils, "run", return_value=ldd),
+            ):
+                reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIsNone(reason)
 
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
@@ -197,19 +223,6 @@ class TestFlyDSLTemplate(TestCase):
         finally:
             FlyDSLTemplate.all_templates.pop(template_name, None)
 
-    def test_shared_input_buffer_names_are_deduplicated(self):
-        shared_names = [bytearray(b"shared").decode() for _ in range(2)]
-        self.assertEqual(shared_names[0], shared_names[1])
-        self.assertIsNot(shared_names[0], shared_names[1])
-        input_nodes = [mock.Mock(), mock.Mock()]
-        for input_node, name in zip(input_nodes, shared_names):
-            input_node.get_name.return_value = name
-
-        self.assertEqual(
-            _ordered_unique_input_names(input_nodes),
-            ("shared",),
-        )
-
     def test_scheduling_disables_fusion(self):
         scheduling = FlyDSLScheduling(scheduler=None)
         node1 = mock.Mock()
@@ -218,6 +231,47 @@ class TestFlyDSLTemplate(TestCase):
         self.assertFalse(scheduling.can_fuse_vertical(node1, node2))
         self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
         self.assertEqual(scheduling.get_backend_features(device=None), set())
+
+    def test_scheduling_codegen_template_uses_run_interface(self):
+        layout = FixedLayout(torch.device("cpu"), torch.float32, [1], [1])
+        input_node = Buffer(name="input", layout=layout)
+        output_node = Buffer(name="output", layout=layout)
+        kernel = FlyDSLTemplateKernel(
+            kernel_name="test_kernel",
+            input_nodes=[input_node],
+            output_node=output_node,
+        )
+
+        ftb = mock.Mock()
+        ftb.make_kernel_render.return_value = (kernel, lambda: "source")
+        template_node = mock.Mock(node=ftb)
+        wrapper = mock.Mock()
+        graph = SimpleNamespace(
+            get_dtype=lambda _name: torch.float32,
+            removed_buffers=OrderedSet(),
+            scheduler=None,
+            wrapper_code=wrapper,
+        )
+        scheduling = FlyDSLScheduling(scheduler=mock.Mock())
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.object(scheduling, "is_flydsl_template", return_value=True),
+            mock.patch.object(
+                scheduling, "_build_precompile_metadata", return_value=None
+            ),
+            mock.patch.object(
+                scheduling, "define_kernel", return_value="generated_kernel"
+            ),
+            mock.patch.object(scheduling, "codegen_comment"),
+            mock.patch.object(scheduling, "free_buffers_in_scheduler"),
+        ):
+            kernel.def_kernel("input")
+            scheduling.codegen_template(template_node, [], [])
+
+        wrapper.generate_kernel_call.assert_called_once()
+        self.assertTrue(wrapper.generate_kernel_call.call_args.kwargs["triton"])
+        template_node.mark_run.assert_called_once()
 
     def test_scheduling_caches_device_arch(self):
         props = mock.Mock(gcnArchName="gfx950:sramecc+:xnack-")
@@ -233,47 +287,64 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(FlyDSLScheduling._build_flydsl_gpu_arch(0), "gfx950")
             get.assert_called_once_with(0)
 
-    def test_scheduling_uses_explicit_gpu_arch(self):
-        with mock.patch.dict(
-            os.environ,
-            {
-                "FLYDSL_GPU_ARCH": "gfx950:sramecc+:xnack-",
-            },
-        ):
-            self.assertEqual(
-                FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
-                "gfx950",
-            )
-
-    def test_scheduling_converts_hsa_override(self):
-        with mock.patch.dict(
-            os.environ,
-            {
-                "FLYDSL_GPU_ARCH": "",
-                "HSA_OVERRIDE_GFX_VERSION": "9.0.10",
-            },
-        ):
-            self.assertEqual(
-                FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
-                "gfx90a",
-            )
-
-    def test_scheduling_returns_none_without_arch_or_device(self):
-        with (
-            mock.patch.dict(
-                os.environ,
+    @parametrize(
+        "env,cuda_available,gcn_arch,expected",
+        (
+            (
                 {
-                    "FLYDSL_GPU_ARCH": "",
+                    "FLYDSL_GPU_ARCH": "gfx950:sramecc+:xnack-",
                     "HSA_OVERRIDE_GFX_VERSION": "",
                 },
+                False,
+                None,
+                "gfx950",
             ),
-            mock.patch("torch.cuda.is_available", return_value=False),
+            (
+                {"FLYDSL_GPU_ARCH": "", "HSA_OVERRIDE_GFX_VERSION": "9.0.10"},
+                False,
+                None,
+                "gfx90a",
+            ),
+            (
+                {"FLYDSL_GPU_ARCH": "", "HSA_OVERRIDE_GFX_VERSION": ""},
+                False,
+                None,
+                None,
+            ),
+            (
+                {"FLYDSL_GPU_ARCH": "", "HSA_OVERRIDE_GFX_VERSION": "9.0.x"},
+                True,
+                "gfx942:xnack-",
+                "gfx942",
+            ),
+        ),
+    )
+    def test_scheduling_resolves_gpu_arch(
+        self, env, cuda_available, gcn_arch, expected
+    ):
+        props = mock.Mock(gcnArchName=gcn_arch)
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch("torch.cuda.is_available", return_value=cuda_available),
+            mock.patch(
+                "torch.cuda.get_device_properties", return_value=props
+            ) as get_properties,
         ):
-            self.assertIsNone(FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0))
+            self.assertEqual(
+                FlyDSLScheduling._build_flydsl_gpu_arch(device_index=0),
+                expected,
+            )
+        if cuda_available:
+            get_properties.assert_called_once_with(0)
+        else:
+            get_properties.assert_not_called()
 
-    def test_precompile_metadata_requires_template_inputs(self):
+    def test_precompile_metadata_requires_defined_signature(self):
         scheduling = FlyDSLScheduling(scheduler=None)
-        kernel = SimpleNamespace(_template_input_args=[])
+        kernel = SimpleNamespace(
+            _template_signature_defined=False,
+            _template_input_args=[],
+        )
         layout = SimpleNamespace(
             size=[1],
             stride=[1],
@@ -286,6 +357,33 @@ class TestFlyDSLTemplate(TestCase):
                 kernel, SimpleNamespace(layout=layout)
             )
         )
+
+    def test_precompile_metadata_supports_inputless_template(self):
+        scheduling = FlyDSLScheduling(scheduler=None)
+        layout = FixedLayout(torch.device("cpu"), torch.float32, [1], [1])
+        kernel = FlyDSLTemplateKernel(
+            kernel_name="inputless",
+            input_nodes=[],
+            output_node=Buffer(name="output", layout=layout),
+        )
+        graph = SimpleNamespace(
+            removed_buffers=OrderedSet(),
+            scheduler=None,
+        )
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            kernel.def_kernel()
+            metadata = scheduling._build_precompile_metadata(
+                kernel, SimpleNamespace(layout=layout)
+            )
+
+        self.assertIsNotNone(metadata)
+        self.assertEqual(metadata["precompile_shapes"], {"output": [1]})
+        self.assertEqual(metadata["precompile_strides"], {"output": [1]})
+        self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
 
 
 if __name__ == "__main__":
