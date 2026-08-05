@@ -386,10 +386,11 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_flight_recorder_dumped_on_timeout(self) -> None:
-        # NoHandling both keeps the process alive so the test can read the
-        # artifact back, and is the configuration where abortProcess() returns
-        # without running any abort hook -- so this only passes if the dump
-        # fires where the timeout is detected.
+        # The dump is written by the abort hook c10d::FlightRecorderHook
+        # registers, which nccl2 runs when it detects the timeout. NoHandling
+        # both keeps the process alive so the test can read the artifact back,
+        # and is the configuration where abortProcess() returns without running
+        # any hook -- so this only passes if the hooks fire at detection.
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         env = {

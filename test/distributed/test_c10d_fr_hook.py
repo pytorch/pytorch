@@ -443,6 +443,35 @@ class AbstractFlightRecorderHookTest:
         # Record ids restart at 0 for the new epoch.
         self.assertEqual([e["record_id"] for e in entries], [0, 1])
 
+    def test_attach_without_abort_hook_support(self):
+        # Abort hooks are what trigger the dump on a collective failure, but
+        # they are optional: gloo has none, and Backend's default
+        # registerAbortHook throws rather than no-opping. attach() must ask
+        # first and keep working -- only the dump-on-failure trigger is lost,
+        # recording is unaffected.
+        pg = self._init_pg()
+        backend = pg._get_backend(self.device)
+        supported = self.backend_name == "nccl2"
+        self.assertEqual(pg.supports_abort_hooks, supported)
+        self.assertEqual(backend.supports_abort_hooks, supported)
+        if not supported:
+            with self.assertRaisesRegex(
+                RuntimeError, "does not support registerAbortHook"
+            ):
+                backend.register_abort_hook(0, lambda: None)
+
+        before = len(self._hook_entries())
+        hook = self._fr_hook(pg)
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t)
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+        self.assertEqual(len(self._hook_entries()), before + 1)
+        # remove() must not throw either: unregisterAbortHook throws on a
+        # backend that has none, so it may only be called if attach()
+        # registered one.
+        hook.remove()
+
     def test_buffer_size_zero_attaches_nothing(self):
         # The gate is read when the group is created, so flip it before init.
         saved = os.environ["TORCH_FR_BUFFER_SIZE"]

@@ -118,6 +118,18 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
       self->onPost(args);
     }
   });
+  // The dump-on-failure trigger. Abort hooks are optional -- gloo has none and
+  // Backend's default implementation throws -- and recording is useful either
+  // way, so ask before registering rather than swallowing the exception, which
+  // would also hide a registration that failed for a real reason.
+  if (hook->pg_->supportsAbortHooks()) {
+    hook->pg_->registerAbortHook(hook->hook_id_, [weak]() {
+      if (auto self = weak.lock()) {
+        self->onAbort();
+      }
+    });
+    hook->abort_hook_registered_ = true;
+  }
   return hook;
 }
 
@@ -166,6 +178,10 @@ void FlightRecorderHook::remove() {
   }
   pg_->unregisterPreHook(hook_id_);
   pg_->unregisterPostHook(hook_id_);
+  if (abort_hook_registered_) {
+    pg_->unregisterAbortHook(hook_id_);
+    abort_hook_registered_ = false;
+  }
   pg_.reset();
   // Ops still in flight have entries borrowing our events; retire them so the
   // recorder drops those pointers before the events are freed below.
@@ -255,6 +271,59 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
     // op never saw its post-hook. Retire it before dropping its events.
     retire(it->second, /*record_end=*/false);
     it->second = std::move(op);
+  }
+}
+
+void FlightRecorderHook::onAbort() {
+  static const bool dump_on_timeout =
+      getCvarBool(TORCH_FR_DUMP_ON_TIMEOUT, true);
+  if (!dump_on_timeout) {
+    return;
+  }
+  // At most one dump per process. A failure is observed by every process group
+  // sharing the fabric, by the backend's watchdog and by the next synchronous
+  // collective, and every dump targets the same file, so the later ones would
+  // only overwrite the snapshot closest to the failure.
+  //
+  // The loser of the race waits on the mutex instead of returning right away:
+  // the thread that detects the failure is usually a watchdog, while the thread
+  // that runs ::abort() is the next synchronous collective on the main thread.
+  // Letting that one run ahead would terminate the process with the trace half
+  // written, which is exactly the post-mortem this exists to produce. The wait
+  // is bounded -- the dump only queries events, it never synchronizes on the
+  // device. Both statics live in libtorch_cpu, the single library that holds
+  // the recorder, so there is one instance of them per process.
+  static std::mutex dump_mutex;
+  static bool dumped = false;
+  std::lock_guard<std::mutex> lock(dump_mutex);
+  if (dumped) {
+    return;
+  }
+  // One shot whatever the outcome: retrying a dump that already failed once
+  // would just repeat itself on every watchdog tick.
+  dumped = true;
+  // No mutex_ here. The abort hook fires from inside the backend, on a thread
+  // that may hold backend locks, whereas onPre/onPost take mutex_ and then the
+  // recorder's; keeping this path off mutex_ leaves that order intact.
+  LOG(ERROR) << "FlightRecorderHook: dumping trace on collective failure";
+  try {
+    // includeStackTraces=false: symbolizing a traceback may take the GIL, and
+    // this runs either on a watchdog thread or on a rank that is about to
+    // ::abort(), where blocking on the GIL would lose the very post-mortem we
+    // are writing. Stock ProcessGroupNCCL disables stack traces on its abort
+    // path for the same reason.
+    if (!try_dump_fr_trace_file(
+            /*includeCollectives=*/true,
+            /*includeStackTraces=*/false,
+            getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false))) {
+      // Recorder off, or no rank was ever set, which means nothing was
+      // recorded either.
+      LOG(ERROR) << "FlightRecorderHook: no trace to dump.";
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "FlightRecorderHook: trace dump failed: " << e.what();
+  } catch (...) {
+    LOG(ERROR) << "FlightRecorderHook: trace dump failed.";
   }
 }
 

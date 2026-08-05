@@ -316,6 +316,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
+  bool supportsAbortHooks() const override {
+    return true;
+  }
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
 
@@ -364,19 +367,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // reconfigurable mode. `reason` is logged after "Aborting process on rank N
   // due to ", so it must describe the actual trigger.
   void abortProcess(const std::string& reason);
-  // Writes the Flight Recorder trace to disk, once per process, the first time
-  // a timeout or an async error is DETECTED. Deliberately not hung off an
-  // abort hook: abortProcess() returns before running any hook unless
-  // TORCH_NCCL_ASYNC_ERROR_HANDLING asks for a tear-down and reconfigure is
-  // off, i.e. it runs no hooks in exactly the configurations where the process
-  // survives the failure and the post-mortem is worth the most. Gated on
-  // TORCH_NCCL_DUMP_ON_TIMEOUT (default on), like the stock backend.
-  //
-  // This diverges from torchcomms, whose FlightRecorder abort hook does not
-  // dump at all -- it flips a health-check flag and sleeps so an external
-  // poller can scrape the process -- despite its README claiming otherwise.
-  // We follow ::c10d::ProcessGroupNCCL and write the trace ourselves.
-  void dumpFlightRecorderOnFailure(const char* reason);
   // Signals the watchdog thread to exit and reaps it. Detaches instead of
   // joining when called from the watchdog thread itself.
   void stopWatchdog();
@@ -662,8 +652,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
-  // base, folded in here).
+  // base, folded in here). Guarded because the watchdog thread fires them while
+  // the owner of a hook may be un/registering on another thread -- a
+  // FlightRecorderHook unregisters from its destructor, i.e. whenever Python
+  // drops the handle.
   std::unordered_map<int64_t, ::c10d::AbortHook> abortHooks_;
+  std::mutex abort_hooks_mutex_;
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.

@@ -1116,6 +1116,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // opaque hook_id so they can be individually unregistered. Registration is
   // expected to happen at setup time, not concurrently with collectives. See
   // Hooks.hpp.
+  virtual bool supportsAbortHooks() const {
+    return getDefaultBackend()->supportsAbortHooks();
+  }
+
   virtual void registerAbortHook(int64_t hook_id, AbortHook hook) {
     getDefaultBackend()->registerAbortHook(hook_id, std::move(hook));
   }
