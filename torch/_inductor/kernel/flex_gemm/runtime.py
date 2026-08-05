@@ -9,20 +9,20 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
-    FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
-    FlexGemmGroupedMainOutputTransform,
+    FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
-    grouped_main_capture_supported,
-    grouped_main_output_config_supported,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
+    output_contraction_capture_supported,
+    output_contraction_config_supported,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_no_c_alpha_beta,
     validate_local_reduce_out_shape,
@@ -257,23 +257,23 @@ class FlexGemmRuntimeOutputPlan:
 
     aux_outs: tuple[torch.Tensor, ...] = ()
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
-    main_transform: FlexGemmGroupedMainOutputTransform | None = None
+    output_contraction: FlexGemmOutputContraction | None = None
 
     def __post_init__(self) -> None:
-        if self.main_transform is not None and (
+        if self.output_contraction is not None and (
             self.aux_outs or self.local_reduce is not None
         ):
-            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
 
     def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
-        """Return the logical shape after applying the grouped-main transform."""
-        if self.main_transform is None:
+        """Return the logical shape after applying the output contraction."""
+        if self.output_contraction is None:
             return physical_shape
-        if physical_shape[-1] % self.main_transform.group != 0:
-            raise RuntimeError(FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR)
+        if physical_shape[-1] % self.output_contraction.group != 0:
+            raise RuntimeError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
         return (
             *physical_shape[:-1],
-            physical_shape[-1] // self.main_transform.group,
+            physical_shape[-1] // self.output_contraction.group,
         )
 
 
@@ -390,21 +390,21 @@ def dispatch_gemm_act(
     ``out``/``C``/``aux_outs`` views, and swaps the row/col broadcast roles of
     captured epilogue tensors so each still aligns with the transposed accumulator.
     Tuple epilogues route the main result through QuACK ``D`` and aux outputs through
-    ``PostAct``/``mAuxOut``. Grouped-main epilogues instead leave ``D`` unused and
-    use ``PostAct``/``mAuxOut`` as the contracted logical main store.
+    ``PostAct``/``mAuxOut``. Output contractions instead leave ``D`` unused and use
+    ``PostAct``/``mAuxOut`` as the contracted logical main store.
     """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
     # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
     quack_a, quack_b = a, b.mT
-    main_transform = output_plan.main_transform
+    output_contraction = output_plan.output_contraction
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
     quack_out, quack_aux_outs, quack_c = out, aux_outs, C
     if config.swap_ab:
-        if main_transform is not None:
+        if output_contraction is not None:
             raise NotImplementedError(
-                "FlexGEMM grouped main outputs do not support swap_ab configs yet"
+                "FlexGEMM output contractions do not support swap_ab configs yet"
             )
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
@@ -465,9 +465,11 @@ def dispatch_gemm_act(
         tensor_epilogue_tile_biases=tile_args,
         tensor_epilogue_scalar_biases=scalar_args,
         main_output_transform_group=(
-            None if main_transform is None else main_transform.group
+            None if output_contraction is None else output_contraction.group
         ),
-        concat_layout=(() if main_transform is None else main_transform.concat_layout),
+        concat_layout=(
+            () if output_contraction is None else output_contraction.concat_layout
+        ),
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,
@@ -508,12 +510,12 @@ def gemm_epilogue(
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
         out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
-        output_plan: Structural plan for auxiliary and transformed outputs.
+        output_plan: Structural plan for auxiliary and contracted outputs.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
         config_is_lowering_validated: Whether generated lowering already checked the
-            config against the grouped-main output contract.
+            config against the output-contraction contract.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
@@ -537,7 +539,7 @@ def gemm_epilogue(
     physical_output_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
-    main_transform = output_plan.main_transform
+    output_contraction = output_plan.output_contraction
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         gemm_config_from_key,
@@ -549,17 +551,17 @@ def gemm_epilogue(
         else candidate_gemm_configs_for_device(a.device)[0]
     )
     logical_output_shape = output_plan.output_shape(physical_output_shape)
-    if main_transform is not None:
+    if output_contraction is not None:
         device_capacity = (
             torch.cuda.get_device_capability(a.device)
             if device_capacity_override is None
             else device_capacity_override
         )
-        main_transform.validate_quack(device_capacity[0])
-        if main_transform.chunked and b.stride(-1) == 1:
+        output_contraction.validate_quack(device_capacity[0])
+        if output_contraction.chunked and b.stride(-1) == 1:
             raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
         if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0:
-            raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
     expected_dtype = out_dtype
     if expected_dtype is None:
         expected_dtype = out.dtype if out is not None else a.dtype
@@ -620,11 +622,11 @@ def gemm_epilogue(
     inferred_arg_kinds = resolve_epilogue_arg_kinds(
         a, b, epilogue_args, epilogue_arg_kinds
     )
-    if main_transform is not None and any(
-        not grouped_main_capture_supported(kind, arg.dtype is torch.bool)
+    if output_contraction is not None and any(
+        not output_contraction_capture_supported(kind, arg.dtype is torch.bool)
         for arg, kind in zip(epilogue_args, inferred_arg_kinds, strict=True)
     ):
-        raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_CAPTURE_ERROR)
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR)
     for index, arg in enumerate(epilogue_args):
         check_matrix_major_layout(f"epilogue_args[{index}]", arg)
     row_args, col_args, tile_args, scalar_args = split_epilogue_args(
@@ -647,33 +649,31 @@ def gemm_epilogue(
 
     config = gemm_config_from_key(config_key) if config_key is not None else None
     if config is None or (
-        main_transform is not None and not config_is_lowering_validated
+        output_contraction is not None and not config_is_lowering_validated
     ):
         candidates = candidate_gemm_configs_for_device(a.device)
         if config is not None and config not in candidates:
             raise NotImplementedError(
                 "FlexGEMM explicit QUACK config is not supported on this device"
             )
-        if main_transform is None:
+        if output_contraction is None:
             config = candidates[0]
         elif config is None:
             config = next(
                 (
                     candidate
                     for candidate in candidates
-                    if grouped_main_output_config_supported(
+                    if output_contraction_config_supported(
                         candidate, physical_output_shape[-1]
                     )
                 ),
                 None,
             )
-        elif not grouped_main_output_config_supported(
-            config, physical_output_shape[-1]
-        ):
+        elif not output_contraction_config_supported(config, physical_output_shape[-1]):
             config = None
         if config is None:
             raise NotImplementedError(
-                "FlexGEMM QUACK config is incompatible with grouped main output"
+                "FlexGEMM QUACK config is incompatible with output contraction"
             )
 
     stream_context = (

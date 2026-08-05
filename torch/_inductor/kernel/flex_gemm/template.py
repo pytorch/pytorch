@@ -14,8 +14,8 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 )
 from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
     local_reduce_needs_physical_callbacks,
@@ -79,7 +79,7 @@ class FlexGemmEpilogueOutputConfig:
 
     aux_out_indices: tuple[int, ...] = ()
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
-    main_transform: FlexGemmGroupedMainOutputTransform | None = None
+    output_contraction: FlexGemmOutputContraction | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -166,7 +166,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             """
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
-                FlexGemmGroupedMainOutputTransform,
+                FlexGemmOutputContraction,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
             )
@@ -285,17 +285,17 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         local_reduce_expr = self._local_reduce_expr(
             input_args, outputs.local_reduce, config.epilogue_name
         )
-        transform = outputs.main_transform
-        transform_expr = (
+        contraction = outputs.output_contraction
+        contraction_expr = (
             "None"
-            if transform is None
-            else "FlexGemmGroupedMainOutputTransform("
-            f"group={transform.group!r}, chunked={transform.chunked!r})"
+            if contraction is None
+            else "FlexGemmOutputContraction("
+            f"group={contraction.group!r}, chunked={contraction.chunked!r})"
         )
         return (
             "FlexGemmRuntimeOutputPlan("
             f"aux_outs={aux_expr}, local_reduce={local_reduce_expr}, "
-            f"main_transform={transform_expr})"
+            f"output_contraction={contraction_expr})"
         )
 
     def _epilogue_kwargs(
@@ -313,7 +313,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if (
             outputs.aux_out_indices
             or outputs.local_reduce is not None
-            or outputs.main_transform is not None
+            or outputs.output_contraction is not None
         ):
             kwargs.append(f", output_plan={self._output_plan_expr(input_args, config)}")
         return "".join(kwargs)
