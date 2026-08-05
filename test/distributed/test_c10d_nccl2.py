@@ -161,6 +161,27 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
 
 
+class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_group(self) -> None:
+        tensor = torch.ones(4, device=self.device)
+        group = dist.new_group(device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        self.assertEqual(shrunk.size(), 1)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
+
+
 class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def opts(cls, high_priority_stream=False):
