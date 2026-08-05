@@ -671,12 +671,19 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def _load_kernel_wrapper(
-        self, backend_name, kernel_name, main_suffix, wrapper_cls, key, path
+        self,
+        kernel_name,
+        main_suffix,
+        wrapper_cls,
+        key,
+        path,
+        *,
+        backend_name=None,
     ):
         """Reload a kernel module from PyCodeCache and wrap the entry point."""
         mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
         main_func_name = f"{kernel_name}_{main_suffix}"
-        if not hasattr(mod, main_func_name):
+        if backend_name is not None and not hasattr(mod, main_func_name):
             available = [name for name in dir(mod) if callable(getattr(mod, name))]
             raise RuntimeError(
                 f"Could not find {backend_name} main kernel function "
@@ -731,12 +738,7 @@ class AsyncCompile:
                     elapsed_us,
                 )
                 return self._load_kernel_wrapper(
-                    "CuteDSL",
-                    kernel_name,
-                    MAIN_SUFFIX,
-                    CuteDSLKernelWrapper,
-                    key,
-                    path,
+                    kernel_name, MAIN_SUFFIX, CuteDSLKernelWrapper, key, path
                 )
 
             return LambdaFuture(get_result, future=subprocess_task)
@@ -748,8 +750,7 @@ class AsyncCompile:
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
-                    f"Could not find CuteDSL main kernel function "
-                    f"'{main_func_name}'. Available callables: {available}"
+                    f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
                 )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
@@ -802,24 +803,24 @@ class AsyncCompile:
                     elapsed_us,
                 )
                 return self._load_kernel_wrapper(
-                    "FlyDSL",
                     kernel_name,
                     MAIN_SUFFIX,
                     FlyDSLKernelWrapper,
                     key,
                     path,
+                    backend_name="FlyDSL",
                 )
 
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             return self._load_kernel_wrapper(
-                "FlyDSL",
                 kernel_name,
                 MAIN_SUFFIX,
                 FlyDSLKernelWrapper,
                 key,
                 path,
+                backend_name="FlyDSL",
             )
 
     def pallas(self, kernel_name: str, source_code: str):
@@ -842,12 +843,12 @@ class AsyncCompile:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
+            # Find our special entry point named function
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
-                    f"Could not find Pallas main kernel function "
-                    f"'{main_func_name}'. Available callables: {available}"
+                    f"Could not find Pallas main kernel function '{main_func_name}'. Available callables: {available}"
                 )
 
             return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
@@ -909,24 +910,24 @@ class AsyncCompile:
                     elapsed_us,
                 )
                 return self._load_kernel_wrapper(
-                    "NVIDIA Universal GEMM",
-                    kernel_name,
-                    MAIN_SUFFIX,
-                    NVUniversalGemmKernelWrapper,
-                    key,
-                    path,
+                    kernel_name, MAIN_SUFFIX, NVUniversalGemmKernelWrapper, key, path
                 )
 
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_kernel_wrapper(
-                "NVIDIA Universal GEMM",
-                kernel_name,
-                MAIN_SUFFIX,
-                NVUniversalGemmKernelWrapper,
-                key,
-                path,
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find NVIDIA Universal GEMM main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return NVUniversalGemmKernelWrapper(
+                getattr(mod, main_func_name), kernel_path=path
             )
 
     def nvgemm_precompile(
