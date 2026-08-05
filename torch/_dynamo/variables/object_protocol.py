@@ -13,8 +13,8 @@ import enum
 import sys
 import types
 import typing
-from functools import partial
-from typing import Any, NoReturn, TYPE_CHECKING
+from functools import lru_cache, partial
+from typing import NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
@@ -121,43 +121,10 @@ def binop_type_error(
     )
 
 
-# Py_TPFLAGS_MANAGED_DICT (CPython 3.11+). On older interpreters the managed
-# dict does not exist and instances rely solely on tp_dictoffset, so leave the
-# bit at 0 there rather than misreading an unrelated flag bit.
-_Py_TPFLAGS_MANAGED_DICT = 1 << 4 if sys.version_info >= (3, 11) else 0
-
-
-def type_has_dict(obj_type: type) -> bool:
-    """Whether instances of obj_type carry an instance __dict__.
-
-    Mirrors CPython's _PyObject_GetDictPtr: true iff the type has the managed
-    dict flag (heap types, incl. Python subclasses of C bases) or a nonzero
-    tp_dictoffset (legacy C types like BaseException). __slots__-only types and
-    the builtin scalar/container bases (int, str, tuple, ...) have neither.
-    Both signals are read from the type via __flags__ / __dictoffset__.
-
-    Not memoized: caching by type object would hold locally-defined classes
-    (and anything their methods close over) alive, leaking compiled models.
-    The computation is two attribute reads and a bitwise op, so caching buys
-    nothing.
-    """
-    return (
-        bool(obj_type.__flags__ & _Py_TPFLAGS_MANAGED_DICT)
-        or obj_type.__dictoffset__ != 0
-    )
-
-
-def get_instance_dict(obj: object) -> dict[str, Any] | None:
-    """The instance __dict__ of obj, or None if it has none.
-
-    object.__getattribute__ reads the tp_dictoffset/managed dict without
-    running a user-defined __getattribute__. _thread._local has neither and
-    only exposes its per-thread dict from tp_getattro, so retry via getattr.
-    """
-    try:
-        return object.__getattribute__(obj, "__dict__")
-    except AttributeError:
-        return getattr(obj, "__dict__", None)
+@lru_cache(maxsize=256)
+def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
+    """Get all type slots for a type (cached)."""
+    return get_type_slots(obj_type)
 
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
