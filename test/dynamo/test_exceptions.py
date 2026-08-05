@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import operator
 import sys
+import unittest
 
 import torch
 import torch._dynamo.config
@@ -207,6 +208,60 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError("v") from dict
             except TypeError as e:
                 return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_skiptest_propagates_as_genuine_skip(self):
+        # A unittest.SkipTest raised inside a fullgraph-compiled function and
+        # left uncaught must propagate as a real SkipTest -- it is test-infra
+        # control flow (e.g. @slowTest / skipIf bodies that CPythonTestCase
+        # compiles), not an internal error to wrap as InternalTorchDynamoError.
+        def fn(x):
+            torch.sin(x)
+            raise unittest.SkipTest("skip me")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(unittest.SkipTest, "skip me"):
+            opt_fn(torch.randn(4))
+
+    def test_skiptest_subclass_propagates(self):
+        class MySkip(unittest.SkipTest):
+            pass
+
+        def fn(x):
+            torch.sin(x)
+            raise MySkip("nope")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(MySkip):
+            opt_fn(torch.randn(4))
+
+    def test_skiptest_default_mode_preserves_side_effects(self):
+        # Under default torch.compile (fullgraph=False), a SkipTest must still
+        # propagate, but via the normal graph-break -> eager-fallback path so
+        # pre-raise side effects are preserved. The nopython re-raise must not
+        # fire here (that would drop the side effect).
+        log = []
+
+        def fn(x):
+            log.append(1)
+            raise unittest.SkipTest("default mode")
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(unittest.SkipTest, "default mode"):
+            opt_fn(torch.randn(4))
+        self.assertEqual(log, [1])
+
+    def test_skiptest_caught_in_traced_frame(self):
+        # A SkipTest caught by a handler inside the traced frame is handled by
+        # the normal observed-exception path and must not escape.
+        def fn(x):
+            try:
+                raise unittest.SkipTest("inner")
+            except unittest.SkipTest:
+                return torch.sin(x)
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
