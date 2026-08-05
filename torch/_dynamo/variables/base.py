@@ -319,7 +319,7 @@ def _check_method_arity(
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
-    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -376,7 +376,7 @@ class Method:
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
     object-protocol dispatch below. The method name is the tp_methods key this
-    entry is stored under (passed to `invoke`); its arity convention is derived
+    entry is stored under; its arity convention is derived
     on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
@@ -1634,11 +1634,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     return table[name]
         return None
 
-    def lookup_tp_getset(self, name: str) -> GetSet | None:
-        return self._lookup_tp_table(name, "tp_getset")
-
-    def lookup_tp_member(self, name: str) -> Member | None:
-        return self._lookup_tp_table(name, "tp_members")
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        return self._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
@@ -1929,6 +1926,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def get_value_for_setattr(self) -> object | None:
+        """Return the wrapped Python object for generic STORE_ATTR mutation,
+        or None to decline.  Only override for VTs with __dict__ and
+        standard __setattr__."""
+        return None
+
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -1962,7 +1965,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         # tp_getset/tp_members are data descriptors: resolve ahead of the
         # object-protocol walk. A getter returning None declines.
-        getset = self.lookup_tp_getset(name)
+        getset = self.lookup_tp_getset_member(name)
         if getset is not None:
             result = getset.getter(self, tx)
             if result is not None:
@@ -2056,6 +2059,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> list[VariableTracker]:
         raise NotImplementedError
 
+    def _hasattr_check_side_effects(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> ConstantVariable | None:
+        """If *name* has a pending mutation, return the hasattr result; else None."""
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        return None
+
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -2066,6 +2080,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None:
+            return result
+
         try:
             self.getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)

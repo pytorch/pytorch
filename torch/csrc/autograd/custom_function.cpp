@@ -462,7 +462,7 @@ static optional_variable_list _process_backward_mode_ad(
     if (maybe_output_impls) {
       maybe_output_impls->insert(out_tensor_impl);
     }
-    outputs.emplace_back(var);
+    outputs.emplace_back(std::move(var));
   }
 
   // If multiple differentiable outputs are returned, we do not allow views to
