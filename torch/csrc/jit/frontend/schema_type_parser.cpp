@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
@@ -242,7 +243,14 @@ std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       L.expect(':');
       const std::string& num = L.expect(TK_NUMBER).text();
       try {
-        device_idx = static_cast<c10::DeviceIndex>(std::stoi(num));
+        int64_t parsed_device_idx = std::stoll(num);
+        if (parsed_device_idx < 0 ||
+            parsed_device_idx >= c10::Device::MAX_NUM_DEVICES) {
+          throw(
+              ErrorReport(L.cur())
+              << "Device index is out of range for DeviceIndex");
+        }
+        device_idx = static_cast<c10::DeviceIndex>(parsed_device_idx);
       } catch (const std::invalid_argument&) {
         throw(
             ErrorReport(L.cur())

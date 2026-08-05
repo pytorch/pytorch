@@ -857,6 +857,18 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(x.device.type, "meta")
         self.assertEqual(dev, torch.device("meta"))
 
+    def test_large_device_index(self):
+        large_index = 32766
+        self.assertEqual(torch.device("meta", large_index).index, large_index)
+        self.assertEqual(torch.device(f"meta:{large_index}").index, large_index)
+
+    def test_device_index_out_of_bounds(self):
+        error_msg = "Device index must be between 0 and 32766 inclusive"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.device("meta", 32767)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.device("meta:32767")
+
     def test_decorator(self):
         @set_device("meta")
         def f():

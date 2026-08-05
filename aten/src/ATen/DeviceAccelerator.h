@@ -1,15 +1,33 @@
 #pragma once
 
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/core/Device.h>
 #include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <ATen/accelerator/Graph.h>
 #include <ATen/core/Generator.h>
 #include <optional>
 
 namespace at::accelerator {
+
+namespace detail {
+
+inline void checkDeviceIndex(c10::DeviceIndex device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      static_cast<int>(device_index),
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+}
+
+} // namespace detail
 
 // Note [Accelerator Concept]
 // This file defines the top level Accelerator concept for PyTorch.
@@ -94,22 +112,26 @@ TORCH_API void emptyHostCache();
 
 TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
     c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getDeviceStats(device_index);
 }
 
 TORCH_API inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
 }
 
 TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->resetPeakStats(device_index);
 }
 
 TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
     c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }

@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 namespace c10::cuda {
 
@@ -38,23 +39,25 @@ int max_stream_priorities;
 // the destruction.
 #if !defined(USE_ROCM)
 // CUDA-only: used to initializes the stream pools (once)
-std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> device_flags;
+using DeviceFlagArray = std::unique_ptr<c10::once_flag[]>; // NOLINT(*-arrays)
+DeviceFlagArray device_flags;
 #endif
-std::array<
-    std::array<std::atomic<uint32_t>, C10_COMPILE_TIME_MAX_GPUS>,
-    c10::cuda::max_compile_time_stream_priorities>
+using PriorityCounter = std::atomic<uint32_t>;
+using PriorityCounterArray =
+    std::unique_ptr<PriorityCounter[]>; // NOLINT(*-arrays)
+std::array<PriorityCounterArray, c10::cuda::max_compile_time_stream_priorities>
     priority_counters;
 
-std::array<
-    std::array<
-        std::array<cudaStream_t, kStreamsPerPool>,
-        C10_COMPILE_TIME_MAX_GPUS>,
-    c10::cuda::max_compile_time_stream_priorities>
+using StreamPool = std::array<cudaStream_t, kStreamsPerPool>;
+using StreamPoolArray = std::unique_ptr<StreamPool[]>; // NOLINT(*-arrays)
+std::array<StreamPoolArray, c10::cuda::max_compile_time_stream_priorities>
     streams;
 #ifdef USE_ROCM
-static c10::once_flag
-    stream_flags[c10::cuda::max_compile_time_stream_priorities]
-                [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+using StreamFlagPool = std::array<c10::once_flag, kStreamsPerPool>;
+using StreamFlagPoolArray =
+    std::unique_ptr<StreamFlagPool[]>; // NOLINT(*-arrays)
+std::array<StreamFlagPoolArray, c10::cuda::max_compile_time_stream_priorities>
+    stream_flags;
 #endif
 
 // Note [HIP Lazy Streams]
@@ -174,11 +177,31 @@ void initGlobalStreamState() {
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   TORCH_CHECK(
-      num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
-      "Number of CUDA devices on the machine is larger than the compiled "
-      "max number of gpus expected (",
-      C10_COMPILE_TIME_MAX_GPUS,
-      "). Increase that and recompile.");
+      num_gpus <= c10::Device::MAX_NUM_DEVICES,
+      "Number of CUDA devices on the machine is larger than the logical "
+      "device limit (",
+      c10::Device::MAX_NUM_DEVICES,
+      ").");
+  const auto num_devices = static_cast<size_t>(num_gpus);
+#if !defined(USE_ROCM)
+  // NOLINTNEXTLINE(*-arrays)
+  device_flags = std::make_unique<c10::once_flag[]>(num_devices);
+#endif
+  for (const auto p :
+       c10::irange(c10::cuda::max_compile_time_stream_priorities)) {
+    // NOLINTNEXTLINE(*-arrays)
+    priority_counters[p] = std::make_unique<PriorityCounter[]>(num_devices);
+    // NOLINTNEXTLINE(*-arrays)
+    streams[p] = std::make_unique<StreamPool[]>(num_devices);
+#ifdef USE_ROCM
+    // NOLINTNEXTLINE(*-arrays)
+    stream_flags[p] = std::make_unique<StreamFlagPool[]>(num_devices);
+#endif
+    for (const auto device_index : c10::irange(num_devices)) {
+      priority_counters[p][device_index].store(0);
+      streams[p][device_index].fill(nullptr);
+    }
+  }
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
       cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
@@ -200,7 +223,8 @@ void initGlobalStreamState() {
 // See Note [HIP Lazy Streams]
 void initSingleStream(int p, DeviceIndex device_index, int i) {
   CUDAGuard device_guard(device_index);
-  auto& stream = streams[p][device_index][i];
+  const auto device = static_cast<size_t>(device_index);
+  auto& stream = streams[p][device][i];
   auto pri = -p; // lower number is higher priority
 
   C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
@@ -208,7 +232,7 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
-    priority_counters[p][device_index] = 0;
+    priority_counters[p][device].store(0);
   }
 }
 
@@ -328,13 +352,15 @@ cudaStream_t CUDAStream::stream() const {
 #ifdef USE_ROCM
     // See Note [HIP Lazy Streams]
     c10::call_once(
-        stream_flags[st.getStreamType() - 1][device_index][si],
+        stream_flags[st.getStreamType() - 1][static_cast<size_t>(device_index)]
+                    [si],
         initSingleStream,
         st.getStreamType() - 1,
         device_index,
         si);
 #endif
-    return streams[st.getStreamType() - 1][device_index][si];
+    return streams[st.getStreamType() - 1][static_cast<size_t>(device_index)]
+                  [si];
   }
 }
 
@@ -352,10 +378,13 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   // See Note [HIP Lazy Streams]
   // CUDA-only: Initializes the stream pools (once)
   c10::call_once(
-      device_flags[device_index], initDeviceStreamState, device_index);
+      device_flags[static_cast<size_t>(device_index)],
+      initDeviceStreamState,
+      device_index);
 #endif
   auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
-  const auto idx = get_idx(priority_counters[pri_idx][device_index]);
+  const auto idx =
+      get_idx(priority_counters[pri_idx][static_cast<size_t>(device_index)]);
   StreamIdType id_type = StreamIdType(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 }

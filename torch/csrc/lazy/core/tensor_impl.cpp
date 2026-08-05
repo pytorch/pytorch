@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
+#include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
@@ -58,8 +59,11 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
       return 0;
     }
 
-    return static_cast<c10::DeviceIndex>(
-        getBackend()->GetBackendDevices().size());
+    const auto device_count = getBackend()->GetBackendDevices().size();
+    TORCH_CHECK(
+        device_count <= c10::Device::MAX_NUM_DEVICES,
+        "Too many Lazy devices, DeviceIndex overflowed");
+    return static_cast<c10::DeviceIndex>(device_count);
   }
 };
 

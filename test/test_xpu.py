@@ -282,6 +282,8 @@ if __name__ == "__main__":
         self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
         # Purely alphabetic tokens make the entire list invalid
         self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(len(torch.xpu._parse_visible_devices()), 32767)
 
         # Valid masks should work the same with strict=True
         self.assertEqual(_parse_visible_devices("0, 1, 2", strict=True), [0, 1, 2])
@@ -420,14 +422,14 @@ print(f"{{r1}}, {{r2}}")
                 .splitlines()[-1]
             )
 
-        # Index 128 is out of range → both return 0
-        self.assertEqual(_run("128"), "0, 0")
-        # COMPOSITE-style mask → _device_count_zes returns -1
+        # Index 32767 is out of range, so both return 0
+        self.assertEqual(_run("32767"), "0, 0")
+        # COMPOSITE-style mask makes _device_count_zes return -1
         self.assertEqual(_run("0.0").split(",")[0].strip(), "-1")
-        # Valid mask selecting device 0 on a single-GPU system → both return 1
+        # Valid mask selecting device 0 on a single-GPU system makes both return 1
         self.assertEqual(_run("0"), "1, 1")
         if TEST_MULTIXPU:
-            # Valid mask selecting device 1 on a multi-GPU system → both return 1
+            # Valid mask selecting device 1 on a multi-GPU system makes both return 1
             self.assertEqual(_run("1"), "1, 1")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")

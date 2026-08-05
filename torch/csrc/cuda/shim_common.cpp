@@ -34,7 +34,8 @@ AOTITorchError torch_set_current_cuda_stream(
     int32_t device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::cuda::setCurrentCUDAStream(at::cuda::getStreamFromExternal(
-        static_cast<cudaStream_t>(stream), device_index));
+        static_cast<cudaStream_t>(stream),
+        torch::aot_inductor::checked_device_index(device_index)));
   });
 }
 
@@ -43,8 +44,9 @@ AOTITorchError torch_get_cuda_stream_from_pool(
     int32_t device_index,
     void** ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *(cudaStream_t*)(ret_stream) =
-        at::cuda::getStreamFromPool(isHighPriority, device_index);
+    *(cudaStream_t*)(ret_stream) = at::cuda::getStreamFromPool(
+        isHighPriority,
+        torch::aot_inductor::checked_device_index(device_index, true));
   });
 }
 
@@ -53,7 +55,8 @@ AOTITorchError torch_cuda_stream_synchronize(
     int32_t device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::cuda::getStreamFromExternal(
-        static_cast<cudaStream_t>(stream), device_index)
+        static_cast<cudaStream_t>(stream),
+        torch::aot_inductor::checked_device_index(device_index))
         .synchronize();
   });
 }

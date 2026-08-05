@@ -1,14 +1,13 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <array>
 
 namespace c10::impl {
 
-// FakeGuardImpl is hardcoded to have eight devices.  Not for
-// any good reason, just to simplify code.
-constexpr DeviceIndex kFakeGuardImplMaxDevices = 8;
+constexpr DeviceIndex kFakeGuardImplMaxDevices = Device::MAX_NUM_DEVICES;
 
 /**
  * A fake implementation of DeviceGuardImplInterface suitable for testing.
@@ -26,6 +25,7 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device d) const override {
     AT_ASSERT(d.type() == type());
+    AT_ASSERT(d.index() >= 0);
     AT_ASSERT(d.index() < kFakeGuardImplMaxDevices);
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
@@ -97,6 +97,6 @@ thread_local DeviceIndex FakeGuardImpl<T>::current_device_ = 0;
 
 template <DeviceType T>
 thread_local std::array<StreamId, kFakeGuardImplMaxDevices>
-    FakeGuardImpl<T>::current_streams_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    FakeGuardImpl<T>::current_streams_ = {};
 
 } // namespace c10::impl

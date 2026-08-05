@@ -110,7 +110,7 @@ DeviceIndex device_count() noexcept {
     try {
       auto result = device_count_impl(/*fail_if_no_driver=*/false);
       TORCH_INTERNAL_ASSERT(
-          result <= std::numeric_limits<DeviceIndex>::max(),
+          result <= c10::Device::MAX_NUM_DEVICES,
           "Too many CUDA devices, DeviceIndex overflowed");
       return result;
     } catch (const c10::Error& ex) {
@@ -129,7 +129,7 @@ DeviceIndex device_count_ensure_non_zero() {
   // Zero gpus doesn't produce a warning in `device_count` but we fail here
   TORCH_CHECK(count, "No CUDA GPUs are available");
   TORCH_INTERNAL_ASSERT(
-      count <= std::numeric_limits<DeviceIndex>::max(),
+      count <= c10::Device::MAX_NUM_DEVICES,
       "Too many CUDA devices, DeviceIndex overflowed");
   return static_cast<DeviceIndex>(count);
 }
@@ -232,8 +232,7 @@ cudaError_t GetDevice(DeviceIndex* device) {
   auto err = cudaGetDevice(&tmp_device);
   if (err == cudaSuccess) {
     TORCH_INTERNAL_ASSERT(
-        tmp_device >= 0 &&
-            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
+        tmp_device >= 0 && tmp_device < c10::Device::MAX_NUM_DEVICES,
         "cudaGetDevice returns invalid device ",
         tmp_device);
     *device = static_cast<DeviceIndex>(tmp_device);
@@ -243,7 +242,11 @@ cudaError_t GetDevice(DeviceIndex* device) {
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
   TORCH_CHECK(
-      device >= 0, "device id must be non-negative!", static_cast<int>(device));
+      device >= 0 && device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(device));
   targetDeviceIndex = -1;
   if (force) {
     return cudaSetDevice(device);
@@ -257,6 +260,12 @@ cudaError_t SetDevice(DeviceIndex device, const bool force) {
 }
 
 cudaError_t MaybeSetDevice(DeviceIndex device) {
+  TORCH_CHECK(
+      device >= 0 && device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(device));
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
@@ -267,11 +276,21 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
 // This function always initializes the CUDA context
 // on to_device
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
+  TORCH_CHECK(
+      to_device >= 0 && to_device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(to_device));
   auto cur_device = targetDeviceIndex;
   targetDeviceIndex = -1;
   if (cur_device < 0) {
     int tmp_device = -1;
     C10_CUDA_CHECK(cudaGetDevice(&tmp_device));
+    TORCH_INTERNAL_ASSERT(
+        tmp_device >= 0 && tmp_device < c10::Device::MAX_NUM_DEVICES,
+        "cudaGetDevice returns invalid device ",
+        tmp_device);
     cur_device = static_cast<DeviceIndex>(tmp_device);
     if (to_device == cur_device) {
       return cur_device;
@@ -284,11 +303,16 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
 // This function does not initialize the CUDA context
 // on to_device if it does not already exist
 DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
+  TORCH_CHECK(
+      to_device >= 0 && to_device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(to_device));
   int tmp_cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
   TORCH_INTERNAL_ASSERT(
-      tmp_cur_device >= 0 &&
-          tmp_cur_device <= std::numeric_limits<DeviceIndex>::max(),
+      tmp_cur_device >= 0 && tmp_cur_device < c10::Device::MAX_NUM_DEVICES,
       "cudaGetDevice returns invalid device ",
       tmp_cur_device);
   auto cur_device = static_cast<DeviceIndex>(tmp_cur_device);
@@ -314,8 +338,7 @@ cudaError_t GetDevice(DeviceIndex* device) {
   auto err = cudaGetDevice(&tmp_device);
   if (err == cudaSuccess) {
     TORCH_INTERNAL_ASSERT(
-        tmp_device >= 0 &&
-            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
+        tmp_device >= 0 && tmp_device < c10::Device::MAX_NUM_DEVICES,
         "cudaGetDevice returns invalid device ",
         tmp_device);
     *device = static_cast<DeviceIndex>(tmp_device);
@@ -325,7 +348,11 @@ cudaError_t GetDevice(DeviceIndex* device) {
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
   TORCH_CHECK(
-      device >= 0, "device id must be non-negative!", static_cast<int>(device));
+      device >= 0 && device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(device));
   if (force) {
     return cudaSetDevice(device);
   }
@@ -342,6 +369,12 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
 }
 
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
+  TORCH_CHECK(
+      to_device >= 0 && to_device < c10::Device::MAX_NUM_DEVICES,
+      "device id must be in [0, ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "] but got ",
+      static_cast<int>(to_device));
   DeviceIndex cur_device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
   if (to_device == cur_device) {

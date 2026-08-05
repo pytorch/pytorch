@@ -94,6 +94,9 @@ c10::Layout convertJsonLayout(const torch::_export::Layout& layout) {
 c10::Device convertJsonDevice(const torch::_export::Device& device) {
   c10::Device d(device.get_type());
   if (auto index = device.get_index()) {
+    TORCH_CHECK(
+        *index >= -1 && *index < c10::Device::MAX_NUM_DEVICES,
+        "Device index out of range for DeviceIndex");
     d.set_index(static_cast<at::DeviceIndex>(*index));
   }
   return d;

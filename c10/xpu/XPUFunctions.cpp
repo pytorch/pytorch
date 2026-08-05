@@ -116,7 +116,7 @@ inline void initGlobalDevicePoolState() {
   // Ensures that the number of GPU devices does not exceed the maximum
   // allowable value for DeviceIndex.
   TORCH_CHECK(
-      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      gDevicePool.devices.size() <= c10::Device::MAX_NUM_DEVICES,
       "Too many XPU devices, DeviceIndex overflowed!");
   // Check each device's architecture and issue a warning if it is older than
   // the officially supported range (Intel GPUs starting from Arc (Alchemist)

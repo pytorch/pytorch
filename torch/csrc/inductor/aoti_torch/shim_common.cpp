@@ -72,7 +72,7 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   } else {
     return c10::Device(
         static_cast<c10::DeviceType>(device_type),
-        static_cast<c10::DeviceIndex>(device_index));
+        checked_device_index(device_index, true));
   }
 }
 } // namespace
@@ -400,7 +400,7 @@ AOTITorchError aoti_torch_get_device_index(
     int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret_device_index = static_cast<int16_t>(t->device().index());
+    *ret_device_index = static_cast<int32_t>(t->device().index());
   });
 }
 
@@ -1491,7 +1491,7 @@ AOTITorchError aoti_torch_create_device_guard(
     // checked=true will fail if no accelerator is available
     const auto device_type =
         at::accelerator::getAccelerator(/*checked=*/true).value();
-    c10::Device device(device_type, device_index);
+    c10::Device device(device_type, checked_device_index(device_index, true));
     c10::DeviceGuard* guard = new c10::DeviceGuard(device);
     *ret_guard = reinterpret_cast<DeviceGuardHandle>(guard);
   });
@@ -1505,8 +1505,10 @@ AOTITorchError aoti_torch_delete_device_guard(DeviceGuardHandle guard) {
 AOTITorchError aoti_torch_device_guard_set_index(
     DeviceGuardHandle guard,
     int32_t device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { reinterpret_cast<c10::DeviceGuard*>(guard)->set_index(device_index); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<c10::DeviceGuard*>(guard)->set_index(
+        checked_device_index(device_index, true));
+  });
 }
 
 AOTITorchError aoti_torch_delete_stream(StreamHandle stream) {
@@ -1529,7 +1531,8 @@ AOTITorchError aoti_torch_get_current_stream(
     int32_t device_index,
     StreamHandle* ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::Stream stream = at::accelerator::getCurrentStream(device_index);
+    c10::Stream stream =
+        at::accelerator::getCurrentStream(checked_device_index(device_index));
     c10::Stream* stream_ptr = new c10::Stream(stream);
     *ret_stream = reinterpret_cast<StreamHandle>(stream_ptr);
   });

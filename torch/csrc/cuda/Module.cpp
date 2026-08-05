@@ -60,6 +60,19 @@ void* getCurrentCUDASolverDnHandleLazy();
 
 using namespace torch;
 
+static c10::DeviceIndex checked_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,7 +83,7 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   auto device = THPUtils_unpackLong(arg);
 
   torch::utils::device_lazy_init(at::kCUDA);
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device), /*force*/ true);
+  c10::cuda::set_device(checked_device_index(device), /*force*/ true);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -248,7 +261,7 @@ PyObject* THCPModule_setStream_wrap(
 
   auto stream = at::cuda::CUDAStream::unpack3(
       stream_id,
-      static_cast<c10::DeviceIndex>(device_index),
+      checked_device_index(device_index),
       static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::cuda::current_device();
@@ -1446,8 +1459,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_getCheckpointState",
-      [](c10::DeviceIndex device, c10::cuda::MempoolId_t id) {
-        return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
+      [](int64_t device, c10::cuda::MempoolId_t id) {
+        return c10::cuda::CUDACachingAllocator::getCheckpointState(
+            checked_device_index(device), id);
       });
 
   m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
@@ -1507,29 +1521,33 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        auto stream = at::cuda::getCurrentCUDAStream(device);
+      [](int64_t device, at::cuda::MempoolId_t mempool_id) {
+        const auto device_index = checked_device_index(device);
+        auto stream = at::cuda::getCurrentCUDAStream(device_index);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [stream](cudaStream_t target) {
+            device_index, mempool_id, [stream](cudaStream_t target) {
               return target == stream;
             });
       });
 
   m.def(
       "_cuda_beginAllocateToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+      [](int64_t device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [](cudaStream_t) { return true; });
+            checked_device_index(device), mempool_id, [](cudaStream_t) {
+              return true;
+            });
       });
 
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+      [](int64_t device, at::cuda::MempoolId_t mempool_id) {
+        const auto device_index = checked_device_index(device);
         auto tid = std::this_thread::get_id();
 
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [=](cudaStream_t) {
+            device_index, mempool_id, [=](cudaStream_t) {
               auto current_tid = std::this_thread::get_id();
               return current_tid == tid;
             });
@@ -1537,19 +1555,21 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_endAllocateToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
+      [](int64_t device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::endAllocateToPool(
+            checked_device_index(device), mempool_id);
       });
 
   m.def(
       "_cuda_releasePool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+      [](int64_t device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::releasePool(
+            checked_device_index(device), mempool_id);
       });
 
   m.def(
       "_cuda_checkPoolLiveAllocations",
-      [](c10::DeviceIndex device,
+      [](int64_t device,
          at::cuda::MempoolId_t mempool_id,
          const py::set& expected_live_allocations) {
         std::unordered_set<void*> allocations;
@@ -1559,15 +1579,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
         }
         return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
-            device, mempool_id, allocations);
+            checked_device_index(device), mempool_id, allocations);
       });
 
   m.def(
       "_cuda_setCheckpointPoolState",
-      [](c10::DeviceIndex device,
+      [](int64_t device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
          const std::vector<size_t>& stale_storages_ptr,
          const std::vector<size_t>& storages_to_add_deleters_to_ptr = {}) {
+        const auto device_index = checked_device_index(device);
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
@@ -1580,7 +1601,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
-            device, std::move(pps));
+            device_index, std::move(pps));
         auto& freed_pointers = delta.ptrs_freed;
 
         std::unordered_set<void*> allocd_set;
@@ -1622,8 +1643,8 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](c10::DeviceIndex device) -> cudaDeviceProp* {
-        return at::cuda::getDeviceProperties(device);
+      [](int64_t device) -> cudaDeviceProp* {
+        return at::cuda::getDeviceProperties(checked_device_index(device));
       },
       py::return_value_policy::reference);
 }
@@ -2191,12 +2212,12 @@ static void initCudaMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_cuda_getStreamFromExternal",
-      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+      [](uintptr_t data_ptr, int64_t device_index) {
         cudaStream_t ext_stream =
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             reinterpret_cast<cudaStream_t>(reinterpret_cast<void*>(data_ptr));
-        at::cuda::CUDAStream stream =
-            c10::cuda::getStreamFromExternal(ext_stream, device_index);
+        at::cuda::CUDAStream stream = c10::cuda::getStreamFromExternal(
+            ext_stream, checked_device_index(device_index));
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });

@@ -74,6 +74,16 @@ TEST(InlineDeviceGuard, SetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
+TEST(InlineDeviceGuard, SetLargeDeviceIndex) {
+  DeviceIndex init_i = 0;
+  TestGuardImpl::setDeviceIndex(init_i);
+  const DeviceIndex i = c10::Device::MAX_NUM_DEVICES - 1;
+  TestGuard g(i);
+  ASSERT_EQ(g.original_device(), dev(init_i));
+  ASSERT_EQ(g.current_device(), dev(i));
+  ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
+}
+
 TEST(InlineDeviceGuard, ResetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);

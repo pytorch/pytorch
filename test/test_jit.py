@@ -3476,6 +3476,17 @@ def foo(x):
             else:
                 cu.define(full)
 
+    def test_int16_device_index(self):
+        tensor = torch.tensor([1.0])
+        cu = torch.jit.CompilationUnit()
+        cu.define(
+            """
+def fn(x):
+    return x.device
+            """
+        )
+        self.assertEqual(cu.fn(tensor), tensor.device)
+
     def test_namedtuple_python(self):
         global MyTuple, MyMod  # see [local resolution in python]
         MyTuple = namedtuple('MyTuple', ['a'])

@@ -1,5 +1,6 @@
 // This file registers special JIT operators used to implement the PyTorch CUDA
 // API in TorchScript.
+#include <c10/core/Device.h>
 #include <torch/csrc/jit/cuda/cuda.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -13,7 +14,24 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-void _device_synchronize(int64_t device_index) {
+c10::DeviceIndex checked_device_index(
+    int64_t device_index,
+    bool allow_default = false) {
+  const int64_t lower_bound = allow_default ? -1 : 0;
+  TORCH_CHECK(
+      device_index >= lower_bound &&
+          device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      lower_bound,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+void _device_synchronize(c10::DeviceIndex device_index) {
   // This is a helper API which synchronizes the device identified
   // by the device index. The device index of the device is passed as an
   // argument to this API.
@@ -48,9 +66,10 @@ RegisterOperators const reg({
     Operator(
         "cuda::current_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
-          c10::DeviceIndex device_index =
-              idx.has_value() ? idx.value() : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? checked_device_index(idx.value(), true)
+              : c10::cuda::current_device();
           auto s = c10::cuda::getCurrentCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
@@ -71,9 +90,10 @@ RegisterOperators const reg({
     Operator(
         "cuda::default_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
-          c10::DeviceIndex device_index =
-              idx.has_value() ? idx.value() : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? checked_device_index(idx.value(), true)
+              : c10::cuda::current_device();
           auto s = c10::cuda::getDefaultCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
@@ -96,7 +116,7 @@ RegisterOperators const reg({
             return;
           }
           auto prev_idx = c10::cuda::current_device();
-          c10::cuda::set_device(static_cast<c10::DeviceIndex>(idx));
+          c10::cuda::set_device(checked_device_index(idx));
           push(stack, static_cast<int>(prev_idx));
         },
         // cuda::set_device has side effects.
@@ -110,7 +130,8 @@ RegisterOperators const reg({
             push(stack, -1);
             return;
           }
-          int prev_idx = c10::cuda::MaybeExchangeDevice(static_cast<int>(idx));
+          int prev_idx =
+              c10::cuda::MaybeExchangeDevice(checked_device_index(idx));
           push(stack, prev_idx);
         },
         c10::AliasAnalysisKind::CONSERVATIVE),
@@ -119,7 +140,7 @@ RegisterOperators const reg({
         [](Stack& stack) {
           int64_t idx = -1;
           pop(stack, idx);
-          c10::cuda::set_device(static_cast<c10::DeviceIndex>(idx));
+          c10::cuda::set_device(checked_device_index(idx));
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -176,9 +197,10 @@ RegisterOperators const reg({
     Operator(
         "cuda::synchronize.int(int? val) -> ()",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
-          c10::DeviceIndex device_index =
-              idx.has_value() ? idx.value() : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? checked_device_index(idx.value())
+              : c10::cuda::current_device();
           _device_synchronize(device_index);
         },
         aliasAnalysisFromSchema()),

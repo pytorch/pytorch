@@ -199,10 +199,12 @@ OpenRegStream OpenRegStreamForId(DeviceIndex device_index, StreamId stream_id) {
 
 // See Note [StreamId assignment]
 orStream_t OpenRegStream::stream() const {
+  initOpenRegStreamsOnce();
   c10::DeviceIndex device_index = stream_.device_index();
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
+  check_device(device_index);
   // OpenReg does not support a default stream natively.
   // Here, we designate stream 0 from the priority 0 stream pool to serve as the default stream.
   if(st.isDefault()){
@@ -232,6 +234,7 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   if (device_index == -1) {
     device_index = current_device();
   }
+  check_device(device_index);
   auto pri_idx = std::clamp(priority, 0, max_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device_index][pri_idx]);
   auto id_type = static_cast<StreamIdType>(pri_idx);
@@ -247,6 +250,8 @@ OpenRegStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
 OpenRegStream getStreamFromExternal(
     orStream_t ext_stream,
     DeviceIndex device_index) {
+  initOpenRegStreamsOnce();
+  check_device(device_index);
   return OpenRegStreamForId(
       device_index, reinterpret_cast<int64_t>(ext_stream));
 }
@@ -272,6 +277,7 @@ OpenRegStream getCurrentOpenRegStream(DeviceIndex device_index) {
 
 void setCurrentOpenRegStream(OpenRegStream stream) {
   initOpenRegStreamsOnce();
+  check_device(stream.device_index());
   current_streams[stream.device_index()] = stream.id();
 }
 

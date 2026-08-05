@@ -14,8 +14,8 @@ AOTITorchError aoti_torch_create_xpu_guard(
     XPUGuardHandle* ret_guard // returns new reference
 ) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::DeviceGuard* guard =
-        new at::DeviceGuard(at::Device(at::DeviceType::XPU, device_index));
+    at::DeviceGuard* guard = new at::DeviceGuard(at::Device(
+        at::DeviceType::XPU, checked_device_index(device_index, true)));
     *ret_guard = reinterpret_cast<XPUGuardHandle>(guard);
   });
 }
@@ -28,8 +28,10 @@ AOTITorchError aoti_torch_delete_xpu_guard(XPUGuardHandle guard) {
 AOTITorchError aoti_torch_xpu_guard_set_index(
     XPUGuardHandle guard,
     int32_t device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { reinterpret_cast<at::DeviceGuard*>(guard)->set_index(device_index); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<at::DeviceGuard*>(guard)->set_index(
+        checked_device_index(device_index, true));
+  });
 }
 
 AOTITorchError aoti_torch_create_xpu_stream_guard(
@@ -40,7 +42,8 @@ AOTITorchError aoti_torch_create_xpu_stream_guard(
     assert(stream);
     at::StreamGuard* guard =
         new at::StreamGuard(at::xpu::getStreamFromExternal(
-                                static_cast<sycl::queue*>(stream), device_index)
+                                static_cast<sycl::queue*>(stream),
+                                checked_device_index(device_index))
                                 .unwrap());
     *ret_guard = reinterpret_cast<XPUStreamGuardHandle>(guard);
   });
@@ -54,26 +57,26 @@ AOTITorchError aoti_torch_delete_xpu_stream_guard(XPUStreamGuardHandle guard) {
 AOTITorchError aoti_torch_get_current_xpu_stream(
     int32_t device_index,
     void** ret_stream) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *ret_stream = &(at::xpu::getCurrentXPUStream(device_index).queue()); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_stream =
+        &(at::xpu::getCurrentXPUStream(checked_device_index(device_index, true))
+              .queue());
+  });
 }
 
 AOTITorchError aoti_torch_get_current_xpu_device(int32_t* device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *device_index =
-        static_cast<int32_t>(static_cast<uint16_t>(c10::xpu::current_device()));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *device_index = static_cast<int32_t>(c10::xpu::current_device()); });
 }
 
 AOTITorchError aoti_torch_set_current_xpu_device(const int32_t& device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { c10::xpu::set_device(static_cast<int8_t>(device_index)); });
+      { c10::xpu::set_device(checked_device_index(device_index)); });
 }
 
 AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    int32_t device_index =
-        static_cast<int32_t>(static_cast<uint16_t>(c10::xpu::current_device()));
+    auto device_index = c10::xpu::current_device();
     *ret = &(at::xpu::getCurrentXPUStream(device_index).queue());
   });
 }

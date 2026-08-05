@@ -170,18 +170,20 @@ at::DataPtr OpenRegDeviceAllocator::allocate(size_t nbytes) {
   int current_device_index = -1;
   auto ret = orGetDevice(&current_device_index);
   TORCH_CHECK(ret == orSuccess, "Failed to get current OpenReg device");
+  c10::openreg::check_device_index(current_device_index);
+  const auto current_device =
+      static_cast<c10::DeviceIndex>(current_device_index);
 
-  auto curr_device =
-      c10::Device(c10::DeviceType::PrivateUse1, current_device_index);
+  auto curr_device = c10::Device(c10::DeviceType::PrivateUse1, current_device);
 
   void* data = nullptr;
   if (nbytes > 0) {
     // Allocate memory via device-specific allocator
-    data = device_allocators_[current_device_index]->malloc(nbytes);
+    data = device_allocators_[current_device]->malloc(nbytes);
 
     // Track which device owns this pointer
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    allocated_blocks_[data] = current_device_index;
+    allocated_blocks_[data] = current_device;
   }
 
   return {data, data, &deleteOpenRegMemory, curr_device};
@@ -246,14 +248,17 @@ void OpenRegDeviceAllocator::freeMemory(void* ptr) {
 
 c10::CachingDeviceAllocator::DeviceStats OpenRegDeviceAllocator::
     getDeviceStats(c10::DeviceIndex device) {
+  c10::openreg::check_device_index(device);
   return device_allocators_[device]->getStats();
 }
 
 void OpenRegDeviceAllocator::resetAccumulatedStats(c10::DeviceIndex device) {
+  c10::openreg::check_device_index(device);
   device_allocators_[device]->resetAccumulatedStats();
 }
 
 void OpenRegDeviceAllocator::resetPeakStats(c10::DeviceIndex device) {
+  c10::openreg::check_device_index(device);
   device_allocators_[device]->resetPeakStats();
 }
 

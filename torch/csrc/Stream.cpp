@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -13,6 +14,19 @@
 #include <cstdint>
 
 PyTypeObject* THPStreamClass = nullptr;
+
+static c10::DeviceIndex checked_stream_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 static PyObject* THPStream_pynew(
     PyTypeObject* type,
@@ -55,7 +69,7 @@ static PyObject* THPStream_pynew(
     priority = r.toInt64WithDefault(1, 0);
   } else if (r.idx == 1) {
     stream_id = r.toInt64WithDefault(0, -1);
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64WithDefault(1, 0));
+    device_index = checked_stream_device_index(r.toInt64WithDefault(1, 0));
     device_type = static_cast<c10::DeviceType>(
         r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU)));
     priority = r.toInt64WithDefault(3, 0);

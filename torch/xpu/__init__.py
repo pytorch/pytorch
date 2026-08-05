@@ -92,8 +92,8 @@ def _parse_visible_devices(strict=False) -> list[int]:
     r"""Parse ``ZE_AFFINITY_MASK`` and return visible device ordinals.
 
     Returns a list of non-negative device ordinals specified by the mask.
-    When the mask is unset, returns ``[0, 1, ..., 127]`` (the maximum range
-    for ``int8_t`` device indices).  Returns an empty list for unsupported
+    When the mask is unset, returns the full logical ``DeviceIndex`` range.
+    Returns an empty list for unsupported
     COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
 
     Args:
@@ -103,9 +103,7 @@ def _parse_visible_devices(strict=False) -> list[int]:
     """
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
-        # DeviceIndex is stored as int8_t, so valid indices are 0–127
-        # (up to 128 devices). Return the full range when no mask is set.
-        return list(range(128))
+        return list(range(32767))
 
     visible_devices: list[int] = []
     for elem in var.split(","):

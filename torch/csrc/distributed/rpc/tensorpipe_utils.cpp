@@ -2,8 +2,8 @@
 
 #ifdef USE_TENSORPIPE
 
+#include <c10/core/Device.h>
 #include <c10/util/irange.h>
-#include <limits>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
@@ -270,8 +270,8 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 
     TORCH_INTERNAL_ASSERT(tpAllocation.tensors.size() == tensorIdx);
     TORCH_INTERNAL_ASSERT(
-        tensor.targetDevice->index <=
-        std::numeric_limits<c10::DeviceIndex>::max());
+        0 <= tensor.targetDevice->index &&
+        tensor.targetDevice->index < c10::Device::MAX_NUM_DEVICES);
     at::DataPtr dataPtr = converter->allocateTensorForReceiving(
         static_cast<c10::DeviceIndex>(tensor.targetDevice->index),
         tensor.length,

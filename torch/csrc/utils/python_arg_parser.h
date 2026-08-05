@@ -847,7 +847,12 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 }
 
 inline at::Device deviceFromLong(int64_t device_index) {
-  TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index must be between 0 and ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      " inclusive, got ",
+      device_index);
   return at::Device(
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       at::getAccelerator(true).value(),
