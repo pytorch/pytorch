@@ -311,18 +311,35 @@ constexpr int kMPSStreamsPerPool = 32;
 std::array<MPSStream*, kMPSStreamsPerPool> stream_pool{};
 c10::once_flag stream_pool_flag;
 std::atomic<uint32_t> stream_pool_counter{0};
+std::atomic<bool> stream_pool_initialized{false};
 
 void initStreamPool() {
   // Pool ids start at 1; id 0 is reserved for the default stream.
   for (const auto i : c10::irange(kMPSStreamsPerPool)) {
     stream_pool[i] = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), i + 1));
   }
+  stream_pool_initialized.store(true, std::memory_order_release);
 }
 } // namespace
 
 MPSStream* getStreamFromPool() {
   c10::call_once(stream_pool_flag, initStreamPool);
   return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+}
+
+void synchronizeAllMPSStreams(SyncType syncType) {
+  auto sync = [syncType](MPSStream* stream) {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      stream->synchronize(syncType);
+    });
+  };
+  sync(getDefaultMPSStream());
+  // don't eagerly create the pool just to synchronize it
+  if (stream_pool_initialized.load(std::memory_order_acquire)) {
+    for (auto* stream : stream_pool) {
+      sync(stream);
+    }
+  }
 }
 
 // Helper methods
