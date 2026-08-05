@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import os
 import time
 
 import torch
@@ -186,6 +187,30 @@ class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-legacy"
+
+
+class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
+    ranks_per_root = 1
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = str(cls.ranks_per_root)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
+    world_size = 3
+    ranks_per_root = 2
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(3)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
 
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
