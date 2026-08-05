@@ -24,10 +24,7 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
-from torch.testing._internal.common_device_type import (
-    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
-    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
-)
+from torch.testing._internal.common_device_type import skipPRIVATEUSE1
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -450,11 +447,7 @@ class DTensorExportTest(TestCase):
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
-    @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
-        or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
-        "requires FlexAttention backward support",
-    )
+    @skipPRIVATEUSE1
     @parametrize(
         "export_fn",
         [
