@@ -362,9 +362,9 @@ def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
 
 
 def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
-    """Resolve the arity flags for method `name` from the VT's runtime
-    python_type()."""
-    return _flags_from_ml_flags(maybe_get_python_type(vt), name)
+    """Resolve the arity flags for method `name` from the VT's arity-reference
+    type (see VariableTracker.method_flags_type)."""
+    return _flags_from_ml_flags(vt.method_flags_type(), name)
 
 
 @dataclasses.dataclass(slots=True)
@@ -1653,6 +1653,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def method_flags_type(self) -> type:
+        """Type whose CPython ml_flags define this VT's tp_methods arities
+        (see _derive_method_flags). Defaults to python_type(); a VT whose
+        python_type() is a pure-Python stand-in without C ml_flags (e.g.
+        OrderedSet) overrides this to the builtin whose method arities it
+        mirrors, so MethodFlags still enforces arity."""
+        return maybe_get_python_type(self)
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
