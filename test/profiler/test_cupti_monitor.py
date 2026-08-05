@@ -2423,6 +2423,7 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertLess(time.time() - start, 2.0)
         self.assertNotIn(sync, monitor._enabled)
 
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_event_node_recorder_arm_before_capture(self):
         # End-to-end usage, and the ordering contract it depends on: the recorder learns a
         # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
@@ -2486,6 +2487,7 @@ class TestCuptiMonitorCUDA(TestCase):
         # The earlier graph is still absent -- arming does not retroactively record it.
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
