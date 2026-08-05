@@ -23,15 +23,14 @@ from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
 )
 from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
-)
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    skip_if_lt_x_gpu,
-    with_comms,
 )
 from torch.testing._internal.distributed.distributed_utils import with_fake_comms
 
@@ -73,6 +72,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
 
 
 class TestMedatadaIndex(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_init_convert_offset(self):
         a = MetadataIndex("foo", [1, 2])
         b = MetadataIndex("foo", torch.Size([1, 2]))
@@ -143,6 +144,8 @@ class TestMedatadaIndex(TestCase):
 
 
 class TestWrapException(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wrap_exception_serializable_via_object_to_tensor(self):
         """Verify _wrap_exception produces a result that _object_to_tensor can serialize.
 
@@ -181,6 +184,8 @@ class TestWrapException(TestCase):
 
 
 class TestReaderView(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
@@ -237,15 +242,28 @@ class TestReaderView(TestCase):
         self.assertEqual(ba, b"VWXYZ\0\0\0")
 
 
-class TestDistWrapper(DTensorTestBase):
+class TestDistWrapper(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type)
+
+    @property
+    def device(self) -> torch.device:
+        return self._dev
+
     @property
     def world_size(self):
         return min(4, torch.accelerator.device_count())
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_gather_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
+    def test_gather_object(self, device):
+        self._dev = torch.device(device, self.rank)
+        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -263,10 +281,13 @@ class TestDistWrapper(DTensorTestBase):
         if gathered_objects != expected_objects:
             raise AssertionError(f"Expected {expected_objects}, got {gathered_objects}")
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_scatter_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
+    def test_scatter_object(self, device):
+        self._dev = torch.device(device, self.rank)
+        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -288,9 +309,12 @@ class TestDistWrapper(DTensorTestBase):
                 f"Expected {expected_objects}, got {scattered_objects}"
             )
 
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast_object_with_nonzero_coordinator(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_broadcast_object_with_nonzero_coordinator(self, device):
+        self._dev = torch.device(device, self.rank)
         # Everybody uses WORLD, but src is coordinator_rank=1
         dist_wrapper = _DistWrapper(
             group=dist.group.WORLD,
@@ -307,12 +331,15 @@ class TestDistWrapper(DTensorTestBase):
         if result != 1:
             raise AssertionError(f"Expected 1, got {result}")
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_broadcast_object_global_local_mismatch(self):
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 4,
+        "test requires 4+ accelerators",
+    )
+    def test_broadcast_object_global_local_mismatch(self, device):
+        self._dev = torch.device(device, self.rank)
         # reproduces issue 152310
 
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
         dist_wrapper = _DistWrapper(
             group=mesh_2d.get_group(1),
             use_dist=True,
@@ -332,10 +359,13 @@ class TestDistWrapper(DTensorTestBase):
         if got != expected:
             raise AssertionError(f"Expected {expected}, got {got}")
 
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_barrier(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    @skip_but_pass_in_sandcastle_if(
+        torch.accelerator.device_count() < 2,
+        "test requires 2+ accelerators",
+    )
+    def test_barrier(self, device):
+        self._dev = torch.device(device, self.rank)
+        mesh_2d = dist.init_device_mesh(device, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -345,6 +375,11 @@ class TestDistWrapper(DTensorTestBase):
         # No exception should be raised.
         dist_wrapper.barrier()
 
+
+instantiate_device_type_tests(
+    TestDistWrapper,
+    globals(),
+)
 
 if __name__ == "__main__":
     run_tests()
