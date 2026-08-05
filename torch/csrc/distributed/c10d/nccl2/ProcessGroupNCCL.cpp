@@ -317,8 +317,33 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  // commName above borrows `name`, which belongs to the Options handed to
+  // split() -- a clone that dies with the caller's frame. Every consumer of a
+  // stored config assigns commName from a live string before passing it to
+  // NCCL (createNcclComm, reconfigure(), this function), so store no pointer
+  // rather than one that outlives its string.
+  childOpts->config.commName = nullptr;
+#endif
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
+
+  // The child's membership in world-rank terms, as stock's split() records it.
+  // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
+  // which otherwise falls back to identity ranks. Map through this group's own
+  // map, not the passed-in Options': an empty map means "spans the world in
+  // rank order", and a merged group inherits its parent's shorter map, so
+  // treat anything too short the same way instead of indexing out of bounds.
+  const auto& parentRanks = options_c10d_->global_ranks_in_group;
+  const bool parentSpansWorld =
+      parentRanks.size() < static_cast<size_t>(getSize());
+  std::vector<uint64_t> childRanks;
+  childRanks.reserve(ranks.size());
+  for (int r : ranks) {
+    childRanks.push_back(
+        parentSpansWorld ? static_cast<uint64_t>(r) : parentRanks[r]);
+  }
+  childOpts->global_ranks_in_group = std::move(childRanks);
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
