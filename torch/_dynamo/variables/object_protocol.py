@@ -14,7 +14,7 @@ import sys
 import types
 import typing
 from functools import lru_cache, partial
-from typing import NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
@@ -151,6 +151,19 @@ def type_has_dict(obj_type: type) -> bool:
         bool(obj_type.__flags__ & _Py_TPFLAGS_MANAGED_DICT)
         or obj_type.__dictoffset__ != 0
     )
+
+
+def get_instance_dict(obj: object) -> dict[str, Any] | None:
+    """The instance __dict__ of obj, or None if it has none.
+
+    object.__getattribute__ reads the tp_dictoffset/managed dict without
+    running a user-defined __getattribute__. _thread._local has neither and
+    only exposes its per-thread dict from tp_getattro, so retry via getattr.
+    """
+    try:
+        return object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return getattr(obj, "__dict__", None)
 
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
