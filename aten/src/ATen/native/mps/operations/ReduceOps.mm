@@ -811,7 +811,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(ps, func_name, {in});
     [ce setComputePipelineState:ps];
-    const std::array<uint32_t, 2> sizes_s{num_rows, row_len};
+    const std::array<uint32_t, 4> sizes_s{num_rows, row_len, 0, 0};
     mtl_setArgs(ce, in, output_t, sizes_s);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
@@ -820,44 +820,33 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   // The outer kernel views the input as [outer_size, dim_size, inner_size]
   // through explicit strides (contiguous callers pass the contiguous
   // strides of that view), reducing dim; grid z walks the outer batches.
+  // With partials, this is split-K pass 1 over a single batch: grid y cuts
+  // the dim rows into num_segs segments, one (value, index) pair each.
   auto encode_arg_outer = [&](const Tensor& in,
                               uint32_t dim_size,
                               uint32_t inner_size,
                               uint32_t outer_size,
                               uint32_t dim_stride,
                               uint32_t inner_stride,
-                              uint32_t outer_stride) {
-    const auto kname = fmt::format("{}_reduction_outer_{}_long", op_prefix, in_str);
-    const auto num_tg_x = c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
-    auto ce = stream->commandEncoder();
-    auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
-    [ce setComputePipelineState:ps];
-    const std::array<uint32_t, 2> sizes_s{dim_size, inner_size};
-    const std::array<uint32_t, 4> strides_s{dim_stride, inner_stride, outer_stride, 0};
-    mtl_setArgs(ce, in, output_t, sizes_s, strides_s);
-    [ce dispatchThreads:MTLSizeMake(num_tg_x * OUTER_TG_WIDTH, OUTER_TG_HEIGHT, outer_size)
-        threadsPerThreadgroup:MTLSizeMake(OUTER_TG_WIDTH, OUTER_TG_HEIGHT, 1)];
-    getMPSProfiler().endProfileKernel(ps);
-  };
-  auto encode_arg_outer_p1 = [&](const Tensor& in,
-                                 const Tensor& vals,
-                                 const Tensor& idxs,
-                                 uint32_t dim_size,
-                                 uint32_t inner_size,
-                                 uint32_t num_segs,
-                                 uint32_t dim_stride,
-                                 uint32_t inner_stride) {
-    const auto kname = fmt::format("{}_reduction_outer_p1_{}", op_prefix, in_str);
+                              uint32_t outer_stride,
+                              uint32_t num_segs,
+                              const std::optional<std::pair<Tensor, Tensor>>& partials) {
+    const auto split = partials.has_value();
+    const auto kname = split ? fmt::format("{}_reduction_outer_p1_{}", op_prefix, in_str)
+                             : fmt::format("{}_reduction_outer_{}_long", op_prefix, in_str);
     const auto num_tg_x = c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(ps, func_name, {in});
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
-    const std::array<uint32_t, 2> strides_s{dim_stride, inner_stride};
-    mtl_setArgs(ce, in, vals, idxs, sizes_s, strides_s);
-    [ce dispatchThreads:MTLSizeMake(num_tg_x * OUTER_TG_WIDTH, num_segs * OUTER_TG_HEIGHT, 1)
+    const std::array<uint32_t, 4> strides_s{dim_stride, inner_stride, outer_stride, 0};
+    mtl_setArgs(ce, in, output_t, sizes_s, strides_s);
+    if (split) {
+      mtl_setArgs<4>(ce, partials->first, partials->second);
+    }
+    [ce dispatchThreads:MTLSizeMake(
+                            num_tg_x * OUTER_TG_WIDTH, (split ? num_segs : 1) * OUTER_TG_HEIGHT, split ? 1 : outer_size)
         threadsPerThreadgroup:MTLSizeMake(OUTER_TG_WIDTH, OUTER_TG_HEIGHT, 1)];
     getMPSProfiler().endProfileKernel(ps);
   };
@@ -893,7 +882,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     getMPSProfiler().beginProfileKernel(ps, func_name, {in});
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{num_partials, seg_len, num_segs, row_len};
-    mtl_setArgs(ce, in, vals, idxs, sizes_s);
+    mtl_setArgs(ce, in, output_t, sizes_s);
+    mtl_setArgs<4>(ce, vals, idxs);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
     getMPSProfiler().endProfileKernel(ps);
@@ -905,7 +895,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(ps, func_name, {vals});
     [ce setComputePipelineState:ps];
-    const std::array<uint32_t, 2> sizes_s{num_outputs, num_segs};
+    const std::array<uint32_t, 4> sizes_s{num_outputs, num_segs, 0, 0};
     mtl_setArgs(ce, vals, output_t, sizes_s, idxs);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
@@ -952,13 +942,14 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         const auto num_segs =
             std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
         run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
-          encode_arg_outer_p1(input, vals, idxs, dim_size, inner_size, num_segs, dim_stride, inner_stride);
+          encode_arg_outer(input, dim_size, inner_size, 1, dim_stride, inner_stride, 0, num_segs, {{vals, idxs}});
         });
         return;
       }
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          encode_arg_outer(input, dim_size, inner_size, outer_size, dim_stride, inner_stride, outer_stride);
+          encode_arg_outer(
+              input, dim_size, inner_size, outer_size, dim_stride, inner_stride, outer_stride, 1, std::nullopt);
         }
       });
       return;
@@ -989,13 +980,14 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         const auto num_segs =
             std::clamp(OUTER_SPLIT_STRIDED_TARGET_TGS / natural_tgs, 2u, std::min(dim_size, SPLIT_MAX_SEGS));
         run_arg_split(inner_size, num_segs, ^(const Tensor& vals, const Tensor& idxs) {
-          encode_arg_outer_p1(input, vals, idxs, dim_size, inner_size, num_segs, inner_size, 1);
+          encode_arg_outer(input, dim_size, inner_size, 1, inner_size, 1, 0, num_segs, {{vals, idxs}});
         });
         return;
       }
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          encode_arg_outer(input, dim_size, inner_size, outer_size, inner_size, 1, dim_size * inner_size);
+          encode_arg_outer(
+              input, dim_size, inner_size, outer_size, inner_size, 1, dim_size * inner_size, 1, std::nullopt);
         }
       });
       return;

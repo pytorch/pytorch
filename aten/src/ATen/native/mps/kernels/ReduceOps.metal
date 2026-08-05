@@ -1975,45 +1975,53 @@ kernel void arg_reduction(
   }
 }
 
+// Role of the inner arg kernel: one pass over a whole row, split-K pass 1
+// (one simdgroup per segment, writes a (value, index) partial), or pass 2
+// (indices come from idx_in, so ties break on the lowest source index).
+enum ArgMode : uint { ARG_PLAIN = 0, ARG_SPLIT_P1 = 1, ARG_COMBINE = 2 };
+
 // Inner-dim arg-reduction: input is logically [M, N] contiguous, reduce N
 // (innermost). One SIMD group (32 lanes) per row, multiple SIMD groups per
 // TG for occupancy. Lane L scans positions {L, L+32, L+64, ...} of its row
 // with strict-improvement updates (so the lane's stored idx is the lowest
 // of its scanned positions matching the winning value). The cross-lane
 // collapse uses simd_arg_reduce which ties on lowest IDX, not lowest LANE.
-// PAYLOAD_IDX reduces (value, source-index) pairs instead of deriving
-// indices from position: this is split-K pass 2, where input/idx_in are the
-// [M, num_segs] partials and ties break on the lowest source index.
-template <template <typename> class OpFn, typename TI, bool PAYLOAD_IDX = false>
+template <template <typename> class OpFn, typename TI, ArgMode MODE = ARG_PLAIN>
 kernel void arg_reduction_inner(
     constant TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
-    constant uint2& sizes [[buffer(2)]], // [M, N]
+    // ARG_SPLIT_P1: [num_partials, seg_len, num_segs, row_len]; else [M, N]
+    constant uint4& sizes [[buffer(2)]],
     constant int* idx_in [[buffer(3)]],
+    device opmath_t<TI>* val_out [[buffer(4)]],
+    device int* idx_out [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
   using TA = opmath_t<TI>;
   using Op = OpFn<TA>;
-  const uint M = sizes.x;
-  const uint N = sizes.y;
   const uint num_simd_groups = tptg / simdgroup_size;
 
   const uint row = tgid * num_simd_groups + simdgroup_id;
-  if (row >= M) {
+  if (row >= sizes.x) {
     return;
   }
 
-  constant TI* row_ptr = input + row * N;
+  const bool split = MODE == ARG_SPLIT_P1;
+  const uint num_segs = split ? sizes.z : 1;
+  const uint seg_off = split ? (row % num_segs) * sizes.y : 0;
+  const uint span = split ? min(seg_off + sizes.y, sizes.w) - seg_off : sizes.y;
+  const uint row_base = split ? (row / num_segs) * sizes.w : row * sizes.y;
+  constant TI* row_ptr = input + row_base + seg_off;
 
   TA best_val = Op::identity();
   uint32_t best_idx =
-      PAYLOAD_IDX ? ::metal::numeric_limits<uint32_t>::max() : 0;
-  for (uint i = simd_lane_id; i < N; i += simdgroup_size) {
+      MODE == ARG_COMBINE ? ::metal::numeric_limits<uint32_t>::max() : 0;
+  for (uint i = simd_lane_id; i < span; i += simdgroup_size) {
     const TA val = static_cast<TA>(row_ptr[i]);
-    if (PAYLOAD_IDX) {
-      const uint32_t idx = static_cast<uint32_t>(idx_in[row * N + i]);
+    if (MODE == ARG_COMBINE) {
+      const uint32_t idx = static_cast<uint32_t>(idx_in[row * span + i]);
       if (arg_replace<OpFn>(val, idx, best_val, best_idx)) {
         best_val = val;
         best_idx = idx;
@@ -2026,7 +2034,12 @@ kernel void arg_reduction_inner(
 
   auto rc = simd_arg_reduce<OpFn>(best_val, best_idx);
   if (simd_lane_id == 0) {
-    output[row] = static_cast<long>(rc.second);
+    if (split) {
+      val_out[row] = rc.first;
+      idx_out[row] = static_cast<int>(seg_off + rc.second);
+    } else {
+      output[row] = static_cast<long>(rc.second);
+    }
   }
 }
 
@@ -2036,38 +2049,49 @@ kernel void arg_reduction_inner(
 // rows, grid z walks the outer batches. Per-thread scan keeps the lowest row
 // with the winning value; the cross-worker tree reduction uses arg_replace
 // (strictly-better OR equal-with-lower-idx).
+// SPLIT selects split-K pass 1 (outer_size == 1): grid y cuts the dim rows
+// into num_segs segments and each threadgroup writes its segment's
+// (value, index) partial to [inner_size, num_segs]. Values keep opmath_t
+// precision so pass 2 compares exactly what pass 1 loaded.
 template <
     template <typename> class OpFn,
     typename TI,
     uint TG_X = OUTER_TG_WIDTH,
-    uint TG_Y = OUTER_TG_HEIGHT>
+    uint TG_Y = OUTER_TG_HEIGHT,
+    bool SPLIT = false>
 [[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
 kernel void arg_reduction_outer(
     constant TI* input [[buffer(0)]],
     device long* output [[buffer(1)]],
-    // [dim_size, inner_size]
-    constant uint2& sizes [[buffer(2)]],
+    // [dim_size, inner_size, num_segs, unused]
+    constant uint4& sizes [[buffer(2)]],
     // [dim_stride, inner_stride, outer_stride, unused]
     constant uint4& strides [[buffer(3)]],
+    device opmath_t<TI>* val_out [[buffer(4)]],
+    device int* idx_out [[buffer(5)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = opmath_t<TI>;
   using Op = OpFn<TA>;
   const uint dim_size = sizes.x;
   const uint inner_size = sizes.y;
+  const uint num_segs = SPLIT ? sizes.z : 1;
   const uint dim_stride = strides.x;
   const uint inner_stride = strides.y;
-  const uint outer_offset = tg_pos.z * strides.z;
+  const uint outer_offset = SPLIT ? 0 : tg_pos.z * strides.z;
 
   const uint col = tg_pos.x * TG_X + tid_tg.x;
   if (col >= inner_size) {
     return;
   }
 
-  // Split the dim rows among the TG_Y workers.
-  const uint rows_per_y = ceil_div(dim_size, TG_Y);
-  const uint row_start = tid_tg.y * rows_per_y;
-  const uint row_end = min(row_start + rows_per_y, dim_size);
+  // Split the segment rows among the TG_Y workers.
+  const uint seg_rows = SPLIT ? ceil_div(dim_size, num_segs) : dim_size;
+  const uint seg_start = SPLIT ? tg_pos.y * seg_rows : 0;
+  const uint seg_end = SPLIT ? min(seg_start + seg_rows, dim_size) : dim_size;
+  const uint rows_per_y = ceil_div(seg_rows, TG_Y);
+  const uint row_start = seg_start + tid_tg.y * rows_per_y;
+  const uint row_end = min(row_start + rows_per_y, seg_end);
   const uint col_off = outer_offset + col * inner_stride;
 
   TA best_val = Op::identity();
@@ -2104,88 +2128,14 @@ kernel void arg_reduction_outer(
   }
 
   if (tid_tg.y == 0) {
-    output[tg_pos.z * inner_size + col] =
-        static_cast<long>(shared_idxs[0][tid_tg.x]);
-  }
-}
-
-// Split-K pass 1 of the outer arg-reduction (outer_size == 1): grid y cuts
-// the dim rows into num_segs segments; each threadgroup reduces its segment
-// to per-column (value, index) partials laid out [inner_size, num_segs].
-// Values are stored in opmath_t precision so pass 2 compares exactly what
-// pass 1 loaded.
-template <
-    template <typename> class OpFn,
-    typename TI,
-    uint TG_X = OUTER_TG_WIDTH,
-    uint TG_Y = OUTER_TG_HEIGHT>
-[[max_total_threads_per_threadgroup(TG_X * TG_Y)]]
-kernel void arg_reduction_outer_p1(
-    constant TI* input [[buffer(0)]],
-    device opmath_t<TI>* val_out [[buffer(1)]],
-    device int* idx_out [[buffer(2)]],
-    // [dim_size, inner_size, num_segs, unused]
-    constant uint4& sizes [[buffer(3)]],
-    // [dim_stride, inner_stride]
-    constant uint2& strides [[buffer(4)]],
-    uint3 tid_tg [[thread_position_in_threadgroup]],
-    uint3 tg_pos [[threadgroup_position_in_grid]]) {
-  using TA = opmath_t<TI>;
-  using Op = OpFn<TA>;
-  const uint dim_size = sizes.x;
-  const uint inner_size = sizes.y;
-  const uint num_segs = sizes.z;
-  const uint dim_stride = strides.x;
-  const uint inner_stride = strides.y;
-
-  const uint col = tg_pos.x * TG_X + tid_tg.x;
-  if (col >= inner_size) {
-    return;
-  }
-  const uint seg = tg_pos.y;
-  const uint seg_rows = ceil_div(dim_size, num_segs);
-  const uint seg_start = seg * seg_rows;
-  const uint seg_end = min(seg_start + seg_rows, dim_size);
-
-  // Split the segment rows among the TG_Y workers.
-  const uint rows_per_y = ceil_div(seg_rows, TG_Y);
-  const uint row_start = seg_start + tid_tg.y * rows_per_y;
-  const uint row_end = min(row_start + rows_per_y, seg_end);
-  const uint col_off = col * inner_stride;
-
-  TA best_val = Op::identity();
-  uint32_t best_idx = row_start;
-  for (uint row = row_start; row < row_end; row++) {
-    const TA val = static_cast<TA>(input[col_off + row * dim_stride]);
-    if (Op::replace(val, best_val)) {
-      best_val = val;
-      best_idx = row;
+    if (SPLIT) {
+      val_out[col * num_segs + tg_pos.y] = shared_vals[0][tid_tg.x];
+      idx_out[col * num_segs + tg_pos.y] =
+          static_cast<int>(shared_idxs[0][tid_tg.x]);
+    } else {
+      output[tg_pos.z * inner_size + col] =
+          static_cast<long>(shared_idxs[0][tid_tg.x]);
     }
-  }
-
-  threadgroup TA shared_vals[TG_Y][TG_X];
-  threadgroup uint32_t shared_idxs[TG_Y][TG_X];
-  shared_vals[tid_tg.y][tid_tg.x] = best_val;
-  shared_idxs[tid_tg.y][tid_tg.x] = best_idx;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  for (uint stride = TG_Y / 2; stride > 0; stride >>= 1) {
-    if (tid_tg.y < stride) {
-      const TA other_val = shared_vals[tid_tg.y + stride][tid_tg.x];
-      const uint32_t other_idx = shared_idxs[tid_tg.y + stride][tid_tg.x];
-      const TA self_val = shared_vals[tid_tg.y][tid_tg.x];
-      const uint32_t self_idx = shared_idxs[tid_tg.y][tid_tg.x];
-      if (arg_replace<OpFn>(other_val, other_idx, self_val, self_idx)) {
-        shared_vals[tid_tg.y][tid_tg.x] = other_val;
-        shared_idxs[tid_tg.y][tid_tg.x] = other_idx;
-      }
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-
-  if (tid_tg.y == 0) {
-    val_out[col * num_segs + seg] = shared_vals[0][tid_tg.x];
-    idx_out[col * num_segs + seg] = static_cast<int>(shared_idxs[0][tid_tg.x]);
   }
 }
 
@@ -2250,73 +2200,42 @@ kernel void arg_reduction_narrow_p1(
   }
 }
 
-// Split-K pass 1 of the inner arg-reduction: each row of the logical
-// [num_rows, row_len] contiguous input is cut into num_segs segments of
-// seg_len; one simdgroup reduces one segment to a (value, index) partial,
-// stored in opmath_t precision. Partials laid out [num_rows, num_segs].
-template <template <typename> class OpFn, typename TI>
-kernel void arg_reduction_inner_p1(
-    constant TI* input [[buffer(0)]],
-    device opmath_t<TI>* val_out [[buffer(1)]],
-    device int* idx_out [[buffer(2)]],
-    // [num_rows * num_segs, seg_len, num_segs, row_len]
-    constant uint4& sizes [[buffer(3)]],
-    uint tptg [[threads_per_threadgroup]],
-    uint tgid [[threadgroup_position_in_grid]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
-  using TA = opmath_t<TI>;
-  using Op = OpFn<TA>;
-  const uint num_partials = sizes.x;
-  const uint seg_len = sizes.y;
-  const uint num_segs = sizes.z;
-  const uint row_len = sizes.w;
-  const uint num_simd_groups = tptg / simdgroup_size;
-  const uint partial = tgid * num_simd_groups + simdgroup_id;
-  if (partial >= num_partials) {
-    return;
-  }
-  const uint seg_off = (partial % num_segs) * seg_len;
-  const uint span = min(seg_off + seg_len, row_len) - seg_off;
-  constant TI* seg_ptr = input + (partial / num_segs) * row_len + seg_off;
-
-  TA best_val = Op::identity();
-  uint32_t best_idx = 0;
-  for (uint i = simd_lane_id; i < span; i += simdgroup_size) {
-    const TA val = static_cast<TA>(seg_ptr[i]);
-    if (Op::replace(val, best_val)) {
-      best_val = val;
-      best_idx = i;
-    }
-  }
-  auto rc = simd_arg_reduce<OpFn>(best_val, best_idx);
-  if (simd_lane_id == 0) {
-    val_out[partial] = rc.first;
-    idx_out[partial] = static_cast<int>(seg_off + rc.second);
-  }
-}
-
 #define INSTANTIATE_KERNEL(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>
 
+// Both split-K passes of the inner and outer layouts are the single-pass
+// kernel under a different mode, so 4 kernel templates cover 6 dispatches.
 #define REGISTER_ARG_REDUCTION_IMPL(TI, NAME, OP)                            \
   INSTANTIATE_KERNEL(NAME "_reduction_" #TI "_long", arg_reduction, OP, TI); \
   INSTANTIATE_KERNEL(                                                        \
       NAME "_reduction_inner_" #TI "_long", arg_reduction_inner, OP, TI);    \
   INSTANTIATE_KERNEL(                                                        \
+      NAME "_reduction_inner_p1_" #TI,                                       \
+      arg_reduction_inner,                                                   \
+      OP,                                                                    \
+      TI,                                                                    \
+      ARG_SPLIT_P1);                                                         \
+  INSTANTIATE_KERNEL(                                                        \
       NAME "_reduction_outer_" #TI "_long", arg_reduction_outer, OP, TI);    \
   INSTANTIATE_KERNEL(                                                        \
-      NAME "_reduction_outer_p1_" #TI, arg_reduction_outer_p1, OP, TI);      \
+      NAME "_reduction_outer_p1_" #TI,                                       \
+      arg_reduction_outer,                                                   \
+      OP,                                                                    \
+      TI,                                                                    \
+      OUTER_TG_WIDTH,                                                        \
+      OUTER_TG_HEIGHT,                                                       \
+      true);                                                                 \
   INSTANTIATE_KERNEL(                                                        \
-      NAME "_reduction_narrow_p1_" #TI, arg_reduction_narrow_p1, OP, TI);    \
-  INSTANTIATE_KERNEL(                                                        \
-      NAME "_reduction_inner_p1_" #TI, arg_reduction_inner_p1, OP, TI);
+      NAME "_reduction_narrow_p1_" #TI, arg_reduction_narrow_p1, OP, TI);
 
-// Split-K pass 2 is arg_reduction_inner over the (value, index) partials.
 #define REGISTER_ARG_COMBINE_IMPL(VT, NAME, OP) \
   INSTANTIATE_KERNEL(                           \
-      NAME "_reduction_combine_" #VT, arg_reduction_inner, OP, VT, true);
+      NAME "_reduction_combine_" #VT,           \
+      arg_reduction_inner,                      \
+      OP,                                       \
+      VT,                                       \
+      ARG_COMBINE);
 
 // Combine runs on the opmath partial dtype, not the input dtype: float
 // covers float/half/bfloat inputs, int covers int/short/char/uchar.
