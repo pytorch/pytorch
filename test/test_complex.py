@@ -8,13 +8,17 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
 )
 from torch.testing._internal.common_dtype import complex_types
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, TestCase
-
-
-devices = (torch.device("cpu"), torch.device("cuda:0"))
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    set_default_dtype,
+    TestCase,
+)
 
 
 class TestComplexTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(*complex_types())
     def test_to_list(self, device, dtype):
         # test that the complex float tensor has expected values and
