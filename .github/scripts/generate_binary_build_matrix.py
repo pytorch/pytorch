@@ -26,11 +26,13 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 CUDA_ARCHES = ["12.6", "13.0", "13.2", "13.4"]
 CUDA_STABLE = "13.0"
+# Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
+# an already-published torch nightly. A CUDA version belongs here only once its
+# wheels are on the download.pytorch.org index, so 13.4 is deliberately absent.
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.0": "13.0.3",
     "13.2": "13.2.1",
-    "13.4": "13.4.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
