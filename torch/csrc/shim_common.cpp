@@ -16,6 +16,8 @@
 #include <ATen/ops/from_blob.h>
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
+#include <c10/util/python_stub.h>
+#include <torch/csrc/PyObjectConversion.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -190,11 +192,13 @@ static c10::IValue to_ivalue(
     uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          torch::stable::detail::_to<AtenTensorHandle>(
-              stable_ivalue, extension_build_version));
-      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get())));
+      // unique_ptr frees the owning handle; we move the Tensor into the IValue
+      // (stealing its TensorImpl ref) instead of copying it.
+      std::unique_ptr<at::Tensor> tensor(
+          torch::aot_inductor::tensor_handle_to_tensor_pointer(
+              torch::stable::detail::_to<AtenTensorHandle>(
+                  stable_ivalue, extension_build_version)));
+      return c10::IValue(std::move(*tensor));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(torch::stable::detail::_to<int64_t>(
@@ -665,6 +669,47 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
     at::Tensor* t =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     t->set_requires_grad(requires_grad);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_has_storage = t->has_storage();
+  });
+}
+
+// PyObject <-> Tensor conversions. These are the only stable shims that need
+// functionality from libtorch_python; they reach it through a vtable that
+// libtorch_python registers at load time (torch::detail::PyObjectConversion*).
+// If libtorch_python is not loaded the call raises a clear error. PyObject*
+// crosses the ABI as an opaque void* so this stays free of Python.h.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_tensor_from_pyobject(void* py_obj, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    // AtenTensorHandle is confined to this shim boundary; the conversion vtable
+    // works in at::Tensor. Wrap the result into a new owning handle here.
+    *ret = torch::aot_inductor::new_tensor_handle(
+        torch::detail::getPyObjectConversionImpl().tensor_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ath != nullptr, "ath must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    // py_type is really a PyTypeObject*, which libtorch can't name. A
+    // PyTypeObject is a PyObject, so it crosses as PyObject* and
+    // libtorch_python casts it back.
+    *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
+        *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
+        static_cast<PyObject*>(py_type));
   });
 }
 

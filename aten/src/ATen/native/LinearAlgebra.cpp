@@ -97,6 +97,7 @@
 #include <ATen/ops/linalg_matrix_power_native.h>
 #include <ATen/ops/linalg_matrix_rank.h>
 #include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_matrix_sqrth_native.h>
 #include <ATen/ops/linalg_multi_dot_native.h>
 #include <ATen/ops/linalg_norm.h>
 #include <ATen/ops/linalg_norm_native.h>
@@ -1967,17 +1968,12 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return true;
   }
 
-  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
-  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
   const auto t1_shape = t1->sym_sizes();
-  const auto t1_strides = t1->sym_strides();
-  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (TORCH_GUARD_OR_TRUE(
-            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]))) {
-      return false;
-    }
-  }
-  return true;
+  const c10::SymDimVector leading_shape(t1_shape.begin(), t1_shape.end() - 1);
+  const c10::SymDimVector folded_shape{
+      c10::multiply_integers(leading_shape), t1_shape.back()};
+  return at::detail::computeStride(t1_shape, t1->sym_strides(), folded_shape)
+      .has_value();
 }
 
 /*
@@ -2131,7 +2127,9 @@ static Tensor _matmul_impl(
 
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + 2);
+      ret.append(output_shape.begin(), output_shape.end());
       ret.append({n, m1});
       return ret;
     }();
@@ -2142,7 +2140,9 @@ static Tensor _matmul_impl(
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + (vector_rhs ? 1 : 2));
+      ret.append(output_shape.begin(), output_shape.end());
       if (vector_rhs) {
         ret.push_back(m2);
       } else {
@@ -2304,11 +2304,12 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
-inline Tensor _move_memory_if_cuda_input(
+inline Tensor _move_memory_if_cuda_or_mps_input(
   const Tensor& mem,
   const Tensor& in
 ) {
-  return (in.device().type() == at::kCUDA)
+  const auto device_type = in.device().type();
+  return (device_type == at::kCUDA || device_type == at::kMPS)
     ? mem.to(at::device_of(in).value())
     : mem;
 }
@@ -2328,7 +2329,7 @@ inline Tensor _blob_to_Tensor(
   // be used in _compute_linear_combination
   auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
     c10::toRealValueType(in.scalar_type())).unsqueeze(0);
-  return _move_memory_if_cuda_input(tensor, in);
+  return _move_memory_if_cuda_or_mps_input(tensor, in);
 }
 
 template <typename scalar_t>
@@ -2477,7 +2478,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2549,7 +2550,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, 1},
     c10::toRealValueType(A.scalar_type())
   );
-  bs = _move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_or_mps_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -2663,10 +2664,11 @@ Tensor mexp_impl(
                              at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
-    // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
-    // and better performance overall (benchmarked).
-    const auto norm_cpu = (a.device().type() == at::kCUDA)
+    // It requires moving data back and forth between devices when `a` is on an
+    // accelerator (CUDA/MPS), but at the cost of only one single synchronization
+    // (instead of 6), and better performance overall (benchmarked).
+    const auto device_type = a.device().type();
+    const auto norm_cpu = (device_type == at::kCUDA || device_type == at::kMPS)
       ? norm.to(at::kCPU) : norm;
 
     constexpr std::array<
@@ -2686,7 +2688,7 @@ Tensor mexp_impl(
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
-        auto idx_to_device = _move_memory_if_cuda_input(
+        auto idx_to_device = _move_memory_if_cuda_or_mps_input(
           idx_curr_norm_interval, a
         );
         auto sub_a = at::index_select(a, 0, idx_to_device);
@@ -2699,7 +2701,7 @@ Tensor mexp_impl(
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
-      auto idx_to_device = _move_memory_if_cuda_input(
+      auto idx_to_device = _move_memory_if_cuda_or_mps_input(
         idx_large_norm, a
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
@@ -2789,6 +2791,13 @@ Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
   checkFloatingOrComplex(a, "linalg.matrix_exp");
 
+  // MPSGraph complex matmul is numerically unreliable before macOS 15, which
+  // breaks the scale-and-square recurrence this op relies on.
+  TORCH_CHECK(
+      a.device().type() != at::kMPS ||
+          at::detail::getMPSHooks().isOnMacOSorNewer(15, 0),
+      "linalg.matrix_exp on MPS requires macOS 15.0 or newer");
+
   NoTF32Guard disable_tf32;
 
   // Trivial cases
@@ -2805,6 +2814,33 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 // Alias
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
+}
+
+// Principal square root of a symmetric/Hermitian positive-definite matrix.
+// Computed from the eigendecomposition A = Q diag(lambda) Q^H as
+// A^{1/2} = Q diag(sqrt(lambda)) Q^H. Only the lower triangle of `a` is read
+// (via linalg_eigh, UPLO="L"); `a` is assumed Hermitian. The custom backward in
+// FunctionsManual.cpp (linalg_matrix_sqrth_differential) uses the Daleckii-Krein
+// formula, whose denominator sqrt(lambda_i) + sqrt(lambda_j) stays well-defined
+// even at degenerate eigenvalues.
+Tensor linalg_matrix_sqrth(const Tensor& a) {
+  squareCheckInputs(a, "linalg.matrix_sqrth");
+  checkFloatingOrComplex(
+      a, "linalg.matrix_sqrth", /*allow_low_precision_dtypes=*/false);
+
+  NoTF32Guard disable_tf32;
+
+  if (a.sym_size(-1) == 0) {
+    return a.clone();
+  }
+  auto [eigvals, eigvecs] = at::linalg_eigh(a);
+
+  // PSD input may still show small eigenvalues due to roundoff.
+  // The clamp_min zeroes them.
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto result = at::matmul(eigvecs * sqrt_eigvals.unsqueeze(-2), eigvecs.mH());
+  // The reconstruction is Hermitian up to roundoff; symmetrize to enforce it.
+  return 0.5 * (result + result.mH());
 }
 
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
@@ -3279,12 +3315,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
 static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
+    TORCH_CHECK_VALUE(!at::isComplexType(ord->type()),
+      "linalg.cond: Expected a non-complex scalar as the order of norm.");
     double abs_ord = std::abs(ord->toDouble());
-    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+    TORCH_CHECK_VALUE(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
-    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+    TORCH_CHECK_VALUE(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
@@ -3351,7 +3389,7 @@ Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return _linalg_cond_empty_matrix(self, self.scalar_type());
   }
 
@@ -3767,107 +3805,6 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
 Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cpu(self, mat2, result);
-}
-
-Tensor& _int_mm_dtype_out_cpu(
-    const Tensor& self,
-    const Tensor& mat2,
-    ScalarType out_dtype,
-    Tensor& result) {
-
-#ifndef STRIP_ERROR_MESSAGES
-  static constexpr std::string_view func_name = "_int_mm_dtype_out_cpu";
-#endif
-  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
-  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
-    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
-  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
-  TORCH_CHECK(result.dtype() == at::kFloat || result.dtype() == at::kBFloat16, func_name, ": result must be float32 or bfloat16");
-  TORCH_CHECK(result.scalar_type() == out_dtype, func_name, ": result dtype mismatch. Expected ", out_dtype, " but got ", result.scalar_type());
-  TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
-  TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
-  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
-  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
-
-  if (result.numel() == 0 || self.size(1) == 0) {
-    return result.zero_();
-  }
-
-  bool dispatched = false;
-
-#if defined(__aarch64__)
-  if (at::globalContext().userEnabledMkldnn()) {
-    try {
-      mkldnn_matmul_i8i8_dtype(self, mat2, result);
-      dispatched = true;
-    } catch (const std::exception& e) {
-      TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
-    }
-  }
-#endif
-
-  // ---- Naive fallback (portable) ----
-  if (!dispatched) {
-    auto b = reinterpret_cast<const int8_t*>(mat2.data_ptr());
-    auto c_float = result.scalar_type() == at::kFloat
-        ? reinterpret_cast<float*>(result.data_ptr())
-        : nullptr;
-    auto c_bf16 = result.scalar_type() == at::kBFloat16
-        ? reinterpret_cast<at::BFloat16*>(result.data_ptr())
-        : nullptr;
-    const int64_t m = result.size(0);
-    const int64_t n = result.size(1);
-    const int64_t k = self.size(1);
-    const int64_t lda_0 = self.strides()[0];
-    const int64_t lda_1 = self.strides()[1];
-    const int64_t ldb_0 = mat2.strides()[0];
-    const int64_t ldb_1 = mat2.strides()[1];
-    const int64_t ldc = result.strides()[0];
-    #define INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(a_type)                             \
-    auto a = reinterpret_cast<const a_type*>(self.data_ptr());      \
-    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
-      for (const auto idx : c10::irange(start, end)) {              \
-        const int64_t row = idx / n;                                \
-        const int64_t col = idx % n;                                \
-        int32_t acc = 0;                                            \
-        for (const auto kk : c10::irange(k)) {                      \
-          acc += static_cast<int32_t>(                              \
-                    a[row * lda_0 + kk * lda_1]) *                  \
-                static_cast<int32_t>(                               \
-                    b[kk * ldb_0 + col * ldb_1]);                   \
-        }                                                           \
-        if (c_float) {                                              \
-          c_float[row * ldc + col] = static_cast<float>(acc);       \
-        } else {                                                    \
-          c_bf16[row * ldc + col] = static_cast<at::BFloat16>(acc); \
-        }                                                           \
-      }                                                             \
-    });
-
-    if (self.scalar_type() == at::kByte) {
-      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(uint8_t);
-    } else {
-      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(int8_t);
-    }
-  }
-  return result;
-}
-
-Tensor _int_mm_dtype_cpu(
-    const Tensor& self,
-    const Tensor& mat2,
-    ScalarType out_dtype) {
-
-  TORCH_CHECK(out_dtype == at::kFloat || out_dtype == at::kBFloat16,
-      "_int_mm_dtype_cpu: out_dtype must be float32 or bfloat16");
-
-  auto result = at::empty(
-      {self.size(0), mat2.size(1)},
-      self.options().dtype(out_dtype));
-
-  return _int_mm_dtype_out_cpu(self, mat2, out_dtype, result);
 }
 
 } // namespace native
