@@ -1457,7 +1457,7 @@ class StringLikeTest(BaseTest):
         self.checkequal(('http', '://', 'www.python.org'), S, 'partition', '://')
         self.checkequal(('http://www.python.org', '', ''), S, 'partition', '?')
         self.checkequal(('', 'http://', 'www.python.org'), S, 'partition', 'http://')
-        self.checkequal(('http://www.python.', 'org', ''), S, 'partition', 'org')
+        self.checkequal(('http://www.python.', 'org', ''), S, 'partition', 'org')  # @lint-ignore
 
         self.checkraises(ValueError, S, 'partition', '')
         self.checkraises(TypeError, S, 'partition', None)
@@ -1472,7 +1472,7 @@ class StringLikeTest(BaseTest):
         self.checkequal(('http', '://', 'www.python.org'), S, 'rpartition', '://')
         self.checkequal(('', '', 'http://www.python.org'), S, 'rpartition', '?')
         self.checkequal(('', 'http://', 'www.python.org'), S, 'rpartition', 'http://')
-        self.checkequal(('http://www.python.', 'org', ''), S, 'rpartition', 'org')
+        self.checkequal(('http://www.python.', 'org', ''), S, 'rpartition', 'org')  # @lint-ignore
 
         self.checkraises(ValueError, S, 'rpartition', '')
         self.checkraises(TypeError, S, 'rpartition', None)
