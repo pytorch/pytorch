@@ -11,7 +11,7 @@ even when the group is small enough to fit in one fragment. Inductor owns FX
 normalization and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
 
-The main caller is ``materialize_flex_gemm_epilogue`` in ``epilogue.py``.
+The main caller is ``materialize_flex_gemm_epilogue`` in ``fx_cutedsl_codegen.py``.
 FlexGEMM lowering first calls ``analyze_flex_gemm_epilogue``, which uses this
 module's layout and reduction-recognition helpers. Materialization then routes
 FX nodes through ``lower_view_or_reshape``, ``lower_prepare_softmax_online``,
@@ -28,7 +28,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     tensorssa_reduction,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
@@ -141,7 +140,7 @@ def _guard_grouped_reshape_group(
 
 def _syntactic_grouped_tensor_layout(
     shape: tuple[Any, ...],
-) -> FlexGemmLocalReduceGeometry | None:
+) -> GemmReductionGeometry | None:
     """Match grouped-reshape syntax before validating source geometry."""
     if len(shape) not in (3, 4):
         return None
@@ -150,13 +149,13 @@ def _syntactic_grouped_tensor_layout(
         and shape[-1] > 0
         and _is_inferred_reshape_dim(shape[-2])
     ):
-        return FlexGemmLocalReduceGeometry(group=shape[-1], axis=1)
+        return GemmReductionGeometry(group=shape[-1], axis=1)
     if (
         _is_inferred_reshape_dim(shape[-3])
         and isinstance(shape[-2], int)
         and shape[-2] > 0
     ):
-        return FlexGemmLocalReduceGeometry(group=shape[-2], axis=0)
+        return GemmReductionGeometry(group=shape[-2], axis=0)
     return None
 
 
@@ -184,7 +183,7 @@ def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
 def _grouped_layout_matches_source_shape(
     shape: tuple[Any, ...],
     source_shape: tuple[Any, ...],
-    layout: FlexGemmLocalReduceGeometry,
+    layout: GemmReductionGeometry,
 ) -> bool:
     """Require a 2-D GEMM output reshape to split exactly M or N."""
     if len(shape) != 3:
@@ -206,7 +205,7 @@ def _grouped_layout_matches_source_shape(
 
 def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
-) -> FlexGemmLocalReduceGeometry | None:
+) -> GemmReductionGeometry | None:
     """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
@@ -220,10 +219,10 @@ def grouped_tensor_layout(
             candidates = []
             match shape:
                 case (*_, int(group)) if group > 0:
-                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=1))
+                    candidates.append(GemmReductionGeometry(group=group, axis=1))
             match shape:
                 case (*_, int(group), _) if group > 0:
-                    candidates.append(FlexGemmLocalReduceGeometry(group=group, axis=0))
+                    candidates.append(GemmReductionGeometry(group=group, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout

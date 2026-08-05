@@ -234,8 +234,11 @@ dtensor_compiled_fails = {
     xfail("reshape_as"),
     xfail("view"),
     xfail("view_as"),
+    # No sharding strategy for aten.transpose_copy.int on 0-d inputs.
+    xfail("transpose_copy"),
     # View-type ops that decompose into as_strided (at autograd level).
-    # DTensor doesn't have a sharding strategy for as_strided.
+    # DTensor only answers as_strided when it is a permutation of the base
+    # dims, which these are not.
     xfail("atleast_1d"),
     xfail("atleast_2d"),
     xfail("atleast_3d"),
@@ -247,15 +250,11 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("movedim"),
     xfail("narrow"),
-    xfail("permute"),
     xfail("select"),
     xfail("slice"),
     xfail("squeeze"),
     xfail("squeeze", "multiple"),
-    xfail("t"),
-    xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
     # Decompositions that use plain tensor constructors (e.g. arange),
