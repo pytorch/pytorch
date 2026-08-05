@@ -120,9 +120,9 @@
 Register callbacks that fire at each point in any CUDA graph's lifecycle -- capture
 start, capture end, instantiate, each replay, and destroy -- for example, a profiler
 observing graph lifecycle without the graph code carrying any consumer knowledge, and
-including graphs the consumer did not build. Registering a hook is the opt-in; with none
-registered they are no-ops. Each has a per-graph counterpart on
-{class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
+including graphs the consumer did not build. Registering a hook is the opt-in and the whole
+API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
+counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graphs
@@ -131,18 +131,11 @@ registered they are no-ops. Each has a per-graph counterpart on
     :nosignatures:
 
     register_graph_capture_start_hook
-    run_graph_capture_start_hooks
     register_graph_capture_end_hook
-    run_graph_capture_end_hooks
     register_graph_instantiate_hook
-    run_graph_instantiate_hooks
     register_graph_replay_start_hook
-    run_graph_replay_start_hooks
     register_graph_replay_end_hook
-    run_graph_replay_end_hooks
     register_graph_destroy_hook
-    run_graph_destroy_hooks
-    graph_destroy_hooks_active
 
 .. currentmodule:: torch.cuda
 ```

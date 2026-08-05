@@ -47,18 +47,11 @@ __all__ = [
     "export_dot",
     "export_graph_data",
     "register_graph_capture_start_hook",
-    "run_graph_capture_start_hooks",
     "register_graph_capture_end_hook",
-    "run_graph_capture_end_hooks",
     "register_graph_instantiate_hook",
-    "run_graph_instantiate_hooks",
     "register_graph_replay_start_hook",
-    "run_graph_replay_start_hooks",
     "register_graph_replay_end_hook",
-    "run_graph_replay_end_hooks",
     "register_graph_destroy_hook",
-    "run_graph_destroy_hooks",
-    "graph_destroy_hooks_active",
 ]
 
 
@@ -174,8 +167,8 @@ class _RetainedCallbacks:
 # consumer (e.g. a profiler observer) registers a hook that fires for every graph, so the graph
 # code stays free of consumer knowledge and a consumer sees captures of graphs it did not build
 # (an inductor or NCCL capture); registering a hook is the opt-in. Keyed by RemovableHandle id.
-# Every global runner swallows per-hook errors so one consumer cannot break a graph lifecycle
-# step for another -- unlike the per-graph hooks, whose errors propagate to the graph's owner.
+# The fan-out (_run_global_hooks) swallows per-hook errors so one consumer cannot break a graph
+# lifecycle step for another -- unlike the per-graph hooks, whose errors propagate to the owner.
 _global_capture_start_hooks: OrderedDict[int, Callable[[CUDAGraph], None]] = (
     OrderedDict()
 )
@@ -224,11 +217,6 @@ def register_graph_capture_start_hook(
     return _register_global_hook(_global_capture_start_hooks, fn)
 
 
-def run_graph_capture_start_hooks(torch_cuda_graph: CUDAGraph) -> None:
-    """Run every registered capture-start hook with the graph."""
-    _run_global_hooks(_global_capture_start_hooks, torch_cuda_graph)
-
-
 def register_graph_capture_end_hook(
     fn: Callable[[CUDAGraph], None],
 ) -> RemovableHandle:
@@ -238,23 +226,12 @@ def register_graph_capture_end_hook(
     return _register_global_hook(_global_capture_end_hooks, fn)
 
 
-def run_graph_capture_end_hooks(torch_cuda_graph: CUDAGraph) -> None:
-    """Run every registered capture-end hook with the graph."""
-    _run_global_hooks(_global_capture_end_hooks, torch_cuda_graph)
-
-
 def register_graph_instantiate_hook(
     fn: Callable[[CUDAGraph], None],
 ) -> RemovableHandle:
     """Register a hook run with each CUDA graph right after it is instantiated. Returns a
     RemovableHandle; call ``.remove()`` to unregister."""
     return _register_global_hook(_global_instantiate_hooks, fn)
-
-
-def run_graph_instantiate_hooks(torch_cuda_graph: CUDAGraph) -> None:
-    """Run every registered instantiate hook with the graph. Errors are swallowed so one
-    consumer cannot break instantiate() for another."""
-    _run_global_hooks(_global_instantiate_hooks, torch_cuda_graph)
 
 
 def register_graph_replay_start_hook(
@@ -270,11 +247,6 @@ def register_graph_replay_start_hook(
     return _register_global_hook(_global_replay_start_hooks, fn)
 
 
-def run_graph_replay_start_hooks(torch_cuda_graph: CUDAGraph) -> None:
-    """Run every registered replay-start hook with the graph."""
-    _run_global_hooks(_global_replay_start_hooks, torch_cuda_graph)
-
-
 def register_graph_replay_end_hook(
     fn: Callable[[CUDAGraph], None],
 ) -> RemovableHandle:
@@ -286,14 +258,9 @@ def register_graph_replay_end_hook(
     return _register_global_hook(_global_replay_end_hooks, fn)
 
 
-def run_graph_replay_end_hooks(torch_cuda_graph: CUDAGraph) -> None:
-    """Run every registered replay-end hook with the graph."""
-    _run_global_hooks(_global_replay_end_hooks, torch_cuda_graph)
-
-
 # Graph-destroy hooks, each handed the destroyed graph's exec ids (tools_id >> 32) so a
 # consumer can purge its per-graph state. A CUDAGraph arms a single destroy callback (only
-# while a hook is registered, see graph_destroy_hooks_active) that fans out here.
+# while a hook is registered, see _graph_destroy_hooks_active) that fans out here.
 _global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
 
 
@@ -307,13 +274,13 @@ def register_graph_destroy_hook(fn: Callable[[set[int]], None]) -> RemovableHand
     return handle
 
 
-def graph_destroy_hooks_active() -> bool:
+def _graph_destroy_hooks_active() -> bool:
     """True when any graph-destroy hook is registered -- the gate a CUDAGraph checks before
     arming its destroy callback."""
     return bool(_global_destroy_hooks)
 
 
-def run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
+def _run_graph_destroy_hooks(exec_graph_ids: set[int]) -> None:
     """Invoke every registered hook with the destroyed exec graph ids, swallowing per-hook
     errors so one failure does not abort the rest (matching the destroy-callback fire
     semantics). The single entry point a graph's destroy callback calls."""
@@ -423,9 +390,9 @@ class CUDAGraph(_CUDAGraph):
         # a hook: a closure reachable to the graph would pin it past collection so it
         # never fires. reset() re-arms a fresh holder, so this re-registers per cycle;
         # a graph that records nothing just fires on an empty set (a no-op).
-        if graph_destroy_hooks_active():
+        if _graph_destroy_hooks_active():
             exec_ids = self._recorded_exec_ids
-            self.register_destroy_callback(lambda: run_graph_destroy_hooks(exec_ids))
+            self.register_destroy_callback(lambda: _run_graph_destroy_hooks(exec_ids))
 
     def register_capture_start_hook(
         self, hook: Callable[[CUDAGraph], None]
@@ -437,7 +404,7 @@ class CUDAGraph(_CUDAGraph):
         .. warning::
             The hook runs inside the capture: any CUDA work it issues is captured into
             the graph, and under the default ``"global"`` capture error mode an unsafe
-            call raises. See :func:`torch.cuda.register_graph_capture_start_hook`.
+            call raises. See :func:`torch.cuda.graphs.register_graph_capture_start_hook`.
         """
         from torch.utils.hooks import RemovableHandle
 
@@ -650,7 +617,8 @@ class CUDAGraph(_CUDAGraph):
         # Capture is live from here, so a hook must not issue CUDA work (see
         # register_capture_start_hook). Global hooks run before the per-graph ones,
         # matching instantiate().
-        run_graph_capture_start_hooks(self)
+        if _global_capture_start_hooks:
+            _run_global_hooks(_global_capture_start_hooks, self)
         for hook in list(self._capture_start_hooks.values()):
             hook(self)
 
@@ -686,7 +654,8 @@ class CUDAGraph(_CUDAGraph):
         from torch.cuda._graph_annotations import maybe_stamp_capture_graph_id
 
         maybe_stamp_capture_graph_id(self)
-        run_graph_capture_end_hooks(self)
+        if _global_capture_end_hooks:
+            _run_global_hooks(_global_capture_end_hooks, self)
         for hook in list(self._capture_end_hooks.values()):
             hook(self)
         if not self._keep_graph:
@@ -710,7 +679,8 @@ class CUDAGraph(_CUDAGraph):
         # one query; the cache is dropped afterwards so nothing is retained for the graph.
         self._caching_graph_data = True
         try:
-            run_graph_instantiate_hooks(self)
+            if _global_instantiate_hooks:
+                _run_global_hooks(_global_instantiate_hooks, self)
             for hook in list(self._post_instantiate_hooks.values()):
                 hook(self)
         finally:
@@ -732,7 +702,7 @@ class CUDAGraph(_CUDAGraph):
         if not self._has_graph_exec:
             self.instantiate()
         if _global_replay_start_hooks:
-            run_graph_replay_start_hooks(self)
+            _run_global_hooks(_global_replay_start_hooks, self)
         if self._replay_start_hooks:
             for hook in list(self._replay_start_hooks.values()):
                 hook(self)
@@ -740,7 +710,7 @@ class CUDAGraph(_CUDAGraph):
             super().replay()
         finally:
             if _global_replay_end_hooks:
-                run_graph_replay_end_hooks(self)
+                _run_global_hooks(_global_replay_end_hooks, self)
             if self._replay_end_hooks:
                 for hook in list(self._replay_end_hooks.values()):
                     hook(self)
