@@ -36,6 +36,7 @@ from torch._inductor.utils import (
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
@@ -1655,6 +1656,81 @@ def forward(self, x_1, output_1):
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    @common_utils.parametrize("gap", [1, 2])
+    def test_triton_kernel_mutated_offset_view_not_miscompiled(self, gap):
+        # Functionalizing a mutated pointer arg used to clone the view itself, via an
+        # as_strided spanning storage_offset + span elements of the *base* storage.
+        # Once Inductor realized the view as its own buffer that extent was past the
+        # end, and the copy kernel read out of bounds with no mask -- returning freed
+        # memory for the elements the kernel chose not to write.
+        # gap=1 gives a dense row; gap=2 makes the view non-dense, so its clone has
+        # to materialize the gaps between elements as well.
+        @triton.jit
+        def maybe_fill_kernel(
+            out_ptr, do_write, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr
+        ):
+            # do_write has to stay a runtime arg: as a tl.constexpr Triton folds
+            # the store away and the pointer is no longer seen as mutated.
+            if do_write != 0:
+                offs = tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols)
+
+        n_cols, n_rows, skipped_row = 256, 2, 1
+        width = n_cols * gap
+
+        def f():
+            base = torch.zeros(n_rows, width, device=GPU_TYPE)
+            for i in range(n_rows):
+                row = base[i : i + 1, ::gap]  # storage_offset = i * width
+                maybe_fill_kernel[(1,)](
+                    row, 0 if i == skipped_row else 1, n_cols, GAP=gap, BLOCK=n_cols
+                )
+                # The write-back is what forces the view to be realized as its own
+                # buffer, which is what used to put the as_strided out of bounds.
+                base[i : i + 1, ::gap] = row
+            return base
+
+        expected = torch.zeros(n_rows, width, device=GPU_TYPE)
+        for i in range(n_rows):
+            if i != skipped_row:
+                expected[i, ::gap] = 1.0
+        self.assertEqual(f(), expected)
+        self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
+
+    @requires_gpu
+    @largeTensorTest("6GB", device=GPU_TYPE)
+    def test_triton_kernel_mutated_offset_view_large_tensor(self):
+        # Same shape as above, but the base holds more than 2**31 elements, so
+        # Inductor has to index its own generated kernels with int64. An int32 index
+        # would wrap and corrupt the row the kernel leaves alone.
+        @triton.jit
+        def maybe_fill_kernel(out_ptr, do_write, n_elements, BLOCK: tl.constexpr):
+            if do_write != 0:
+                offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs, 1, mask=offs < n_elements)
+
+        n_cols, n_rows, skipped_row, block = 2**30 + 1024, 2, 1, 1024
+        self.assertGreater(n_rows * n_cols, torch.iinfo(torch.int32).max)
+
+        def f():
+            base = torch.zeros(n_rows, n_cols, device=GPU_TYPE, dtype=torch.int8)
+            for i in range(n_rows):
+                row = base[i : i + 1]
+                maybe_fill_kernel[(triton.cdiv(n_cols, block),)](
+                    row, 0 if i == skipped_row else 1, n_cols, BLOCK=block
+                )
+                base[i : i + 1] = row
+            return base
+
+        out = torch.compile(f, fullgraph=True)()
+        # min/max per row rather than a full compare, which would need another copy
+        # of a multi-gigabyte tensor.
+        for i in range(n_rows):
+            want = 0 if i == skipped_row else 1
+            self.assertEqual(out[i].min().item(), want)
+            self.assertEqual(out[i].max().item(), want)
 
     @requires_gpu
     def test_triton_kernel_fallback(self):

@@ -2174,9 +2174,21 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 
-def clone_preserve_strides(x):
+def clone_preserve_strides(x, *, base=None):
+    """Clone x, preserving its size, stride and storage_offset.
+
+    The clone spans storage_offset + span elements and is copied out of x's storage,
+    so it is only meaningful while all of that storage is addressable. That holds in
+    eager, but a tracing backend may materialize an intermediate view as a buffer
+    sized to the view alone, leaving the leading storage_offset elements outside any
+    allocation. Callers tracing a view with a non-zero storage_offset must therefore
+    pass its ``base``, so the clone is taken from the base and x's view re-derived
+    from it -- every access then stays inside one real buffer. See how
+    auto_functionalize clones mutable custom-op args via their bases.
+    """
+    src = x if base is None else base
     needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
+        src.size(), src.stride(), src.storage_offset()
     )
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
@@ -2191,7 +2203,7 @@ def clone_preserve_strides(x):
         torch._C._dispatch_tls_set_dispatch_key_excluded(
             torch._C.DispatchKey.ADInplaceOrView, True
         )
-        buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+        buffer = torch.as_strided(src, (needed_size,), (1,), 0).clone()
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(
