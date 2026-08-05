@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
-     skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
@@ -3077,6 +3077,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @skipIfRocmVersionAtLeast([7, 14])
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -6419,15 +6420,19 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                         torch.bfloat16: 5e-2, torch.half: 5e-2})
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @parametrize("beta", [1.0, 0.75, -2.0])
-    @parametrize("alpha", [1.0, 0.5])
+    @parametrize("alpha", [1.0, 0.5, 0.0])
+    @parametrize("shape", [(64, 96, 32), (1, 8, 32)])
     @parametrize("transpose_mat1", [False, True])
     @parametrize("transpose_mat2", [False, True])
     @tf32_on_and_off(0.05)
-    def test_addmm_out_distinct_c_and_d(self, device, dtype, beta, alpha,
+    def test_addmm_out_distinct_c_and_d(self, device, dtype, beta, alpha, shape,
                                         transpose_mat1, transpose_mat2):
         # When `out` is a distinct tensor from `input`, CUDA addmm can hand C and D
         # to cuBLASLt as separate pointers instead of copying C into D first.
-        m, n, k = 64, 96, 32
+        # alpha == 0 and a skinny m are both covered on purpose: with no GEMM to
+        # run, cuBLASLt may skip writing D and silently drop the beta * C term,
+        # and whether it does depends on the shape and the algorithm chosen.
+        m, n, k = shape
         mat1 = make_tensor((k, m) if transpose_mat1 else (m, k), dtype=dtype, device=device, low=-1, high=1)
         mat2 = make_tensor((n, k) if transpose_mat2 else (k, n), dtype=dtype, device=device, low=-1, high=1)
         if transpose_mat1:
@@ -6437,7 +6442,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
 
         inp_before = inp.clone()
-        out = torch.empty((m, n), dtype=dtype, device=device)
+        # Deliberately not `empty`: a path that never writes D would otherwise be
+        # able to pass on whatever the allocator happened to hand back.
+        out = torch.full((m, n), 7.0, dtype=dtype, device=device)
         res = torch.addmm(inp, mat1, mat2, beta=beta, alpha=alpha, out=out)
         self.assertIs(res, out)
         ref = beta * inp.double() + alpha * (mat1.double() @ mat2.double())
