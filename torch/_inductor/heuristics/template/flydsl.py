@@ -1,3 +1,4 @@
+import functools
 import logging
 from dataclasses import asdict, dataclass
 from itertools import product
@@ -102,6 +103,7 @@ def is_gemm_config_valid_for_shape(
     )
 
 
+@functools.cache
 def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the exhaustive configuration set for the gfx950 FlyDSL GEMM kernel.
@@ -137,6 +139,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     return valid_configs
 
 
+@functools.cache
 def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the default configuration set for the gfx950 FlyDSL GEMM kernel.

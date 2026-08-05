@@ -219,6 +219,8 @@ def check_supported_striding(mat_a, mat_b) -> None:
 def _fits_int32_buffer_span(
     rows: int, row_stride: int | None, cols: int, itemsize: int
 ) -> bool:
+    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
+    # 32-bit byte offset.
     int32_max = (1 << 31) - 1
     return (
         0 < rows <= int32_max
@@ -263,8 +265,6 @@ def get_flydsl_mm_template_kwargs(
 
     if dtype not in (torch.float16, torch.bfloat16):
         return []
-
-    from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
     # Require vectorized tensor origins and row increments to stay GPU-aligned.
     itemsize = dtype.itemsize
@@ -312,13 +312,14 @@ def get_flydsl_mm_template_kwargs(
         return []
 
     # The wrapper transposes aten.mm's [K, N] RHS view to FlyDSL's [N, K].
+    from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
+
     gemm_dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
     # Filter shape-incompatible configs before autotuning.
     return [
         {
             **gemm_config,
             "GEMM_DTYPE_ID": gemm_dtype_id,
-            "MAT2_IS_NK": False,
             "GEMM_M": m_static,
             "GEMM_N": n_static,
             "GEMM_K": k_static,

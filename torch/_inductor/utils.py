@@ -2226,16 +2226,13 @@ def use_flydsl_gemm_template(layout: Layout) -> bool:
     if not flydsl_utils.runtime_available():
         return False
 
+    from .codegen.flydsl.flydsl_scheduling import _get_flydsl_device_arch
+
     # The vendored FlyDSL GEMM kernel targets the gfx950 (MI350) layout; its LDS
     # capacity and MFMA assumptions do not hold on other archs, so gate strictly
     # on gfx950 to avoid emitting kernels that fail to compile or run there.
-    try:
-        device_index = layout.device.index if layout.device.index is not None else 0
-        gcn_arch = torch.cuda.get_device_properties(device_index).gcnArchName or ""
-    except Exception:
-        log.debug("Could not determine ROCm arch for FlyDSL gate", exc_info=True)
-        return False
-    if gcn_arch.split(":", 1)[0] != "gfx950":
+    device_index = layout.device.index if layout.device.index is not None else 0
+    if _get_flydsl_device_arch(device_index) != "gfx950":
         return False
     return True
 

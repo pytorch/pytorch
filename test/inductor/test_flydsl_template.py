@@ -359,32 +359,70 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(metadata["precompile_strides"], {"output": [1]})
         self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
 
-    def test_compiled_cache_keys_only_on_param(self):
+    @parametrize(
+        "size,dtype,stride,offset,n",
+        (
+            ([1, 64, 128], torch.float16, [8192, 128, 1], 0, 64),
+            ([64, 128], torch.float32, [128, 1], 0, 64),
+            ([64, 128], torch.float16, [129, 1], 0, 64),
+            ([64, 128], torch.float16, [128, 1], 1, 64),
+            ([64, 128], torch.float16, [128, 1], 0, 63),
+        ),
+    )
+    def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
+        from torch._inductor.kernel import mm
+
+        def node(size, stride, offset=0):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: SimpleNamespace(offset=offset),
+            )
+
+        mat1 = node(size, stride, offset)
+        mat2 = node([128, n], [1, 128])
+        layout = SimpleNamespace(stride=[n, 1], dtype=dtype, device=torch.device("cpu"))
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_unaligned", return_value=False),
+        ):
+            result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
+            self.assertEqual(result, [])
+
+    def test_compiled_cache_keys_on_device_and_param(self):
         jit_func = SimpleNamespace()
-        compile_args = (object(),)
-        dispatch_args = (object(),)
         compiled = mock.Mock()
         compiler = mock.Mock(return_value=compiled)
 
-        first = run_cached_flydsl(
-            jit_func,
-            *compile_args,
-            constexpr_param=_CacheParam(),
-            compiler=compiler,
-            dispatch_args=dispatch_args,
-        )
-        second = run_cached_flydsl(
-            jit_func,
-            object(),
-            constexpr_param=_CacheParam(),
-            compiler=compiler,
-            dispatch_args=dispatch_args,
-        )
+        def invoke(device_index):
+            dispatch = SimpleNamespace(device=SimpleNamespace(index=device_index))
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        first = invoke(0)
+        with mock.patch(
+            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
+        ) as cache_lock:
+            second = invoke(0)
+        third = invoke(1)
 
         self.assertIs(first, compiled)
         self.assertIs(second, compiled)
-        compiler.assert_called_once_with(jit_func, *compile_args)
-        compiled.assert_called_once_with(*dispatch_args)
+        self.assertIs(third, compiled)
+        cache_lock.__enter__.assert_not_called()
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_called_once()
 
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
@@ -419,24 +457,6 @@ class TestFlyDSLTemplate(TestCase):
 
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
-
-    def test_compiled_cache_hit_skips_lock(self):
-        compiled = mock.Mock()
-        cache_key = (os.getpid(), None, ("param",))
-        jit_func = SimpleNamespace(_compiled_cache={cache_key: compiled})
-        with mock.patch(
-            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
-        ) as cache_lock:
-            result = run_cached_flydsl(
-                jit_func,
-                constexpr_param=_CacheParam(),
-                compiler=mock.Mock(),
-                dispatch_args=("dispatch",),
-            )
-
-        self.assertIs(result, compiled)
-        cache_lock.__enter__.assert_not_called()
-        compiled.assert_called_once_with("dispatch")
 
     def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool | None = True):
         from torch._inductor.utils import run_and_get_code
