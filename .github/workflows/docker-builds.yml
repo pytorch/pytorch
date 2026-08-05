@@ -57,6 +57,7 @@ jobs:
           pytorch-linux-jammy-py3.13-clang21,
           pytorch-linux-jammy-py3.14-clang21,
           pytorch-linux-jammy-py3.14t-clang21,
+          pytorch-linux-jammy-py3.15-clang21,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
           pytorch-linux-noble-rocm-nightly-py3,
