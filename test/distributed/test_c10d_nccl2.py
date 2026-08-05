@@ -19,7 +19,9 @@ from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -73,6 +75,79 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduction_semantics(self) -> None:
+        tensor = torch.ones(4, dtype=torch.bool, device=self.device)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        self.assertEqual(
+            tensor.view(torch.uint8),
+            torch.ones(4, dtype=torch.uint8, device=self.device),
+        )
+
+        with self.assertRaisesRegex(TypeError, "ReduceOp.AVG"):
+            dist.all_reduce(tensor, op=dist.ReduceOp.AVG)
+
+        for dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, "Unsupported Float8"):
+                dist.all_reduce(tensor)
+
+        tensor = torch.empty(4, dtype=torch.float4_e2m1fn_x2, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "Unsupported Float4"):
+            dist.all_reduce(tensor)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_if_lt_x_gpu(2)
+    def test_float8_reduction(self) -> None:
+        if torch.cuda.get_device_capability(self.device) < (9, 0):
+            self.skipTest("Float8 reductions require sm90 or newer")
+        for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+            tensor = torch.ones(4, device=self.device).to(dtype)
+            dist.all_reduce(tensor)
+            self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_float4_transport(self) -> None:
+        tensor = torch.full(
+            (4,), self.rank + 1, dtype=torch.uint8, device=self.device
+        ).view(torch.float4_e2m1fn_x2)
+        dist.broadcast(tensor, src=0)
+        self.assertEqual(
+            tensor.view(torch.uint8),
+            torch.ones(4, dtype=torch.uint8, device=self.device),
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ephemeral_timeout(self) -> None:
+        dist.set_timeout(timedelta(seconds=3))
+
+        existing_work = dist.all_reduce(
+            torch.ones(4, device=self.device), async_op=True
+        )
+        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=10))
+        self.assertEqual(existing_work.timeout, timedelta(seconds=3))
+
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        self.assertEqual(work.timeout, timedelta(seconds=13))
+        existing_work.wait()
+        work.wait()
+        torch.cuda.synchronize(self.device)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            work = dist.all_reduce(tensor, async_op=True)
+            if work.timeout == timedelta(seconds=3):
+                work.wait()
+                return
+            work.wait()
+            time.sleep(0.1)
+        self.fail("ephemeral timeout was not reset after collective completion")
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
@@ -98,6 +173,27 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         dist.all_reduce(t)
         expected = float(sum(range(self.world_size)))
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_group(self) -> None:
+        tensor = torch.ones(4, device=self.device)
+        group = dist.new_group(device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        self.assertEqual(shrunk.size(), 1)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
 
 
 class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
@@ -155,6 +251,30 @@ class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-legacy"
+
+
+class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
+    ranks_per_root = 1
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = str(cls.ranks_per_root)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
+    world_size = 3
+    ranks_per_root = 2
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(3)
+    def test_collective_with_scalable_init(self) -> None:
+        self._check_all_reduce()
 
 
 class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
@@ -285,6 +405,7 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_large_in_place_all_gather(self) -> None:
         numel = 16 * 1024 * 1024
         output = torch.empty(
