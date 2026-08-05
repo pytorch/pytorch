@@ -124,13 +124,11 @@ TEST(XPUCachingAllocatorTest, NoSplitPool) {
   // Use a fixed user-created pool id that won't collide with any MemPool
   // created by other tests.
   const c10::MempoolId_t pool_id{0, 9999};
-  c10::xpu::XPUCachingAllocator::createOrIncrefPool(device, pool_id);
 
   // Step 1: pre-fill the pool cache with a 20 MB block.
   const size_t _20mb = 20 * 1024 * 1024;
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
   void* large_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_20mb);
-  c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
   c10::xpu::XPUCachingAllocator::raw_delete(large_ptr);
 
   // Step 2: mark pool as no-split.
@@ -139,7 +137,6 @@ TEST(XPUCachingAllocatorTest, NoSplitPool) {
   // Step 3: allocate a smaller block (10 MB); the 20 MB cached block must not
   // be split.
   const size_t _10mb = 10 * 1024 * 1024;
-  c10::xpu::XPUCachingAllocator::beginAllocateToPool(device, pool_id, filter);
   void* small_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   c10::xpu::XPUCachingAllocator::endAllocateToPool(device, pool_id);
 

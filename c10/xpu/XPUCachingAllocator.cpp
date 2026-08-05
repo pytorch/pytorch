@@ -1840,7 +1840,8 @@ class DeviceCachingAllocator {
   }
 
   void setNoSplit(MempoolId_t mempool_id) {
-    // Choose if this pool should not split a segment
+    // Choose if this pool should not split a segment. Also cleared by
+    // releasePool.
     std::lock_guard<std::recursive_mutex> lock(mutex);
     no_split_pools.insert(mempool_id);
   }
@@ -1975,6 +1976,7 @@ class DeviceCachingAllocator {
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
     }
+    no_split_pools.erase(mempool_id);
   }
 };
 
