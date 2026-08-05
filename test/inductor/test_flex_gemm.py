@@ -17,8 +17,6 @@ from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     mx_e8m0_scale,
-    nvfp4_e4m3_scale,
-    nvfp4_pack,
 )
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.exc import InductorError
@@ -27,7 +25,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, SM120OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, pack_uint4
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -35,6 +32,15 @@ from torch.testing._internal.common_utils import (
     skipIfNoCuteDSL,
     TestCase,
 )
+
+
+def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor:
+    """Compute the ordinary E4M3 scale used by NVFP4 test epilogues."""
+    return torch.clamp(
+        amax.float() / max_value,
+        min=torch.finfo(torch.float8_e4m3fn).tiny,
+        max=torch.finfo(torch.float8_e4m3fn).max,
+    ).to(torch.float8_e4m3fn)
 
 
 try:
@@ -4523,23 +4529,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
 
-    def test_nvfp4_pack_matches_reference(self):
-        values = torch.tensor(
-            [
-                [-6.0, -5.0],
-                [-3.5, -2.5],
-                [-1.75, -1.25],
-                [-0.75, -0.25],
-                [0.25, 0.75],
-                [1.25, 1.75],
-                [2.5, 3.5],
-                [5.0, 6.0],
-            ],
-            dtype=torch.float32,
-        )
-        expected = pack_uint4(_f32_to_floatx_unpacked(values, 2, 1)).squeeze(-1)
-        self.assertEqual(nvfp4_pack(values), expected)
-
     def test_quant_scale_fake_strides_match_eager(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4634,13 +4623,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         nv_amax = amax[:6]
-        nv_scale = nvfp4_e4m3_scale(nv_amax)
-        self.assertEqual(
-            nv_scale.view(torch.uint8),
-            nvfp4_e4m3_scale(nv_amax, max_value=6.0, rounding="nearest").view(
-                torch.uint8
-            ),
-        )
         self.assertEqual(
             nvfp4_e4m3_scale(nv_amax, max_value=4.0),
             torch.clamp(
@@ -4651,8 +4633,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         with self.assertRaisesRegex(ValueError, "rounding must be 'floor', 'rceil'"):
             mx_e8m0_scale(amax, rounding="nearest")
-        with self.assertRaisesRegex(ValueError, "rounding must be 'nearest'"):
-            nvfp4_e4m3_scale(amax, rounding="rceil")
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

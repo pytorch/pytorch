@@ -147,17 +147,6 @@ def normalize_mx_scale_rounding(rounding: str | None) -> str:
             )
 
 
-def normalize_nvfp4_scale_rounding(rounding: str | None) -> str:
-    """Resolve the NVFP4 scale-rounding recipe."""
-    match rounding:
-        case None | "nearest":
-            return "nearest"
-        case _:
-            raise ValueError(
-                f"nvfp4_e4m3_scale rounding must be 'nearest' or None, got {rounding!r}"
-            )
-
-
 def validate_scale_max_value(op_name: str, max_value: float) -> None:
     """Require a finite positive quantized-type maximum."""
     if (
@@ -245,93 +234,6 @@ def _(
     validate_scale_max_value("mx_e8m0_scale", max_value)
     normalize_mx_scale_rounding(rounding)
     return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
-
-
-@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
-def nvfp4_e4m3_scale(
-    amax: torch.Tensor,
-    max_value: float = 6.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    """Encode an NVFP4 per-block E4M3 scale using nearest rounding.
-
-    Args:
-        amax: Nonnegative absolute block maxima to encode.
-        max_value: Maximum magnitude of the quantized element type. The default
-            preserves the symmetric E2M1 recipe.
-        rounding: Scale calculation recipe. Only ``"nearest"`` is supported.
-
-    Returns:
-        E4M3 scale values with the same shape as ``amax``.
-    """
-    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
-    normalize_nvfp4_scale_rounding(rounding)
-    scale = amax.to(torch.float32) / max_value
-    scale = torch.clamp(
-        scale,
-        min=torch.finfo(torch.float8_e4m3fn).tiny,
-        max=torch.finfo(torch.float8_e4m3fn).max,
-    )
-    return scale.to(torch.float8_e4m3fn)
-
-
-@nvfp4_e4m3_scale.register_fake
-def _(
-    amax: torch.Tensor,
-    max_value: float = 6.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    validate_scale_max_value("nvfp4_e4m3_scale", max_value)
-    normalize_nvfp4_scale_rounding(rounding)
-    return torch.empty_like(amax, dtype=torch.float8_e4m3fn)
-
-
-def validate_nvfp4_pack_input(input: torch.Tensor) -> None:
-    """Require paired Float32 values along the innermost dimension."""
-    if input.dtype is not torch.float32 or input.ndim == 0 or input.shape[-1] != 2:
-        raise ValueError(
-            "nvfp4_pack input must be Float32 with innermost dimension 2, "
-            f"got dtype={input.dtype}, shape={tuple(input.shape)}"
-        )
-
-
-@torch.library.custom_op("flex_gemm::nvfp4_pack", mutates_args=())
-def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
-    """Quantize adjacent normalized values into packed E2M1 storage.
-
-    Args:
-        input: Float32 values with an innermost pair dimension. Finite values
-            are rounded to nearest E2M1, and infinities saturate to its finite
-            range. NaN encoding is unspecified, matching the floatx conversion
-            contract used by TorchAO.
-
-    Returns:
-        Contiguous Uint8 storage with the innermost pair dimension removed.
-    """
-    validate_nvfp4_pack_input(input)
-    input_bits = input.view(torch.int32)
-    sign = input_bits & 0x80000000
-    magnitude = (input_bits ^ sign).view(torch.float32)
-    saturated = magnitude >= 6.0
-    denormal = (~saturated) & (magnitude < 1.0)
-    normal = ~(saturated | denormal)
-    denormal_code = ((magnitude + 4194304.0).view(torch.int32) - 1249902592).to(
-        torch.uint8
-    )
-    normal_bits = magnitude.view(torch.int32)
-    mantissa_odd = (normal_bits >> 22) & 1
-    normal_code = ((normal_bits - 1054867457 + mantissa_odd) >> 22).to(torch.uint8)
-    codes = torch.full_like(magnitude, 7, dtype=torch.uint8)
-    codes = torch.where(denormal, denormal_code, codes)
-    codes = torch.where(normal, normal_code, codes)
-    codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
-    return (codes[..., 1] << 4) | codes[..., 0]
-
-
-@nvfp4_pack.register_fake
-def _(input: torch.Tensor) -> torch.Tensor:
-    validate_nvfp4_pack_input(input)
-    return torch.empty(tuple(input.shape[:-1]), device=input.device, dtype=torch.uint8)
 
 
 def apply_flex_gemm_body_graph_passes(
