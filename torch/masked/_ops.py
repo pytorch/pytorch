@@ -454,7 +454,9 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         ord = args[0] if args else 2
         if ord == float("-inf"):
             if not torch.is_floating_point(input):
-                raise AssertionError(f"input must be floating point, got {input.dtype}")
+                raise NotImplementedError(
+                    f"input must be floating point, got {input.dtype}"
+                )
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name == "median":
@@ -1412,7 +1414,7 @@ elements, have ``nan`` values.
         dtype_source = "Input"
 
     if not (dtype.is_floating_point or dtype.is_complex):
-        raise ValueError(
+        raise NotImplementedError(
             f"mean(): Could not infer output dtype. {dtype_source} dtype must be either "
             f"a floating point or complex dtype. Got: {dtype}"
         )
@@ -1483,7 +1485,7 @@ elements, have ``nan`` values.
         elif not is_float and not torch.isnan(output).any():
             return output.to(dtype=dtype)
         else:
-            raise ValueError(
+            raise NotImplementedError(
                 "masked median expects no fully masked out rows if dtype is not floating point"
             )
     else:
