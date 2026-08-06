@@ -27,6 +27,13 @@
 
 namespace at::native {
 
+static MemoryFormat group_norm_memory_format(const Tensor& input) {
+  return (input.device().is_cpu() || input.device().is_cuda() ||
+          input.device().is_privateuseone())
+      ? input.suggest_memory_format()
+      : MemoryFormat::Contiguous;
+}
+
 template <typename T>
 static void check_group_norm_inputs(
     const Tensor& input,
@@ -94,7 +101,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     check_mixed_data_type(X, gamma, beta);
   }
 
-  auto memory_format{X.suggest_memory_format()};
+  auto memory_format{group_norm_memory_format(X)};
   auto stat_options{X.options()
                         .memory_format(at::MemoryFormat::Contiguous)
                         .dtype(param_scalar_type(X, mixed_type))};
@@ -149,7 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     check_mixed_data_type(X, mean, rstd);
   }
 
-  auto memory_format = X.suggest_memory_format();
+  auto memory_format = group_norm_memory_format(X);
   auto dparam_options{(gamma.defined() ? gamma.options() : X.options())
                           .memory_format(MemoryFormat::Contiguous)};
 
