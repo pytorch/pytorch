@@ -81,7 +81,7 @@ def _window_function_checks(
             f"{function_name} is implemented for strided tensors only, got: {layout}"
         )
     if dtype not in [torch.float32, torch.float64]:
-        raise ValueError(
+        raise NotImplementedError(
             f"{function_name} expects float32 or float64 dtypes, got: {dtype}"
         )
 
