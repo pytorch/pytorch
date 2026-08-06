@@ -7,7 +7,12 @@ keeps the ``flyc.compile(...)`` result for a specialization such as
 rebuilding the launcher and re-entering FlyDSL's compile path.
 
 This mirrors the call shape of Quack/CuteDSL's ``@jit_cache`` while deliberately
-not copying its persistent ``.o`` cache behavior.
+not copying its persistent ``.o`` cache behavior. The mirroring stops at the
+call shape: ``jit_cache`` returns a function, so it is a descriptor and works on
+methods, while this returns a class instance and must decorate module-level
+functions only. Making it a descriptor would key each entry on ``self``, and
+since entries are never evicted (below) that would pin every instance for the
+life of the process -- a worse failure than the one it fixes.
 
 Entries are never evicted: nothing here bounds the cache except the number of
 distinct specializations the caller asks for, and each one holds a compiled
@@ -60,7 +65,6 @@ class _JitCacheWrapper:
         self._misses = 0
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        kwargs = dict(kwargs)
         compile_args = kwargs.pop("compile_args", _MISSING)
         cache_key: _CacheKey = args, tuple(sorted(kwargs.items()))
 
@@ -110,9 +114,9 @@ class _JitCacheWrapper:
 
     @property
     def cache(self) -> dict[_CacheKey, Any]:
-        # Named to match jit_cache's ``wrapper.cache``: instrument_flydsl_compile
-        # forwards all three of cache/cache_clear/cache_info onto the
-        # instrumented function, and skips silently what the wrapper lacks.
+        # Named to match jit_cache's ``wrapper.cache`` so that
+        # instrument_flydsl_compile forwards all three of
+        # cache/cache_clear/cache_info onto the instrumented function.
         return self._cache
 
     def cache_clear(self) -> None:
@@ -136,7 +140,10 @@ class _JitCacheWrapper:
 
 
 def flydsl_jit_cache(fn: Callable[..., Any]) -> _JitCacheWrapper:
-    """Decorate a FlyDSL compile helper using its explicit args as the key.
+    """Decorate a module-level FlyDSL compile helper, keyed on its explicit args.
+
+    Module-level only: the wrapper is not a descriptor, so on a method ``self``
+    would never reach the wrapped call. See the module docstring.
 
     The decorated function should take stable specialization parameters as its
     normal arguments. Runtime sample objects can be passed by callers through the
