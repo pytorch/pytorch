@@ -4475,3 +4475,30 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        if input_handles:
+            for idx, handle in enumerate(input_handles):
+                ivalue_var = f"tmp_{sanitized}_input_{idx}"
+                self.writeline(f"C10IValueHandle {ivalue_var};")
+                self.writeline(f"aoti_torch_tensor_to_ivalue({handle}, &{ivalue_var});")
+                self.writeline(f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});")
+            inputs_vec = f"{sanitized}_inputs_"
+            ivalue_names = ", ".join(
+                f"tmp_{sanitized}_input_{idx}" for idx in range(len(input_handles))
+            )
+            self.writeline(
+                f"std::vector<C10IValueHandle> {inputs_vec}({{{ivalue_names}}});"
+            )
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
+            )
+        else:
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+            )
