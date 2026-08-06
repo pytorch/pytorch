@@ -22,7 +22,6 @@ from torch.distributed.tensor._shards_wrapper import LocalShardsWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
@@ -65,7 +64,6 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
-@instantiate_parametrized_tests
 class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
@@ -607,6 +605,7 @@ class TestCheckpointableReshard(DTensorTestBase):
         dist.barrier()
 
 
+instantiate_device_type_tests(TestDTensorReshardPlacementChange, globals())
 instantiate_device_type_tests(TestDTensorReshardMeshChange, globals())
 instantiate_device_type_tests(TestCheckpointableReshard, globals())
 
