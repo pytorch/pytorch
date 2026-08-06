@@ -394,8 +394,15 @@ class AbstractFaultToleranceTest:
         handles = self._collect_handles("ft_reused_uuid_initial")
         self._reconfigure(uuid, handles)
         handles = self._collect_handles("ft_reused_uuid_current")
-        with self.assertRaisesRegex(RuntimeError, "already used"):
-            self._reconfigure(uuid, handles)
+        error = "already used" if self.rank == 0 else "Wait timeout"
+        with self.assertRaisesRegex(RuntimeError, error):
+            dist._reconfigure(
+                uuid,
+                handles,
+                timeout=timedelta(milliseconds=500),
+            ).wait()
+        self._store_barrier("ft_reused_uuid_rejected")
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
     def test_reconfigure_timeout_is_retryable(self):
         if self.backend_name != "nccl2":

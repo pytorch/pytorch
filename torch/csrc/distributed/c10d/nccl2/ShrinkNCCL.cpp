@@ -33,7 +33,6 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& ranks_to_exclude,
     int shrink_flags,
     const c10::intrusive_ptr<::c10d::Backend::Options>& opts_override) {
-  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(supportsShrinking(), "nccl2 shrink requires NCCL 2.27 or later");
   TORCH_CHECK_VALUE(
       !ranks_to_exclude.empty(), "ranks_to_exclude cannot be empty");
