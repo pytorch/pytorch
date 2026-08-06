@@ -175,6 +175,45 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
 
 
+class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
+    world_size = 4
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        os.environ["LOCAL_RANK"] = str(rank)
+        store = dist.FileStore(rdvz_file, world_size)
+        dist.init_process_group(
+            backend=cls.backend_str(),
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            pg_options=cls.opts(),
+            timeout=cls.timeout,
+            device_id=torch.device("cuda", rank),
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_with_nonmembers(self) -> None:
+        ranks = [0, 1]
+        group = dist.new_group(ranks=ranks)
+        if self.rank in ranks:
+            tensor = torch.tensor([self.rank + 1], device=self.device)
+            dist.all_reduce(tensor, group=group)
+            self.assertEqual(tensor, torch.tensor([3], device=self.device))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+
+        store = dist.distributed_c10d._get_default_store()
+        store.set(f"eager_new_group/{self.rank}", b"1")
+        store.wait([f"eager_new_group/{rank}" for rank in range(self.world_size)])
+        self._check_all_reduce()
+
+
 class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")

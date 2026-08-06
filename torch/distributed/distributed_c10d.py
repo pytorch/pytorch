@@ -741,6 +741,12 @@ def _create_nccl2_process_group(
     pg_options.group_name = opts.group_id
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
+    if opts.split_from:
+        if not isinstance(opts.split_from, ProcessGroupNCCL2):
+            raise AssertionError("Expected split_from to be ProcessGroupNCCL2")
+        return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
+            opts.store, opts.global_ranks_in_group, pg_options
+        )
     return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
 
 
@@ -756,6 +762,12 @@ def _create_nccl_lazy_process_group(
     pg_options.group_name = opts.group_id
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
+    if opts.split_from:
+        if not isinstance(opts.split_from, ProcessGroupNCCLLazy):
+            raise AssertionError("Expected split_from to be ProcessGroupNCCLLazy")
+        return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
+            opts.store, opts.global_ranks_in_group, pg_options
+        )
     return ProcessGroupNCCLLazy(
         opts.store, opts.group_rank, opts.group_size, pg_options
     )
