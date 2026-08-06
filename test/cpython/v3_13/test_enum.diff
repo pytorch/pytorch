@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_enum.py b/test/cpython/v3_13/test_enum.py
+index 73ae53a3694dcaaacb27ba31f5df90c565be1d0b..ffb9a74fd02d2f8d5dd32afde1486176b642eb4e 100644
 --- a/test/cpython/v3_13/test_enum.py
 +++ b/test/cpython/v3_13/test_enum.py
 @@ -1,3 +1,20 @@

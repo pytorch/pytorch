@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_generators.py b/test/cpython/v3_13/test_generators.py
+index 515fe7407f1d80e50523964cfc8822c1f9d9e587..1b82c7ebdd916c2ce6bbd8845d14761aa56c6e1b 100644
 --- a/test/cpython/v3_13/test_generators.py
 +++ b/test/cpython/v3_13/test_generators.py
 @@ -1,3 +1,56 @@

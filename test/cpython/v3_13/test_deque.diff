@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_deque.py b/test/cpython/v3_13/test_deque.py
+index 4679f297fd7f4a134c12552b96671f4a7e4f6b10..5cf7c75efe5184fc6f93916440e02372f5dcf46c 100644
 --- a/test/cpython/v3_13/test_deque.py
 +++ b/test/cpython/v3_13/test_deque.py
 @@ -1,7 +1,31 @@
