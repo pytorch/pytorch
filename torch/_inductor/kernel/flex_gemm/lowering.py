@@ -21,12 +21,11 @@ from torch._higher_order_ops.flex_gemm import (
     FLEX_GEMM_OP_SPECS,
 )
 from torch._inductor import config
-from torch._inductor.kernel.gemm_epilogue_utils import statically_known_equal
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
 from ...ir import IRNode, TensorBox
-from ...lowering import empty_strided, full, process_subgraph_nodes, register_lowering
+from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from ...utils import ceildiv, has_free_symbols
 from ...virtualized import V
 from .constraints import (
@@ -620,28 +619,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
     aux_outs = allocate_flex_gemm_aux_outs(aux_metas, gemm_args[mat1_index])
-    zero_init_local_reduce = False
-    if local_reduce_store is not None and local_reduce_store.output_layout is not None:
-        zero_init_local_reduce = not statically_known_equal(
-            local_reduce_store.node.meta["val"].numel(),
-            local_reduce_store.value_node.meta["val"].numel(),
-        )
-    if zero_init_local_reduce:
-        local_reduce_outs = tuple(
-            full(
-                ir.convert_shape_to_inductor(meta.shape),
-                0,
-                dtype=meta.dtype,
-                device=gemm_args[mat1_index].get_device_or_error(),
-            )
-            for meta in local_reduce_metas
-        )
-    else:
-        local_reduce_outs = allocate_flex_gemm_aux_outs(
-            local_reduce_metas,
-            gemm_args[mat1_index],
-            column_major=explicit_swap_ab and local_reduce_layout is None,
-        )
+    local_reduce_outs = allocate_flex_gemm_aux_outs(
+        local_reduce_metas,
+        gemm_args[mat1_index],
+        column_major=explicit_swap_ab and local_reduce_layout is None,
+    )
     aux_input_nodes = [
         ir.TemplateBuffer.realize_template_input(aux_out) for aux_out in aux_outs
     ]
@@ -685,7 +667,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             aux_metas,
             local_reduce_metas,
             local_reduce_layout=local_reduce_layout,
-            zero_init_local_reduce=zero_init_local_reduce,
             swap_ab_alignment=swap_ab_alignment,
         ),
         lowering_name=subgraph.name,
