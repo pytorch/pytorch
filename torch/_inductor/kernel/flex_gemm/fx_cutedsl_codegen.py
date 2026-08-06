@@ -113,24 +113,20 @@ def tuple_output_plan(
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
     feed_match = analysis.common_feed_main_match((output, *aux_outputs))
     compressed_aux_plans = tuple(
-        (index, match, plan)
+        (index, plan)
         for index, aux_output in enumerate(aux_outputs)
-        if (match := analysis.matches.get(aux_output)) is not None
+        if aux_output in analysis.matches
         if (plan := analysis.compressed_aux_plan(output, aux_output, index)) is not None
     )
     if len(compressed_aux_plans) > 1:
         raise NotImplementedError(LOCAL_REDUCE_MIXED_MATCH_ERROR)
     if compressed_aux_plans:
-        local_reduce_index, compressed_match, compressed_aux_plan = (
-            compressed_aux_plans[0]
-        )
+        local_reduce_index, compressed_aux_plan = compressed_aux_plans[0]
         if feed_match is not None:
-            if feed_match.value_node is not compressed_match.value_node:
+            if feed_match.value_node is not compressed_aux_plan.match.value_node:
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             compressed_aux_plan = feed_match.to_plan(
-                store=FlexGemmLocalReduceStore(
-                    aux_outputs[local_reduce_index], local_reduce_index
-                ),
+                store=compressed_aux_plan.store,
                 feeds_main=True,
             )
         return FlexGemmOutputPlan(
