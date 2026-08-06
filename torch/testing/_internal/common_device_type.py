@@ -425,7 +425,7 @@ class DeviceTypeTestBase(TestCase):
     # declare supported capabilities grouped by namespace. This method flattens
     # the nested map, evaluates the support checks, and caches the result.
     @classmethod
-    @cache()
+    @cache
     def get_capabilities(cls) -> dict[str, bool]:
         return {
             k: fn() for sub in cls._capabilities().values() for k, fn in sub.items()
