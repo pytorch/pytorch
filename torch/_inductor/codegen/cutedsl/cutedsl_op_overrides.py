@@ -778,9 +778,14 @@ class CuteDSLOpOverrides(OpOverrides):
                     and input_dtype in (torch.float16, torch.bfloat16)
                     and (cse_var is None or cse_var.dtype != input_dtype)
                 ):
-                    cast_inputs[source_index] = CuteDSLOpOverrides.to_dtype(
-                        value, input_dtype, use_compute_types=False
-                    )
+                    if cse_var is None:
+                        cast_inputs[source_index] = CuteDSLOpOverrides._cast_expr(
+                            CuteDSLOpOverrides._as_expr(value), input_dtype
+                        )
+                    else:
+                        cast_inputs[source_index] = CuteDSLOpOverrides.to_dtype(
+                            value, input_dtype, use_compute_types=False
+                        )
 
         operands = ", ".join(
             str(CuteDSLOpOverrides._as_expr(value)) for value in cast_inputs
