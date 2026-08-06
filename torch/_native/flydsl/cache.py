@@ -49,12 +49,7 @@ def flydsl_jit_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
     that happened to be called ``compile_args`` would collapse every value of
     itself onto one entry and hand back a kernel compiled for another.
 
-    The per-key lock is reentrant, so a compile function that calls back into its
-    own cache with the same key recurses until the stack runs out: nothing is
-    stored until the compile returns, so the reentrant call misses, retakes the
-    lock, and compiles again. That is a bug in the compile function either way,
-    and a RecursionError names the cycle in its traceback where a plain lock
-    would just hang.
+    Recursive calls back into a cached function are not expected.
 
     Deliberately not named ``jit_cache``: the instrumentation coverage scan in
     test_instrumentation.py attributes compile sites by decorator name, and that
