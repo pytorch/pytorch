@@ -2,10 +2,7 @@
 
 import torch
 from torch.fx.experimental._dynamism import track_dynamism_across_examples
-from torch.testing._internal.common_utils import (
-    TestCase,
-    HardwareClassification,
-)
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestDynamism(TestCase):
