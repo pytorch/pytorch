@@ -517,7 +517,6 @@ class SideEffects:
         name: str,
         value: VariableTracker,
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
-        mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -546,12 +545,9 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        if mutated_source is not None:
-            self.mutated_sources.add(mutated_source)
-        else:
-            item_source = getattr(item, "source", None)
-            if item_source is not None:
-                self.mutated_sources.add(AttrSource(item_source, name))
+        item_source = getattr(item, "source", None)
+        if item_source is not None:
+            self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -652,15 +648,6 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
-        # This path serves the read out of side effects, bypassing
-        # VariableBuilder, so record the source here the way load_cell does --
-        # otherwise a subgraph reading a rebound global has no traced source to
-        # intersect with mutated_sources and is wrongly considered reusable.
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            output_graph.current_tx.output.current_tracer.traced_sources.add(
-                GlobalSource(name)
-            )
         return self.load_attr(gvar, name)
 
     def store_global(
@@ -674,11 +661,7 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
-        # gvar is a per-global sentinel holder whose own source already names
-        # the global, so store_attr's default AttrSource(item.source, name)
-        # would name a nonexistent `G.G`. Record the source readers actually
-        # use, so mutated_sources intersects with traced_sources.
-        self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
+        self.store_attr(gvar, name, value)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
