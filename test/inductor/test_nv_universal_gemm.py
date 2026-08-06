@@ -348,6 +348,19 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected, rtol=1.6e-2, atol=1e-1)
 
+    def test_direct_dense_epilogue_support_check(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        operator = object.__new__(VendoredDenseGemmEFCOperator)
+        args = MagicMock()
+        args.epilogue._is_direct_cutedsl = True
+        args.epilogue.traced_epilogue = None
+        args.local_reduce = GemmReductionArguments()
+        self.assertTrue(operator._supports(args))
+
     def test_efc_epilogue_lookup_no_deadlock(self):
         """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
         kernel is not pre-resolved and misses the args cache, calls
