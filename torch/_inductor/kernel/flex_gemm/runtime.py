@@ -163,13 +163,15 @@ def resolve_epilogue_arg_kinds(
     return epilogue_arg_kinds
 
 
-# NOTE [Boolean epilogue tensor storage]
-# PyTorch bool tensors are byte-addressed, but CuTeDSL models cutlass.Boolean as
-# a 1-bit logical type. Keep the manual uint8 storage view
-# see https://github.com/NVIDIA/cutlass/issues/3348 for details
+# NOTE [Byte-backed epilogue tensor storage]
+# PyTorch bool tensors are byte-addressed while CuTeDSL models cutlass.Boolean as
+# a 1-bit logical type; Float4E2M1FN similarly exposes two values per byte. Pass
+# both through QuACK as their physical uint8 carrier.
 def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     """Adapt logical epilogue tensors to QuACK's physical tensor ABI."""
-    return arg.view(torch.uint8) if arg.dtype is torch.bool else arg
+    if arg.dtype in (torch.bool, torch.float4_e2m1fn_x2):
+        return arg.view(torch.uint8)
+    return arg
 
 
 def split_epilogue_args(
@@ -500,6 +502,7 @@ def dispatch_gemm_act(
     # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
     quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
     quack_b = quack_b.unsqueeze(0) if quack_b.ndim == 2 else quack_b
+    quack_out = quack_epilogue_arg(quack_out)
     quack_out = quack_out.unsqueeze(0) if quack_out.ndim == 2 else quack_out
     quack_aux_outs = tuple(quack_epilogue_arg(aux_out) for aux_out in quack_aux_outs)
     quack_aux_outs = tuple(
