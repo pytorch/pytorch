@@ -319,15 +319,22 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Caching-allocator segment registration (called by
   // NCCLCachingAllocatorHook, potentially from allocator threads).
   void register_address(void* addr, size_t len);
-  // from_allocator_hook only controls diagnostics: tearing a symmetric window
-  // down from the hook is the uncollective path worth warning about.
-  void deregister_address(void* addr, bool from_allocator_hook = false);
+  // Symmetric windows must be released collectively before an allocator hook
+  // observes the segment free. NCCLX may barrier while deregistering them.
+  void deregister_address(
+      void* addr,
+      bool from_allocator_hook = false,
+      bool comm_teardown = false);
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
-  ncclResult_t ensureSegmentWindow(const void* ptr);
+  ncclResult_t ensureSegmentWindow(
+      const void* ptr,
+      bool owned_by_mem_pool = false);
+  void retainSegmentWindow(const void* ptr);
+  void releaseSegmentWindow(const void* ptr);
 
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
@@ -593,6 +600,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
+  std::atomic<uint64_t> comm_generation_{0};
   std::atomic<uint64_t> window_registration_counter_{0};
   uint64_t sequence_number_{0};
 
@@ -629,6 +637,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     void* regHandle{nullptr};
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
+    size_t windowRefCount{0};
+    bool windowOwnedByMemPool{false};
   };
   std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
   // Guards memoryRegistrationHandles_ and registeredMemPools_:

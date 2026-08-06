@@ -290,6 +290,27 @@ class AbstractWindowTest:
         win.tensor_deregister()
         del padding
 
+    def test_windows_sharing_allocator_segment_have_independent_lifetimes(self):
+        self._init_pg()
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        with torch.cuda.use_mem_pool(pool):
+            backing = torch.zeros(32, device=self.device)
+        first_buf = backing[:16]
+        second_buf = backing[16:]
+        second_buf.fill_(self.rank + 1.0)
+        first = dist._new_window(first_buf)
+        second = dist._new_window(second_buf)
+
+        first.tensor_deregister()
+        dst_rank = (self.rank + 1) % self.world_size
+        src_rank = (self.rank - 1 + self.world_size) % self.world_size
+        second.put(second_buf[:1], dst_rank, 0, False)
+        second.wait_signal(src_rank, False)
+        torch.cuda.synchronize()
+        self.assertEqual(second_buf[0], src_rank + 1.0)
+        second.tensor_deregister()
+
 
 def _make_window_test_class(backend_name, device_type):
     class WindowTest(AbstractWindowTest, MultiProcessTestCase):

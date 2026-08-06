@@ -135,6 +135,8 @@ class AbstractSuspendResumeTest:
         try:
             with self.assertRaisesRegex(RuntimeError, "communicator is suspended"):
                 dist.all_reduce(torch.ones(1, device=self.device))
+            with self.assertRaisesRegex(RuntimeError, "communicator is suspended"):
+                dist._new_window()
         finally:
             self.backend.resume()
 

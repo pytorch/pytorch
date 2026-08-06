@@ -583,6 +583,7 @@ void ProcessGroupNCCL::attachMemoryHook() {
 }
 
 void ProcessGroupNCCL::detachMemoryHook() {
+  comm_generation_.fetch_add(1, std::memory_order_release);
   NCCLCachingAllocatorHook::getInstance().deregisterComm(this);
 }
 
@@ -597,7 +598,7 @@ void ProcessGroupNCCL::registerAddressLocked(void* addr, size_t len) {
   // cannot run from the allocator hook, which fires on arbitrary threads. It
   // happens lazily in ensureSegmentWindow(), keyed by the base recorded here.
   memoryRegistrationHandles_.emplace(
-      addr, RegistrationHandle{handle, nullptr, len});
+      addr, RegistrationHandle{handle, nullptr, len, 0, false});
 }
 
 void ProcessGroupNCCL::register_address(void* addr, size_t len) {
@@ -613,7 +614,8 @@ void ProcessGroupNCCL::register_address(void* addr, size_t len) {
 
 void ProcessGroupNCCL::deregister_address(
     void* addr,
-    bool from_allocator_hook) {
+    bool from_allocator_hook,
+    bool comm_teardown) {
   if (nccl_comm_ == nullptr) {
     return;
   }
@@ -622,20 +624,23 @@ void ProcessGroupNCCL::deregister_address(
   if (it == memoryRegistrationHandles_.end()) {
     return;
   }
+  if (comm_teardown) {
+    // ncclCommAbort destroys communicator registrations. Window deregistration
+    // may barrier in NCCLX, so it cannot be called while failed ranks are
+    // absent from a fault-tolerance teardown.
+    memoryRegistrationHandles_.erase(it);
+    return;
+  }
   if (it->second.winHandle != nullptr) {
-    // Tearing the window down is still the least bad option -- the allocator is
-    // about to hand this address range back, and a later allocation reusing it
-    // would silently resolve to the stale window -- but say so loudly: on NCCL
-    // builds where ncclCommWindowDeregister barriers, a rank-divergent free
-    // hangs here, on an allocator thread, holding the allocator's mutex.
-    if (from_allocator_hook) {
-      TORCH_WARN_ONCE(
-          "A symmetric-window segment was freed without deregister_mem_pool() "
-          "being called first, so its NCCL window is being torn down from the "
-          "CUDA allocator hook. That is only safe if every rank frees the same "
-          "segment in the same order; call deregister_mem_pool() from every "
-          "rank before freeing.");
-    }
+    TORCH_CHECK(
+        !from_allocator_hook,
+        "A symmetric-window segment is being freed before its window was "
+        "deregistered. Call Window.tensor_deregister() or "
+        "backend.deregister_mem_pool() collectively before freeing it.");
+    TORCH_CHECK(
+        it->second.windowRefCount == 0,
+        "Cannot deregister a memory pool while a Window still uses one of its "
+        "segments");
     NCCL_CHECK_IGNORE(
         nccl_api_,
         nccl_api_->commWindowDeregister(nccl_comm_, it->second.winHandle),
@@ -667,7 +672,9 @@ std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
   return {it->second.winHandle, target - base};
 }
 
-ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
+ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(
+    const void* ptr,
+    bool owned_by_mem_pool) {
   if (nccl_comm_ == nullptr) {
     return ncclInvalidUsage;
   }
@@ -683,6 +690,7 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
     return ncclInvalidArgument;
   }
   if (it->second.winHandle != nullptr) {
+    it->second.windowOwnedByMemPool |= owned_by_mem_pool;
     return ncclSuccess;
   }
   ncclWindow_t win = nullptr;
@@ -699,7 +707,47 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
     return ncclInvalidUsage;
   }
   it->second.winHandle = win;
+  it->second.windowOwnedByMemPool = owned_by_mem_pool;
   return ncclSuccess;
+}
+
+void ProcessGroupNCCL::retainSegmentWindow(const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  auto it = memoryRegistrationHandles_.upper_bound(ptr);
+  TORCH_CHECK(
+      it != memoryRegistrationHandles_.begin(),
+      "Cannot retain an unregistered NCCL window");
+  --it;
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
+  TORCH_CHECK(
+      target < base + it->second.len && it->second.winHandle != nullptr,
+      "Cannot retain an unregistered NCCL window");
+  ++it->second.windowRefCount;
+}
+
+void ProcessGroupNCCL::releaseSegmentWindow(const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  auto it = memoryRegistrationHandles_.upper_bound(ptr);
+  TORCH_CHECK(
+      it != memoryRegistrationHandles_.begin(),
+      "Cannot release an unregistered NCCL window");
+  --it;
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
+  TORCH_CHECK(
+      target < base + it->second.len && it->second.winHandle != nullptr &&
+          it->second.windowRefCount > 0,
+      "Cannot release an unregistered NCCL window");
+  if (it->second.windowRefCount == 1 && !it->second.windowOwnedByMemPool) {
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->commWindowDeregister(nccl_comm_, it->second.winHandle),
+        "ncclCommWindowDeregister failed for segment");
+    it->second.winHandle = nullptr;
+  }
+  --it->second.windowRefCount;
 }
 
 namespace {
@@ -761,7 +809,7 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
     // Only segments that exist now can be upgraded: the window call is
     // collective, so a segment another thread allocates concurrently must be
     // left to the next registerMemPool.
-    auto rc = ensureSegmentWindow(addr);
+    auto rc = ensureSegmentWindow(addr, /*owned_by_mem_pool=*/true);
     if (rc == ncclInvalidUsage) {
       // No symmetric-memory-capable transport (or NCCL predates
       // ncclCommWindowRegister). The stock backend keeps the plain

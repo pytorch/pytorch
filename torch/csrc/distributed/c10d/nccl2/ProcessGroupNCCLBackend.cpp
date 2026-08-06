@@ -226,6 +226,7 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       supportsWindow(),
       "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
@@ -246,7 +247,7 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
           this));
   if (tensor.has_value()) {
-    window->tensor_register(*tensor);
+    window->tensorRegisterImpl(*tensor, true);
   }
   return window;
 }

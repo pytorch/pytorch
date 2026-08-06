@@ -63,6 +63,9 @@ class WindowNCCL : public ::c10d::Window {
   ::c10d::WindowAttr get_attr(int64_t peerRank) override;
 
  private:
+  friend class ProcessGroupNCCL;
+
+  void tensorRegisterImpl(const at::Tensor& tensor, bool owning);
   void checkWindowAndThrow() const;
   void checkDeviceAndThrow(const at::Tensor& tensor) const;
   void checkPeerRankAndThrow(int64_t rank) const;
@@ -74,6 +77,7 @@ class WindowNCCL : public ::c10d::Window {
   c10::intrusive_ptr<ProcessGroupNCCL> pg_;
   NcclApi* nccl_api_{nullptr};
   ncclComm_t nccl_comm_{nullptr};
+  uint64_t comm_generation_{0};
 
   // Destination window for this rank and each peer's logical tensor metadata.
   // The NCCL window is collective, but tensor offsets and sizes may differ.
@@ -81,6 +85,7 @@ class WindowNCCL : public ::c10d::Window {
   std::vector<size_t> peer_win_offsets_;
   std::vector<size_t> peer_win_sizes_;
   std::vector<at::ScalarType> peer_dtypes_;
+  const void* registered_ptr_{nullptr};
   std::optional<at::Tensor> buf_tensor_;
 };
 

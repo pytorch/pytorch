@@ -28,6 +28,7 @@ WindowNCCL::WindowNCCL(c10::intrusive_ptr<ProcessGroupNCCL> pg)
   TORCH_CHECK(pg_, "WindowNCCL: null ProcessGroupNCCL");
   nccl_api_ = pg_->getNcclApi();
   nccl_comm_ = pg_->nccl_comm_;
+  comm_generation_ = pg_->comm_generation_.load(std::memory_order_acquire);
   TORCH_CHECK(
       nccl_comm_ != nullptr && nccl_api_ != nullptr,
       "WindowNCCL: ProcessGroupNCCL is not initialized");
@@ -94,6 +95,14 @@ void WindowNCCL::exchangePeerMetadata(
 
 void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
   auto commUseGuard = pg_->acquireCommUse();
+  tensorRegisterImpl(tensor, owning);
+}
+
+void WindowNCCL::tensorRegisterImpl(const at::Tensor& tensor, bool owning) {
+  TORCH_CHECK(
+      comm_generation_ == pg_->comm_generation_.load(std::memory_order_acquire),
+      "WindowNCCL: window belongs to a stale communicator generation; "
+      "create and register a new window after reconfigure");
   TORCH_CHECK(tensor.defined(), "WindowNCCL: a valid tensor is required");
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(win_ == nullptr, "WindowNCCL: double registration");
@@ -123,24 +132,30 @@ void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
       !c10::mul_overflows(numel, tensor.element_size(), &win_size),
       "WindowNCCL: tensor size overflows size_t");
   exchangePeerMetadata(seg_offset, win_size, tensor.scalar_type());
+  pg_->retainSegmentWindow(tensor.data_ptr());
   win_ = seg_win;
+  registered_ptr_ = tensor.data_ptr();
   if (owning) {
     buf_tensor_ = tensor;
   }
 }
 
 void WindowNCCL::tensor_deregister() {
-  // Segment-level deregistration happens automatically when the mempool frees
-  // the segment (via NCCLCachingAllocatorHook). Here we just forget the
-  // tensor; the barriers keep ranks aligned around the collective contract.
-  pg_->barrier();
-  TORCH_CHECK(win_ != nullptr, "WindowNCCL: double deregistration");
+  auto commUseGuard = pg_->acquireCommUse();
+  checkWindowAndThrow();
+  const auto barrier = [&] {
+    ++pg_->sequence_number_;
+    pg_->barrierImpl(/*async_op=*/false, pg_->options_c10d_->timeout)->wait();
+  };
+  barrier();
+  pg_->releaseSegmentWindow(registered_ptr_);
   win_ = nullptr;
   peer_win_offsets_.clear();
   peer_win_sizes_.clear();
   peer_dtypes_.clear();
+  registered_ptr_ = nullptr;
   buf_tensor_.reset();
-  pg_->barrier();
+  barrier();
 }
 
 c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
@@ -317,6 +332,10 @@ void WindowNCCL::checkWindowAndThrow() const {
   TORCH_CHECK(
       win_ != nullptr,
       "WindowNCCL: window not registered (call tensor_register first)");
+  TORCH_CHECK(
+      comm_generation_ == pg_->comm_generation_.load(std::memory_order_acquire),
+      "WindowNCCL: window belongs to a stale communicator generation; "
+      "create and register a new window after reconfigure");
 }
 
 void WindowNCCL::checkDeviceAndThrow(const at::Tensor& tensor) const {
