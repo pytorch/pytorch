@@ -139,6 +139,15 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
     return has_slot(map_slots, slot)
 
 
+# Flag Include/object.h
+Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+
+
+def type_disallows_instantiation(obj_type: type) -> bool:
+    """Check whether obj_type's tp_new is NULL (see CPython's type_call)."""
+    return bool(obj_type.__flags__ & Py_TPFLAGS_DISALLOW_INSTANTIATION)
+
+
 # PySequenceSlots
 type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
 type_implements_sq_length = partial(

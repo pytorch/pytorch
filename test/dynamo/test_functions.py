@@ -4082,6 +4082,28 @@ class GraphModule(torch.nn.Module):
         z = fn(x)
         self.assertEqual(z, x + 1 + 3 + 5 + 7)
 
+    def test_disallow_instantiation_type_call(self):
+        # C types with Py_TPFLAGS_DISALLOW_INSTANTIATION (NULL tp_new) raise a
+        # catchable TypeError when called, matching CPython's type_call.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            msgs = []
+            for ty in (type(iter(range(3))), type(iter([]))):
+                try:
+                    ty(1, 3, 1)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return x + 1, msgs
+
+        _, msgs = fn(torch.tensor([1.0]))
+        self.assertEqual(
+            msgs,
+            [
+                "cannot create 'range_iterator' instances",
+                "cannot create 'list_iterator' instances",
+            ],
+        )
+
     @make_test
     def test_range_iterator(a, b):
         it = range(5).__iter__()
