@@ -103,7 +103,8 @@ void waitForNcclChildComm(
         " timed out after ",
         timeout.count(),
         " ms");
-    return std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - now);
   };
   try {
     waitForNcclCompletion(
@@ -132,11 +133,7 @@ void waitForNcclChildComm(
     const auto abortComm = [&](ncclComm_t comm, std::string_view description) {
       try {
         waitForNcclCompletion(
-            nccl_api,
-            comm,
-            nccl_api.commAbort(comm),
-            timeout,
-            description);
+            nccl_api, comm, nccl_api.commAbort(comm), timeout, description);
       } catch (const std::exception& error) {
         LOG(ERROR) << error.what();
       }
