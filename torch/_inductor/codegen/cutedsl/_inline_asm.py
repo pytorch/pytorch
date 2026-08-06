@@ -116,14 +116,6 @@ def zero_for_constraint(letter: str) -> ir.Value:
     return arith.constant(target, 0.0 if letter in ("f", "d") else 0)
 
 
-def inline_asm_result_type(output_types: list[ir.Type]) -> ir.Type:
-    """Return the scalar or LLVM struct type required by inline asm outputs."""
-    if len(output_types) == 1:
-        return output_types[0]
-    fields = ", ".join(str(output_type) for output_type in output_types)
-    return ir.Type.parse(f"!llvm.struct<({fields})>")
-
-
 def packed_operands(
     sources,
     input_letters: list[str],
@@ -149,16 +141,6 @@ def packed_operands(
                 )
             )
     return operands
-
-
-def unpack_outputs(produced: ir.Value, output_types: list[ir.Type]) -> list[ir.Value]:
-    """Extract scalar results from an inline-asm scalar or LLVM struct result."""
-    if len(output_types) == 1:
-        return [produced]
-    return [
-        llvm.extractvalue(output_type, produced, [index])
-        for index, output_type in enumerate(output_types)
-    ]
 
 
 @dsl_user_op
@@ -211,7 +193,10 @@ def inline_asm_elementwise_intrinsic(
         )
 
     output_types = [CONSTRAINT_TYPES[letter]() for letter in output_letters]
-    asm_result_type = inline_asm_result_type(output_types)
+    asm_result_type = output_types[0]
+    if len(output_types) > 1:
+        fields = ", ".join(str(output_type) for output_type in output_types)
+        asm_result_type = ir.Type.parse(f"!llvm.struct<({fields})>")
     compute_type = (
         cutlass.Float32 if result_type == cutlass.Float8E8M0FNU else result_type
     )
@@ -250,10 +235,15 @@ def inline_asm_elementwise_intrinsic(
             has_side_effects=not is_pure,
             is_align_stack=False,
         )
+        outputs = [produced]
+        if len(output_types) > 1:
+            outputs = [
+                llvm.extractvalue(output_type, produced, [index])
+                for index, output_type in enumerate(output_types)
+            ]
         valid_outputs = min(pack, count - base)
         converted.extend(
-            convert_output(output, result_type)
-            for output in unpack_outputs(produced, output_types)[:valid_outputs]
+            convert_output(output, result_type) for output in outputs[:valid_outputs]
         )
 
     if shape is None:
