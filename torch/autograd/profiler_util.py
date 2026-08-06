@@ -304,15 +304,16 @@ class EventList(list):
             for evt in self:
                 if evt.trace_name is None:
                     continue
+                name_json = json.dumps(evt.trace_name)
                 f.write(
-                    '{{"name": "{}", '
+                    '{{"name": {}, '
                     '"ph": "X", '
                     '"ts": {}, '
                     '"dur": {}, '
                     '"tid": {}, '
                     '"pid": "CPU functions", '
                     '"args": {{}}}}, '.format(
-                        evt.trace_name,
+                        name_json,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -324,7 +325,7 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        f'{{"name": "{evt.trace_name}", '
+                        f'{{"name": {name_json}, '
                         '"ph": "s", '
                         f'"ts": {evt.time_range.start}, '
                         f'"tid": {evt.thread}, '
