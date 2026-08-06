@@ -2147,6 +2147,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
             autotune_hints=None,
             atomic_add_found=False,
             no_x_dim=False,
+            uses_device_tma=False,
             tiling_scores=None,
         ):
             return {
@@ -2156,6 +2157,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 "autotune_hints": autotune_hints if autotune_hints is not None else [],
                 "atomic_add_found": atomic_add_found,
                 "no_x_dim": no_x_dim,
+                "uses_device_tma": uses_device_tma,
                 "tiling_scores": tiling_scores
                 if tiling_scores is not None
                 else {"x": 1, "r0_": 8},
@@ -2192,6 +2194,12 @@ class ComboKernelTestsMaxAutotune(TestCase):
             ("all identical merge", None, None, 1),
             ("different r0_numel", ("size_hints_1",), {"x": 2048, "r0_": 512}, 2),
             ("different num_load", ("inductor_meta_1", "num_load"), 12, 2),
+            (
+                "different uses_device_tma",
+                ("inductor_meta_1", "uses_device_tma"),
+                True,
+                2,
+            ),
             (
                 "different tiling_scores",
                 ("inductor_meta_1", "tiling_scores"),
