@@ -4,7 +4,8 @@ Inductor's `inline_asm_elementwise` HOP is how callers reach instructions the
 compiler will not emit on its own, such as TorchAO's
 `cvt.rp.satfinite.ue8m0x2.f32` MX scale conversion. Triton lowers the HOP to
 `tl.inline_asm_elementwise`; this module provides the CuteDSL equivalent by
-emitting one `llvm.inline_asm` per element and rebuilding the fragment.
+emitting `llvm.inline_asm` over physical fragment groups and rebuilding the
+fragment.
 
 The asm string and constraint list are the caller's contract, exactly as in the
 Triton backend. Inputs are bitcast into the register class each constraint letter
@@ -16,12 +17,14 @@ HOP's logical dtype still controls eventual storage.
 
 import functools
 import hashlib
+import math
 from pathlib import Path
 
 import cutlass
 import cutlass.cute as cute
 from cutlass._mlir import ir
 from cutlass._mlir.dialects import arith, llvm, vector
+from cutlass.cute.tensor import _infer_broadcast_shape
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 
@@ -54,10 +57,6 @@ def split_constraints(constraints: str) -> tuple[list[str], list[str]]:
                 f"got {entry!r}"
             )
         target.append(letter)
-    if len(outputs) != 1:
-        raise NotImplementedError(
-            f"CuteDSL inline asm requires exactly one output constraint, got {constraints!r}"
-        )
     return outputs, inputs
 
 
@@ -89,7 +88,9 @@ def decode_e8m0(value: ir.Value) -> ir.Value:
 
 
 def convert_output(value: ir.Value, result_type) -> ir.Value:
-    """Convert a register result to the requested narrower element type."""
+    """Convert a register result to the requested logical element type."""
+    if result_type == cutlass.Float8E8M0FNU:
+        return decode_e8m0(value)
     target = result_type.mlir_type
     if value.type == target:
         return value
@@ -109,6 +110,57 @@ def fragment_element(source, index: int) -> ir.Value:
     return source.ir_value()
 
 
+def zero_for_constraint(letter: str) -> ir.Value:
+    """Create a zero in the register type named by an inline-asm constraint."""
+    target = CONSTRAINT_TYPES[letter]()
+    return arith.constant(target, 0.0 if letter in ("f", "d") else 0)
+
+
+def inline_asm_result_type(output_types: list[ir.Type]) -> ir.Type:
+    """Return the scalar or LLVM struct type required by inline asm outputs."""
+    if len(output_types) == 1:
+        return output_types[0]
+    fields = ", ".join(str(output_type) for output_type in output_types)
+    return ir.Type.parse(f"!llvm.struct<({fields})>")
+
+
+def packed_operands(
+    sources,
+    input_letters: list[str],
+    scalar_sources: tuple[bool, ...],
+    base: int,
+    count: int,
+    pack: int,
+) -> list[ir.Value]:
+    """Gather one source-major inline-asm pack, padding a partial tail with zero."""
+    operands = []
+    for source_index, source in enumerate(sources):
+        for lane in range(pack):
+            letter = input_letters[source_index * pack + lane]
+            index = base + lane
+            operands.append(
+                bitcast_to(
+                    fragment_element(
+                        source, 0 if scalar_sources[source_index] else index
+                    )
+                    if index < count
+                    else zero_for_constraint(letter),
+                    CONSTRAINT_TYPES[letter](),
+                )
+            )
+    return operands
+
+
+def unpack_outputs(produced: ir.Value, output_types: list[ir.Type]) -> list[ir.Value]:
+    """Extract scalar results from an inline-asm scalar or LLVM struct result."""
+    if len(output_types) == 1:
+        return [produced]
+    return [
+        llvm.extractvalue(output_type, produced, [index])
+        for index, output_type in enumerate(output_types)
+    ]
+
+
 @dsl_user_op
 def inline_asm_elementwise_intrinsic(
     *sources,
@@ -117,62 +169,95 @@ def inline_asm_elementwise_intrinsic(
     result_type,
     is_pure: bool = True,
     pack: int = 1,
+    scalar_sources: tuple[bool, ...] = (),
     loc=None,
     ip=None,
 ):
     """Apply an inline PTX block elementwise across a TensorSSA fragment.
 
     Args:
-        sources: TensorSSA fragments or scalars, all of the same length.
+        sources: Broadcastable TensorSSA fragments or repeated scalar values.
         asm: PTX text using `$N` operand syntax, output first.
         constraints: LLVM constraint list, e.g. `"=h,r"`.
         result_type: Logical cutlass numeric type of the produced fragment.
             E8M0 integer results are decoded to Float32 for fused consumers.
         is_pure: Whether the block may be reordered and CSEd.
-        pack: Elements consumed per asm invocation. Only 1 is supported.
+        pack: Elements consumed per asm invocation. Missing tail elements are
+            zero-padded and their corresponding outputs are discarded.
+        scalar_sources: Sources whose physical TensorSSA value represents one
+            logical scalar and must be repeated for every lane.
     """
-    if pack != 1:
-        raise NotImplementedError(
-            f"CuteDSL inline asm supports pack=1, got pack={pack}"
-        )
+    if pack < 1:
+        raise ValueError(f"CuteDSL inline asm requires pack >= 1, got pack={pack}")
     output_letters, input_letters = split_constraints(constraints)
-    if len(input_letters) != len(sources):
+    if len(output_letters) != pack:
         raise ValueError(
-            f"inline asm expects {len(input_letters)} inputs for constraints "
-            f"{constraints!r}, got {len(sources)}"
+            f"inline asm pack={pack} requires {pack} output constraints, "
+            f"got {len(output_letters)} in {constraints!r}"
+        )
+    expected_inputs = len(sources) * pack
+    if len(input_letters) != expected_inputs:
+        raise ValueError(
+            f"inline asm pack={pack} with {len(sources)} sources requires "
+            f"{expected_inputs} input constraints, got {len(input_letters)} "
+            f"in {constraints!r}"
+        )
+    if not scalar_sources:
+        scalar_sources = (False,) * len(sources)
+    elif len(scalar_sources) != len(sources):
+        raise ValueError(
+            f"inline asm received {len(scalar_sources)} scalar-source flags "
+            f"for {len(sources)} sources"
         )
 
-    output_type = CONSTRAINT_TYPES[output_letters[0]]()
+    output_types = [CONSTRAINT_TYPES[letter]() for letter in output_letters]
+    asm_result_type = inline_asm_result_type(output_types)
     compute_type = (
         cutlass.Float32 if result_type == cutlass.Float8E8M0FNU else result_type
     )
+    fragments = [
+        source
+        for source, is_scalar in zip(sources, scalar_sources)
+        if isinstance(source, cute.TensorSSA) and not is_scalar
+    ]
+    if fragments:
+        shape = fragments[0].shape
+        if any(source.shape != shape for source in fragments[1:]):
+            shape = _infer_broadcast_shape(*(source.shape for source in fragments))
+            sources = tuple(
+                source.broadcast_to(shape)
+                if isinstance(source, cute.TensorSSA) and not is_scalar
+                else source
+                for source, is_scalar in zip(sources, scalar_sources)
+            )
+        first_fragment = next(
+            source
+            for source, is_scalar in zip(sources, scalar_sources)
+            if isinstance(source, cute.TensorSSA) and not is_scalar
+        )
+        count = math.prod(ir.VectorType(first_fragment.ir_value().type).shape)
+    else:
+        count = 1
+        shape = None
 
-    def invoke(index: int) -> ir.Value:
-        operands = [
-            bitcast_to(fragment_element(source, index), CONSTRAINT_TYPES[letter]())
-            for source, letter in zip(sources, input_letters)
-        ]
+    converted = []
+    for base in range(0, count, pack):
         produced = llvm.inline_asm(
-            output_type,
-            operands,
+            asm_result_type,
+            packed_operands(sources, input_letters, scalar_sources, base, count, pack),
             asm,
             constraints,
             has_side_effects=not is_pure,
             is_align_stack=False,
         )
-        return (
-            decode_e8m0(produced)
-            if result_type == cutlass.Float8E8M0FNU
-            else convert_output(produced, result_type)
+        valid_outputs = min(pack, count - base)
+        converted.extend(
+            convert_output(output, result_type)
+            for output in unpack_outputs(produced, output_types)[:valid_outputs]
         )
 
-    fragments = [source for source in sources if isinstance(source, cute.TensorSSA)]
-    if not fragments:
-        return compute_type(invoke(0))
-
-    shape = fragments[0].shape
-    count = ir.VectorType(fragments[0].ir_value().type).shape[0]
-    converted = [invoke(index) for index in range(count)]
+    if shape is None:
+        return compute_type(converted[0])
     vector_type = ir.VectorType.get([count], compute_type.mlir_type)
     return cute.TensorSSA(
         vector.from_elements(vector_type, converted), shape, compute_type
