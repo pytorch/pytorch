@@ -732,6 +732,7 @@ class BaseListVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "index": Method(list_index),
         "count": Method(list_count),
@@ -1101,6 +1102,7 @@ class RangeVariable(BaseListVariable):
         new_step = -step
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/rangeobject.c#L781-L787
     tp_methods = {
         "count": Method(count),
         "index": Method(index),
@@ -1338,6 +1340,7 @@ class ListVariable(BaseListVariable):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "append": Method(BaseListVariable.list_append),
         "extend": Method(BaseListVariable.list_extend),
@@ -1797,6 +1800,7 @@ class DequeVariable(BaseListVariable):
             mutation_type=ValueMutationNew(),
         )
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Modules/_collectionsmodule.c#L1838-L1860
     tp_methods = {
         # append/extend clamp right; appendleft/extendleft clamp left; the rest
         # are the shared list handlers (they don't grow, so need no clamp).
@@ -2296,6 +2300,7 @@ class SliceVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return VariableTracker.build(tx, result)
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/sliceobject.c#L564-L570
     tp_methods = {"indices": Method(indices)}
 
 
@@ -2480,6 +2485,7 @@ class RangeIteratorVariable(IteratorVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1109-L1115
         return ConstantVariable.create(self.len)
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/rangeobject.c#L948-L953
     tp_methods = {
         "__setstate__": Method(setstate),
         "__length_hint__": Method(length_hint),
