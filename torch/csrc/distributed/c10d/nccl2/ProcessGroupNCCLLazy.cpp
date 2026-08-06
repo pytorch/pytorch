@@ -15,6 +15,9 @@ c10::intrusive_ptr<ProcessGroupNCCL> makePrimary(
     int rank,
     int size,
     const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options) {
+  TORCH_CHECK(
+      !options->enable_reconfigure,
+      "nccl-lazy does not support enable_reconfigure");
   return c10::make_intrusive<ProcessGroupNCCL>(store, rank, size, options);
 }
 
