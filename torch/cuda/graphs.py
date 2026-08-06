@@ -903,28 +903,42 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
 # Annotation options live in that dict rather than as separate arguments so later ones do
 # not each widen the signature; validating here means a typo raises instead of silently
 # leaving the default in place.
-_ANNOTATION_CONFIG_VALUES: dict[str, tuple[str, ...]] = {
-    "backend": ("auto", "cupti", "edge_walk"),
+# Recognized keys of graph()'s annotation_config, each mapped to ``(default, allowed)``.
+# ``allowed`` is the tuple of permitted values, or None for an option that is not an
+# enumeration (a path or a limit, say) and validates itself. The default is stored
+# separately rather than taken as the first allowed value, so a boolean or free-form option
+# can be added without contorting it.
+_ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | None]] = {
+    "backend": ("auto", ("auto", "cupti", "edge_walk")),
 }
 
 
-def _parse_annotation_config(config: dict[str, typing.Any] | None) -> str:
-    """Validate ``graph(annotation_config=...)`` and return the annotation backend."""
+def _parse_annotation_config(
+    config: dict[str, typing.Any] | None,
+) -> dict[str, typing.Any]:
+    """Validate ``graph(annotation_config=...)`` and resolve it against the defaults.
+
+    Returns every recognized key, so callers read the result directly instead of repeating
+    the defaults. An unrecognized key or value raises, so a typo fails loudly rather than
+    silently leaving the default in place.
+    """
+    resolved = {key: default for key, (default, _) in _ANNOTATION_CONFIG_KEYS.items()}
     if config is None:
-        return "auto"
-    unknown = set(config) - set(_ANNOTATION_CONFIG_VALUES)
+        return resolved
+    unknown = set(config) - set(_ANNOTATION_CONFIG_KEYS)
     if unknown:
         raise ValueError(
             f"unrecognized annotation_config key(s) {sorted(unknown)}; "
-            f"supported: {sorted(_ANNOTATION_CONFIG_VALUES)}"
+            f"supported: {sorted(_ANNOTATION_CONFIG_KEYS)}"
         )
-    for key, allowed in _ANNOTATION_CONFIG_VALUES.items():
-        value = config.get(key, allowed[0])
-        if value not in allowed:
+    for key, value in config.items():
+        allowed = _ANNOTATION_CONFIG_KEYS[key][1]
+        if allowed is not None and value not in allowed:
             raise ValueError(
                 f"annotation_config[{key!r}] must be one of {list(allowed)}, got {value!r}"
             )
-    return config.get("backend", "auto")
+        resolved[key] = value
+    return resolved
 
 
 class graph:
@@ -1000,7 +1014,7 @@ class graph:
         annotation_config: dict[str, typing.Any] | None = None,
         check_input_liveness: bool = False,
     ):
-        self._annotation_backend = _parse_annotation_config(annotation_config)
+        self._annotation_config = _parse_annotation_config(annotation_config)
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -1048,8 +1062,9 @@ class graph:
         )
 
         backend = "edge_walk"
-        if self._enable_annotations and self._annotation_backend != "edge_walk":
-            force = self._annotation_backend == "cupti"
+        requested = self._annotation_config["backend"]
+        if self._enable_annotations and requested != "edge_walk":
+            force = requested == "cupti"
             # The CUPTI backend attributes each node to the mark_kernels scope open on the
             # thread that created it, so multithreaded autograd would mis-attribute the nodes
             # its engine worker threads create -- their scope state is not the capturing

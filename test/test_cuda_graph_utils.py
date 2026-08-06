@@ -1266,8 +1266,14 @@ class TestCuptiAnnotationBackend(TestCase):
         return dict(get_kernel_annotations())
 
     def test_parity_with_edge_walk(self):
-        # Both backends must attribute the same nodes for a plain single-stream scope.
-        counts = {}
+        # Both backends must attribute the same nodes for a plain single-stream scope, and
+        # key them the same way: the node ids must match, and every key must be rekeyed to
+        # that capture's exec graph id (what lets an annotation join a trace's "graph node
+        # id"). Comparing keys rather than just counts is what catches the CUPTI handler
+        # recording into a different id space.
+        from cuda.bindings import runtime as cuda_runtime
+
+        node_ids = {}
         for backend in ("edge_walk", "cupti"):
             clear_kernel_annotations()
             x = self._warm(torch.randn(64, 64, device="cuda"))
@@ -1278,12 +1284,16 @@ class TestCuptiAnnotationBackend(TestCase):
                 with mark_kernels("phase"):
                     for _ in range(4):
                         x = x + 1
+            exec_graph_id = _check_cuda_bindings(
+                cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
+            )
             annotations = self._annotations()
-            counts[backend] = len(annotations)
-            for entries in annotations.values():
+            for tools_id, entries in annotations.items():
                 self.assertEqual(entries, [{"name": "phase"}])
-        self.assertEqual(counts["cupti"], counts["edge_walk"])
-        self.assertEqual(counts["cupti"], 4)
+                self.assertEqual(tools_id >> 32, exec_graph_id)
+            node_ids[backend] = {tools_id & 0xFFFFFFFF for tools_id in annotations}
+        self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
+        self.assertEqual(len(node_ids["cupti"]), 4)
 
     def test_scope_entered_before_stream_joins_capture(self):
         # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
@@ -1355,6 +1365,50 @@ class TestCuptiAnnotationBackend(TestCase):
         ]
         self.assertEqual(names, ["outer", "inner", "outer"])
 
+    def test_conditional_body_work_warns_and_is_not_annotated(self):
+        # Parity with the edge walk's conditional-body warning, but reported on the drop
+        # rather than at scope entry: the handler cannot key body nodes to anything a trace
+        # would match, so it counts them and disarm() says how many were lost. That covers
+        # a scope *containing* a body as well as one inside it.
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2048], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with self.assertWarnsRegex(UserWarning, "were not annotated"):
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    z = x + 1
+                    with _if_body(pred):
+                        _ = torch.sqrt(z)
+        g.instantiate()
+
+        # Whatever was annotated is top-level: every key belongs to the exec graph, so none
+        # of the body's nodes (which live in the body graph's id space) slipped in. The
+        # exact top-level count is left alone -- _if_body emits kernels of its own.
+        annotations = self._annotations()
+        self.assertGreater(len(annotations), 0)
+        exec_graph_id = g.get_graph_data()["exec_graph_id"]
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    def test_no_warning_without_body_work(self):
+        # The counter must not leak across captures: a plain capture right after one that
+        # dropped body nodes has to be silent.
+        import warnings as _warnings
+
+        x = self._warm(torch.randn(64, 64, device="cuda"))
+        g = torch.cuda.CUDAGraph()
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error")
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+            ):
+                with mark_kernels("region"):
+                    x = x + 1
+
     def test_scopes_do_not_leak_across_captures(self):
         # A capture that raises mid-scope must not leave the scope open for the next one.
         x = self._warm(torch.randn(64, 64, device="cuda"))
@@ -1393,24 +1447,6 @@ class TestCuptiAnnotationBackend(TestCase):
             g.replay()
         torch.cuda.synchronize()
         self.assertEqual(len(self._annotations()), before)
-
-    def test_annotations_remap_to_exec_graph(self):
-        # Whichever backend recorded them, annotations end up keyed by the exec graph id so
-        # they join a profiler trace's "graph node id".
-        x = self._warm(torch.randn(64, 64, device="cuda"))
-        g = torch.cuda.CUDAGraph(keep_graph=True)
-        with torch.cuda.graph(
-            g, enable_annotations=True, annotation_config={"backend": "cupti"}
-        ):
-            with mark_kernels("phase"):
-                x = x + 1
-        g.instantiate()
-        resolve_and_remap(g)
-        exec_graph_id = g.get_graph_data()["exec_graph_id"]
-        annotations = self._annotations()
-        self.assertTrue(annotations)
-        for tools_id in annotations:
-            self.assertEqual(tools_id >> 32, exec_graph_id)
 
     def test_cupti_backend_requires_single_threaded_autograd(self):
         x = self._warm(torch.randn(64, 64, device="cuda"))

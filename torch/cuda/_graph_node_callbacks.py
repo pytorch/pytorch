@@ -23,6 +23,7 @@ cost a traceback per node).
 
 from __future__ import annotations
 
+import warnings
 from logging import getLogger
 from typing import Any
 
@@ -33,6 +34,11 @@ logger = getLogger(__name__)
 # The handler token from the monitor. Carries the (domain, cbid) it was registered for, so
 # it is also what arm/disarm address the callback by; kept so disarm can unregister it.
 _handler: Any = None
+
+# Nodes dropped during the armed capture for belonging to a child-graph or conditional
+# body. Counted rather than warned about on the spot: warnings.warn can be configured to
+# raise, and that must not happen inside CUPTI's C dispatch. disarm() reports the total.
+_dropped_body_nodes: int = 0
 
 
 def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
@@ -70,8 +76,10 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
     tools_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(graph_data.node))
     # Nodes reported for any other graph belong to a child-graph or conditional body, whose
     # ids live in that body graph's space and are renumbered again in the exec graph -- so
-    # recording them would produce keys matching nothing.
+    # recording them would produce keys matching nothing. disarm() warns about the total.
     if tools_id >> 32 != capture_root_graph_id():
+        global _dropped_body_nodes
+        _dropped_body_nodes += 1
         return
     record_node_annotation(tools_id, annotation)
 
@@ -141,6 +149,7 @@ def arm() -> bool:
     top-level graph id -- the handler filters body nodes against that id, so without it
     every node would be dropped and the caller should fall back to the edge walk.
     """
+    global _dropped_body_nodes
     if _handler is None:
         return False
     from torch.cuda._graph_annotations import capture_root_graph_id
@@ -148,13 +157,14 @@ def arm() -> bool:
 
     if capture_root_graph_id() is None:
         return False
+    _dropped_body_nodes = 0
     CuptiMonitor().arm_callback(_handler.domain, _handler.cbid)
     return True
 
 
 def disarm() -> None:
-    """Disable and unregister the node-creation callback. Idempotent, so it is safe in a
-    ``finally`` for a capture that raised."""
+    """Disable and unregister the node-creation callback, and report any work that went
+    unannotated. Idempotent, so it is safe in a ``finally`` for a capture that raised."""
     global _handler
     if _handler is None:
         return
@@ -166,3 +176,16 @@ def disarm() -> None:
         monitor.unregister_callback_handler(_handler)
     finally:
         _handler = None
+    # Warn here rather than from the handler: this runs on the normal path, where a
+    # warnings filter promoting warnings to errors is harmless. The edge walk reports the
+    # same situation at scope entry; reporting it on the drop instead covers both a scope
+    # inside a body and a scope containing one, and says how much was actually lost.
+    if _dropped_body_nodes:
+        warnings.warn(
+            f"mark_kernels: {_dropped_body_nodes} node(s) created inside a CUDA graph "
+            "child-graph or conditional-node body (torch.cond / torch.while_loop) were "
+            "not annotated -- such a body is captured into a separate cudaGraph_t whose "
+            "node ids are never remapped to the exec graph, so an annotation there would "
+            "match nothing in a profiler trace",
+            stacklevel=2,
+        )
