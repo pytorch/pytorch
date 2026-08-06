@@ -4,6 +4,139 @@
 
 using namespace metal;
 
+// P_KIND: 0 = p==0, 1 = p==1, 2 = p==2, 3 = p==inf, 4 = generic.
+template <typename T, int P_KIND>
+kernel void cdist_forward_scalar(
+    constant T* x1 [[buffer(0)]],
+    constant T* x2 [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant CdistFwdParams& params [[buffer(3)]],
+    uint2 pair [[thread_position_in_grid]]) {
+  const ulong row2 = pair.x;
+  const ulong batch_row = pair.y;
+  if (row2 >= ulong(params.R) ||
+      batch_row >= ulong(params.B) * ulong(params.P)) {
+    return;
+  }
+  const ulong batch = batch_row / ulong(params.P);
+  const ulong row1 = batch_row % ulong(params.P);
+  const ulong x1_base = (batch * ulong(params.P) + row1) * ulong(params.D);
+  const ulong x2_base = (batch * ulong(params.R) + row2) * ulong(params.D);
+
+  float value = 0.0f;
+  for (long dim = 0; dim < params.D; ++dim) {
+    const float distance = ::metal::precise::abs(
+        float(x1[x1_base + ulong(dim)]) - float(x2[x2_base + ulong(dim)]));
+    if IF_CONSTEXPR (P_KIND == 0) {
+      value += distance != 0.0f;
+    } else if IF_CONSTEXPR (P_KIND == 1) {
+      value += distance;
+    } else if IF_CONSTEXPR (P_KIND == 2) {
+      value += distance * distance;
+    } else if IF_CONSTEXPR (P_KIND == 3) {
+      value = isnan(value)
+          ? value
+          : (isnan(distance) ? distance : max(value, distance));
+    } else {
+      value += ::metal::precise::pow(distance, params.p);
+    }
+  }
+  if IF_CONSTEXPR (P_KIND == 2) {
+    value = ::metal::precise::sqrt(value);
+  } else if IF_CONSTEXPR (P_KIND == 4) {
+    value = ::metal::precise::pow(value, 1.0f / params.p);
+  }
+  output[batch_row * ulong(params.R) + row2] = T(value);
+}
+
+template <typename T, int P_KIND>
+kernel void cdist_forward_scalar4(
+    constant T* x1 [[buffer(0)]],
+    constant T* x2 [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant CdistFwdParams& params [[buffer(3)]],
+    uint2 tile [[thread_position_in_grid]]) {
+  constexpr uint outputs_per_thread = 4;
+  const ulong batch_row = tile.y;
+  const ulong batch = batch_row / ulong(params.P);
+  const ulong row1 = batch_row % ulong(params.P);
+  const ulong row2_base = ulong(tile.x) * outputs_per_thread;
+  if (row2_base >= ulong(params.R) || batch >= ulong(params.B)) {
+    return;
+  }
+  const ulong x1_base = (batch * ulong(params.P) + row1) * ulong(params.D);
+  const ulong x2_batch = batch * ulong(params.R) * ulong(params.D);
+  float values[outputs_per_thread] = {};
+
+  for (long dim = 0; dim < params.D; ++dim) {
+    const float a = float(x1[x1_base + ulong(dim)]);
+    for (uint item = 0; item < outputs_per_thread; ++item) {
+      const ulong row2 = row2_base + item;
+      if (row2 >= ulong(params.R)) {
+        continue;
+      }
+      const float distance = ::metal::precise::abs(
+          a - float(x2[x2_batch + row2 * ulong(params.D) + ulong(dim)]));
+      if IF_CONSTEXPR (P_KIND == 0) {
+        values[item] += distance != 0.0f;
+      } else if IF_CONSTEXPR (P_KIND == 1) {
+        values[item] += distance;
+      } else if IF_CONSTEXPR (P_KIND == 2) {
+        values[item] += distance * distance;
+      } else if IF_CONSTEXPR (P_KIND == 3) {
+        values[item] = isnan(values[item])
+            ? values[item]
+            : (isnan(distance) ? distance : max(values[item], distance));
+      } else {
+        values[item] += ::metal::precise::pow(distance, params.p);
+      }
+    }
+  }
+  for (uint item = 0; item < outputs_per_thread; ++item) {
+    const ulong row2 = row2_base + item;
+    if (row2 >= ulong(params.R)) {
+      continue;
+    }
+    float value = values[item];
+    if IF_CONSTEXPR (P_KIND == 2) {
+      value = ::metal::precise::sqrt(value);
+    } else if IF_CONSTEXPR (P_KIND == 4) {
+      value = ::metal::precise::pow(value, 1.0f / params.p);
+    }
+    output[(batch * ulong(params.P) + row1) * ulong(params.R) + row2] =
+        T(value);
+  }
+}
+
+#define REGISTER_CDIST_FORWARD_SCALAR(T)                   \
+  template [[host_name("cdist_forward_scalar_" #T "_p4")]] \
+  kernel void cdist_forward_scalar<T, 4>(                  \
+      constant T * x1 [[buffer(0)]],                       \
+      constant T * x2 [[buffer(1)]],                       \
+      device T * output [[buffer(2)]],                     \
+      constant CdistFwdParams & params [[buffer(3)]],      \
+      uint2 pair [[thread_position_in_grid]]);
+
+#define REGISTER_CDIST_FORWARD_SCALAR4(T, P_KIND)                  \
+  template [[host_name("cdist_forward_scalar4_" #T "_p" #P_KIND)]] \
+  kernel void cdist_forward_scalar4<T, P_KIND>(                    \
+      constant T * x1 [[buffer(0)]],                               \
+      constant T * x2 [[buffer(1)]],                               \
+      device T * output [[buffer(2)]],                             \
+      constant CdistFwdParams & params [[buffer(3)]],              \
+      uint2 tile [[thread_position_in_grid]]);
+
+#define REGISTER_CDIST_FORWARD_FOR_TYPE(T) \
+  REGISTER_CDIST_FORWARD_SCALAR(T)         \
+  REGISTER_CDIST_FORWARD_SCALAR4(T, 0)     \
+  REGISTER_CDIST_FORWARD_SCALAR4(T, 1)     \
+  REGISTER_CDIST_FORWARD_SCALAR4(T, 2)     \
+  REGISTER_CDIST_FORWARD_SCALAR4(T, 3)
+
+REGISTER_CDIST_FORWARD_FOR_TYPE(float)
+REGISTER_CDIST_FORWARD_FOR_TYPE(half)
+REGISTER_CDIST_FORWARD_FOR_TYPE(bfloat)
+
 // P_KIND: 0 = p==1, 1 = p==inf, 2 = generic. The TG precomputes
 // `grad / cdist^(p-1)` per (b, i, j) into `s_reducer`, shared across c-threads.
 template <typename T, int P_KIND, uint TG_C>
