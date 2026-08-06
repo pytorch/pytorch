@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
+from torch.cuda._graph_annotations import _is_tools_id_unavailable
 from torch.profiler import (
     kineto_available,
     profile,
@@ -43,6 +44,13 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
+
+
+# get_graph_data() -- how the tests below read a graph's node ids -- needs
+# cudaGraphNodeGetToolsId, i.e. cuda.bindings >= 13.1 and a driver >= 13.1 (or cuda-compat on
+# LD_LIBRARY_PATH); it raises otherwise. Probed only under CUDA, since the probe calls into the
+# CUDA runtime.
+TEST_GRAPH_TOOLS_ID = TEST_CUDA and not _is_tools_id_unavailable()
 
 
 def setUpModule():
@@ -583,6 +591,34 @@ class TestCuptiRecords(TestCase):
         _add_graph_event_node_spans(cols2, 1000, 2000)
         self.assertNotIn("graph_event_node", cols2)
 
+    def test_resolve_lane_columns_offsets_into_reserved_range(self):
+        # Lanes are born in the reserved range: _resolve_lane_columns places the resolver's
+        # ordinal there, so the column never holds a bare ordinal that is indistinguishable from
+        # a CUDA stream id. Rows the resolver declines (None) and eager rows keep their stream.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _LOGICAL_LANE_BASE
+        from torch.profiler._cupti.observers.profiler import _resolve_lane_columns
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        frame = {
+            "graph_node_id": i64(101, 102, 0),  # two graphed rows, one eager
+            "stream_id": i64(7, 7, 9),
+        }
+        # node 101 -> lane 8; node 102 -> declined; the eager row is never consulted
+        resolver = {101: (8, "DP")}.get
+        logical, names = _resolve_lane_columns(resolver, frame)
+        self.assertEqual(logical.tolist(), [_LOGICAL_LANE_BASE + 8, 7, 9])
+        self.assertEqual(names.tolist(), ["DP", None, None])
+
+        # an ordinal already in the reserved range is left alone, so the offset never stacks
+        logical, _names = _resolve_lane_columns(
+            {101: (_LOGICAL_LANE_BASE + 8, "DP")}.get, frame
+        )
+        self.assertEqual(logical.tolist()[0], _LOGICAL_LANE_BASE + 8)
+
     def test_add_graph_event_node_spans_attaches_lane_columns(self):
         # The span frame is synthesized after the _COLUMN_BUILDERS lane pass has run, so it must
         # attach its own (logical_lane, lane_name); without them the export's reassignment is
@@ -590,6 +626,7 @@ class TestCuptiRecords(TestCase):
         # kernel moves to the process-group lane.
         import numpy as np
 
+        from torch.profiler._cupti.monitor_trace import _LOGICAL_LANE_BASE
         from torch.profiler._cupti.observers.profiler import _add_graph_event_node_spans
 
         node = (7 << 32) | 11
@@ -615,7 +652,8 @@ class TestCuptiRecords(TestCase):
             cols, 1000, 2000, lane_resolver=lambda g: (61, "DP")
         )
         gen = cols["graph_event_node"]
-        self.assertEqual(gen["logical_lane"].tolist(), [61])
+        # the resolver's ordinal 61, placed in the reserved lane range at assignment time
+        self.assertEqual(gen["logical_lane"].tolist(), [_LOGICAL_LANE_BASE + 61])
         self.assertEqual(gen["lane_name"].tolist(), ["DP"])
         self.assertEqual(gen["stream_id"].tolist(), [377])  # capture stream preserved
 
@@ -1003,6 +1041,246 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 8)], "side comms")
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
+    def test_normalize_logical_lanes_offsets_into_reserved_range(self):
+        # A resolver lane id IS a stream id to the exports (same per-device tid namespace) and
+        # its name is only a label, so a lane landing on a live stream would silently merge the
+        # two sets of ops onto one lane and rename that stream. Every reassigned lane moves into
+        # the reserved range by a CONSTANT offset -- not "above whatever this window holds" --
+        # so the id depends only on the resolver's assignment and is comparable across traces.
+        # No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _LOGICAL_LANE_BASE,
+            _normalize_logical_lanes,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "device_id": i64(0, 0, 0),
+                # graphed on 7 -> lane 9, which stream 9's eager kernel already owns; graphed on
+                # 40 -> lane 50, which nothing owns; eager on 9.
+                "stream_id": i64(7, 40, 9),
+                "graph_node_id": i64(101, 202, 0),
+                "logical_lane": i64(9, 50, 9),
+            },
+        }
+        _normalize_logical_lanes(columns)
+        # Both reassigned lanes offset by the base, whether or not they collided; the eager row
+        # is not reassigned, so it stays on its stream.
+        self.assertEqual(
+            columns["kernel"]["logical_lane"].tolist(),
+            [_LOGICAL_LANE_BASE + 9, _LOGICAL_LANE_BASE + 50, 9],
+        )
+
+        # idempotent: ids already in the reserved range are left alone, so re-running does not
+        # offset twice (a window can be exported to both .json and .pftrace).
+        _normalize_logical_lanes(columns)
+        self.assertEqual(
+            columns["kernel"]["logical_lane"].tolist(),
+            [_LOGICAL_LANE_BASE + 9, _LOGICAL_LANE_BASE + 50, 9],
+        )
+
+    def test_normalize_logical_lanes_id_is_stable_across_windows(self):
+        # The point of the constant offset: one logical lane keeps one id across traces of the
+        # same job, whatever streams happened to be live in each window -- including a window
+        # where the resolver's own id (8) is a live stream. An "allocate above what this window
+        # holds" scheme would hand out a different id each time. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _LOGICAL_LANE_BASE,
+            _normalize_logical_lanes,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        def lane_for(streams):
+            # row 0 is the graphed op the resolver puts on lane 8; the rest are eager.
+            n = len(streams)
+            columns = {
+                "kernel": {
+                    "device_id": i64(*([0] * n)),
+                    "stream_id": i64(*streams),
+                    "graph_node_id": i64(101, *([0] * (n - 1))),
+                    "logical_lane": i64(8, *streams[1:]),
+                }
+            }
+            _normalize_logical_lanes(columns)
+            return columns["kernel"]["logical_lane"].tolist()[0]
+
+        for streams in ([7, 7], [7, 8], [7, 40, 8, 9]):
+            self.assertEqual(
+                lane_for(streams), _LOGICAL_LANE_BASE + 8, msg=f"{streams}"
+            )
+
+    def test_pftrace_lane_names_are_per_device(self):
+        # A lane is (gpu, stream), so the pftrace stream-lane names are interned on that pair,
+        # not on the bare stream id: one device's resolver name must not relabel another device's
+        # identically-numbered lane. Two collisions in one window -- dev 0's REAL stream 8 vs
+        # dev 1's lane 8 named "DP", and lane 9 named differently on each device. None of them is
+        # a same-device clash, so the normalizer leaves every id alone. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+            _LOGICAL_LANE_BASE,
+            _normalize_logical_lanes,
+            _STREAM_IID_BASE,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000, 7000),
+                "end_ns": i64(2000, 4000, 6000, 8000),
+                "device_id": i64(0, 1, 0, 1),
+                "stream_id": i64(8, 7, 7, 7),
+                "graph_node_id": i64(0, 102, 103, 104),
+                "logical_lane": i64(8, 8, 9, 9),
+                "lane_name": np.array([None, "DP", "TP", "PP"], dtype=object),
+                "name": np.array(["eagerOnEight", "k1", "k2", "k3"], dtype=object),
+            },
+        }
+        _normalize_logical_lanes(columns)
+        # dev 0's eager row keeps stream 8; the three reassigned lanes move into the reserved
+        # range, where the cross-device id reuse is still legal -- (dev, lane) is the key.
+        b = _LOGICAL_LANE_BASE
+        self.assertEqual(
+            columns["kernel"]["logical_lane"].tolist(), [8, b + 8, b + 9, b + 9]
+        )
+
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        specs, *_ = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
+        # One lane per (device, lane id), ordered by that pair; dev 1's stream 7 is absent
+        # because both of its ops moved off it. Interning on the bare stream id would collapse
+        # this to 2 lanes, labelling dev 0's real stream 8 "DP" and its lane 9 "PP".
+        self.assertEqual(
+            lane_names,
+            [
+                "[000008] stream 8",
+                f"[{b + 9}] TP",
+                f"[{b + 8}] DP",
+                f"[{b + 9}] PP",
+            ],
+        )
+
+    def test_normalize_logical_lanes_offsets_negative_lane(self):
+        # A negative lane id is abs()-folded onto a positive lane by the chrome path
+        # (_sanitize_tid) but kept as-is by pftrace, so the two exports would disagree on the
+        # lane count. The reserved-range offset lands it non-negative, no special case. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _LOGICAL_LANE_BASE,
+            _normalize_logical_lanes,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "device_id": i64(0),
+                "stream_id": i64(7),
+                "graph_node_id": i64(101),
+                "logical_lane": i64(-5),
+            },
+        }
+        _normalize_logical_lanes(columns)
+        self.assertEqual(
+            columns["kernel"]["logical_lane"].tolist(), [_LOGICAL_LANE_BASE - 5]
+        )
+
+    def test_merge_moves_logical_lane_to_reserved_range(self):
+        # End to end through the single merge entry point: the colliding lane moves into the
+        # reserved range before the chrome export reads the columns, so the graphed kernel gets
+        # its own lane (named by the resolver) and the stream it would have merged with keeps
+        # its work and its name. No CUDA.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _LOGICAL_LANE_BASE,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000),
+                "end_ns": i64(2000, 4000, 6000),
+                "device_id": i64(0, 0, 0),
+                "context_id": i64(1, 1, 1),
+                # graphed replayed on 7 -> lane 9, already owned by eagerOnNine's stream
+                "stream_id": i64(7, 7, 9),
+                "correlation_id": i64(11, 12, 13),
+                "graph_id": i64(0, 1, 0),
+                "graph_node_id": i64(0, 102, 0),
+                "logical_lane": i64(7, 9, 9),
+                "lane_name": np.array([None, "side comms", None], dtype=object),
+                "name": np.array(
+                    ["eagerKernel", "graphKernel", "eagerOnNine"], dtype=object
+                ),
+                "annotation": np.array([None, None, None], dtype=object),
+                "grid_x": i64(1, 1, 1),
+                "grid_y": i64(1, 1, 1),
+                "grid_z": i64(1, 1, 1),
+                "block_x": i64(32, 32, 32),
+                "block_y": i64(1, 1, 1),
+                "block_z": i64(1, 1, 1),
+                "registers_per_thread": i64(0, 0, 0),
+                "static_shared_memory": i64(0, 0, 0),
+                "dynamic_shared_memory": i64(0, 0, 0),
+                "priority": i64(0, 0, 0),
+                "queued": i64(0, 0, 0),
+                "channel": i64(0, 0, 0),
+                "channel_type": i64(0, 0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.json")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with open(out_path, "rb") as f:
+                out = json.loads(f.read())
+
+        kernels = {e["name"]: e for e in out["traceEvents"] if e.get("cat") == "kernel"}
+        graphed = kernels["graphKernel"]
+        lane = _LOGICAL_LANE_BASE + 9
+        self.assertEqual(graphed["tid"], lane)
+        self.assertEqual(graphed["args"]["stream"], lane)
+        self.assertEqual(graphed["args"]["original_stream"], 7)
+        self.assertEqual(kernels["eagerKernel"]["tid"], 7)
+        self.assertEqual(kernels["eagerOnNine"]["tid"], 9)
+
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in out["traceEvents"]
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, lane)], "side comms")
+        self.assertEqual(names[(0, 9)].strip(), "stream 9")
+
     def test_gpu_user_annotation_stays_on_capture_stream(self):
         # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
         # resolver reassigned kernels onto. But when a capture stream has no work left to
@@ -1298,7 +1576,7 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(meta_off[1] - meta_off[0], 0)  # kernel row: no spread blob
 
     def test_pftrace_lane_names_order_by_id(self):
-        # Perfetto sorts GPU hardware-queue lanes lexicographically by name, so lane names must
+        # Perfetto sorts GPU stream lanes lexicographically by name, so lane names must
         # be prefixed with the zero-padded lane id -> the lane order matches the chrome path's
         # numeric lane-id order. A resolver-named lane must not sort ahead of a lower-id stream
         # lane (regression: "aaa_comm" (lane 50) sorted before "stream 7"). No CUDA.
@@ -1307,7 +1585,7 @@ class TestCuptiRecords(TestCase):
         from torch.profiler._cupti.monitor_trace import (
             _assign_render_event_ids,
             _build_render_stages,
-            _HW_QUEUE_IID_BASE,
+            _STREAM_IID_BASE,
         )
 
         def i64(*vals):
@@ -1332,7 +1610,7 @@ class TestCuptiRecords(TestCase):
         )
         # hw-queue lanes are appended in ascending lane-id order; Perfetto re-sorts by name, so
         # the names sorted lexicographically must equal that ascending-id order.
-        lane_names = [name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE]
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
         self.assertEqual(len(lane_names), 2)
         self.assertEqual(
             sorted(lane_names), lane_names
@@ -1662,11 +1940,11 @@ class TestCuptiRecords(TestCase):
 
             name_table = captured["name_table"]
             specs, _gfx, stage_cols, *_ = captured["render"]
-            ts, dur, event_id, gpu, hw_queue_iid, stage, _context, name_iid, _wait = (
+            ts, dur, event_id, gpu, stream_iid, stage, _context, name_iid, _wait = (
                 stage_cols
             )
             # specs maps every iid -> name: the stage iids (Kernel/Memcpy/Memset/Annotation)
-            # and the hardware-queue lane iids (labeled "[<padded lane id>] <label>").
+            # and the stream-lane iids (labeled "[<padded lane id>] <label>").
             name_by_iid = {int(iid): name for iid, name, _cat in specs}
             render_slices = []
             render_lane_names = {}  # (device, lane_id) -> lane label, id prefix stripped
@@ -1676,7 +1954,7 @@ class TestCuptiRecords(TestCase):
                 # kernels/annotations carry a name_iid into the global table; memcpy/memset
                 # fall back to the stage spec name ("Memcpy"/"Memset").
                 name = name_table[niid - 1] if niid else name_by_iid[int(stage[i])]
-                label = name_by_iid[int(hw_queue_iid[i])]
+                label = name_by_iid[int(stream_iid[i])]
                 lane_id = int(label[1 : label.index("]")])
                 render_lane_names[(int(gpu[i]), lane_id)] = label[
                     label.index("]") + 1 :
@@ -1754,20 +2032,21 @@ class TestCuptiRecords(TestCase):
 
     def test_pftrace_chrome_lane_order_parity(self):
         # The GPU lane DISPLAY ORDER matches across formats -- both order by numeric lane id.
-        # Chrome orders lanes by tid (numeric); pftrace names its hardware-queue lanes
+        # Chrome orders lanes by tid (numeric); pftrace names its stream lanes
         # "[<zero-padded id>] <label>" so that Perfetto's lexicographic sort of those labels
         # reproduces the numeric id order. Assert the id sequences agree and are strictly
         # ascending. The window mixes a low-id "stream" lane (7), a higher-id resolver-named
-        # lane (17, "side comms"), and a mid "stream" lane (9): the named high-id lane must NOT
-        # sort ahead of the low-id stream lane (the regression the id prefix fixes), and the
-        # single- vs double-digit pair (7 vs 17) locks the zero-padding -- without it "[17]"
-        # would sort before "[7]". No CUDA.
+        # lane (17, "side comms" -- rendered in the reserved range as 100017), and a mid
+        # "stream" lane (9): the named high-id lane must NOT sort ahead of the low-id stream lane
+        # (the regression the id prefix fixes), and the differing digit counts lock the
+        # zero-padding -- without it "[100017]" would sort before "[7]". No CUDA.
         import tempfile
 
         import numpy as np
 
         from torch.profiler._cupti.monitor_trace import (
-            _HW_QUEUE_IID_BASE,
+            _LOGICAL_LANE_BASE,
+            _STREAM_IID_BASE,
             merge_trace_window_into_chrome_trace,
         )
 
@@ -1852,15 +2131,15 @@ class TestCuptiRecords(TestCase):
         # hw-queue lane specs, sorted lexicographically by label as Perfetto would, then the
         # lane id parsed back out of each "[<padded id>] ..." prefix.
         lane_specs = sorted(
-            (name for iid, name, _cat in specs if iid >= _HW_QUEUE_IID_BASE)
+            (name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE)
         )
         pftrace_order = [int(name[1 : name.index("]")]) for name in lane_specs]
 
-        self.assertEqual(chrome_order, [7, 9, 17])
+        self.assertEqual(chrome_order, [7, 9, _LOGICAL_LANE_BASE + 17])
         self.assertEqual(chrome_order, pftrace_order)
         self.assertEqual(pftrace_order, sorted(pftrace_order))  # strictly ascending
-        # zero-padding is load-bearing: labels are "[07]"/"[09]"/"[17]", so lexicographic
-        # order == id order (unpadded "[17]" would sort before "[7]").
+        # zero-padding is load-bearing: labels are "[000007]"/"[000009]"/"[100017]", so
+        # lexicographic order == id order (unpadded "[100017]" would sort before "[7]").
         self.assertTrue(
             all("]" in name and name.startswith("[0") for name in lane_specs[:2])
         )
@@ -2424,6 +2703,7 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(sync, monitor._enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_GRAPH_TOOLS_ID, "requires cudaGraphNodeGetToolsId")
     def test_event_node_recorder_arm_before_capture(self):
         # End-to-end usage, and the ordering contract it depends on: the recorder learns a
         # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
@@ -2488,6 +2768,7 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_GRAPH_TOOLS_ID, "requires cudaGraphNodeGetToolsId")
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
