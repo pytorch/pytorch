@@ -8085,14 +8085,25 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
+            node1, node2
+        ):
+            why("incompatible reduction contracts")
+            return False
 
         if node1.is_template() and self.get_backend(
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
-        if node1.is_template() and self.get_backend(
+        if (
+            node1.is_template() or isinstance(node1, FusedSchedulerNode)
+        ) and self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+            node1, node2
+        ):
+            return True
+        if any(node.is_reduction() for node in node1.get_nodes()) and self.get_backend(
             node1.get_device()
-        ).can_fuse_reduction_epilogue(node1, node2):
+        ).can_fuse_reduction_chain(node1, node2):
             return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
@@ -10545,6 +10556,16 @@ class BaseScheduling:  # noqa: docstring_linter
         raise NotImplementedError
 
     def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return False
+
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return True
+
+    def can_fuse_reduction_chain(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return False
