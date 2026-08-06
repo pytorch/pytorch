@@ -278,6 +278,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void suspend() override;
   void resume() override;
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
+  bool hasCapturedGraphs() const;
 
   // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
   // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
@@ -349,21 +350,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
-    return timing_enabled_.load();
+    return work_state_->timing_enabled.load();
   }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  // Events are pooled per timing mode: an event created with timing disabled
-  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
-  // describe the work the event is taken for / returned from.
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
-      bool timing_enabled);
-  void returnEvent(
-      std::unique_ptr<at::cuda::CUDAEvent> event,
-      bool timing_enabled);
   void waitForNcclOperation(
       ncclResult_t status,
       std::chrono::milliseconds timeout,
@@ -379,18 +372,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // reconfigurable mode. `reason` is logged after "Aborting process on rank N
   // due to ", so it must describe the actual trigger.
   void abortProcess(const std::string& reason);
+  void startWatchdog();
   // Signals the watchdog thread to exit and reaps it. Detaches instead of
   // joining when called from the watchdog thread itself.
   void stopWatchdog();
   void revokeNcclComm();
 
-  enum class CommState {
-    NORMAL,
-    ERROR,
-    TIMEOUT,
-  };
-
-  std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
@@ -592,7 +579,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
   // ctor and refreshed from NCCL in initNcclResources). The ported engine code
   // reads/writes `rank_` directly, which resolves to that protected member.
-  size_t max_event_pool_size_{};
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
   at::DataPtr barrier_buffer_;
@@ -612,12 +598,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
-
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
-  std::mutex event_pool_mutex_;
-  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
-  // pool never holds events whose timing mode disagrees with it.
-  std::atomic<bool> timing_enabled_{false};
+  std::shared_ptr<WorkNCCLState> work_state_;
 
   WorkNCCLQueue workq_;
 
@@ -636,10 +617,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool abort_process_on_timeout_or_error_;
 
   c10::intrusive_ptr<Options> options_c10d_;
-
-  std::mutex ephemeral_timeout_mutex_;
-  std::chrono::milliseconds ephemeral_timeout_active_{0};
-  std::chrono::milliseconds ephemeral_timeout_inflight_{0};
 
   // Identifies the current communicator generation in the reconfigure regime;
   // -1 until the first reconfigure(). Baked into the reconfigure handle so
@@ -677,17 +654,23 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::optional<BatchSendRecv> coalescing_batch_;
   c10::intrusive_ptr<WorkNCCL> coalesced_work_;
 
-  std::unordered_map<
-      unsigned long long,
-      std::vector<c10::intrusive_ptr<WorkNCCL>>>
-      graph_capture_work_refs_;
-  std::mutex graph_capture_work_mutex_;
+  struct GraphCaptureState {
+    std::unordered_map<
+        unsigned long long,
+        std::vector<c10::intrusive_ptr<WorkNCCL>>>
+        work_refs;
+    std::mutex mutex;
+  };
+  std::shared_ptr<GraphCaptureState> graph_capture_state_{
+      std::make_shared<GraphCaptureState>()};
 
   struct GraphCleanupData {
-    ProcessGroupNCCL* comm;
+    std::shared_ptr<GraphCaptureState> state;
     unsigned long long graph_id;
-    GraphCleanupData(ProcessGroupNCCL* comm_, unsigned long long id)
-        : comm(comm_), graph_id(id) {}
+    GraphCleanupData(
+        std::shared_ptr<GraphCaptureState> state_,
+        unsigned long long id)
+        : state(std::move(state_)), graph_id(id) {}
   };
   // NOTE: no CUDART_CB here -- it is empty on Linux CUDA and undefined under
   // HIP/ROCm; the plain void(void*) signature matches cuda/hipHostFn_t.

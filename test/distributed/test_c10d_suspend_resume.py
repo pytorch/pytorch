@@ -6,6 +6,7 @@
 # 2.29.7+), but other backends can be enabled by extending
 # SUSPEND_RESUME_BACKENDS.
 
+import gc
 import os
 import sys
 import unittest
@@ -160,6 +161,24 @@ class AbstractSuspendResumeTest:
                 self.backend.suspend()
         finally:
             self.backend._end_coalescing().wait()
+
+    def test_suspend_rejects_live_cuda_graph(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 captured-work lifecycle")
+        if torch.version.hip is not None:
+            self.skipTest("RCCL graph capture is not supported")
+        self._init_pg()
+        tensor = torch.ones(1, device=self.device)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            dist.all_reduce(tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "captured CUDA graph is alive"):
+            self.backend.suspend()
+        del graph
+        gc.collect()
+        self.backend.suspend()
+        self.backend.resume()
 
 
 def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):
