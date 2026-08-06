@@ -18,6 +18,7 @@ from torch.distributed.elastic.multiprocessing.redirects import (
     redirect_stderr,
     redirect_stdout,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 libc = ctypes.CDLL("libc.so.6")
@@ -25,6 +26,8 @@ c_stderr = ctypes.c_void_p.in_dll(libc, "stderr")
 
 
 class RedirectsTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
