@@ -165,6 +165,27 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
+    @torch._dynamo.config.patch(recompile_limit=32)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_good_shape_dynamic_shapes(self):
+        """
+        Under dynamic=True, FakeTensor shapes can be concrete-wrapping
+        torch.SymInt. is_b2b_gemm_good_on() converts them with int() before
+        passing to ceildiv(), which asserts on non-int. Without the guard this
+        used to crash the compiler (AssertionError: <class 'torch.SymInt'>).
+        """
+
+        def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            return torch.mm(torch.mm(m1, m2), m3)
+
+        f_opt = torch.compile(f, dynamic=True)
+        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        res = f_opt(A, B, C)
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
     def test_plain_b2b_gemm_performance(self):
