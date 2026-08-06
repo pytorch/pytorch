@@ -122,6 +122,10 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     const ::c10d::ReconfigureOptions& opts) {
   TORCH_CHECK(
+      !hasCapturedGraphs(),
+      "ProcessGroupNCCL communicator cannot be reconfigured while a captured "
+      "CUDA graph is alive");
+  TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL has been finalized");
   auto handles = getOrderedReconfigureHandles(opts);
@@ -221,7 +225,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   }
   init_state_ = InitializationState::UNINITIALIZED;
 
-  comm_state_ = CommState::NORMAL;
+  work_state_->comm_state = CommState::NORMAL;
   shutdown_ = false;
   revoked_ = false;
 
@@ -280,7 +284,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         LOG(ERROR) << e.what();
       }
     }
-    comm_state_ = CommState::ERROR;
+    work_state_->comm_state = CommState::ERROR;
     nccl_comm_ = nullptr;
     init_state_ = InitializationState::UNINITIALIZED;
     throw;
