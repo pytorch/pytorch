@@ -16174,6 +16174,27 @@ fn
         obj = fn(t)
         self.assertEqual(obj.compute(), t.sin())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation(self):
+        # A class defined in the compiled region has no source, so each read of
+        # a mutable class attribute used to build a fresh VariableTracker and
+        # silently drop mutations made through an earlier read.
+        def fn(t):
+            class Holder:
+                items = []
+                lookup = {}
+
+            Holder.items.append(1)
+            Holder.lookup["k"] = 2
+            # read the same attributes back through an instance as well
+            obj = Holder()
+            obj.items.append(3)
+            return t + len(Holder.items) + len(Holder.lookup) + len(obj.items)
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t), fn(t))
+
     @torch._dynamo.config.patch(enable_trace_load_build_class=False)
     def test___build_class___disabled(self):
         @torch.compile(backend="eager", fullgraph=True)

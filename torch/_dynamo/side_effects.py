@@ -216,6 +216,9 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[Any]
+    # Memoizes VTs for mutable attributes of classes built during tracing, which
+    # have no source to key on. See track_sourceless_cls_attr.
+    sourceless_cls_attrs: dict[int, VariableTracker]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
@@ -230,6 +233,7 @@ class SideEffects:
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
         keepalive: list[Any] | None = None,
+        sourceless_cls_attrs: dict[int, VariableTracker] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
@@ -252,6 +256,7 @@ class SideEffects:
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
+        self.sourceless_cls_attrs = sourceless_cls_attrs or {}
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
         # Used by MappingProxyVariable to graph break in case of any mutated
@@ -421,6 +426,7 @@ class SideEffects:
             },
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
+            sourceless_cls_attrs=dict(self.sourceless_cls_attrs),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
@@ -755,6 +761,18 @@ class SideEffects:
             variable,
             mutation_type_cls=AttributeMutationExisting,
         )
+
+    def get_sourceless_cls_attr(self, item: Any) -> VariableTracker | None:
+        return self.sourceless_cls_attrs.get(id(item))
+
+    def track_sourceless_cls_attr(self, item: Any, variable: VariableTracker) -> None:
+        """Memoize the VT built for a mutable attribute of a class that was
+        defined inside the compiled region. Such a class has no source, so
+        without this every read would build a fresh VT and mutations made
+        through an earlier one would be invisible to later reads. Keyed by the
+        underlying object, which keepalive pins so its id stays valid."""
+        self.sourceless_cls_attrs[id(item)] = variable
+        self.keepalive.append(item)
 
     def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
         """Register a sourceless VT (e.g. a synthetic exception) as a new

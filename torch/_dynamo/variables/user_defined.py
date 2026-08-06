@@ -856,6 +856,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.GetAttrVariable(self, name, source=source)
         if self.value is collections.OrderedDict:
             return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
+        if source is None and isinstance(cls_attr, (list, dict, set)):
+            # A class defined inside the compiled region (LOAD_BUILD_CLASS) has
+            # no source, so a fresh VT is built on every read. Each VT tracks
+            # its own contents, so for a mutable attribute that drops mutations
+            # made through an earlier read. In CPython `cls.attr` returns the
+            # same object every time, so memoize to match.
+            cached = tx.output.side_effects.get_sourceless_cls_attr(cls_attr)
+            if cached is not None:
+                return cached
+            built = VariableTracker.build(tx, cls_attr, source)
+            tx.output.side_effects.track_sourceless_cls_attr(cls_attr, built)
+            return built
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -3619,6 +3631,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self.get_source_by_walking_mro(tx, name)
         elif not source and self.cls_source is not None:
             source = AttrSource(self.cls_source, name)
+        if source is None and isinstance(type_attr, (list, dict, set)):
+            # Same memoization as UserDefinedClassVariable.resolve_cls_plain_attr,
+            # for a mutable class attribute read through an instance. Only a
+            # class built inside the compiled region gets here with no source;
+            # one defined outside has a cls_source to key on.
+            cached = tx.output.side_effects.get_sourceless_cls_attr(type_attr)
+            if cached is not None:
+                return cached
+            built = VariableTracker.build(tx, type_attr, source)
+            tx.output.side_effects.track_sourceless_cls_attr(type_attr, built)
+            return built
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
