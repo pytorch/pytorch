@@ -536,6 +536,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'torch/headeronly/macros/Macros.h',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -559,6 +560,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'torch/headeronly/macros/Macros.h',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -613,6 +615,7 @@ exclude_patterns = [
     'torch/headeronly/**',
     'torch/lib/**',
     'torch/nativert/**',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -673,6 +676,7 @@ exclude_patterns = [
     'torch/csrc/utils/pybind.h',
     'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
     'caffe2/**/*',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -769,6 +773,7 @@ exclude_patterns = [
     '**/fb/**',
     # These are safe to exclude as they do not have Python
     'c10/**/*',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -988,6 +993,7 @@ exclude_patterns = [
     'cmake/cmake_uninstall.cmake.i',
     'fb/**',
     '**/fb/**',
+    'third_party/kineto/**',
 ]
 command = [
     'uv',
@@ -1607,6 +1613,9 @@ include_patterns = [
     "**/*requirements*.txt",
     "**/*requirements*.in",
 ]
+exclude_patterns = [
+    'third_party/kineto/**',
+]
 
 [[linter]]
 code = 'COPYRIGHT'
@@ -1615,6 +1624,7 @@ exclude_patterns = [
     '.lintrunner.toml',
     'fb/**',
     '**/fb/**',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
@@ -1636,6 +1646,7 @@ include_patterns = ['**']
 exclude_patterns = [
     'fb/**',
     '**/fb/**',
+    'third_party/kineto/**',
 ]
 command = [
     'python3',
