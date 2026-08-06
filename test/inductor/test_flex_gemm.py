@@ -2671,6 +2671,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "flex_gemm"):
             actual.sum().backward()
 
+    @skipIfNoCuteDSL
     def test_generated_captured_arg_rejects_unsupported_shape(self):
         def fn(a, b, scale):
             return flex_gemm(
@@ -2690,6 +2691,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
 
+    @skipIfNoCuteDSL
     def test_generated_captured_arg_rejects_addmm_scope(self):
         def fn(bias, a, b, scale):
             return flex_gemm(
@@ -2710,6 +2712,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(bias, a, b, scale)
 
+    @skipIfNoCuteDSL
     def test_generated_tuple_aux_rejects_unsupported_scope(self):
         def addmm_fn(bias, a, b):
             return flex_gemm(
@@ -3151,6 +3154,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         FileCheck().check("epilogue_arg_kinds=('scalar',)").run(code)
         self.assertLocalReduceAuxCode(code, group)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3181,6 +3185,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "partial-output contract"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_tuple_aux_rejects_dbias_reduction_without_contract(self):
         def fn(a, b):
             return flex_gemm(
@@ -3196,6 +3201,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "partial-output contract"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_aux_rejects_addmm_scope(self):
         def fn(bias, a, b):
             def epilogue(acc):
@@ -3216,6 +3222,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(fn, backend="inductor", fullgraph=True)(bias, a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_rejects_empty_dim_list(self):
         def fn(a, b):
             def epilogue(acc):
@@ -3235,6 +3242,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "innermost grouped dimension"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_feed_main_rejects_addmm_scope(self):
         def fn(bias, a, b):
             def epilogue(acc):
@@ -3256,6 +3264,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(fn, backend="inductor", fullgraph=True)(bias, a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_fragment_feed_main_rejects_addmm_scope(self):
         def fn(bias, a, b):
             def epilogue(acc):
@@ -3277,6 +3286,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(fn, backend="inductor", fullgraph=True)(bias, a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_rejects_bmm_scope(self):
         def fn(a, b):
             def epilogue(acc):
@@ -3296,6 +3306,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3349,6 +3360,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3383,6 +3395,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "explicit reduction dtype"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3414,6 +3427,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "does not map to a CuTe TensorSSA"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3482,6 +3496,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -3533,6 +3548,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @skipIfNoCuteDSL
     def test_generated_local_reduce_rejects_mixed_row_column_grouping(self):
         m = 8
         n = 64
