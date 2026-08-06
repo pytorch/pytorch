@@ -10,7 +10,7 @@ import logging
 import traceback
 import types
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch._higher_order_ops
@@ -32,7 +32,6 @@ from torch._dynamo.variables.higher_order_ops import WrapHigherOrderVariable
 from torch._dynamo.variables.lists import ListVariable, TupleVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
-from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
 from torch._guards import (
     Guard,
     InvokeSubgraphReuseCondition,
@@ -142,14 +141,12 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #    (e.g. the result of a prior FX op). These can reach a nested compile region
 #    only via (a) the region's explicit function arguments, or (b) closure
 #    capture. We do not support nested-function regions that close over tensors,
-#    so only (a) applies. For explicit arguments, the set of types we support is
-#    small and well-defined: TensorVariable, SymNodeVariable, and
-#    ConstantVariable (enum members included). Each has a cheap structural
+#    so only (a) applies. For explicit arguments, the set of types that can
+#    appear is small and well-defined: TensorVariable, SymNodeVariable,
+#    ConstantVariable, and NNModuleVariable. Each has a cheap structural
 #    comparison (tensor metadata, symnode identity, constant value equality).
 #    We also snapshot the pytree treespec of the argument list and verify it
 #    matches on lookup, ensuring the flattened structure is identical.
-#    A sourceless object -- an nn.Module built during tracing, say -- has
-#    neither a structural comparison nor guards, so it is not eligible at all.
 #
 # 2. Sourceful variables — values with a known originating source (e.g. a
 #    module attribute or a local variable visible in the outer frame). For these
@@ -175,7 +172,7 @@ class InputTag(enum.Enum):
     TENSOR = "tensor"
     SYMNODE = "symnode"
     CONSTANT = "constant"
-    OBJECT = "object"
+    MODULE = "module"
 
 
 class InputFingerprint(NamedTuple):
@@ -189,35 +186,16 @@ class InputFingerprint(NamedTuple):
     treespec: pytree.TreeSpec | None = None
 
 
-def is_constant_like(
-    vt: Any,
-) -> TypeGuard[ConstantVariable | UserDefinedObjectVariable]:
-    """Whether a leaf VT is compared by value, via ``vt.value``.
-
-    Enum members are UserDefinedObjectVariable (not ConstantVariable) in
-    Dynamo, but they are immutable singletons, so value comparison is as
-    sound as it is for ConstantVariable.
-    """
-    if isinstance(vt, ConstantVariable):
-        return True
-    return isinstance(vt, UserDefinedObjectVariable) and isinstance(vt.value, enum.Enum)
-
-
 def classify_vt(vt: Any) -> InputTag | None:
     """Return the tag for a leaf VT, or None if unsupported."""
     if isinstance(vt, TensorVariable):
         return InputTag.TENSOR
     elif isinstance(vt, SymNodeVariable):
         return InputTag.SYMNODE
-    elif is_constant_like(vt):
+    elif isinstance(vt, ConstantVariable):
         return InputTag.CONSTANT
-    elif isinstance(vt, UserDefinedObjectVariable) and vt.source is not None:
-        # Covers nn.Modules too -- UnspecializedNNModuleVariable is a
-        # UserDefinedObjectVariable subclass. No metadata is recorded; reuse
-        # safety comes entirely from re-evaluating the guards installed on this
-        # object's source and on the sources derived from it. A sourceless
-        # object has no guards to re-evaluate, so it stays unsupported.
-        return InputTag.OBJECT
+    elif isinstance(vt, UnspecializedNNModuleVariable):
+        return InputTag.MODULE
     return None
 
 
@@ -466,9 +444,8 @@ def is_reuse_eligible(
         time — if the underlying object changed since then, the cached
         guards would silently evaluate against stale values.
       - Output must be a single tensor, or a tuple/list of plain tensors.
-      - All flattened inputs must be one of: tensor, symnode, constant
-        (including enum members), or a sourceful user-defined object
-        (nn.Modules included) — for sourceless or other input types we
+      - All flattened inputs must be one of: tensor, symnode, constant,
+        unspecialized NN module — for sourceless or other input types we
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
 
@@ -530,7 +507,7 @@ def build_reuse_condition(
     A reuse condition is a mix of two kinds of checks:
 
     1. **Input tag checks** (from flat_vts): For each flattened leaf VT,
-       we record its tag (InputTag.TENSOR/SYMNODE/CONSTANT/OBJECT) and
+       we record its tag (_VtTag.TENSOR/SYMNODE/CONSTANT/MODULE) and
        metadata (e.g. tensor shape/stride/dtype/device/requires_grad).
        At lookup time, the treespec ensures structural equivalence, and
        then we compare tags and metadata leaf-by-leaf.
@@ -568,16 +545,13 @@ def build_reuse_condition(
                 )
             input_checks.append((InputTag.SYMNODE, sym_num_key(vt.sym_num)))
         elif tag == InputTag.CONSTANT:
-            if not is_constant_like(vt):
+            if not isinstance(vt, ConstantVariable):
                 raise AssertionError(
-                    f"expected constant-like VT for CONSTANT tag, got {type(vt).__name__}"
+                    f"expected ConstantVariable for CONSTANT tag, got {type(vt).__name__}"
                 )
-            # Type is part of the key: `Mode.ADD == 1` and `True == 1` compare
-            # equal, but an isinstance() check inside the region traces
-            # differently for each, so value equality alone is not enough.
-            input_checks.append((InputTag.CONSTANT, (type(vt.value), vt.value)))
-        elif tag == InputTag.OBJECT:
-            input_checks.append((InputTag.OBJECT, None))
+            input_checks.append((InputTag.CONSTANT, vt.value))
+        elif tag == InputTag.MODULE:
+            input_checks.append((InputTag.MODULE, None))
         else:
             raise AssertionError(
                 f"Unexpected input tag '{tag}' for {type(vt).__name__} -- "
@@ -726,23 +700,11 @@ def is_reusable(
                 )
                 return False
         elif cached_tag == InputTag.CONSTANT:
-            if not is_constant_like(cur_vt):
+            if not isinstance(cur_vt, ConstantVariable):
                 raise AssertionError(
-                    f"expected constant-like VT for CONSTANT tag, got {type(cur_vt).__name__}"
+                    f"expected ConstantVariable for CONSTANT tag, got {type(cur_vt).__name__}"
                 )
-            cached_type, cached_value = cast(tuple[type, Any], cached_val)
-            if type(cur_vt.value) is not cached_type:
-                # Not deferred to the source check below: a value guard cannot
-                # catch a type change that alters the trace (isinstance, etc).
-                hc_log.debug(
-                    "subgraph_reuse: reuse failed -- input %d constant type "
-                    "mismatch: cached '%s' vs current '%s'",
-                    i,
-                    cached_type,
-                    type(cur_vt.value),
-                )
-                return False
-            if cur_vt.value != cached_value:
+            if cur_vt.value != cached_val:
                 # If both the cached and current arg have sources, source
                 # replacement in stamp_out will resolve the correct value.
                 cached_src = (
