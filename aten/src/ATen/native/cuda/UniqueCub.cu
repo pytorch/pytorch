@@ -8,6 +8,7 @@
 
 #include <c10/core/DeviceArray.h>
 #include <c10/util/Load.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -133,7 +134,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
 
   data_out.resize_(num_out);
   return std::tuple<Tensor, Tensor, Tensor>(
-      data_out, inverse_indices, counts);
+      std::move(data_out), std::move(inverse_indices), std::move(counts));
 }
 
 } // namespace
@@ -295,7 +296,8 @@ struct UniqueCub<bool> {
     output.resize_({num_out});
     counts.resize_({num_out});
 
-    return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
+    return std::tuple<Tensor, Tensor, Tensor>(
+        std::move(output), std::move(inverse_indices), std::move(counts));
   }
 };
 

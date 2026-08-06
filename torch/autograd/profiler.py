@@ -267,6 +267,16 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
+        if (
+            experimental_config.profiler_metrics
+            or experimental_config.profiler_measure_per_kernel
+        ):
+            warn(
+                "profiler_metrics and profiler_measure_per_kernel are deprecated "
+                "and ignored. These options will be removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -570,12 +580,16 @@ class profile:
         group_by_input_shape=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_functions=False,
     ):
         self._ensure_function_events()
         if self._function_events is None:
             raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -836,8 +850,20 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore [invalid-inheritance]
-class record_function(_ContextDecorator):
+# Set by torch.profiler to the active cupti_monitor ProfilerObserver while a session is
+# running (None otherwise). record_function routes regions to it via push/pop_annotation.
+# Held as an opaque object -- NOT imported from the cupti package -- so record_function never
+# pulls in the cupti chain on a non-cupti run, and there is a single "is a session active"
+# signal (this reference) rather than a separate flag.
+_active_cupti_profiler_observer: Any = None
+
+
+def _set_active_cupti_profiler_observer(observer: Any) -> None:
+    global _active_cupti_profiler_observer
+    _active_cupti_profiler_observer = observer
+
+
+class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -888,14 +914,29 @@ class record_function(_ContextDecorator):
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
+        self._cupti_monitor_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
+        # Route the region to the active cupti_monitor observer, if any. The reference is
+        # None unless a cupti_monitor profile is running, so a non-cupti run never touches
+        # the cupti chain. Guarded by is_scripting() (the global access doesn't compile under
+        # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
+        if not torch.jit.is_scripting():
+            observer = _active_cupti_profiler_observer
+            if observer is not None:
+                self._cupti_monitor_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        if not torch.jit.is_scripting():
+            if self._cupti_monitor_external_id is not None:
+                observer = _active_cupti_profiler_observer
+                if observer is not None:
+                    observer.pop_annotation()
+                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 
