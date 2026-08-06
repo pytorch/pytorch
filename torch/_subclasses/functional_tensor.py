@@ -165,6 +165,7 @@ class FunctionalTensor(torch.Tensor):
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.dim.default,
             torch.ops.prim.device.default,
+            torch.ops.prim.layout.default,
         }
     )
 
@@ -214,7 +215,7 @@ class FunctionalTensor(torch.Tensor):
             elem.requires_grad,  # requires_grad
             None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
-            False,  # dispatch_layout
+            is_sparse_any(elem),  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
