@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import os
-import pathlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -55,6 +54,8 @@ class TensorProperties:
     # This field is deprecated.
     pin_memory: bool = False
 
+    strides: tuple[int, ...] | None = None
+
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.memory_format
@@ -73,19 +74,31 @@ class TensorProperties:
             self.requires_grad,
             mem_format_encoding,
             self.pin_memory,
+            self.strides,
         )
 
     def __setstate__(
         self,
         state,
     ):
-        (
-            self.dtype,
-            self.layout,
-            self.requires_grad,
-            mem_format_encoding,
-            self.pin_memory,
-        ) = state
+        if len(state) == 5:
+            (
+                self.dtype,
+                self.layout,
+                self.requires_grad,
+                mem_format_encoding,
+                self.pin_memory,
+            ) = state
+            self.strides = None
+        else:
+            (
+                self.dtype,
+                self.layout,
+                self.requires_grad,
+                mem_format_encoding,
+                self.pin_memory,
+                self.strides,
+            ) = state
 
         if mem_format_encoding == _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
@@ -108,6 +121,7 @@ class TensorProperties:
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
+            strides=tensor.stride(),
         )
 
 
@@ -184,26 +198,3 @@ class MetadataIndex:
         object.__setattr__(self, "index", index)
         if offset is not None:
             object.__setattr__(self, "offset", torch.Size(offset))
-
-
-# These are transmitted between ranks via the c10d object collectives (which
-# deserialize with weights_only=True by default) during save/load plan exchange.
-# The pathlib types can appear as StorageMeta.checkpoint_id.
-torch.serialization.add_safe_globals(
-    [
-        ChunkStorageMetadata,
-        _MEM_FORMAT_ENCODING,
-        TensorProperties,
-        TensorStorageMetadata,
-        BytesStorageMetadata,
-        StorageMeta,
-        Metadata,
-        MetadataIndex,
-        pathlib.PurePath,
-        pathlib.PurePosixPath,
-        pathlib.PureWindowsPath,
-        pathlib.Path,
-        pathlib.PosixPath,
-        pathlib.WindowsPath,
-    ]
-)

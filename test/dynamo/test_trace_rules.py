@@ -28,7 +28,8 @@ from torch._dynamo.variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import skipIfWindows, TEST_CUDA, TEST_XPU
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 try:
@@ -48,6 +49,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch.sparse_csc_tensor",
     "torch.sparse_csr_tensor",
     "torch.cuda._get_device_properties",
+    "torch.xpu._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
@@ -72,7 +74,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -339,12 +340,13 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
-    def test_cuda_manual_seed_functions_graph_break(self):
+    @unittest.skipUnless(TEST_XPU or TEST_CUDA, "GPU is not available")
+    def test_gpu_manual_seed_functions_graph_break(self):
         for name in (
-            "torch.cuda.manual_seed",
-            "torch.cuda.manual_seed_all",
-            "torch.cuda.random.manual_seed",
-            "torch.cuda.random.manual_seed_all",
+            f"torch.{GPU_TYPE}.manual_seed",
+            f"torch.{GPU_TYPE}.manual_seed_all",
+            f"torch.{GPU_TYPE}.random.manual_seed",
+            f"torch.{GPU_TYPE}.random.manual_seed_all",
         ):
             self.assertIs(
                 torch._dynamo.trace_rules.lookup(load_object(name)),

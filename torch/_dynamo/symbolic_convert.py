@@ -52,6 +52,7 @@ import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
+    FakeTensorObservedException,
     get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
@@ -194,11 +195,13 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
-    generic_bool,
-    generic_contains,
+    generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_is_true,
+    generic_setitem,
     pyiter_send,
+    pysequence_contains,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -400,11 +403,6 @@ class LocalState:
         return "\n".join(
             f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
         )
-
-
-# Transmitted between ranks by the compiler collective (all_gather_object
-# deserializes with weights_only=True by default).
-torch.serialization.add_safe_globals([LocalState])
 
 
 # Mutable box that is shared across restarts
@@ -961,7 +959,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
                 if truth_fn(result.as_python_constant()):
                     if push:
@@ -1000,7 +998,7 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif not value.is_tensor():
-            result = generic_bool(self, value)  # type: ignore[arg-type]
+            result = generic_is_true(self, value)  # type: ignore[arg-type]
             if truth_fn(result):
                 if push:
                     self.push(value)
@@ -1465,6 +1463,15 @@ class InstructionTranslatorBase(
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
+    # Registry of this frame's cells (cellvars + freevars), recorded at frame
+    # setup. `symbolic_locals` models localsplus slot contents, which
+    # fast-local ops may legitimately clobber (LOAD_FAST_AND_CLEAR in inlined
+    # comprehensions evicts a merged cell slot; a comprehension iteration
+    # variable shadowing an enclosing `nonlocal` reuses the cell's name for a
+    # distinct fast slot). The registry survives such slot traffic so cell
+    # lookups and cell codegen at a graph break never depend on what the slot
+    # happens to hold. See `_cellvar` for the resolution rule.
+    symbolic_cellvars: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     symbolic_stream_state: SymbolicStreamState
@@ -1567,12 +1574,27 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
 
+    def _register_cells(self) -> None:
+        # Record this frame's cells in the symbolic_cellvars registry. A free
+        # var that shares its name with a fast local occupies a second,
+        # distinct localsplus slot in CPython (e.g. an inlined comprehension
+        # iteration variable shadowing an enclosing `nonlocal`); it is removed
+        # from symbolic_locals so fast-local ops on the name can't touch it.
+        # Cellvars that match a fast local are merged into one slot by CPython,
+        # so they (and non-colliding cells) stay in symbolic_locals as slot
+        # contents too. Idempotent: re-registering is a no-op.
+        fastlocals = set(self.f_code.co_varnames)
+        for name in self.cell_and_freevars():
+            if name in self.symbolic_locals:
+                self.symbolic_cellvars[name] = self.symbolic_locals[name]
+        for name in self.f_code.co_freevars:
+            if name in fastlocals:
+                self.symbolic_locals.pop(name, None)
+
     def prune_dead_locals(self) -> None:
         # keep cell and freevar references alive
         self.post_prune_cell_and_freevars = {
-            k: v
-            for k, v in self.symbolic_locals.items()
-            if k in self.cell_and_freevars()
+            name: self._cellvar(name) for name in self.cell_and_freevars()
         }
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
@@ -1637,7 +1659,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
+        if is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(
@@ -2210,12 +2232,25 @@ class InstructionTranslatorBase(
         if name.startswith("__stack"):
             self.symbolic_locals.pop(name)
 
+    def _cellvar(self, name: str) -> VariableTracker:
+        # The localsplus slot is authoritative while it holds a cell (a
+        # mid-function MAKE_CELL from an inlined comprehension can replace a
+        # merged cell slot's cell with a fresh one). Fall back to the registry
+        # when the slot doesn't hold a cell: either the name is a colliding
+        # free var that never lives in symbolic_locals, or the cell was
+        # temporarily evicted by LOAD_FAST_AND_CLEAR.
+        var = self.symbolic_locals.get(name)
+        # __instancecheck__ to avoid realizing lazy vts
+        if var is not None and type.__instancecheck__(CellVariable, var):
+            return var
+        return self.symbolic_cellvars[name]
+
     def LOAD_DEREF(self, inst: Instruction) -> None:
         if inst.argval not in self.cell_and_freevars():
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self.symbolic_locals[inst.argval]
+        cell = self._cellvar(inst.argval)
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -2288,7 +2323,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self.symbolic_locals[inst.argval]
+        cell = self._cellvar(inst.argval)
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
@@ -2299,7 +2334,9 @@ class InstructionTranslatorBase(
         if cell.local_name is not None:
             val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
-    LOAD_CLOSURE = LOAD_FAST
+    def LOAD_CLOSURE(self, inst: Instruction) -> None:
+        # LOAD_CLOSURE pushes the cell object itself.
+        self.push(self._cellvar(inst.argval))
 
     def _load_const(self, inst: Instruction) -> VariableTracker:
         i = inst.arg
@@ -2873,6 +2910,20 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if isinstance(raised_exception, FakeTensorObservedException):
+                from .exc import format_graph_break_message
+
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    str(raised_exception),
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
@@ -2930,7 +2981,6 @@ class InstructionTranslatorBase(
                 block_stack_entry = self.block_stack.pop()
 
                 while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
-                    # TODO(anijain2305) - This is not tested .. unable to create a testcase
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     self.exn_vt_stack.pop()
@@ -2939,14 +2989,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented(
-                                gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=raised_exception,
-                            )
+                            bubble_exception_to_interpreter()
 
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
@@ -3317,10 +3360,10 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            # pyrefly: ignore [unsupported-operation]
-            if inst.arg % 2:
-                self.LOAD_METHOD(inst)
-                return
+            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
+                "LOAD_ATTR method variant should have been normalized by "
+                "remove_load_attr_method_variant in cleaned_instructions"
+            )
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
@@ -3966,7 +4009,7 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
-        obj.call_method(self, "__setitem__", [key, val], {})
+        generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
@@ -3974,7 +4017,7 @@ class InstructionTranslatorBase(
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
         self._maybe_sync_dealloc_subscr(obj, key)
-        obj.call_method(self, "__delitem__", [key], {})
+        generic_delitem(self, obj, key)
 
     def _maybe_sync_dealloc_subscr(
         self, obj: VariableTracker, key: VariableTracker
@@ -4114,7 +4157,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance(obj, ConstDictVariable) to be true"
             )
-        obj.call_method(self, "__setitem__", (k, v), {})  # type: ignore[arg-type]
+        generic_setitem(self, obj, k, v)
 
     def SET_ADD(self, inst: Instruction) -> None:
         v = self.pop()
@@ -4206,9 +4249,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
@@ -4334,7 +4375,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source, tx=self
+                LazySymNodeFormatString(value, fmt_spec), source=None
             )
             self.push(value)
             return
@@ -4434,7 +4475,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
+        self.push(pysequence_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -4823,8 +4864,27 @@ class InstructionTranslatorBase(
 
     def MAKE_CELL(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
-            # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
+            # In 3.12+, MAKE_CELL is no longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
+            # A mid-function MAKE_CELL replaces the slot's contents with a
+            # fresh cell (the frame-entry cell was saved on the stack by a
+            # preceding LOAD_FAST_AND_CLEAR and is restored by the
+            # comprehension epilogue). Only the slot is updated: the
+            # symbolic_cellvars registry keeps the frame-entry cell, and
+            # `_cellvar` prefers the slot while it holds a cell.
+            if inst.argval in self.f_code.co_freevars:
+                # The name refers to three localsplus slots at once (fast
+                # local + comprehension cell + free var, e.g. `nonlocal i`
+                # with `[lambda: i for i in ...]`). Dynamo tracks locals by
+                # name and cannot model two same-named cells; tracing on
+                # would silently target the wrong cell.
+                unimplemented(
+                    gb_type="MAKE_CELL on a free variable name",
+                    context=f"MAKE_CELL {inst.argval}",
+                    explanation="An inlined comprehension creates a cell whose name "
+                    f"`{inst.argval}` is also a free variable of the enclosing function.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
             if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
                     "expected isinstance(self.symbolic_locals[inst.argval], NullVariable) to be true"
@@ -4982,12 +5042,7 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
-                "__setattr__",
-                [ConstantVariable.create("__annotations__"), attr],
-                {},
-            )
+            fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5002,9 +5057,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -5382,6 +5435,7 @@ class InstructionTranslatorBase(
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
         self.symbolic_locals = symbolic_locals
+        self.symbolic_cellvars = {}
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.symbolic_stream_state = symbolic_stream_state
@@ -5425,6 +5479,10 @@ class InstructionTranslatorBase(
         self.code_options: CodeOptions = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
+        # Inlined frames receive a fully-populated symbolic_locals (cells
+        # included); register their cells now. Root frames populate
+        # symbolic_locals after super().__init__ and register there.
+        self._register_cells()
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
@@ -5601,9 +5659,28 @@ class InstructionTranslator(InstructionTranslatorBase):
             if f_code.co_flags & CO_VARKEYWORDS:
                 varkw_name = f_code.co_varnames[_vararg_idx]
 
+            # Skip inputs never read anywhere in the function: they cannot
+            # affect the graph or any resume suffix, so guards on them are
+            # wasteful. Export mode must keep all locals because realize_all()
+            # below needs them. locals()/vars() are handled in _call_frame_locals_snapshot
+            # which adds pruned entries back from tx.f_locals on demand.
+            if export:
+                function_live_names: set[str] | None = None
+            else:
+                function_live_names = livevars_analysis(
+                    self.instructions, self.instructions[0]
+                )
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    if (
+                        function_live_names is not None
+                        and name not in function_live_names
+                        and name != varargs_name
+                        and name != varkw_name
+                    ):
+                        continue
                     local_dynamism = None
                     if dynamism:
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
@@ -5682,6 +5759,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
+            # symbolic_locals is now fully populated; register the frame's
+            # cells (base __init__ ran before this population).
+            self._register_cells()
+
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack,
                 skip_next=False,
@@ -5694,6 +5775,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
+                )
+                self.symbolic_cellvars = variables.LazyVariableTracker.realize_all(
+                    self.symbolic_cellvars
                 )
 
     def _throw_if_in_functorch(self) -> None:
@@ -6029,17 +6113,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         sub_locals = None
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
-        except TypeError as e:
-            unimplemented(
-                gb_type="failed to bind arguments when attempting to inline",
-                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
-                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
-                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-                from_exc=e,
-            )
+        except variables.functions.BindArgsTypeError as e:
+            exc.raise_type_error(parent, msg=e.args[0])
 
         if sub_locals is None:
             raise AssertionError("expected sub_locals is not None to be true")
@@ -6199,43 +6274,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug("DONE INLINING %s", code)
         self.output.tracing_context.traced_code.append(code)
 
-        if config.enable_faithful_generator_behavior or (
-            isinstance(self, InliningGeneratorInstructionTranslator)
-            and self.is_generator_from_ctx_manager
+        if (
+            is_generator(code)
+            and isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.frame_state == FrameState.FRAME_CLEARED
         ):
-            if (
-                is_generator(code)
-                and isinstance(self, InliningGeneratorInstructionTranslator)
-                and self.frame_state == FrameState.FRAME_CLEARED
-            ):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                # When the generator returns None, we raise StopIteration
-                # pyrefly: ignore [implicit-any]
-                args = []
-                if not self.symbolic_result.is_constant_none():
-                    args = [self.symbolic_result]
-                exc.raise_observed_exception(StopIteration, self, args=args)
-            else:
-                return self.symbolic_result
+            # When the generator returns None, we raise StopIteration
+            # pyrefly: ignore [implicit-any]
+            args = []
+            if not self.symbolic_result.is_constant_none():
+                args = [self.symbolic_result]
+            exc.raise_observed_exception(StopIteration, self, args=args)
         else:
-            if is_generator(code):
-                if not isinstance(self, InliningGeneratorInstructionTranslator):
-                    raise AssertionError(
-                        "expected isinstance(self, InliningGeneratorInstructionTranslator) to be true"
-                    )
-                if not self.symbolic_result.is_constant_none():
-                    raise AssertionError(
-                        "expected self.symbolic_result.is_constant_none() to be true"
-                    )
-                return ListIteratorVariable(
-                    self.generated_items,
-                    mutation_type=ValueMutationNew(),
-                )
-            else:
-                return self.symbolic_result
+            return self.symbolic_result
 
     def __init__(
         self,
@@ -6444,12 +6495,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
-    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.is_generator_from_ctx_manager = False
         self.frame_state = FrameState.FRAME_CREATED
         self.gi_exc_state = Segment()
 
@@ -6488,13 +6537,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        if (
-            config.enable_faithful_generator_behavior
-            or self.is_generator_from_ctx_manager
-        ):
-            self.symbolic_result = top
-            # Stop tracing
-            raise YieldValueOp
+        self.symbolic_result = top
+        # Stop tracing
+        raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
