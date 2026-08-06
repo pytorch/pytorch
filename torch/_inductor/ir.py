@@ -399,9 +399,12 @@ def _empty_non_strided(
     values_size = [*batch, 0, 1, 1] if blocked else [*batch, 0]
     values = torch.zeros(values_size, dtype=dtype, device=device)
     with torch.sparse.check_sparse_tensor_invariants(False):
-        # pyrefly: ignore [bad-argument-type]
         return torch.sparse_compressed_tensor(
-            compressed_indices, plain_indices, values, size, layout=torch_layout
+            compressed_indices,
+            plain_indices,
+            values,
+            torch.Size(size),
+            layout=torch_layout,
         )
 
 
