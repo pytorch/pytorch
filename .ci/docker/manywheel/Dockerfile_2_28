@@ -192,6 +192,9 @@ ARG ROCM_VERSION
 # repair_wheel.py discover ROCM_HOME from there. No /opt/rocm symlink.
 ARG THEROCK_INDEX_URL
 ENV MKLROOT /opt/intel
+# torch's extensions link libatomic.so.1, which the plain AlmaLinux base lacks and
+# which no ROCm OS package pulls in on this path (unlike rocm_final_legacy).
+RUN yum install -y libatomic
 # cmake-3.28.4 from pip to get enable_language(HIP)
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4

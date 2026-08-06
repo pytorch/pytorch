@@ -416,6 +416,14 @@ if(USE_CUDA AND BUILD_PYTHON)
   elseif(EXISTS "${CUPTI_STUBS_PY}")
     message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
     set(CUPTI_STUBS_GENERATED TRUE)
+    # The generated module is gitignored, so scikit-build-core's package walk
+    # drops it from the wheel (gitignore semantics; torch/version.py has an
+    # explicit install rule in torch/CMakeLists.txt for the same reason).
+    # Without this the wheel ships torch/profiler/_cupti/ WITHOUT the stubs
+    # and importing the CUPTI monitor dies with ModuleNotFoundError; editable
+    # installs mask it (redirect mode reads the source tree). DESTINATION is
+    # relative to the install prefix, which the wheel maps to torch/.
+    install(FILES "${CUPTI_STUBS_PY}" DESTINATION "profiler/_cupti")
     # Regenerate when the resolved header (or its version header) changes: adding them to
     # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
     string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
