@@ -64,6 +64,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
+    _graph_capture_device_type,
     BoxedDeviceIndex,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
@@ -2145,21 +2146,36 @@ def cudagraphify_impl(
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    device_type = _graph_capture_device_type()
+    device_interface = get_interface_for_device(device_type)
+
     # warmup
-    torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
-    stream.wait_stream(torch.cuda.current_stream())
+    device_interface.synchronize()
+    stream = device_interface.Stream()
+    stream.wait_stream(device_interface.current_stream())
     # copy static_inputs because it will be cleared in model
-    with torch.cuda.stream(stream):
+    with device_interface.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
-    torch.cuda.current_stream().wait_stream(stream)
-    torch.cuda.synchronize()
+    device_interface.current_stream().wait_stream(stream)
+    device_interface.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
-        static_outputs = model(list(static_inputs))
+    graph: Any
+    if device_type == "cuda":
+        # CUDA keeps its untouched legacy graph object and capture context.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
+            static_outputs = model(list(static_inputs))
+    else:
+        # Registered accelerator backends resolve their GraphImplInterface
+        # implementation from the C++ registry; the graph object is itself a
+        # capture context manager on the current stream.
+        graph = torch.accelerator.Graph(capture_error_mode="thread_local")
+        with device_interface.stream(stream), graph:
+            static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 

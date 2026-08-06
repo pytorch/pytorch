@@ -170,6 +170,63 @@ class DeviceInterface:
         if not cls.is_triton_capable():
             raise RuntimeError("This device is not capable of supporting Triton")
 
+    class GraphOps:
+        """
+        Runtime extension point for CUDA-graph-style capture: memory-pool
+        routing and caching-allocator checkpointing, as consumed by Inductor's
+        cudagraph_trees. Backends that support graph capture override the
+        NotImplementedError members; the remaining defaults are safe no-ops.
+        """
+
+        @staticmethod
+        def graph_pool_handle() -> tuple[int, int]:
+            raise NotImplementedError
+
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device: int, pool: tuple[int, int]
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def end_allocate_to_pool(device: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def release_pool(device: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def get_checkpoint_state(device: int, pool: tuple[int, int]) -> Any:
+            raise NotImplementedError
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device: int,
+            state: Any,
+            stale_storages: Any,
+            storages_to_add_deleters_to: Any,
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device: int, pool: tuple[int, int], expected_live_allocations: Any
+        ) -> bool:
+            raise NotImplementedError
+
+        @staticmethod
+        def raw_delete(ptr: int) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def caching_allocator_enabled() -> bool:
+            return True
+
+        @staticmethod
+        def memory_snapshot() -> Any:
+            return None
+
 
 class DeviceGuard:
     """
@@ -291,6 +348,58 @@ class CudaInterface(DeviceInterface):
                 raise RuntimeError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise RuntimeError("triton not built with the 'nvidia' backend")
+
+    class GraphOps(DeviceInterface.GraphOps):
+        graph_pool_handle = staticmethod(torch.cuda.graph_pool_handle)
+        memory_snapshot = staticmethod(torch.cuda.memory_snapshot)
+
+        # The torch._C._cuda_* symbols below only exist in CUDA builds, so
+        # they are bound at call time rather than at class-definition time to
+        # keep CPU-only builds importable.
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device: int, pool: tuple[int, int]
+        ) -> None:
+            torch._C._cuda_beginAllocateCurrentThreadToPool(device, pool)
+
+        @staticmethod
+        def end_allocate_to_pool(device: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_endAllocateToPool(device, pool)
+
+        @staticmethod
+        def release_pool(device: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_releasePool(device, pool)
+
+        @staticmethod
+        def get_checkpoint_state(device: int, pool: tuple[int, int]) -> Any:
+            return torch._C._cuda_getCheckpointState(device, pool)
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device: int,
+            state: Any,
+            stale_storages: Any,
+            storages_to_add_deleters_to: Any,
+        ) -> None:
+            torch._C._cuda_setCheckpointPoolState(
+                device, state, stale_storages, storages_to_add_deleters_to
+            )
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device: int, pool: tuple[int, int], expected_live_allocations: Any
+        ) -> bool:
+            return torch._C._cuda_checkPoolLiveAllocations(
+                device, pool, expected_live_allocations
+            )
+
+        @staticmethod
+        def raw_delete(ptr: int) -> None:
+            torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
+
+        @staticmethod
+        def caching_allocator_enabled() -> bool:
+            return torch._C._cuda_cudaCachingAllocator_is_enabled()
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -463,6 +572,12 @@ class XpuInterface(DeviceInterface):
 
         if "intel" not in triton.backends.backends:
             raise RuntimeError("triton not built with the 'intel' backend")
+
+    @classmethod
+    def is_graph_capture_supported(cls) -> bool:
+        # XPU registers XPUGraphImpl in the accelerator GraphImplInterface
+        # registry, which is the source of truth for its capture support.
+        return torch._C._accelerator_hasGraphImpl("xpu")
 
 
 @dataclass

@@ -1,4 +1,6 @@
+#include <ATen/core/GraphImplInterface.h>
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -187,6 +189,22 @@ void initModule(PyObject* module) {
     torch::utils::maybe_initialize_device(device_type);
     return at::accelerator::getDefaultGenerator(device_index);
   });
+
+  // Whether a backend-agnostic graph capture implementation
+  // (GraphImplInterface) is registered for the given device type (default:
+  // the current accelerator). Consumed by
+  // DeviceInterface.is_graph_capture_supported for registered backends such
+  // as XPU and out-of-tree accelerators. CUDA intentionally keeps its legacy
+  // torch.cuda.CUDAGraph path and is not registered here.
+  m.def(
+      "_accelerator_hasGraphImpl",
+      [](std::optional<std::string> device_type) {
+        const auto dt = device_type.has_value()
+            ? c10::Device(device_type.value()).type()
+            : at::accelerator::getAccelerator(/*checked=*/true).value();
+        return at::has_graph_impl(dt);
+      },
+      py::arg("device_type") = std::nullopt);
 
   // Accelerator Graph class binding
   py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(

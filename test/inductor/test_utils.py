@@ -13,6 +13,11 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo.device_interface import (
+    CudaInterface,
+    DeviceInterface,
+    XpuInterface,
+)
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
@@ -1144,6 +1149,39 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+class TestGraphOpsContract(TestCase):
+    def test_base_graph_ops_defaults(self):
+        ops = DeviceInterface.GraphOps
+        # Safe defaults for backends that have not been adapted.
+        self.assertTrue(ops.caching_allocator_enabled())
+        self.assertIsNone(ops.memory_snapshot())
+        with self.assertRaises(NotImplementedError):
+            ops.graph_pool_handle()
+
+    def test_cuda_graph_ops_forward_original_symbols(self):
+        # The class-level bindings must be the original functions so routing
+        # through GraphOps cannot change CUDA behavior.
+        self.assertIs(
+            CudaInterface.GraphOps.graph_pool_handle, torch.cuda.graph_pool_handle
+        )
+        self.assertIs(
+            CudaInterface.GraphOps.memory_snapshot, torch.cuda.memory_snapshot
+        )
+
+    def test_accelerator_has_graph_impl_binding(self):
+        # CUDA intentionally keeps its legacy capture path and is not
+        # registered in the GraphImplInterface registry; neither is CPU.
+        self.assertFalse(torch._C._accelerator_hasGraphImpl("cuda"))
+        self.assertFalse(torch._C._accelerator_hasGraphImpl("cpu"))
+
+    def test_xpu_graph_capture_capability_is_registry_derived(self):
+        self.assertIsInstance(XpuInterface.is_graph_capture_supported(), bool)
+        self.assertEqual(
+            XpuInterface.is_graph_capture_supported(),
+            torch._C._accelerator_hasGraphImpl("xpu"),
+        )
 
 
 if __name__ == "__main__":
