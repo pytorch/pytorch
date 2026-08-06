@@ -13,9 +13,11 @@
 #include <thread>
 #include <unordered_set>
 
+#include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -101,31 +103,14 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         << " was not finalized before destruction. "
         << "This may indicate a resource leak. Please call finalize() explicitly.";
 
-    // Signal shutdown to timeout watchdog thread to prevent it from accessing
-    // this object after destruction
-    shutdown_ = true;
+    // Stop the watchdog so it cannot access this object after destruction. It
+    // may be the caller (garbageCollect can pop a work item whose destruction
+    // releases the last reference to this comm), which stopWatchdog handles.
+    stopWatchdog();
 
-    // Wake up the timeout watchdog thread
-    {
-      std::lock_guard<std::mutex> lock(timeout_mutex_);
-      timeout_cv_.notify_all();
-    }
-
-    // Wait for timeout thread to finish. If we're being called from within
-    // the timeout thread itself (e.g., garbageCollect popped a work item whose
-    // destruction released the last shared_ptr to this comm), we must detach
-    // instead of join to avoid a deadlock.
-    if (timeout_thread_.joinable()) {
-      if (std::this_thread::get_id() != timeout_thread_.get_id()) {
-        timeout_thread_.join();
-      } else {
-        timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
-      }
-    }
-
-    // Abort the NCCL communicator since we can't do a clean finalization
-    // Note: We don't call the full abortNcclComm() to avoid potential abort()
-    // calls from abort_process_on_timeout_or_error_
+    // Abort the NCCL communicator since we can't do a clean finalization.
+    // Open-coded rather than abortNcclComm() so a failure cannot throw out of
+    // the destructor (abortNcclComm() throws on a failed or timed-out abort).
     if (nccl_comm_) {
       // Drop our symmetric-memory registration while nccl_comm_ is still valid
       // (it is nulled below, before detachMemoryHook runs).
@@ -167,6 +152,21 @@ void ProcessGroupNCCL::init(at::Device device) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
   }
 
+  // If deterministic mode is enabled, disable the NVLS algorithm in NCCL
+  // (which can lead to non-deterministic reductions). Mirrors the stock
+  // ProcessGroupNCCL. NCCL reads NCCL_ALGO when the communicator is created,
+  // so this must run before createNcclComm below. If the user already set
+  // NCCL_ALGO, leave it untouched.
+  // TODO: remove this once NVLS supports deterministic mode.
+  if (at::globalContext().deterministicAlgorithms()) {
+    if (!c10::utils::get_env("NCCL_ALGO").has_value()) {
+      LOG(INFO)
+          << "torch deterministic mode is enabled, "
+          << "disabling NVLS algorithm in NCCL which can lead to non-deterministic reduction.";
+      c10::utils::set_env("NCCL_ALGO", "^NVLS");
+    }
+  }
+
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
     auto bootstrap = std::make_unique<NCCLBootstrap>(
         store_,
@@ -186,7 +186,7 @@ void ProcessGroupNCCL::init(at::Device device) {
   initNcclResources();
 
   init_state_ = InitializationState::INITIALIZED;
-  TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
+  TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized for rank: " << rank_;
 }
@@ -203,11 +203,6 @@ void ProcessGroupNCCL::initNcclResources() {
 
   if (!dependency_event_) {
     dependency_event_.emplace(cudaEventDisableTiming);
-  }
-
-  if (!barrier_buffer_) {
-    barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
@@ -232,7 +227,7 @@ void ProcessGroupNCCL::initNcclResources() {
   publishComm();
 }
 
-void ProcessGroupNCCL::initFromSplitComm(
+void ProcessGroupNCCL::initFromComm(
     ncclComm_t comm,
     at::Device device,
     std::shared_ptr<NcclApi> nccl_api) {
@@ -241,7 +236,7 @@ void ProcessGroupNCCL::initFromSplitComm(
   nccl_comm_ = comm;
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
-  TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
+  TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized from split for rank: "
                      << rank_;
 }
@@ -322,20 +317,59 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  // commName above borrows `name`, which belongs to the Options handed to
+  // split() -- a clone that dies with the caller's frame. Every consumer of a
+  // stored config assigns commName from a live string before passing it to
+  // NCCL (createNcclComm, reconfigure(), this function), so store no pointer
+  // rather than one that outlives its string.
+  childOpts->config.commName = nullptr;
+#endif
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
 
+  // The child's membership in world-rank terms, as stock's split() records it.
+  // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
+  // which otherwise falls back to identity ranks. Map through this group's own
+  // map, not the passed-in Options': an empty map means "spans the world in
+  // rank order", and a merged group inherits its parent's shorter map, so
+  // treat anything too short the same way instead of indexing out of bounds.
+  const auto& parentRanks = options_c10d_->global_ranks_in_group;
+  const bool parentSpansWorld =
+      parentRanks.size() < static_cast<size_t>(getSize());
+  std::vector<uint64_t> childRanks;
+  childRanks.reserve(ranks.size());
+  for (int r : ranks) {
+    childRanks.push_back(
+        parentSpansWorld ? static_cast<uint64_t>(r) : parentRanks[r]);
+  }
+  childOpts->global_ranks_in_group = std::move(childRanks);
+
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
-  child->initFromSplitComm(new_comm, device_, nccl_api_);
+  child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
 
 void ProcessGroupNCCL::abort() {
-  comm_state_ = CommState::ERROR;
+  // User-initiated (backend.abort() / _abort_process_group()): tear the
+  // communicator down and return. Never terminates the process, whatever
+  // TORCH_NCCL_ASYNC_ERROR_HANDLING says -- that gate only covers failures the
+  // watchdog detects on its own.
+  TC_LOG(INFO, this) << "abort() requested on rank " << rank_
+                     << "; aborting the NCCL communicator";
   if (options_c10d_->enable_reconfigure) {
+    comm_state_ = CommState::ERROR;
     revokeNcclComm();
   } else {
+    // Stop the watchdog before publishing the error: this failure is one the
+    // caller asked for, so it must not trigger a process abort, and there is no
+    // communicator left to watch either. Not done in reconfigurable mode, where
+    // the comm is revoked rather than destroyed and the watchdog is needed
+    // again after reconfigure(). The error is still published before the
+    // teardown, so work in flight reports it instead of completing.
+    stopWatchdog();
+    comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
 }
@@ -399,19 +433,10 @@ void ProcessGroupNCCL::finalize() {
   }
   init_state_ = InitializationState::FINALIZED;
 
-  // Signal shutdown to timeout watchdog
-  shutdown_ = true;
-
-  // Wake up the timeout watchdog thread
-  {
-    std::lock_guard<std::mutex> lock(timeout_mutex_);
-    timeout_cv_.notify_all();
-  }
-
-  // Wait for timeout thread to finish
-  if (timeout_thread_.joinable()) {
-    timeout_thread_.join();
-  }
+  // Stop the watchdog first: draining the work queue below may surface a
+  // timeout, which is a teardown result to report to the caller, not a reason
+  // to terminate the process.
+  stopWatchdog();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -429,6 +454,10 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
+    if (!nccl_comm_) {
+      throw std::runtime_error(
+          "NCCL communicator was aborted after a previous error");
+    }
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -483,14 +512,36 @@ void ProcessGroupNCCL::abortNcclComm() {
         "NCCL Abort failed");
     nccl_comm_ = nullptr;
   }
-  // Never abort the process in reconfigurable mode: callers fall back to
-  // revoke + throw so the failure can be handled by reconfiguring.
-  if (abort_process_on_timeout_or_error_ &&
-      !options_c10d_->enable_reconfigure) {
-    TC_LOG(ERROR, this) << "Aborting process due to timeout";
-    runAbortHooks();
-    ::abort();
+}
+
+void ProcessGroupNCCL::stopWatchdog() {
+  shutdown_ = true;
+  {
+    std::lock_guard<std::mutex> lock(timeout_mutex_);
+    timeout_cv_.notify_all();
   }
+  if (timeout_thread_.joinable()) {
+    // Joining from within the watchdog thread (the async-error path calls
+    // abort()) would deadlock.
+    if (std::this_thread::get_id() != timeout_thread_.get_id()) {
+      timeout_thread_.join();
+    } else {
+      timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
+    }
+  }
+}
+
+void ProcessGroupNCCL::abortProcess(const std::string& reason) {
+  // Never terminate the process in reconfigurable mode: callers fall back to
+  // revoke + throw so the failure can be handled by reconfiguring.
+  if (!abort_process_on_timeout_or_error_ ||
+      options_c10d_->enable_reconfigure) {
+    return;
+  }
+  TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
+                      << reason;
+  runAbortHooks();
+  ::abort();
 }
 
 void ProcessGroupNCCL::revokeNcclComm() {
@@ -538,7 +589,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "send", dst, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "send", dst, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -596,7 +648,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "recv", src, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "recv", src, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -674,6 +727,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
       comm_size_,
       "batch_op_issue",
       rank_,
+      sequence_number_,
       input_tensors,
       output_tensors);
 
@@ -746,7 +800,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
   checkTensorDevice(tensor);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "broadcast", root, tensor, tensor);
+      name_, comm_size_, "broadcast", root, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -788,7 +842,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
   checkTensorDevice(tensor);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_reduce", rank_, tensor, tensor);
+      name_, comm_size_, "all_reduce", rank_, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -805,7 +859,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           tensor.data_ptr(), // In-place operation
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
           stream),
       timeout,
@@ -831,7 +885,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "reduce", root, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "reduce", root, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -848,7 +903,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           rank_ == root ? tensor.data_ptr() : nullptr,
           tensor.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
           stream),
@@ -908,7 +963,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_gather", rank_, tensor_list, {tensor});
+      name_,
+      comm_size_,
+      "all_gather",
+      rank_,
+      sequence_number_,
+      tensor_list,
+      {tensor});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -988,7 +1049,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "allGatherSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "allGatherSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1044,7 +1111,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   checkSameDtype(output, input_list);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "reduce_scatter", rank_, input_list, {output});
+      name_,
+      comm_size_,
+      "reduce_scatter",
+      rank_,
+      sequence_number_,
+      input_list,
+      {output});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1070,7 +1143,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 output.data_ptr(),
                 output.numel(),
                 dataType,
-                getNcclReduceOp(op, nccl_comm_, dataType),
+                getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
                 stream),
@@ -1085,7 +1158,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 nullptr, // Non-root ranks don't receive
                 input_list[i].numel(),
                 dataType,
-                getNcclReduceOp(op, nccl_comm_, dataType),
+                getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
                 stream),
@@ -1127,7 +1200,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "reduceScatterSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "reduceScatterSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1144,7 +1223,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           output.data_ptr(),
           output.numel(),
           dataType,
-          getNcclReduceOp(op, nccl_comm_, dataType),
+          getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
           stream),
       timeout,
@@ -1183,7 +1262,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "allToAllSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "allToAllSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1294,7 +1379,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_to_all_v_single", rank_, input, output);
+      name_,
+      comm_size_,
+      "all_to_all_v_single",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1407,6 +1498,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
       comm_size_,
       "all_to_all",
       rank_,
+      sequence_number_,
       input_tensor_list,
       output_tensor_list);
 
@@ -1471,7 +1563,22 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
 
-  TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
+  // Allocated here rather than in initNcclResources() so that merely creating a
+  // process group never touches the CUDA caching allocator. Eager init runs
+  // before anything has initialized CUDA (init_process_group(device_id=...) on
+  // a process that has made no torch.cuda call), and the allocator is brought
+  // up lazily, so allocating there tripped "Allocator not initialized for
+  // device N". lazyInitDevice() is what ATen's own allocating paths call, and
+  // is a no-op once CUDA is up.
+  if (!barrier_buffer_) {
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    c10::cuda::CUDAGuard gpuGuard(device_);
+    barrier_buffer_ =
+        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+  }
+
+  TracingGuard tracingGuard(
+      name_, comm_size_, "barrier", rank_, sequence_number_);
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
@@ -1535,7 +1642,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "scatter", root, input_tensor_list, {output_tensor});
+      name_,
+      comm_size_,
+      "scatter",
+      root,
+      sequence_number_,
+      input_tensor_list,
+      {output_tensor});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1650,7 +1763,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "gather", root, {input_tensor}, output_tensor_list);
+      name_,
+      comm_size_,
+      "gather",
+      root,
+      sequence_number_,
+      {input_tensor},
+      output_tensor_list);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
