@@ -415,8 +415,8 @@
   self: cholesky_inverse_backward(grad, self, upper, result)
   result: cholesky_inverse_jvp(self_p, self_t, result, upper)
 
-# For clamp, gradient is not defined at the boundaries. But empirically it's helpful
-# to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
+# Tensor-bound clamp treats its differentiable Tensor arguments jointly, so
+# ordinary boundary ties split the gradient evenly between the Tensor inputs.
 - name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
   min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
@@ -427,22 +427,26 @@
   result: auto_element_wise
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
-  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  self: where(self > min, grad, at::scalar_tensor(0., grad.options()))
   result: auto_element_wise
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
-  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
-  min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p >= min_p, self_t, min_t)
+  # Split ties first, then reuse the where output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == min, grad / 2, grad), self < min, 0)
+  min: masked_fill_inplace_if_safe(at::where(self == min, grad / 2, grad), self > min, 0)
+  # masked_fill_ cannot select the Tensor-valued min_t; use where to keep the JVP differentiable for higher-order AD.
+  result: at::where(self_p == min_p, (self_t + min_t) / 2, at::where(self_p > min_p, self_t, min_t))
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
-  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  self: where(self < max, grad, at::scalar_tensor(0., grad.options()))
   result: auto_element_wise
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
-  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
-  max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p <= max_p, self_t, max_t)
+  # Split ties first, then reuse the where output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == max, grad / 2, grad), self > max, 0)
+  max: masked_fill_inplace_if_safe(at::where(self == max, grad / 2, grad), self < max, 0)
+  # masked_fill_ cannot select the Tensor-valued max_t; use where to keep the JVP differentiable for higher-order AD.
+  result: at::where(self_p == max_p, (self_t + max_t) / 2, at::where(self_p < max_p, self_t, max_t))
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
@@ -1123,6 +1127,10 @@
   self: linalg_matrix_sqrth_differential(self, grad)
   result: linalg_matrix_sqrth_differential(self_p, self_t)
 
+- name: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
+  A: linalg_polar_backward(grad_U, grad_H, A, U, H)
+  U, H: linalg_polar_jvp(A_t, A_p, U, H)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
@@ -1132,14 +1140,18 @@
   result: evenly_read_jvp(self_t, self_p, result)
 
 - name: maximum(Tensor self, Tensor other) -> Tensor
-  self: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
-  other: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
-  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
+  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  # Do not blend tangents arithmetically: an inactive infinite tangent would produce 0 * inf = nan.
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
-  self: grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.masked_fill((self >= other).logical_or_(other.isnan()), 0)
-  result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
+  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -1194,14 +1206,18 @@
   result: evenly_read_jvp(self_t, self_p, result)
 
 - name: minimum(Tensor self, Tensor other) -> Tensor
-  self: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
-  other: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
-  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
+  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  # Do not blend tangents arithmetically: an inactive infinite tangent would produce 0 * inf = nan.
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
-  self: grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.masked_fill((self <= other).logical_or_(other.isnan()), 0)
-  result: other_t + (self_p <= other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
+  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)

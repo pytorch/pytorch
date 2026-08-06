@@ -64,12 +64,21 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
-IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
-IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
-IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
-IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
-IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
-IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
+# These exact-match SM predicates identify specific NVIDIA architectures and must
+# be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
+# version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
+IS_SM89 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                  torch.cuda.get_device_capability() == (8, 9))
+IS_SM90 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                  torch.cuda.get_device_capability() == (9, 0))
+IS_SM100 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability() == (10, 0))
+IS_SM103 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability() == (10, 3))
+IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability()[0] == 10)
+IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
+                   torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
