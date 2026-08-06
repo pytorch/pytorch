@@ -18,8 +18,10 @@ from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     skipIfCrossRef,
+    skipIfMPS,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
@@ -31,8 +33,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
-    onlyCPU,
     OpDTypes,
     skipOps,
     xfail,
@@ -91,6 +93,8 @@ foreach_op_db = (
 
 
 class TestMetaConverter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
         # lack of Storage bindings.  Use version counter.
@@ -1155,6 +1159,8 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # with the inconsistencies but this takes time.
 @unMarkDynamoStrictTest
 class TestMeta(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
     def _get_safe_inplace(self, inplace_variant):
@@ -1642,7 +1648,6 @@ class TestMeta(TestCase):
             with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
                 op(t, t.clone().unsqueeze(0))
 
-    @onlyCPU
     def test_meta_autograd_no_error(self):
         with torch.library._scoped_library("meta_test", "DEF") as lib:
             with torch.library._scoped_library("meta_test", "IMPL", "CPU") as impl_cpu:
@@ -1697,7 +1702,6 @@ class TestMeta(TestCase):
         assertEqualShapes(out_kwargs["out1"], expected_shapes[1])
         assertEqualShapes(out_kwargs["out2"], expected_shapes[2])
 
-    @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_layer_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_layer_norm
@@ -1730,7 +1734,6 @@ class TestMeta(TestCase):
                 self._norm_backwards_test_helper(torch.ops.aten.native_layer_norm_backward,
                                                  args, output_mask, expected_shapes)
 
-    @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
     def test_group_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_group_norm
@@ -1761,7 +1764,6 @@ class TestMeta(TestCase):
                 self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
                                                  args, output_mask, expected_shapes)
 
-    @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
@@ -2012,10 +2014,11 @@ class TestMeta(TestCase):
         )
 
     # opinfo test is using aten.fill_, it's not testing aten.fill
-    @onlyCUDA
-    def test_fill_stride(self):
+    @onlyAccelerator
+    @skipIfMPS
+    def test_fill_stride(self, device):
         to_meta = MetaConverter()
-        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+        sample_args = [torch.rand(2, 2, 2, 2, device=device), 1.0]
 
         for args in get_strided_args(sample_args):
             meta_args = to_meta(args)
@@ -2203,6 +2206,8 @@ class TestMeta(TestCase):
         self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
 
 class TestMetaKernelConv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
         """Test the meta kernel directly (device='meta', no FakeTensorMode).
@@ -2256,6 +2261,8 @@ class TestMetaKernelConv(TestCase):
 
 
 class TestMetaKernelRegistrations(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_aminmax_out_dtype_mismatch(self):
         inp = torch.rand(10, 10, device="meta")
