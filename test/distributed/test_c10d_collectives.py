@@ -597,6 +597,23 @@ class AbstractCollectivesTest(C10dBackendTest):
                                 output, self._expected_reduce(count, dtype, op)
                             )
 
+    def test_premul_sum(self):
+        if not self.premul_sum_dtypes:
+            self.skipTest(f"{self.backend_name} does not support PREMUL_SUM")
+        self._init_pg()
+        expected = sum(range(1, self.world_size + 1)) * 0.5
+        for dtype in self.premul_sum_dtypes:
+            for factor in (
+                0.5,
+                torch.tensor(0.5, dtype=dtype, device=self.device),
+            ):
+                with self.subTest(dtype=dtype, factor_type=type(factor).__name__):
+                    tensor = torch.full(
+                        (4,), float(self.rank + 1), dtype=dtype, device=self.device
+                    )
+                    dist.all_reduce(tensor, op=dist.ReduceOp.PREMUL_SUM(factor))
+                    self.assertEqual(tensor, torch.full_like(tensor, expected))
+
     def test_barrier(self):
         self._init_pg()
         for async_op in ASYNC_OPS:
