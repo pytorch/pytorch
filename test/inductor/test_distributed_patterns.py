@@ -15,7 +15,13 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_g
 WORLD_SIZE = 2
 
 
+def ensure_fsdp_test_ops_registered():
+    import torch.distributed.fsdp._fully_shard._fsdp_param  # noqa: F401
+
+
 def init_fake_distributed(device="cpu"):
+    ensure_fsdp_test_ops_registered()
+
     @torch.no_grad
     def all_gather(t):
         return torch.cat([t] * WORLD_SIZE, 0)

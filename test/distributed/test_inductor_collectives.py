@@ -4022,7 +4022,9 @@ class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         if not c10d.is_initialized():
-            store = c10d.HashStore()
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            store = FakeStore()
             c10d.init_process_group(backend="fake", store=store, rank=0, world_size=2)
 
     def tearDown(self):

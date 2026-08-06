@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import importlib
 import logging
 
 import torch
@@ -477,6 +478,14 @@ def register_symm_mem_lowerings():
     """
     Register lowerings for symmetric memory (symm_mem) operations.
     """
+    if not torch.distributed.is_available():
+        log.info("distributed support not available, skipping symm_mem lowerings")
+        return
+
+    # Some symm_mem schemas are defined in Python, so make sure they are
+    # registered before looking them up on torch.ops.symm_mem.
+    importlib.import_module("torch.distributed._symmetric_memory")
+
     try:
         symm_mem = torch.ops.symm_mem
         # Check for an actual operation, not just the namespace.

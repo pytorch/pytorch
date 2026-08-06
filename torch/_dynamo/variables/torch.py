@@ -31,6 +31,7 @@ import inspect
 import logging
 import math
 import re
+import sys
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -122,12 +123,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._custom_class_base import CustomClassBase
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -158,6 +153,15 @@ def _is_supported_out_tensor_layout(
             false_if_dde=false_if_dde,
         )
     )
+
+
+def _is_fsdp_use_training_state(value: object) -> bool:
+    fsdp_param_group = sys.modules.get(
+        "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+    )
+    if fsdp_param_group is None:
+        return False
+    return value is fsdp_param_group.FSDPParamGroup.use_training_state
 
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -891,10 +895,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
-        elif (
-            _fsdp_param_group is not None
-            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
-        ):
+        elif _is_fsdp_use_training_state(self.value):
             if len(args) != 2:
                 raise AssertionError(
                     f"FSDPParamGroup.use_training_state expects 2 args, got {len(args)}"

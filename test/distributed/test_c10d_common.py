@@ -2706,6 +2706,8 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             dist.destroy_process_group()
 
     def test_init_process_group_for_all_backends(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
         for backend in dist.Backend.backend_list:
             excepted_backend = backend
             # skip if the backend is not available on the system
@@ -2732,7 +2734,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend != "threaded":
                 excepted_backend = "custom"
 
-            store = dist.FileStore(self.file_name, self.world_size)
+            if backend == dist.Backend.FAKE:
+                store = FakeStore()
+            else:
+                store = dist.FileStore(self.file_name, self.world_size)
             dist.init_process_group(
                 backend=backend,
                 rank=self.rank,

@@ -457,6 +457,10 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
+        # Register the test-only backend used by the mixed backend below instead
+        # of relying on another module to import its registration owner.
+        import torch.testing._internal.distributed.fake_pg
+
         torch.distributed.config.use_torchcomms = True
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(find_free_port())
