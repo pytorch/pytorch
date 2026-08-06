@@ -4587,7 +4587,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             dtype=torch.float32,
         )
         expected = pack_uint4(_f32_to_floatx_unpacked(values, 2, 1)).squeeze(-1)
-        self.assertEqual(nvfp4_pack(values), expected)
+        actual = nvfp4_pack(values)
+        self.assertIs(actual.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(actual.view(torch.uint8), expected)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            fake = nvfp4_pack(mode.from_tensor(values))
+        self.assertIs(fake.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(fake.shape, actual.shape)
+        self.assertEqual(fake.stride(), actual.stride())
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4633,7 +4643,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
         expected = nvfp4_pack((a @ b).float().view(m, -1, 2))
-        self.assertEqual(actual, expected)
+        self.assertIs(actual.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
 
     def test_quant_scale_fake_strides_match_eager(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
