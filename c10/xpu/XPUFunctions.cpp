@@ -1,3 +1,4 @@
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -43,12 +44,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
   auto is_igpu = [](const sycl::device& device) {
-#if SYCL_COMPILER_VERSION < 20260000
-    // Generally, iGPUs share a unified memory subsystem with the host.
-    return device.get_info<sycl::info::device::host_unified_memory>();
-#else
     return device.has(sycl::aspect::ext_oneapi_is_integrated_gpu);
-#endif
   };
 
   // Check if a platform contains at least one GPU (either iGPU or dGPU).
@@ -189,9 +185,7 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
 
-#if SYCL_COMPILER_VERSION >= 20260000
   ASSIGN_DEVICE_ASPECT(is_integrated_gpu)
-#endif
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_HAS_ASPECT);
 
@@ -199,6 +193,22 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
 
+#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: Remove once driver supports querying Xe topology properties.
+#define OVERRIDE_DEVICE_PROP_XE(name, property, default) \
+  device_prop->name = device_prop->name == 0 ? default : device_prop->name;
+
+  namespace syclex = sycl::ext::oneapi::experimental;
+  if (device_prop->architecture >= syclex::architecture::intel_gpu_acm_g10 ||
+      device_prop->architecture <= syclex::architecture::intel_gpu_pvc_vg) {
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(OVERRIDE_DEVICE_PROP_XE)
+    device_prop->xe_cores_per_cluster =
+        (device_prop->gpu_eu_count / device_prop->gpu_eu_count_per_subslice) /
+        (device_prop->xe_stack_count * device_prop->xe_regions_per_stack *
+         device_prop->xe_clusters_per_region);
+    device_prop->eus_per_xe_core = device_prop->gpu_eu_count_per_subslice;
+  }
+#endif
   return;
 }
 
@@ -279,6 +289,29 @@ c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
 
 c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
+}
+
+// TODO: Currently only used by syncStreamsOnDevice. Once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms,
+// deprecate syncStreamsOnDevice and route callers to device_synchronize.
+void device_synchronize(c10::DeviceIndex device) {
+#if SYCL_COMPILER_VERSION >= 20260100
+  initDevicePoolCallOnce();
+  if (device == -1) {
+    device = c10::xpu::current_device();
+  }
+  check_device_index(device);
+  get_raw_device(device).ext_oneapi_wait_and_throw();
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+  }
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "device_synchronize is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.1 or newer.");
+#endif
 }
 
 } // namespace c10::xpu

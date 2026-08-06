@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
@@ -93,6 +94,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     ~Options() override = default;
     Options(const Options&) = default;
 
+    // Returns an independent copy, preserving the concrete type.
+    // ProcessGroup::splitGroup()/mergeRemoteGroup() clone the options they
+    // hand to a child backend: getBackendOptions() returns the parent's live
+    // options_, and split()/merge() implementations mutate what they are given
+    // (group_name, timeout, global_ranks_in_group, split_color, ...), so
+    // sharing one object corrupts the parent. A subclass that adds fields must
+    // override this or it would be sliced; ProcessGroup detects a sliced clone
+    // and falls back to sharing rather than handing a backend the wrong type.
+    virtual c10::intrusive_ptr<Options> clone() const {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::chrono::milliseconds timeout;
 
     // backend name
@@ -176,6 +189,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         getBackendName(),
         " does not support setting timeout; the new value is ignored");
   }
+
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
 
   // Fault Tolerance / Reconfigure API
   //
@@ -653,7 +675,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  std::optional<at::Device> getBoundDeviceId() const {
+  virtual std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -664,7 +686,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(std::optional<at::Device> device) {
+  virtual void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
@@ -672,9 +694,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual ErrorType getError() {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), " does not support getError"));
+    return ErrorType::SUCCESS;
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
@@ -727,6 +747,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -745,8 +777,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
+
+  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d
+
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail
 
 #undef C10D_BACKEND_FORWARDING_GUARD
