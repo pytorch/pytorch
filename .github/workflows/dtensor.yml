@@ -31,7 +31,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   dtensor-build:
     name: dtensor-build
@@ -47,7 +47,6 @@ jobs:
         { include: [
           { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -61,8 +60,39 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
       docker-image: ${{ needs.dtensor-build.outputs.docker-image }}
       test-matrix: ${{ needs.dtensor-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+    secrets: inherit
+
+  dtensor-build-cuda132:
+    name: dtensor-build-cuda132
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.6 8.9'
+      test-matrix: |
+        { include: [
+          { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  dtensor-test-cuda132:
+    name: dtensor-test-cuda132
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [get-label-type, dtensor-build-cuda132]
+    with:
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc11
+      docker-image: ${{ needs.dtensor-build-cuda132.outputs.docker-image }}
+      test-matrix: ${{ needs.dtensor-build-cuda132.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit

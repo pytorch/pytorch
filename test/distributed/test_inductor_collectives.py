@@ -699,6 +699,25 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_list_input(self):
+        def func(output, inputs):
+            torch.distributed.reduce_scatter(output, inputs)
+            return output
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = [
+                torch.ones(4, 4, device=self.device) * (self.rank + i)
+                for i in range(self.world_size)
+            ]
+            output = torch.empty(4, 4, device=self.device)
+            correct = torch.empty(4, 4, device=self.device)
+            func_compiled = torch.compile(func, fullgraph=True)
+            func_compiled(output, inputs)
+            func(correct, inputs)
+            self.assertTrue(same(output, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -1076,6 +1095,81 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism(self):
+        # A compiled region whose input alternates between an AsyncCollectiveTensor
+        # (the native all-gather output) and the resolved plain Tensor must not
+        # recompile on the tensor-class guard: the two produce an equivalent
+        # graph (the runtime wrapper unwraps ACT). See
+        # VariableBuilder.wrap_tensor / UnwrapCollectiveTensorSource.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            torch.manual_seed(1234)
+            x = torch.randn(8, 8, device=self.device)
+            w_shard = torch.randn(4, 8, device=self.device)
+            for i in range(6):
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                # Step 0 traces with the ACT; odd steps resolve to a plain
+                # Tensor before the compiled region.
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                eager = (
+                    x
+                    @ torch.ops._c10d_functional.wait_tensor(
+                        _functional_collectives.all_gather_tensor(
+                            w_shard, gather_dim=0, group=list(range(self.world_size))
+                        )
+                    )
+                ).sum()
+                self.assertEqual(step(x, w), eager)
+            # ACT and Tensor share one compiled graph -- no class-guard recompile.
+            self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism_backward(self):
+        # Backward through an ACT input (a real all-gather output) must match eager
+        # across the ACT/Tensor alternation and not recompile on the class change.
+        # Uses a real collective because grad flows through the all-gather autograd,
+        # not through a directly-constructed ACT wrapper.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            for i in range(6):
+                torch.manual_seed(1234)
+                x = torch.randn(8, 8, device=self.device)
+                w_shard = torch.randn(4, 8, device=self.device, requires_grad=True)
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                step(x, w).backward()
+
+                w_shard_ref = w_shard.detach().clone().requires_grad_(True)
+                w_ref = torch.ops._c10d_functional.wait_tensor(
+                    _functional_collectives.all_gather_tensor(
+                        w_shard_ref, gather_dim=0, group=list(range(self.world_size))
+                    )
+                )
+                (x @ w_ref).sum().backward()
+                self.assertEqual(w_shard.grad, w_shard_ref.grad)
+            self.assertEqual(cnt.frame_count, 1)
+
 
 @instantiate_parametrized_tests
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -1387,6 +1481,72 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
         if counter.op_count != 3:
             raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        local_size = [4, 4]
+        # single-proc test
+        inputs = [torch.ones(local_size, device=self.device)]
+        outputs = torch.empty(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_size_mismatch(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([8, 4], device=self.device)]
+        outputs = torch.empty([4, 4], device=self.device)
+        compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception,
+            "reduce_scatter requires every input_list element to have the same size as output",
+        ):
+            compiled(outputs, inputs, pg=GroupMember.WORLD)
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_scalar(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([], device=self.device)]
+        outputs = torch.empty([], device=self.device)
+        correct_outputs = torch.empty([], device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
@@ -2619,6 +2779,41 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self._init_process_group()
         saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
         self.assertEqual(saved_values, [wt1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
+        # When ranks have structurally different graphs, has_same_nodes returns
+        # False and the cross-rank sync is skipped, so each rank keeps its own
+        # saved_values instead of converging to a single rank's decision.
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        node1 = test_graph.placeholder("x")
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag,)
+        )
+        wt.meta["val"] = torch.randn(10, 10)
+
+        # Diverge the graph structure across ranks so the canonical hashes differ.
+        if self.rank == 0:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+        else:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (wt,)
+            )
+        extra.meta["val"] = torch.randn(10, 10)
+        test_graph.output((extra,))
+
+        self._init_process_group()
+        saved_values = _sync_decision_cross_ranks(test_graph, [extra])
+        self.assertEqual(saved_values, [extra])
 
     @skip_if_lt_x_gpu(2)
     def test_sync_decision_cross_ranks_different_node_order(self):

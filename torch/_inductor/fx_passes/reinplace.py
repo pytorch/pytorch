@@ -74,6 +74,10 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
     node = graph.call_function(fn, args, kwargs)
 
     node.meta["val"] = fake_result
+    if (V.fake_mode.shape_env) and (
+        symbol_to_path := compute_unbacked_bindings(V.fake_mode.shape_env, fake_result)
+    ):
+        node.meta["unbacked_bindings"] = symbol_to_path
 
     return node
 
@@ -185,13 +189,6 @@ def _decompose_scatter_mutating(
     tmp = inp
     for view in view_ops:  # type: ignore[union-attr]
         tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)  # type: ignore[union-attr]
-        # we need to set unbacked bindings that could have been created in the view ops.
-        if (V.fake_mode.shape_env) and (
-            symbol_to_path := compute_unbacked_bindings(
-                V.fake_mode.shape_env, tmp.meta["val"]
-            )
-        ):
-            tmp.meta["unbacked_bindings"] = symbol_to_path
 
     graph_call_function(graph, aten.copy_.default, tmp, src)
     return inp  # type: ignore[return-value]
@@ -382,6 +379,10 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         0,
         extra_check=should_reinplace_scatter,
     ),
+    # Stateless Philox RNG: reinplace the functionalized clone onto the dead
+    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
+    aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
+    aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
 }
 
 try:
@@ -780,7 +781,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
-                        # output atindex size(out)+i.
+                        # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target is operator.getitem and user.args[1] == arg:

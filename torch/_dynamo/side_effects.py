@@ -23,19 +23,21 @@ while enabling optimizations where safe.
 
 import collections
 import contextlib
+import dataclasses
 import enum
 import inspect
 import logging
 import textwrap
 import traceback
 import weakref
-from collections.abc import Generator, MutableMapping
+from collections.abc import Callable, Generator, MutableMapping
 from types import CellType
 from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch._library.utils import RegistrationHandle
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
@@ -45,6 +47,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    Instruction,
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
@@ -76,6 +79,92 @@ if TYPE_CHECKING:
 
 
 side_effects_log = torch._logging.getArtifactLogger(__name__, "side_effects")
+
+
+@dataclasses.dataclass(frozen=True)
+class SideEffectReplayContext:
+    side_effects: "SideEffects"
+    codegen: PyCodegen
+    var: VariableTracker
+    suffixes: list[list[Instruction]]
+    log: Callable[[VariableTracker], None]
+
+
+SideEffectReplayMatcher = Callable[[SideEffectReplayContext], bool]
+SideEffectReplayCodegen = Callable[[SideEffectReplayContext], None]
+SideEffectReplayHandlerDecorator = Callable[
+    [SideEffectReplayCodegen], SideEffectReplayCodegen
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class SideEffectReplayHandler:
+    name: str
+    matcher: SideEffectReplayMatcher
+    codegen: SideEffectReplayCodegen
+    priority: int = 0
+
+
+class _SideEffectReplayRegistry:
+    def __init__(self) -> None:
+        self.handlers: list[SideEffectReplayHandler] = []
+
+    def register_handler(self, handler: SideEffectReplayHandler) -> RegistrationHandle:
+        self.handlers.append(handler)
+
+        def deregister() -> None:
+            self.handlers.remove(handler)
+
+        return RegistrationHandle(deregister)
+
+    def lookup_handler(
+        self, ctx: SideEffectReplayContext
+    ) -> SideEffectReplayHandler | None:
+        matches = [handler for handler in self.handlers if handler.matcher(ctx)]
+        if not matches:
+            return None
+        matches.sort(key=lambda handler: handler.priority, reverse=True)
+        top = matches[0]
+        if len(matches) > 1 and matches[1].priority == top.priority:
+            names = [
+                handler.name for handler in matches if handler.priority == top.priority
+            ]
+            raise RuntimeError(
+                f"Ambiguous side effect replay handler for "
+                f"{type(ctx.var).__name__}: {names}"
+            )
+        return top
+
+
+_side_effect_replay_registry = _SideEffectReplayRegistry()
+
+
+def _register_side_effect_replay_handler(
+    handler: SideEffectReplayHandler,
+) -> RegistrationHandle:
+    return _side_effect_replay_registry.register_handler(handler)
+
+
+def register_side_effect_replay_handler(
+    *,
+    name: str,
+    matcher: SideEffectReplayMatcher,
+    priority: int = 0,
+) -> SideEffectReplayHandlerDecorator:
+    def decorator(
+        codegen: SideEffectReplayCodegen,
+    ) -> SideEffectReplayCodegen:
+        _register_side_effect_replay_handler(
+            SideEffectReplayHandler(
+                name=name,
+                matcher=matcher,
+                codegen=codegen,
+                priority=priority,
+            )
+        )
+        return codegen
+
+    return decorator
 
 
 def _manual_dict_setitem(
@@ -226,7 +315,7 @@ class SideEffects:
         """Record an attribute mutation for deferred validation.
 
         Returns True if successfully deferred, False if we cannot read the
-        original value (var_getattr raises NotImplementedError) or the
+        original value (getattro_impl raises NotImplementedError) or the
         original is not a python constant — caller should fall back to
         check_allowed_side_effect.
         """
@@ -244,7 +333,7 @@ class SideEffects:
                 raise AssertionError("output_graph weakref is dead")
             tx = output_graph.current_tx
             try:
-                original_vt = item.var_getattr(tx, name)  # type: ignore[arg-type]
+                original_vt = item.getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
             if not original_vt.is_python_constant():
@@ -428,6 +517,7 @@ class SideEffects:
         name: str,
         value: VariableTracker,
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
+        mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -456,9 +546,12 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        item_source = getattr(item, "source", None)
-        if item_source is not None:
-            self.mutated_sources.add(AttrSource(item_source, name))
+        if mutated_source is not None:
+            self.mutated_sources.add(mutated_source)
+        else:
+            item_source = getattr(item, "source", None)
+            if item_source is not None:
+                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -559,6 +652,15 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
+        # This path serves the read out of side effects, bypassing
+        # VariableBuilder, so record the source here the way load_cell does --
+        # otherwise a subgraph reading a rebound global has no traced source to
+        # intersect with mutated_sources and is wrongly considered reusable.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.current_tx.output.current_tracer.traced_sources.add(
+                GlobalSource(name)
+            )
         return self.load_attr(gvar, name)
 
     def store_global(
@@ -572,7 +674,11 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
-        self.store_attr(gvar, name, value)
+        # gvar is a per-global sentinel holder whose own source already names
+        # the global, so store_attr's default AttrSource(item.source, name)
+        # would name a nonexistent `G.G`. Record the source readers actually
+        # use, so mutated_sources intersects with traced_sources.
+        self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -667,6 +773,16 @@ class SideEffects:
             mutation_type_cls=AttributeMutationExisting,
         )
 
+    def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
+        """Register a sourceless VT (e.g. a synthetic exception) as a new
+        attribute-mutation object so its attribute mutations are codegen'd.
+        Keyed by the VT's id since there is no backing Python object."""
+        if id(variable) in self.id_to_variable:
+            return
+        variable.mutation_type = AttributeMutationNew()
+        self.id_to_variable[id(variable)] = variable
+        self.keepalive.append(variable)
+
     def track_object_new(
         self,
         cls_source: Source | None,
@@ -689,7 +805,7 @@ class SideEffects:
 
         from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
-        from .variables.user_defined import is_forbidden_context_manager
+        from .variables.user_defined import is_generic_ctx_manager_cls
 
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
@@ -698,19 +814,15 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif (
-            hasattr(user_cls, "__enter__")
-            and hasattr(user_cls, "__exit__")
-            and not is_forbidden_context_manager(user_cls)
-        ):
+        elif is_generic_ctx_manager_cls(user_cls):
             variable_cls = GenericContextWrappingVariable
         elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            variable_cls = variables.OrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
@@ -948,6 +1060,27 @@ class SideEffects:
                     )
                 init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
+
+        # Generators tracked for close-on-exit have their close() called in
+        # compile_subgraph after pruning.
+        gen_reachable_new: set[VariableTracker] = set()
+
+        def visit_gen(var: VariableTracker) -> None:
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                gen_reachable_new.add(var)
+
+        # Pass side_effects so the walk follows store_attr_mutations, and share
+        # one cache across all generators to dedup shared subiterators.
+        gen_visit_cache: dict[int, Any] = {}
+        for gen in tx.output.local_generators:
+            gen_tracer = gen.inline_tracer
+            VariableTracker.visit(
+                visit_gen,
+                [gen_tracer.stack, gen_tracer.symbolic_locals],
+                gen_visit_cache,
+                self,
+            )
+
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
@@ -963,7 +1096,7 @@ class SideEffects:
         # that are sensitive to when certain objects get released.
         del visit
 
-        # NB: cell variable handling.is tricky.
+        # NB: cell variable handling is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
         # are live. "visit"-ing the NestedUserFunctionVariable visits
         # the .closures field, from which we will see if we need to keep
@@ -973,10 +1106,14 @@ class SideEffects:
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
         self.store_attr_mutations = {
-            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+            k: v
+            for k, v in self.store_attr_mutations.items()
+            if is_live(k) or k in gen_reachable_new
         }
         self.attr_mutation_kinds = {
-            k: v for k, v in self.attr_mutation_kinds.items() if is_live(k)
+            k: v
+            for k, v in self.attr_mutation_kinds.items()
+            if is_live(k) or k in gen_reachable_new
         }
 
     def mutation(self, var: VariableTracker) -> None:
@@ -1093,6 +1230,14 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.ExceptionVariable):
+                # Exceptions cannot be built via object.__new__ (CPython rejects
+                # it), so reconstruct() constructs by calling the type. Cache
+                # the result so later references load the single instance; any
+                # __dict__ attributes replay in codegen_update_mutated.
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -1358,456 +1503,25 @@ class SideEffects:
                 msg = self._format_side_effect_message(var)
                 side_effect_messages.append(msg)
 
-        suffixes = []
+        suffixes: list[list[Instruction]] = []
         for var in self._get_modified_vars():
             # When replay_side_effects=False, only update variables with TempLocalSource
             if not config.replay_side_effects and not isinstance(
                 var.source, TempLocalSource
             ):
                 continue
-            if isinstance(var, variables.ListVariable):
-                # old[:] = new
-                cg(var, allow_cache=False)  # Don't codegen via source
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.extend_output(
-                    [
-                        cg.create_load_const(None),
-                        cg.create_load_const(None),
-                        create_instruction("BUILD_SLICE", arg=2),
-                    ]
-                )
-                suffixes.append([create_instruction("STORE_SUBSCR")])
-                _maybe_log_side_effect(var)
-            elif isinstance(var, variables.lists.DequeVariable):
-                # For limited maxlen, the order of operations matter for side
-                # effect, but we currently don't track the order, so no support.
-                if not var.maxlen.is_constant_none():
-                    unimplemented(
-                        gb_type="Side effect on existing deque with limited maxlen",
-                        context="",
-                        explanation="This is not supported.",
-                        hints=[
-                            "Don't use a deque with `maxlen` specified.",
-                        ],
-                    )
 
-                # old.extend(new), this runs last
-                cg(var.source)
-                cg.load_method("extend")
-                cg(var, allow_cache=False)  # Don't codegen via source
-                suffixes.append(
-                    [
-                        *create_call_method(1),
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-
-                # old.clear(), this runs first
-                cg(var.source)
-                cg.load_method("clear")
-                suffixes.append(
-                    [
-                        *create_call_method(0),
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-                _maybe_log_side_effect(var)
-
-            elif isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
-                # Reconstruct works as follow:
-                # (1) Skip codegen if there are no new items
-                # (2) codegen(...) each pair of key/value
-                # (3) create a new dictionary with the pairs of key/values above
-                # (4) clear the original dictionary
-                #   + only if a key was removed from the input dict
-                # (5) update the original dictionary with the dict created in (2)
-
-                if var.has_new_items():
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("update")
-                    cg(var, allow_cache=False)  # Don't codegen via source
-
-                    if var.should_reconstruct_all:
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg.load_method("clear")
-
-                    suffixes.append(
-                        [
-                            *create_call_method(1),  # update
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
-
-                    if var.should_reconstruct_all:
-                        # clear will appear before "update" as the suffixes are
-                        # applied in reverse order.
-                        suffixes.append(
-                            [
-                                *create_call_method(0),  # clear
-                                create_instruction("POP_TOP"),
-                            ]
-                        )
-                    _maybe_log_side_effect(var)
-
-            elif isinstance(
-                var, variables.torch_function.TorchFunctionModeStackVariable
-            ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, "set_torch_function_mode_stack"
-                    )
-                )
-
-                cg.foreach(var.symbolic_stack)
-                cg.append_output(
-                    create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
-                )
-                cg.call_function(1, False)
-                cg.append_output(create_instruction("POP_TOP"))
-                _maybe_log_side_effect(var)
-
-            elif isinstance(var, variables.CellVariable) and var.local_name is not None:
-                # Emit more readable and performant bytecode.
-                # TODO generalize this for cells created during inlining.
-                if var in self.store_attr_mutations:
-                    contents_var = self.load_cell(var)
-                    cg(contents_var)
-                    suffixes.append([cg.create_store_deref(var.local_name)])
-                    _maybe_log_side_effect(var)
-
-            elif self.is_attribute_mutation(var):
-                # FrozenDataClassVariable attributes were emitted in
-                # codegen_save_tempvars right after __new__. Skip here to
-                # avoid double-emitting.
-                if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                    var, variables.FrozenDataClassVariable
-                ):
-                    continue
-
-                # Sourceless enum members: mutations (like _inverted_ caching)
-                # already happened on the real object during tracing.
-                if (
-                    var.is_python_constant()
-                    and isinstance(var.mutation_type, AttributeMutationNew)
-                    and isinstance(var, variables.UserDefinedObjectVariable)
-                    and (
-                        isinstance(
-                            var.value,
-                            (
-                                enum.Enum,
-                                torch.DispatchKey,
-                                torch._C._functorch.TransformType,
-                            ),
-                        )
-                        or is_pybind11_enum_member(var.value)
-                    )
-                ):
-                    continue
-
-                if (
-                    isinstance(
-                        var,
-                        variables.UserDefinedDictVariable,
-                    )
-                    and self.is_modified(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
-                    and var._base_vt.has_new_items(  # pyrefly: ignore[union-attr,missing-attribute]
-                    )
-                ):
-                    # Do dict related update manually here. The store_attr
-                    # mutations will be applied later.
-                    varname_map = {}
-                    for name in _manual_dict_setitem.__code__.co_varnames:
-                        varname_map[name] = cg.tx.output.new_var()
-
-                    try:
-                        mro_index = type(var.value).__mro__.index(
-                            collections.OrderedDict
-                        )
-                    except ValueError:
-                        mro_index = type(var.value).__mro__.index(dict)
-
-                    cg.extend_output(
-                        [
-                            create_instruction("LOAD_CONST", argval=mro_index),
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["mro_index"]
-                            ),
-                        ]
-                    )
-
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["dict_to"]
-                            )
-                        ]
-                    )
-
-                    # Reconstruct all items — _manual_dict_setitem clears
-                    # dict_to first, so we need every key/value, not just
-                    # the ones that differ from original_items.
-                    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
-                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["dict_from"]
-                            )
-                        ]
-                    )
-
-                    dict_update_insts = bytecode_from_template(
-                        _manual_dict_setitem, varname_map=varname_map
-                    )
-
-                    suffixes.append(
-                        [
-                            *dict_update_insts,
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
-                    _maybe_log_side_effect(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
-                elif isinstance(
-                    var,
-                    variables.UserDefinedListVariable,
-                ) and self.is_modified(
-                    var._base_vt  # pyrefly: ignore[bad-argument-type]
-                ):
-                    # Update the list to the updated items. Be careful in
-                    # calling the list methods and not the overridden methods.
-                    varname_map = {}
-                    for name in _manual_list_update.__code__.co_varnames:
-                        varname_map[name] = cg.tx.output.new_var()
-
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["list_to"]
-                            )
-                        ]
-                    )
-
-                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["list_from"]
-                            )
-                        ]
-                    )
-
-                    list_update_insts = bytecode_from_template(
-                        _manual_list_update, varname_map=varname_map
-                    )
-
-                    suffixes.append(
-                        [
-                            *list_update_insts,
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
-                    _maybe_log_side_effect(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
-                elif isinstance(
-                    var,
-                    variables.UserDefinedDequeVariable,
-                ) and self.is_modified(
-                    var._base_vt  # pyrefly: ignore[bad-argument-type]
-                ):
-                    # Update the deque to the updated items. Be careful in
-                    # calling the deque methods and not the overridden methods.
-                    varname_map = {}
-                    for name in _manual_deque_update.__code__.co_varnames:
-                        varname_map[name] = cg.tx.output.new_var()
-
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["deque_to"]
-                            )
-                        ]
-                    )
-
-                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=varname_map["deque_from"]
-                            )
-                        ]
-                    )
-
-                    deque_update_insts = bytecode_from_template(
-                        _manual_deque_update, varname_map=varname_map
-                    )
-
-                    suffixes.append(
-                        [
-                            *deque_update_insts,
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
-                    _maybe_log_side_effect(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
-
-                # Applying mutations involves two steps: 1) Push all
-                # reconstructed objects onto the stack.  2) Call STORE_ATTR to
-                # apply the mutations.
-                #
-                # Dynamo must ensure that mutations are applied in the same
-                # order as in the original program. Therefore, two reverse
-                # operations occur below.
-                #
-                # The first reverse operation concerns `suffixes`. We apply
-                # suffixes in reverse order due to the way Python handles the
-                # stack. In Step 1, we push all reconstructed objects onto the
-                # stack, but the item at the top of the stack refers to the last
-                # attribute in the mutation order. If not fixed, this will apply
-                # the mutations of attributes in the reverse order.  To account
-                # for this reversal, we iterate through the mutable attributes
-                # in reverse order.
-                side_effect_occurred = False
-                for name, value in reversed(
-                    self.store_attr_mutations.get(var, {}).items()
-                ):
-                    mutation_kind = self.get_attr_mutation_kind(var, name)
-                    if isinstance(var, variables.NewGlobalVariable):
-                        cg.tx.output.update_co_names(name)
-                        cg(value)
-                        if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
-                            raise AssertionError(
-                                f"Expected GlobalSource for NewGlobalVariable, "
-                                f"got {type(var.source)}"  # type: ignore[attr-defined]
-                            )
-                        suffixes.append(
-                            [create_instruction("STORE_GLOBAL", argval=name)]
-                        )
-                        side_effect_occurred = True
-                    elif isinstance(value, variables.DeletedVariable):
-                        if (
-                            isinstance(var, variables.UserDefinedObjectVariable)
-                            and mutation_kind is AttrMutationKind.INSTANCE_DICT
-                        ):
-                            original_dict = getattr(
-                                getattr(var, "value", None), "__dict__", {}
-                            )
-                            # If the key only existed in the traced instance
-                            # dict, the add/delete sequence is a replay no-op.
-                            if name in original_dict:
-                                cg.add_push_null(
-                                    lambda: cg.load_import_from(
-                                        utils.__name__,
-                                        "object_delattr_ignore_descriptor",
-                                    )
-                                )
-                                cg(var.source)  # type: ignore[attr-defined]
-                                cg(variables.ConstantVariable(name))
-                                suffixes.append(
-                                    [
-                                        *create_call_function(2, False),
-                                        create_instruction("POP_TOP"),
-                                    ]
-                                )
-                                side_effect_occurred = True
-                        # GENERIC_SETATTR deletions on UDOV fall through to the
-                        # normal DELETE_ATTR path below so descriptor semantics
-                        # are preserved during replay.
-                        elif isinstance(
-                            var.mutation_type, AttributeMutationExisting
-                        ) and hasattr(getattr(var, "value", None), name):
-                            cg.tx.output.update_co_names(name)
-                            cg(var.source)
-                            suffixes.append(
-                                [create_instruction("DELETE_ATTR", argval=name)]
-                            )
-                            side_effect_occurred = True
-                    elif (
-                        isinstance(var, variables.UserDefinedObjectVariable)
-                        and mutation_kind is AttrMutationKind.INSTANCE_DICT
-                    ):
-                        cg.add_push_null(
-                            lambda: cg.load_import_from(
-                                utils.__name__, "object_setattr_ignore_descriptor"
-                            )
-                        )
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg(variables.ConstantVariable(name))
-                        cg(value)
-                        suffixes.append(
-                            [
-                                *create_call_function(3, False),
-                                create_instruction("POP_TOP"),
-                            ]
-                        )
-                        side_effect_occurred = True
-                    elif (
-                        isinstance(var, variables.UserDefinedObjectVariable)
-                        and var.needs_slow_setattr()
-                    ):
-                        # __setattr__ is defined on this object, so call object.__setattr__ directly
-                        cg.load_import_from("builtins", "object")
-                        cg.load_method("__setattr__")
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg(variables.ConstantVariable(name))
-                        cg(value)
-                        suffixes.append(
-                            [*create_call_method(3), create_instruction("POP_TOP")]
-                        )
-                        side_effect_occurred = True
-                    else:
-                        cg.tx.output.update_co_names(name)
-                        cg(value)
-                        cg(var)
-                        suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-                        side_effect_occurred = True
-
-                if side_effect_occurred:
-                    _maybe_log_side_effect(var)
-            elif isinstance(var, variables.ListIteratorVariable):
-                for _ in range(var.index):
-                    cg.add_push_null(
-                        lambda: cg.load_import_from(utils.__name__, "iter_next")
-                    )
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.call_function(1, False)
-                    cg.pop_top()
-                _maybe_log_side_effect(var)
-            elif isinstance(var, variables.CountIteratorVariable):
-                for _ in range(var.advance_count):
-                    cg.add_push_null(
-                        lambda: cg.load_import_from(utils.__name__, "iter_next")
-                    )
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.call_function(1, False)
-                    cg.pop_top()
-                _maybe_log_side_effect(var)
-            elif isinstance(var, variables.RandomVariable):
-                # set correct random seed state
-                def gen_fn() -> None:
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_attr("setstate")
-
-                cg.add_push_null(gen_fn)
-                cg(var.wrap_state(var.random.getstate()))
-
-                suffixes.append(
-                    [
-                        *create_call_function(1, False),  # setstate
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-                _maybe_log_side_effect(var)
-            else:
+            ctx = SideEffectReplayContext(
+                side_effects=self,
+                codegen=cg,
+                var=var,
+                suffixes=suffixes,
+                log=_maybe_log_side_effect,
+            )
+            handler = _side_effect_replay_registry.lookup_handler(ctx)
+            if handler is None:
                 raise AssertionError(type(var))
+            handler.codegen(ctx)
 
         # do all the actual mutations at the very end to handle dependencies
         for suffix in reversed(suffixes):
@@ -1837,6 +1551,531 @@ class SideEffects:
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@register_side_effect_replay_handler(
+    name="list_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
+    priority=90,
+)
+def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.ListVariable):
+        raise AssertionError(type(var))
+    # old[:] = new
+    cg(var, allow_cache=False)  # Don't codegen via source
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            cg.create_load_const(None),
+            cg.create_load_const(None),
+            create_instruction("BUILD_SLICE", arg=2),
+        ]
+    )
+    ctx.suffixes.append([create_instruction("STORE_SUBSCR")])
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="deque_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
+    priority=80,
+)
+def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.lists.DequeVariable):
+        raise AssertionError(type(var))
+    # For limited maxlen, the order of operations matter for side effect, but we
+    # currently don't track the order, so no support.
+    if not var.maxlen.is_constant_none():
+        unimplemented(
+            gb_type="Side effect on existing deque with limited maxlen",
+            context="",
+            explanation="This is not supported.",
+            hints=[
+                "Don't use a deque with `maxlen` specified.",
+            ],
+        )
+
+    # old.extend(new), this runs last
+    cg(var.source)
+    cg.load_method("extend")
+    cg(var, allow_cache=False)  # Don't codegen via source
+    ctx.suffixes.append(
+        [
+            *create_call_method(1),
+            create_instruction("POP_TOP"),
+        ]
+    )
+
+    # old.clear(), this runs first
+    cg(var.source)
+    cg.load_method("clear")
+    ctx.suffixes.append(
+        [
+            *create_call_method(0),
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="const_dict_or_set_mutation",
+    matcher=lambda ctx: isinstance(
+        ctx.var, (variables.ConstDictVariable, variables.SetVariable)
+    ),
+    priority=70,
+)
+def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
+        raise AssertionError(type(var))
+    # Reconstruct works as follow:
+    # (1) Skip codegen if there are no new items
+    # (2) codegen(...) each pair of key/value
+    # (3) create a new dictionary with the pairs of key/values above
+    # (4) clear the original dictionary
+    #   + only if a key was removed from the input dict
+    # (5) update the original dictionary with the dict created in (2)
+    if var.has_new_items():
+        cg(var.source)  # type: ignore[attr-defined]
+        cg.load_method("update")
+        cg(var, allow_cache=False)  # Don't codegen via source
+
+        if var.should_reconstruct_all:
+            cg(var.source)  # type: ignore[attr-defined]
+            cg.load_method("clear")
+
+        ctx.suffixes.append(
+            [
+                *create_call_method(1),  # update
+                create_instruction("POP_TOP"),
+            ]
+        )
+
+        if var.should_reconstruct_all:
+            # clear will appear before "update" as the suffixes are applied in
+            # reverse order.
+            ctx.suffixes.append(
+                [
+                    *create_call_method(0),  # clear
+                    create_instruction("POP_TOP"),
+                ]
+            )
+        ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="torch_function_mode_stack_mutation",
+    matcher=lambda ctx: isinstance(
+        ctx.var, variables.torch_function.TorchFunctionModeStackVariable
+    ),
+    priority=60,
+)
+def _codegen_torch_function_mode_stack_mutation(
+    ctx: SideEffectReplayContext,
+) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.torch_function.TorchFunctionModeStackVariable):
+        raise AssertionError(type(var))
+    cg.add_push_null(
+        lambda: cg.load_import_from(utils.__name__, "set_torch_function_mode_stack")
+    )
+
+    cg.foreach(var.symbolic_stack)
+    cg.append_output(create_instruction("BUILD_LIST", arg=len(var.symbolic_stack)))
+    cg.call_function(1, False)
+    cg.append_output(create_instruction("POP_TOP"))
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="cell_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.CellVariable)
+    and ctx.var.local_name is not None,
+    priority=50,
+)
+def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.CellVariable):
+        raise AssertionError(type(var))
+    if var.local_name is None:
+        raise AssertionError("cell mutation local name must be set")
+    # Emit more readable and performant bytecode.
+    # TODO generalize this for cells created during inlining.
+    if var in ctx.side_effects.store_attr_mutations:
+        contents_var = ctx.side_effects.load_cell(var)
+        cg(contents_var)
+        ctx.suffixes.append([cg.create_store_deref(var.local_name)])
+        ctx.log(var)
+
+
+def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.UserDefinedDictVariable):
+        raise AssertionError(type(var))
+    # Do dict related update manually here. The store_attr mutations will be
+    # applied later.
+    varname_map = {}
+    for name in _manual_dict_setitem.__code__.co_varnames:
+        varname_map[name] = cg.tx.output.new_var()
+
+    try:
+        mro_index = type(var.value).__mro__.index(collections.OrderedDict)
+    except ValueError:
+        mro_index = type(var.value).__mro__.index(dict)
+
+    cg.extend_output(
+        [
+            create_instruction("LOAD_CONST", argval=mro_index),
+            create_instruction("STORE_FAST", argval=varname_map["mro_index"]),
+        ]
+    )
+
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["dict_to"]),
+        ]
+    )
+
+    # Reconstruct all items - _manual_dict_setitem clears dict_to first, so we
+    # need every key/value, not just the ones that differ from original_items.
+    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
+    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["dict_from"]),
+        ]
+    )
+
+    dict_update_insts = bytecode_from_template(
+        _manual_dict_setitem, varname_map=varname_map
+    )
+
+    ctx.suffixes.append(
+        [
+            *dict_update_insts,
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    )
+
+
+def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.UserDefinedListVariable):
+        raise AssertionError(type(var))
+    # Update the list to the updated items. Be careful in calling the list
+    # methods and not the overridden methods.
+    varname_map = {}
+    for name in _manual_list_update.__code__.co_varnames:
+        varname_map[name] = cg.tx.output.new_var()
+
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["list_to"]),
+        ]
+    )
+
+    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["list_from"]),
+        ]
+    )
+
+    list_update_insts = bytecode_from_template(
+        _manual_list_update, varname_map=varname_map
+    )
+
+    ctx.suffixes.append(
+        [
+            *list_update_insts,
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    )
+
+
+def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.UserDefinedDequeVariable):
+        raise AssertionError(type(var))
+    # Update the deque to the updated items. Be careful in calling the deque
+    # methods and not the overridden methods.
+    varname_map = {}
+    for name in _manual_deque_update.__code__.co_varnames:
+        varname_map[name] = cg.tx.output.new_var()
+
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["deque_to"]),
+        ]
+    )
+
+    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg.extend_output(
+        [
+            create_instruction("STORE_FAST", argval=varname_map["deque_from"]),
+        ]
+    )
+
+    deque_update_insts = bytecode_from_template(
+        _manual_deque_update, varname_map=varname_map
+    )
+
+    ctx.suffixes.append(
+        [
+            *deque_update_insts,
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    )
+
+
+def _skip_attribute_mutation_replay(var: VariableTracker) -> bool:
+    # FrozenDataClassVariable attributes were emitted in codegen_save_tempvars
+    # right after __new__. Skip here to avoid double-emitting.
+    if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
+        var, variables.FrozenDataClassVariable
+    ):
+        return True
+
+    # Sourceless enum members: mutations (like _inverted_ caching) already
+    # happened on the real object during tracing.
+    return (
+        var.is_python_constant()
+        and isinstance(var.mutation_type, AttributeMutationNew)
+        and isinstance(var, variables.UserDefinedObjectVariable)
+        and (
+            isinstance(
+                var.value,
+                (
+                    enum.Enum,
+                    torch.DispatchKey,
+                    torch._C._functorch.TransformType,
+                ),
+            )
+            or is_pybind11_enum_member(var.value)
+        )
+    )
+
+
+@register_side_effect_replay_handler(
+    name="attribute_mutation",
+    matcher=lambda ctx: ctx.side_effects.is_attribute_mutation(ctx.var),
+    priority=40,
+)
+def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    side_effects = ctx.side_effects
+    if _skip_attribute_mutation_replay(var):
+        return
+
+    if (
+        isinstance(var, variables.UserDefinedDictVariable)
+        and side_effects.is_modified(
+            var._base_vt  # pyrefly: ignore[bad-argument-type]
+        )
+        and var._base_vt.has_new_items()  # type: ignore[union-attr]
+    ):
+        _codegen_user_defined_dict_mutation(ctx)
+    elif isinstance(
+        var, variables.UserDefinedListVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    ):
+        _codegen_user_defined_list_mutation(ctx)
+    elif isinstance(
+        var, variables.UserDefinedDequeVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    ):
+        _codegen_user_defined_deque_mutation(ctx)
+
+    # Applying mutations involves two steps: 1) Push all reconstructed objects
+    # onto the stack. 2) Call STORE_ATTR to apply the mutations.
+    #
+    # Dynamo must ensure that mutations are applied in the same order as in the
+    # original program. Therefore, two reverse operations occur below.
+    #
+    # The first reverse operation concerns `suffixes`. We apply suffixes in
+    # reverse order due to the way Python handles the stack. In Step 1, we push
+    # all reconstructed objects onto the stack, but the item at the top of the
+    # stack refers to the last attribute in the mutation order. If not fixed,
+    # this will apply the mutations of attributes in the reverse order. To
+    # account for this reversal, we iterate through the mutable attributes in
+    # reverse order.
+    side_effect_occurred = False
+    for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
+        mutation_kind = side_effects.get_attr_mutation_kind(var, name)
+        if isinstance(var, variables.NewGlobalVariable):
+            cg.tx.output.update_co_names(name)
+            cg(value)
+            if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
+                raise AssertionError(
+                    f"Expected GlobalSource for NewGlobalVariable, "
+                    f"got {type(var.source)}"  # type: ignore[attr-defined]
+                )
+            ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
+            side_effect_occurred = True
+        elif isinstance(value, variables.DeletedVariable):
+            if (
+                isinstance(var, variables.UserDefinedObjectVariable)
+                and mutation_kind is AttrMutationKind.INSTANCE_DICT
+            ):
+                original_dict = getattr(getattr(var, "value", None), "__dict__", {})
+                # If the key only existed in the traced instance dict, the
+                # add/delete sequence is a replay no-op.
+                if name in original_dict:
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(
+                            utils.__name__,
+                            "object_delattr_ignore_descriptor",
+                        )
+                    )
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(variables.ConstantVariable(name))
+                    ctx.suffixes.append(
+                        [
+                            *create_call_function(2, False),
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    side_effect_occurred = True
+            # GENERIC_SETATTR deletions on UDOV fall through to the normal
+            # DELETE_ATTR path below so descriptor semantics are preserved
+            # during replay.
+            elif isinstance(var.mutation_type, AttributeMutationExisting) and hasattr(
+                getattr(var, "value", None), name
+            ):
+                cg.tx.output.update_co_names(name)
+                cg(var.source)
+                ctx.suffixes.append([create_instruction("DELETE_ATTR", argval=name)])
+                side_effect_occurred = True
+        elif (
+            isinstance(var, variables.UserDefinedObjectVariable)
+            and mutation_kind is AttrMutationKind.INSTANCE_DICT
+        ):
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    utils.__name__, "object_setattr_ignore_descriptor"
+                )
+            )
+            cg(var.source)  # type: ignore[attr-defined]
+            cg(variables.ConstantVariable(name))
+            cg(value)
+            ctx.suffixes.append(
+                [
+                    *create_call_function(3, False),
+                    create_instruction("POP_TOP"),
+                ]
+            )
+            side_effect_occurred = True
+        elif (
+            isinstance(var, variables.UserDefinedObjectVariable)
+            and var.needs_slow_setattr()
+        ):
+            # __setattr__ is defined on this object, so call object.__setattr__
+            # directly.
+            cg.load_import_from("builtins", "object")
+            cg.load_method("__setattr__")
+            cg(var.source)  # type: ignore[attr-defined]
+            cg(variables.ConstantVariable(name))
+            cg(value)
+            ctx.suffixes.append([*create_call_method(3), create_instruction("POP_TOP")])
+            side_effect_occurred = True
+        else:
+            cg.tx.output.update_co_names(name)
+            cg(value)
+            cg(var)
+            ctx.suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            side_effect_occurred = True
+
+    if side_effect_occurred:
+        ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="list_iterator_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListIteratorVariable),
+    priority=30,
+)
+def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.ListIteratorVariable):
+        raise AssertionError(type(var))
+    for _ in range(var.index):
+        cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
+        cg(var.source)  # type: ignore[attr-defined]
+        cg.call_function(1, False)
+        cg.pop_top()
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="count_iterator_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.CountIteratorVariable),
+    priority=20,
+)
+def _codegen_count_iterator_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.CountIteratorVariable):
+        raise AssertionError(type(var))
+    for _ in range(var.advance_count):
+        cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
+        cg(var.source)  # type: ignore[attr-defined]
+        cg.call_function(1, False)
+        cg.pop_top()
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
+    name="random_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.RandomVariable),
+    priority=10,
+)
+def _codegen_random_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.RandomVariable):
+        raise AssertionError(type(var))
+
+    def gen_fn() -> None:
+        cg(var.source)  # type: ignore[attr-defined]
+        cg.load_attr("setstate")
+
+    cg.add_push_null(gen_fn)
+    cg(var.wrap_state(var.random.getstate()))
+
+    ctx.suffixes.append(
+        [
+            *create_call_function(1, False),  # setstate
+            create_instruction("POP_TOP"),
+        ]
+    )
+    ctx.log(var)
 
 
 @contextlib.contextmanager
