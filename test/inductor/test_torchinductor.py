@@ -7504,6 +7504,22 @@ for dtype in (torch.int32, torch.int64):
             (weight, indices),
         )
 
+    def test_sparse_csr_creation(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("sparse tensors unsupported on this device")
+
+        def fn(v, y):
+            crow = torch.tensor([0, 2, 4], device=v.device)
+            col = torch.tensor([0, 1, 0, 1], device=v.device)
+            a = torch.sparse_csr_tensor(crow, col, v, size=(2, 2))
+            return torch.mm(a, y), a.to_dense(), a
+
+        v = torch.randn(4, device=self.device)
+        y = torch.randn(2, 2, device=self.device)
+        expect = fn(v, y)
+        actual = torch.compile(fn, fullgraph=True)(v, y)
+        self.assertEqual(actual, expect)
+
     @config.patch(implicit_fallbacks=True)
     def test_no_grad_embedding_renorm_negative_indices(self):
         if self.device != "cuda":
