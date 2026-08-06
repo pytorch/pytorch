@@ -3269,12 +3269,23 @@ class PolyfilledFunctionVariable(VariableTracker):
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
-            result = (
-                self.fn(  # use the original function which is faster than the polyfill
+            # use the original function which is faster than the polyfill
+            fn = self.fn
+            try:
+                result = fn(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            )
+            except AsPythonConstantNotImplementedError as exc:
+                unimplemented(
+                    gb_type="constant fold exception",
+                    context=f"attempted to run function {fn} with arguments {args}",
+                    explanation="Encountered exception when attempting to constant fold.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                    from_exc=exc,
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
             return VariableTracker.build(tx, result)
 
         # Special case for sum on tuple/list of ints

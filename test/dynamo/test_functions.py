@@ -211,6 +211,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
 
+    def test_polyfill_constant_fold_raises_catchable(self):
+        # Polyfilled constant-foldable functions (e.g. builtins.all) fold through
+        # the original C function. A user exception raised during the fold must
+        # surface as the real catchable exception, not an uncatchable
+        # InternalTorchDynamoError.
+        def fn(t):
+            try:
+                all(5)  # 'int' object is not iterable
+                return t + 1
+            except TypeError:
+                return t - 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(torch.ones(3)), fn(torch.ones(3)))
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache
