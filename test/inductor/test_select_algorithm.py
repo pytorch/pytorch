@@ -1065,6 +1065,19 @@ class TestDtypeViewAutotuning(TestCase):
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
 
+    @requires_gpu()
+    @unittest.skipIf(
+        not hasattr(torch, "float4_e2m1fn_x2"),
+        "float4_e2m1fn_x2 dtype not available",
+    )
+    def test_zero_benchmark_output_uses_fp4_storage(self):
+        storage = torch.full((32,), 0xFF, dtype=torch.uint8, device=GPU_TYPE)
+        output = storage.view(torch.float4_e2m1fn_x2)
+
+        select_algorithm.zero_benchmark_output(output)
+
+        self.assertEqual(storage, torch.zeros_like(storage))
+
 
 class TestGetInputsStorageSizeCheck(TestCase):
     def test_get_inputs_realloc_with_undersized_base(self):
