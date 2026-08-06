@@ -96,6 +96,21 @@ constexpr CUTLASS_HOST_DEVICE integer align_up(integer n, integer m) {
   return ((n + m - 1) / m) * m;
 }
 
+// NOTE [Mem-efficient attention dropout RNG offset]
+// The forward kernel, the backward kernel and the rand_uniform_kernel helper
+// that reconstructs the mask for tests must partition the Philox sequence
+// identically, otherwise the passes disagree about which elements were
+// dropped. Taking every extent as int64_t also keeps num_queries * num_keys
+// from wrapping at 2^32.
+constexpr CUTLASS_HOST_DEVICE int64_t dropout_rng_offset(
+    int64_t batch_id,
+    int64_t head_id,
+    int64_t num_heads,
+    int64_t num_queries,
+    int64_t num_keys) {
+  return (batch_id * num_heads + head_id) * num_queries * num_keys;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Determine the type of GEMM we do (TensorCores or not, Shapes ...)
 // TODO: Maybe we could rely on Cutlass's DefaultGemm templates
