@@ -45,6 +45,7 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
@@ -591,6 +592,33 @@ def _spdiags(
     )
 
 
+@register_op_impl(
+    [
+        aten.sparse_compressed_tensor.comp_plain_value_size,
+        aten.sparse_compressed_tensor.comp_plain_value,
+    ]
+)
+def sparse_compressed_constructors(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    if "size" not in new_kwargs:
+        # without an explicit size, it is inferred from plain_indices.max()
+        raise DataDependentOutputException(func)
+    out_device = new_kwargs.pop("device", None)
+    out_device = out_device if out_device is not None else new_kwargs["values"].device
+    new_kwargs["device"] = torch.device("meta")
+    with in_kernel_invocation_manager(fake_mode):
+        # Invariant checks read index data, which meta tensors do not have.
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            out = func(**new_kwargs)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, out_device
+    )
+
+
 @register_op_impl(aten._to_dense.default)
 def _to_dense(
     fake_mode: FakeTensorMode,
@@ -603,7 +631,8 @@ def _to_dense(
     if maybe_mkldnn_out is not NotImplemented:
         return typing_cast(FakeTensor, maybe_mkldnn_out)
 
-    if self.layout is torch.sparse_coo:
+    fake_device = self.fake_device
+    if is_sparse_any(self):
         if dtype is not None:
             raise RuntimeError("dtype argument is not supported by sparse_to_dense")
         with in_kernel_invocation_manager(fake_mode):
@@ -612,7 +641,7 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, self.fake_device)
+        return FakeTensor(fake_mode, out, fake_device)
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
