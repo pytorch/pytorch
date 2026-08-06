@@ -3280,7 +3280,10 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
     @staticmethod
     def _memory_context(nodes, baseline_peak, live_before, graph_outputs=None):
-        from torch._inductor.scheduler import ComboKernelMemoryContext
+        from torch._inductor.scheduler import (
+            _combo_kernel_step_peak,
+            ComboKernelMemoryContext,
+        )
 
         node_to_idx = {node: idx for idx, node in enumerate(nodes)}
         return ComboKernelMemoryContext(
@@ -3289,10 +3292,9 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             baseline_peak=baseline_peak,
             current_nodes=list(nodes),
             current_node_to_idx=node_to_idx.copy(),
-            current_live_before=live_before,
+            current_live_before=live_before[: len(nodes)],
             initial_step_peak=[
-                live_before[idx]
-                + sum(buf.mpi_buffer.size_alloc for buf in node.get_outputs())
+                _combo_kernel_step_peak(live_before[idx], node)
                 for idx, node in enumerate(nodes)
             ],
         )
@@ -3338,12 +3340,11 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             ("pct=0", self._thresholds(pct_thr=0.0)),
             ("abs_gb=1MB", self._thresholds(abs_thr_gb=1.0 / 1024)),
         ):
-            combo, _ = run(thresholds)
+            combo = run(thresholds)
             self.assertIsNone(combo, lambda msg: f"{msg}\n{label} should reject")
 
-        combo, combo_step = run(self._thresholds(abs_thr_gb=1.0))
+        combo = run(self._thresholds(abs_thr_gb=1.0))
         self.assertIsNotNone(combo)
-        self.assertEqual(combo_step, 0)
 
     def test_halving_rollback_and_final_schedule(self):
         from torch._inductor.scheduler import Scheduler
@@ -3437,7 +3438,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             result = try_memory(scheduler, subset, ctx, enable_autotune)
             attempts.append(list(subset))
             if subset == [a, b, c, d]:
-                self.assertIsNone(result[0])
+                self.assertIsNone(result)
                 self.assertEqual(state(), initial_state)
             return result
 
@@ -3497,7 +3498,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         thresholds = self._thresholds(pct_thr=0.05)
 
-        combo_a, _ = self._try_combo_with_fake_scheduler(
+        combo_a = self._try_combo_with_fake_scheduler(
             nodes,
             [z1, z2],
             baseline_peak=baseline_peak,
@@ -3509,7 +3510,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         y1_step = mem_ctx.current_node_to_idx[y1]
         self.assertEqual(mem_ctx.current_live_before[y1_step], 160)
 
-        combo_b, _ = self._try_combo_with_fake_scheduler(
+        combo_b = self._try_combo_with_fake_scheduler(
             nodes,
             [y1, y2],
             baseline_peak=baseline_peak,
@@ -3573,7 +3574,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         scheduler = DelayedScheduler(nodes)
         thresholds = self._thresholds(pct_thr=0.0)
-        combo_a, _ = self._try_combo_with_fake_scheduler(
+        combo_a = self._try_combo_with_fake_scheduler(
             nodes,
             [a0, producer],
             baseline_peak=200,
@@ -3584,7 +3585,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertIsNotNone(combo_a)
 
-        combo_b, _ = self._try_combo_with_fake_scheduler(
+        combo_b = self._try_combo_with_fake_scheduler(
             nodes,
             [consume_i, q],
             baseline_peak=200,
@@ -3628,7 +3629,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         live_before = [0, 20, 60, 40, 40, 140, 180, 80, 40, 0, 250, 0]
         mem_ctx = self._memory_context(nodes, 250, live_before)
         for group in ([z1, z2], [y1, y2]):
-            combo, _ = self._try_combo_with_fake_scheduler(
+            combo = self._try_combo_with_fake_scheduler(
                 nodes,
                 group,
                 baseline_peak=250,
@@ -3657,7 +3658,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # carry-in from buf_a.
         baseline_live_before = [0, 100, 0, 100, 200]
 
-        combo, _ = self._try_combo_with_fake_scheduler(
+        combo = self._try_combo_with_fake_scheduler(
             nodes,
             [c, d],
             baseline_peak=200,
@@ -3691,8 +3692,14 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                     **cfg,
                 ),
             ):
+                compiled = torch.compile(model)
                 with torch.no_grad():
-                    _ = torch.compile(model)(x)
+                    compiled(x)
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                with torch.no_grad():
+                    compiled(x)
                 torch.cuda.synchronize()
             return torch.cuda.max_memory_allocated()
 
