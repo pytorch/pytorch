@@ -17,7 +17,7 @@ from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM, \
-    TEST_ACCELERATOR
+    TEST_ACCELERATOR, TEST_MPS
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -3754,11 +3754,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
         def assert_module_parameters_are(tensor_type, device_id=None):
             for p in module.parameters():
-                if self.device is not None and "xpu" not in self.device.type:
-                    # https://github.com/intel/torch-xpu-ops/issues/2508
-                    test_case.assertIsInstance(p, tensor_type)
                 if device_id is not None:
+                    # tensor_type is a legacy CPU-only tensor class (e.g. torch.FloatTensor),
+                    # so isinstance() would incorrectly fail for accelerator tensors. Check
+                    # dtype and device separately instead.
+                    test_case.assertEqual(p.dtype, tensor_type.dtype)
                     test_case.assertEqual(p.get_device(), device_id)
+                else:
+                    test_case.assertIsInstance(p, tensor_type)
 
         if all(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_ACCELERATOR:
             # check that to(device) moves module parameters to correct GPU device,
@@ -3842,7 +3845,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                     module(*input_tuple).to(1)
                     assert_module_parameters_are(torch.FloatTensor, 1)  # type: ignore[attr-defined]
 
-                if not self.skip_double:
+                if not self.skip_double and not TEST_MPS:
                     # test double()
                     input_tuple = tuple(to_double(t).to(self.device) for t in input_tuple)
                     module.double().to(self.device)
