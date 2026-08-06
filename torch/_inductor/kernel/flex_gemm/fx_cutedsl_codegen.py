@@ -852,14 +852,16 @@ class FlexGemmEpilogueEmitter:
                 key: _cute_arg(value, self.env) for key, value in source.kwargs.items()
             }
             env = dict(self.env)
-            env[source] = _cute_call(source.target, source_args, source_kwargs)
+            env[source] = _cute_call(
+                source.target, source_args, source_kwargs, node=source
+            )
         reduction_input = normalized.source
         layout = self.grouped_tensors.get(reduction_input)
         if layout is None:
             return False
         node_args = tuple(_cute_arg(arg, env) for arg in node.args)
         node_kwargs = {key: _cute_arg(value, env) for key, value in node.kwargs.items()}
-        self.env[node] = _cute_call(node.target, node_args, node_kwargs)
+        self.env[node] = _cute_call(node.target, node_args, node_kwargs, node=node)
         _, self.store_sources[node] = _keepdim_and_broadcast(
             self.kernel,
             self.env[node],
@@ -887,7 +889,7 @@ class FlexGemmEpilogueEmitter:
             key: _local_reduce_store_arg(value, self.env, self.store_sources)
             for key, value in node.kwargs.items()
         }
-        self.env[node] = _cute_call(node.target, store_args, store_kwargs)
+        self.env[node] = _cute_call(node.target, store_args, store_kwargs, node=node)
         self.store_sources[node] = self.env[node]
         return True
 
@@ -922,7 +924,7 @@ class FlexGemmEpilogueEmitter:
         kwargs = {
             key: self.physical_finalize_arg(value) for key, value in node.kwargs.items()
         }
-        finalize_expr = _cute_call(node.target, args, kwargs)
+        finalize_expr = _cute_call(node.target, args, kwargs, node=node)
         if not isinstance(finalize_expr, str):
             raise NotImplementedError(LOCAL_REDUCE_FINALIZE_SCALAR_ONLY_ERROR)
         self.store_sources[node] = self.store_sources[base]
@@ -1028,7 +1030,7 @@ class FlexGemmEpilogueEmitter:
         node_kwargs = {
             key: _cute_arg(value, self.env) for key, value in node.kwargs.items()
         }
-        self.env[node] = _cute_call(node.target, node_args, node_kwargs)
+        self.env[node] = _cute_call(node.target, node_args, node_kwargs, node=node)
 
     def lower_graph(self) -> None:
         """Lower body nodes in FX topological order."""
