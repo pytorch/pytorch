@@ -110,6 +110,14 @@ Multi-instance inference
    python -m torch.backends.xeon.run_cpu --core-list "0, 1, 2, 3" --ninstances 2 --ncores-per-instance 2
    --rank 0 python_script args
 
+   --core-list also accepts ranges, so cores can be picked without enumerating every id.
+
+   eg: run two instances on cores 0-31 and 64-95 respectively
+
+::
+
+   python -m torch.backends.xeon.run_cpu --core-list "0-31,64-95" --ncores-per-instance 32 python_script args
+
 3. To look up what optional arguments this module offers:
 
 ::
@@ -143,6 +151,38 @@ from torch.distributed.elastic.multiprocessing import (
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
 logger = logging.getLogger(__name__)
+
+
+def _parse_core_list(core_list):
+    """Expand a core list such as "0-31,65,92-102" into a sorted list of unique core ids."""
+    cores = []
+    for entry in core_list.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        core_list_entry_pattern = re.compile(r"(\d+)(?:-(\d+))?")
+        matched = core_list_entry_pattern.fullmatch(entry)
+        if not matched:
+            raise ValueError(
+                f'Invalid entry "{entry}" in core list "{core_list}"; expected a core id such as "5" or a range such as "0-31".'
+            )
+        start = int(matched.group(1))
+        end = start if matched.group(2) is None else int(matched.group(2))
+        if end < start:
+            raise ValueError(
+                f'Invalid range "{entry}" in core list "{core_list}"; the end core id must not be smaller than the start core id.'
+            )
+        cores.extend(range(start, end + 1))
+    if not cores:
+        raise ValueError(f'No core id found in core list "{core_list}".')
+    unique_cores = sorted(set(cores))
+    if len(unique_cores) != len(cores):
+        logger.warning(
+            'core list "%s" contains duplicate core ids; using %s unique core(s)',
+            core_list,
+            len(unique_cores),
+        )
+    return unique_cores
 
 
 class _CPUinfo:
@@ -443,7 +483,7 @@ Value applied: %s. Value ignored: %s",
         set_kmp_affinity = True
         enable_taskset = False
         if args.core_list:  # user specify what cores will be used by params
-            cores = [int(x) for x in args.core_list.split(",")]
+            cores = _parse_core_list(args.core_list)
             if args.ncores_per_instance == -1:
                 raise RuntimeError(
                     'please specify the "--ncores-per-instance" if you have pass the --core-list params'
@@ -807,7 +847,8 @@ https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/
         metavar="\b",
         default=None,
         type=str,
-        help='Specify the core list as "core_id, core_id, ....", otherwise, all the cores will be used.',
+        help='Specify the core list as "core_id, core_id, ...." or as ranges such as "0-31,65,92-102", \
+otherwise, all the cores will be used.',
     )
     group.add_argument(
         "--log-path",
