@@ -572,17 +572,15 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     def test_cooperative_reduction_workspace_name_not_baked(self):
         # The cooperative-reduction semaphore workspace is named after its device, and
         # that name is emitted into the wrapper -- so an index in it makes the wrapper
-        # differ across ranks even though no "cuda:N" literal appears.
+        # differ across ranks even though no "cuda:N" literal appears. This runs on
+        # whatever device is current rather than a second GPU: the index would be baked
+        # as semaphores_cuda_0 just the same, so the check keeps working on the
+        # single-GPU runners that make up most of CI.
         from torch._inductor.utils import run_and_get_code
 
         torch._dynamo.reset()
-        with torch.cuda.device(1):
-            compiled = torch.compile(
-                lambda x: x.sum(), backend="inductor", fullgraph=True
-            )
-            _, codes = run_and_get_code(
-                compiled, torch.randn(4096, 4096, device="cuda:1")
-            )
+        compiled = torch.compile(lambda x: x.sum(), backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(compiled, torch.randn(4096, 4096, device="cuda"))
         code = "\n".join(codes)
         self.assertIn("semaphores_cuda", code)  # the workspace is actually in play
         self.assertNotRegex(code, r"semaphores_cuda_\d")
