@@ -644,6 +644,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "only on SM100 and SM110"):
             validate_grouped_n_contract_device(2, (9, 0))
 
+    @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_runtime_output_contraction_rejects_unsafe_explicit_config(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -687,6 +688,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 device_capacity_override=(10, 0),
             )
 
+    @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_runtime_output_contraction_selects_safe_default_config(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
