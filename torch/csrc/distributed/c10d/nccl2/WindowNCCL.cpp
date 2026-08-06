@@ -94,7 +94,6 @@ void WindowNCCL::exchangePeerMetadata(
 }
 
 void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
-  auto commUseGuard = pg_->acquireCommUse();
   tensorRegisterImpl(tensor, owning);
 }
 
@@ -141,7 +140,6 @@ void WindowNCCL::tensorRegisterImpl(const at::Tensor& tensor, bool owning) {
 }
 
 void WindowNCCL::tensor_deregister() {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   const auto barrier = [&] {
     ++pg_->sequence_number_;
@@ -164,7 +162,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
     int64_t targetOffsetNelems,
     bool asyncOp,
     const ::c10d::PutOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   checkDeviceAndThrow(tensor);
   checkPeerRankAndThrow(dstRank);
@@ -249,7 +246,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
     int64_t peerRank,
     bool asyncOp,
     const ::c10d::SignalOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   checkPeerRankAndThrow(peerRank);
   c10::cuda::CUDAGuard device_guard(pg_->getDevice());
@@ -276,7 +272,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
     int64_t peerRank,
     bool asyncOp,
     const ::c10d::WaitSignalOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   checkPeerRankAndThrow(peerRank);
   c10::cuda::CUDAGuard device_guard(pg_->getDevice());
