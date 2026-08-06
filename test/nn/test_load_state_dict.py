@@ -25,8 +25,6 @@ if TEST_NUMPY:
 
 
 class TestLoadStateDict(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -442,14 +440,7 @@ class TestLoadStateDict(NNTestCase):
         with torch.device("meta"):
             m = torch.nn.Linear(3, 5)
         state_dict = m.state_dict()
-        runtime_device = (
-            torch.device("xpu")
-            if hasattr(torch, "xpu") and torch.xpu.is_available()
-            else torch.device("cpu")
-        )
-        state_dict["weight"] = torch.empty_like(
-            state_dict["weight"], device=runtime_device
-        )
+        state_dict["weight"] = torch.empty_like(state_dict["weight"], device="cpu")
         with self.assertWarnsRegex(
             UserWarning,
             "for weight: copying from a non-meta parameter in the checkpoint to a meta",
@@ -604,8 +595,6 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 
 class TestLoadStateDictSwap(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])
