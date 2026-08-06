@@ -536,15 +536,18 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: list[Any] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
+        # Callers often forward the `args` of a real exception, so elements may
+        # be plain Python values rather than VariableTrackers.
         args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
-            for arg in args
+            a if isinstance(a, VariableTracker) else SourcelessBuilder.create(tx, a)
+            for a in args
         ]
     else:
         args_: list[VariableTracker] = []
