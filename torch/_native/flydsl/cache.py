@@ -22,9 +22,12 @@ from __future__ import annotations
 
 import functools
 from collections import namedtuple
-from collections.abc import Callable
 from threading import Lock, RLock
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
