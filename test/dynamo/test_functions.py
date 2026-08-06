@@ -188,6 +188,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
 
+    def test_heapq_polyfill(self):
+        # heapq is a C extension; Dynamo traces it via the pure-Python polyfill
+        # (torch/_dynamo/polyfills/heapq.py). Counter.most_common(n) routes
+        # through heapq.nlargest, so exercise it too.
+        import heapq
+        from collections import Counter
+
+        def fn(t):
+            h = [5, 3, 8, 1, 9, 2]
+            heapq.heapify(h)
+            heapq.heappush(h, 0)
+            smallest = heapq.heappop(h)
+            big = heapq.nlargest(3, [5, 3, 8, 1, 9, 2])
+            small = heapq.nsmallest(2, [5, 3, 8, 1, 9, 2])
+            common = Counter("abracadabra").most_common(2)
+            return t + 1, smallest, sorted(h), big, small, common
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.ones(3))
+        res = opt(torch.ones(3))
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1:], res[1:])
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache
