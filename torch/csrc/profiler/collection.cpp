@@ -923,7 +923,9 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
     addValue(field.name, c10::IValue(inputs));
   }
 
-  void visitUnsupported(std::string_view /*name*/) override {}
+  void visitUnsupported(std::string_view name) override {
+    TORCH_WARN_ONCE("Dropping unsupported Kineto metadata field: ", name);
+  }
 
   void beginDict(std::string_view name) override {
     dict_stack_.emplace_back(std::string{name});
@@ -932,6 +934,7 @@ class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
   void endDict() override {
     auto dict = std::move(dict_stack_.back());
     dict_stack_.pop_back();
+    // Intentionally omit keys for empty dictionaries.
     if (!dict.values_.empty()) {
       addValue(dict.name_, c10::IValue(dict.values_));
     }
