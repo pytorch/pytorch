@@ -9,13 +9,15 @@
 // ROCm 6.3 is planned to have these functions, but until then here they are.
 #if defined(USE_ROCM)
 #include <device_functions.h>
-#include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
 
 #include <torch/headeronly/cuda/ROCmMacros.h>
 
 #if ROCM_VERSION < 60400
-__device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+__device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
+    __hip_bfloat162* address,
+    __hip_bfloat162 value) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
     typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
     static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
@@ -23,7 +25,8 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* addre
       __hip_bfloat162_raw bf162_raw;
       vec_short2 vs2;
     } u{static_cast<__hip_bfloat162_raw>(value)};
-    u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+    u.vs2 =
+        __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
     return static_cast<__hip_bfloat162>(u.bf162_raw);
   } else {
     static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
@@ -32,26 +35,34 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* addre
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = __hip_atomic_load(
+        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
     } while (!__hip_atomic_compare_exchange_strong(
-          (unsigned int*)address, &old_val.u32, new_val.u32,
-          __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+        (unsigned int*)address,
+        &old_val.u32,
+        new_val.u32,
+        __ATOMIC_RELAXED,
+        __ATOMIC_RELAXED,
+        __HIP_MEMORY_SCOPE_AGENT));
     return old_val.h2r;
   }
 }
 
-__device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 value) {
-  if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
+__device__ inline __half2 preview_unsafeAtomicAdd(
+    __half2* address,
+    __half2 value) {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
     // The api expects an ext_vector_type of half
     typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
     static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
     union {
       __half2_raw h2r;
       vec_fp162 fp16;
-    } u {static_cast<__half2_raw>(value)};
-    u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+    } u{static_cast<__half2_raw>(value)};
+    u.fp16 =
+        __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
     return static_cast<__half2>(u.h2r);
   } else {
     static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
@@ -60,12 +71,17 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = __hip_atomic_load(
+        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
     } while (!__hip_atomic_compare_exchange_strong(
-          (unsigned int*)address, &old_val.u32, new_val.u32,
-          __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+        (unsigned int*)address,
+        &old_val.u32,
+        new_val.u32,
+        __ATOMIC_RELAXED,
+        __ATOMIC_RELAXED,
+        __HIP_MEMORY_SCOPE_AGENT));
     return old_val.h2r;
   }
 }
@@ -95,8 +111,8 @@ namespace torch::headeronly {
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if_t<std::is_same_v<torch::headeronly::Half, scalar_t>>* =
-        nullptr>
+    typename std::enable_if_t<
+        std::is_same_v<torch::headeronly::Half, scalar_t>>* = nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
     index_t index,
@@ -107,9 +123,11 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
       reinterpret_cast<torch::headeronly::Half*>(tensor) + index,
       static_cast<torch::headeronly::Half>(value));
 #else
-  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32 bit aligned)
+  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32
+  // bit aligned)
   __half* target_addr = reinterpret_cast<__half*>(tensor + index);
-  bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
+  bool low_byte =
+      (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
 
   if (low_byte && index < (numel - 1)) {
     __half2 value2;
@@ -126,7 +144,8 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
   } else {
 #ifdef USE_ROCM
     gpuAtomicAddNoReturn(
-        reinterpret_cast<torch::headeronly::Half*>(tensor) + index, static_cast<torch::headeronly::Half>(value));
+        reinterpret_cast<torch::headeronly::Half*>(tensor) + index,
+        static_cast<torch::headeronly::Half>(value));
 #else
     atomicAdd(
         reinterpret_cast<__half*>(tensor) + index, static_cast<__half>(value));
@@ -138,8 +157,8 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if_t<std::is_same_v<torch::headeronly::BFloat16, scalar_t>>* =
-        nullptr>
+    typename std::enable_if_t<
+        std::is_same_v<torch::headeronly::BFloat16, scalar_t>>* = nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
     index_t index,
@@ -150,9 +169,12 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
       reinterpret_cast<torch::headeronly::BFloat16*>(tensor) + index,
       static_cast<torch::headeronly::BFloat16>(value));
 #else
-  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32 bit aligned)
+  // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32
+  // bit aligned)
   __nv_bfloat16* target_addr = reinterpret_cast<__nv_bfloat16*>(tensor + index);
-  bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__nv_bfloat162) == 0);
+  bool low_byte =
+      (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__nv_bfloat162) ==
+       0);
 
   if (low_byte && index < (numel - 1)) {
     __nv_bfloat162 value2;
@@ -169,21 +191,23 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
   } else {
 #ifdef USE_ROCM
     gpuAtomicAddNoReturn(
-        reinterpret_cast<torch::headeronly::BFloat16*>(tensor) + index, static_cast<torch::headeronly::BFloat16>(value));
+        reinterpret_cast<torch::headeronly::BFloat16*>(tensor) + index,
+        static_cast<torch::headeronly::BFloat16>(value));
 #else
     atomicAdd(
-        reinterpret_cast<__nv_bfloat16*>(tensor) + index, *reinterpret_cast<__nv_bfloat16*>(&value));
+        reinterpret_cast<__nv_bfloat16*>(tensor) + index,
+        *reinterpret_cast<__nv_bfloat16*>(&value));
 #endif
   }
 #endif
 }
 
-
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if_t<!std::is_same_v<torch::headeronly::Half, scalar_t> && !std::is_same_v<torch::headeronly::BFloat16, scalar_t>>* =
-        nullptr>
+    typename std::enable_if_t<
+        !std::is_same_v<torch::headeronly::Half, scalar_t> &&
+        !std::is_same_v<torch::headeronly::BFloat16, scalar_t>>* = nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
     index_t index,
@@ -205,6 +229,5 @@ __device__ __forceinline__ void fastAtomicAdd(
     gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
-
 
 } // namespace torch::headeronly
