@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import dataclasses
 import importlib
 import os
 import sys
@@ -14,7 +15,12 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.exc import PackageError
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
     precompile_capture,
@@ -1290,6 +1296,53 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         first.unload()
         second.unload()
+
+    def test_stale_artifact_rejected_when_source_drifts(self):
+        # The deployment shape is capture on one machine, serve on another. The
+        # dangerous version of that is an artifact outliving a code change, so
+        # the source checksum has to fire even though the module is found by
+        # name and its path differs between the two machines.
+        src = "import torch\n\n\ndef staged(x):\n    y = x * 2\n    torch._dynamo.graph_break()\n    return (y + 1).sum()\n"
+        pkg_dir = os.path.join(self.path(), "srcdrift")
+        os.makedirs(pkg_dir, exist_ok=True)
+        mod_path = os.path.join(pkg_dir, "drift_mod.py")
+        with open(mod_path, "w") as f:
+            f.write(src)
+
+        sys.path.insert(0, pkg_dir)
+        try:
+            mod = importlib.import_module("drift_mod")
+            session = precompile_capture(mod.staged, backend="eager", dynamic=False)
+            with session as compiled, torch.no_grad():
+                compiled(torch.randn(4, 8))
+            session.save(self.path())
+
+            # The serving machine runs a slightly different build.
+            with open(mod_path, "w") as f:
+                f.write(src.replace("y + 1", "y + 2"))
+            importlib.invalidate_caches()
+            del sys.modules["drift_mod"]
+            mod2 = importlib.import_module("drift_mod")
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
+                precompile_load(
+                    mod2.staged, self.path(), backend="eager", dynamic=False
+                )
+        finally:
+            sys.path.remove(pkg_dir)
+            sys.modules.pop("drift_mod", None)
+
+    def test_artifact_rejected_on_version_skew(self):
+        # Guards and bytecode are version specific, so an artifact must not load
+        # onto a machine running a different Python or PyTorch.
+        current = SystemInfo.current()
+        for field, bad in (
+            ("python_version", "3.0.0"),
+            ("torch_version", "0.0.0"),
+        ):
+            skewed = dataclasses.replace(current, **{field: bad})
+            with self.assertRaisesRegex(RuntimeError, "different"):
+                skewed.check_compatibility(current, "cpu")
 
     def test_load_rejects_artifact_from_a_different_callable(self):
         x = torch.randn(4, 8)

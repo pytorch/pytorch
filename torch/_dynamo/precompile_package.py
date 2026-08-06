@@ -189,9 +189,13 @@ def _is_risky_drop(source: str, value: object) -> bool:
     ``self.act = ACT2FN[cfg.act]`` dispatch shape, where a rebind silently serves
     the graph traced against the old callable.
 
+    For a capture-here / serve-there deployment the concern is not in-process
+    rebinding but DIVERGENCE: the serving machine runs the same source but picks
+    a different object because config, a flag, or an env var differs.
+
     KNOWN GAP: only the capture-time value is visible. Capturing with a
-    torch-owned callable and rebinding to a different one (``relu`` ->
-    ``sigmoid``) is classified benign and is NOT caught. ``dropped_guards`` is
+    torch-owned callable and diverging to a different torch-owned one (``relu``
+    -> ``sigmoid``) is classified benign and is NOT caught. ``dropped_guards`` is
     the authoritative list; this predicate is a lint over it, not a proof of
     safety.
     """
@@ -345,12 +349,15 @@ class PrecompileSession:
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped identity guard(s) on "
-                f"{[n for _, n in summary.risky_dropped_guards]}, which cannot be "
-                f"serialized. Each of those is a bare global holding a non-module: "
-                f"rebinding one between capture and load would silently serve a "
-                f"graph traced against the old value, with no error. Read the value "
-                f"from a module attribute or pass it as an argument so it can be "
-                f"guarded, or pass require_no_risky_drops=False to accept the risk."
+                f"{[n for _, n in summary.risky_dropped_guards]}. These guard objects "
+                f"owned by your code rather than by torch, and identity guards cannot "
+                f"be serialized, so nothing checks them at load time. Identical source "
+                f"is not enough: if config, a feature flag, or an environment variable "
+                f"selects a different object on the serving machine, the artifact "
+                f"serves the graph traced against the capture-time object and returns "
+                f"a wrong answer with no error. Make the value reachable as data the "
+                f"graph can guard, pin it so both machines agree, or pass "
+                f"require_no_risky_drops=False to accept the risk."
             )
         if require_no_dropped_guards and summary.dropped_guards:
             raise PackageError(
