@@ -276,9 +276,7 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
 @nvfp4_pack.register_fake
 def _(input: torch.Tensor) -> torch.Tensor:
     _validate_nvfp4_pack_input(input)
-    return torch.empty(
-        tuple(input.shape[:-1]), device=input.device, dtype=torch.float4_e2m1fn_x2
-    )
+    return input.new_empty(input.shape[:-1], dtype=torch.float4_e2m1fn_x2)
 
 
 @torch.library.custom_op("flex_gemm::to_blocked", mutates_args=())
