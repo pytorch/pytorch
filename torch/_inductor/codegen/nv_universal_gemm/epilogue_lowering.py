@@ -164,6 +164,10 @@ class NVGemmEpilogueProgram:
         owned = OrderedSet(self.owned_nodes)
         return tuple(node for node in self.capture.nodes if node not in owned)
 
+    @property
+    def pointwise_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+        return self.evt_nodes
+
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class NVGemmEpilogueCapture:
