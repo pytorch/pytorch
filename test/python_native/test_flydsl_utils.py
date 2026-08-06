@@ -92,7 +92,7 @@ class TestFlyDSLArchResolution(TestCase):
 
 
 class TestFlyDSLRuntimeProbe(TestCase):
-    """The import-free probe the eager gate and Inductor both rely on.
+    """The import-free probe the eager gate relies on.
 
     It must never import flydsl -- test_no_dsl_imports_after_import_torch in
     test_native_dsl_ops.py enforces that end to end; these cases pin every
