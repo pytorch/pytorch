@@ -166,6 +166,81 @@ class TestAOTIPackageDeviceValidation(TestCase):
             ):
                 torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
+    def test_aoti_load_does_not_invoke_compiler_isa_probe(self):
+        from torch._inductor import config as inductor_config, cpu_vec_isa
+
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cpu", "AOTI_CPU_ISA": "AVX2"}
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        def clear_isa_caches():
+            cpu_vec_isa.valid_vec_isa_list.cache_clear()
+            cpu_vec_isa.cpuinfo_vec_isa_list.cache_clear()
+            cpu_vec_isa.VecISA._VecISA__bool__impl.cache_clear()
+            cpu_vec_isa.VecAVX512.__bool__.cache_clear()
+            cpu_vec_isa.VecAVX512VNNI.__bool__.cache_clear()
+            cpu_vec_isa.VecAMX.__bool__.cache_clear()
+
+        clear_isa_caches()
+        try:
+            with (
+                inductor_config.patch({"cpp.vec_isa_ok": None, "cpp.simdlen": None}),
+                mock.patch.object(
+                    torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+                ),
+                mock.patch.object(
+                    cpu_vec_isa.VecISA,
+                    "check_build",
+                    side_effect=AssertionError(
+                        "the load path must not dry-compile ISA probe programs"
+                    ),
+                ),
+            ):
+                _load_aoti("model.pt2", "model", False, 1, -1)
+        finally:
+            clear_isa_caches()
+
+    def test_aoti_load_still_warns_on_isa_mismatch(self):
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                # An ISA string no host can satisfy, so the mismatch warning
+                # must fire regardless of the machine running the test.
+                return {
+                    "AOTI_DEVICE_KEY": "cpu",
+                    "AOTI_CPU_ISA": "AVX512 AVX512_VNNI AMX_TILE NONEXISTENT_ISA",
+                }
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        with (
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+            ),
+            mock.patch("torch.export.pt2_archive._package.logger.warning") as mock_warn,
+        ):
+            _load_aoti("model.pt2", "model", False, 1, -1)
+
+        mock_warn.assert_called_once()
+        self.assertIn("Device information mismatch", mock_warn.call_args[0][0])
+
+    def test_cpuinfo_vec_isa_list_covers_valid_vec_isa_list(self):
+        from torch._inductor import cpu_vec_isa
+
+        # The cpuinfo-detected list may only ever be a (non-strict) superset
+        # of the toolchain-validated list: the dry-compile probe can remove
+        # ISAs the compiler cannot build for, never add them.
+        valid = {str(isa) for isa in cpu_vec_isa.valid_vec_isa_list()}
+        detected = {str(isa) for isa in cpu_vec_isa.cpuinfo_vec_isa_list()}
+        self.assertTrue(
+            valid.issubset(detected), f"{valid=} not a subset of {detected=}"
+        )
+
 
 if __name__ == "__main__":
     run_tests()
