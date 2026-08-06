@@ -1255,8 +1255,10 @@ class CuptiMonitor:
                 obs.callback(chunk)
 
     def _account_dropped_records(self, ctx: int, stream_id: int) -> None:
+        if self._subscriber is None:
+            return
         self._dropped_records += self._cupti.activity_get_num_dropped_records(
-            ctx, stream_id
+            self._subscriber, ctx, stream_id
         )
 
 
