@@ -188,6 +188,150 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
 
+    def test_bytes_methods_constant_fold(self):
+        def fn(t, b):
+            return (
+                t + 1,
+                b.upper(),
+                b.lower(),
+                b.strip(),
+                b.replace(b"a", b"z"),
+                b.startswith(b"a"),
+                b.endswith(b"c"),
+                b.find(b"b"),
+                b.count(b"a"),
+                b.hex(),
+                b.decode(),
+                b.partition(b"b"),
+                b.zfill(8),
+                b.center(9, b"-"),
+                b"-".join([b"x", b"y"]),
+                bytes.maketrans(b"a", b"b"),
+            )
+
+        b = b"abcabc"
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3), b), opt(torch.ones(3), b))
+
+    def test_bytes_constructor_constant_folds(self):
+        def fn(t):
+            return (
+                t + 1,
+                bytes(),  # noqa: UP018
+                bytes(3),
+                bytes([1, 2, 3]),
+                bytes((4, 5)),
+                bytes("ab", "utf-8"),
+                bytes(b"cd"),  # noqa: UP018
+                bytes.fromhex("616263"),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_split_returns_mutable_list(self):
+        # bytes.split/rsplit/splitlines return a fresh caller-owned mutable list;
+        # in-place mutations on the result must be tracked (no graph break).
+        def fn(t, b):
+            words = b.split()
+            words.sort()
+            words.append(b"zzz")
+            rparts = b.rsplit(b" ")
+            rparts.reverse()
+            lines = b.splitlines()
+            lines.pop()
+            return t + 1, words, rparts, lines
+
+        b = b"the quick brown fox"
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.ones(3), b)
+        res = opt(torch.ones(3), b)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1:], res[1:])
+
+    def test_bytes_constructor_folds_iterators(self):
+        def fn(t, s):
+            return (
+                t + 1,
+                bytes(map(ord, s)),
+                bytes(x * 3 for x in range(1, 7)),
+                bytes(iter([1, 2, 3])),
+                bytes(iter(range(4))),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3), "abc"), opt(torch.ones(3), "abc"))
+
+    def test_bytes_constructor_encoding_forms(self):
+        def fn(t):
+            def err(*args, **kwargs):
+                try:
+                    return bytes(*args, **kwargs)
+                except TypeError as e:
+                    return str(e)
+
+            return (
+                t + 1,
+                bytes("ab", "utf-8"),
+                bytes("ab", "utf-8", "strict"),
+                bytes("\xff", "ascii", "replace"),
+                bytes("ab", encoding="utf-8"),
+                bytes(source="ab", encoding="utf-8", errors="strict"),
+                err("ab"),
+                err(3, "utf-8"),
+                err(b"ab", "ascii"),
+                err(encoding="ascii"),
+                err([1, 2], errors="strict"),
+                err("ab", 3),
+                err("ab", "utf-8", "strict", 1),
+                err(x=1),
+                err(map(ord, "hi"), "utf-8"),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_constant_exceptions_keep_their_args(self):
+        # User code inspects the message of an exception raised by a folded
+        # method or operator, so the original args must be carried over.
+        def fn(t):
+            try:
+                b"hello".startswith([b"h"])
+            except TypeError as e:
+                startswith = str(e)
+            try:
+                "hello".index("z")
+            except ValueError as e:
+                index = str(e)
+            out_of_range = 300
+            try:
+                _ = out_of_range in b"abc"
+            except ValueError as e:
+                contains = str(e)
+            try:
+                bytes("\xff", "ascii")
+            except UnicodeEncodeError as e:
+                encode = e.args
+            return t + 1, startswith, index, contains, encode
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_errors_are_observed_exceptions(self):
+        def fn(t):
+            try:
+                b"\xff".decode("utf-8")
+            except UnicodeDecodeError:
+                decoded = "decode raised"
+            try:
+                bytes([256])
+            except ValueError:
+                built = "ctor raised"
+            return t + 1, decoded, built
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache
