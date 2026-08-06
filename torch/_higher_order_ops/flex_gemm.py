@@ -270,7 +270,8 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
     codes = torch.where(denormal, denormal_code, codes)
     codes = torch.where(normal, normal_code, codes)
     codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
-    return ((codes[..., 1] << 4) | codes[..., 0]).view(torch.float4_e2m1fn_x2)
+    packed = (codes[..., 1] << 4) | codes[..., 0]
+    return packed.contiguous().view(torch.float4_e2m1fn_x2)
 
 
 @nvfp4_pack.register_fake
