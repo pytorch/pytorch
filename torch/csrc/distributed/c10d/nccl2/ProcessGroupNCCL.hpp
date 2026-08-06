@@ -22,6 +22,7 @@
 #include <optional>
 #include <queue>
 #include <set>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -363,6 +364,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
+  [[nodiscard]] std::shared_lock<std::shared_mutex> acquireCommUse() const;
   // Tears the NCCL communicator down. This NEVER terminates the process --
   // a user-initiated abort()/shutdown() must be survivable, matching
   // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
@@ -594,7 +596,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     UNINITIALIZED,
     INITIALIZED,
     FINALIZED,
-  } init_state_{InitializationState::UNINITIALIZED};
+  };
+  std::atomic<InitializationState> init_state_{
+      InitializationState::UNINITIALIZED};
+  std::mutex initialization_mutex_;
+  mutable std::shared_mutex comm_lifecycle_mutex_;
+  std::atomic<bool> comm_suspended_{false};
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
