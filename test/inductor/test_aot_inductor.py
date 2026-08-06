@@ -6505,6 +6505,42 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_scatter_fallback(self):
+        # Scatter fallback kernels use a separate codegen path
+        # (_generate_scatter_fallback) that must also be wrapped in
+        # KernelContextGuard and RAIIAtenRecordFunctionHandle profiling
+        # blocks when profiling is enabled.  RAIIAtenRecordFunctionHandle
+        # is what actually creates the RecordFunction / External id linkage.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                return torch.scatter(inp, 1, index, src)
+
+        example_inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("KernelContextGuard").run(code)
+            # RAIIAtenRecordFunctionHandle creates the RecordFunction that
+            # produces the External id linkage in GPU traces.
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
