@@ -8,6 +8,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
@@ -514,6 +515,8 @@ DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
 
 
 class DynamicShapesCodegenTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

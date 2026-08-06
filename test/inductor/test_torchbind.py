@@ -13,7 +13,10 @@ from torch._inductor import aot_compile, ir
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfWindows,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
@@ -22,6 +25,8 @@ from torch.testing._internal.torchbind_impls import (
 
 
 class TestTorchbind(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
