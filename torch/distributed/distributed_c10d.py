@@ -2628,6 +2628,12 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    # nccl2 only supports the explicit split_group path. Its new_group factory
+    # creates a fresh communicator and does not consume split_from, so issuing a
+    # no-color split on nonmembers would mismatch the members' initialization.
+    if split_from.name() in ("nccl2", "nccl-lazy"):
+        return None
+
     return split_from
 
 
