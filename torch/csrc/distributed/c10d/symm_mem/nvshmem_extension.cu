@@ -530,8 +530,11 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   // Compute the warp-wide exclusive prefix sum
   WarpScan(temp_storage[warp_id]).ExclusiveSum(thread_data, thread_data, warp_aggregate);
 
-  // Store the result
-  odata[tid] = thread_data;
+  // Store the result. Callers size `odata` to `n`, not to WARP_SIZE, so the
+  // lanes past `n` must not write.
+  if (tid < n) {
+    odata[tid] = thread_data;
+  }
   return warp_aggregate;
 }
 
@@ -577,6 +580,15 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
 
   // Total length of each tile
   __shared__ int64_t len_per_tile[NUM_TILES];
+  // Tiles with no splits skip the prefix sum below, and lanes past
+  // `nsplits_per_tile` are never written by it. Zero both arrays first so the
+  // second scan and the offset fix-up do not read uninitialized shared memory.
+  // NUM_TILES * A2AV_TILE_SIZE == THREADS_PER_BLOCK, so this covers every entry.
+  tile_prefix_sums[tileId][laneId] = 0;
+  if (tid < NUM_TILES) {
+    len_per_tile[tid] = 0;
+  }
+  __syncthreads();
   // When `nsplits` is small, not every tile gets data to sum. They can skip
   // this local prefix sum.
   if (nsplits_per_tile > 0) {
