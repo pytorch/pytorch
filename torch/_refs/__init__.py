@@ -6659,7 +6659,7 @@ def geometric(self, p, generator=None):
 def log_normal(self, mean=1, std=2, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    torch._check(
+    torch._check_not_implemented(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
