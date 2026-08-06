@@ -17,7 +17,10 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 import torch
 from torch.profiler._cupti.cupti_python import OVERHEAD_KIND_NAMES
-from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_trace
+from torch.profiler._cupti.monitor_trace import (
+    _LOGICAL_LANE_BASE,
+    merge_trace_window_into_chrome_trace,
+)
 from torch.profiler._cupti.observers.base import (
     CuptiMonitorObserver,
     default_graph_annotation_resolver,
@@ -890,7 +893,13 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
     get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
     keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
     keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
-    so distinct nodes resolve once for its lifetime."""
+    so distinct nodes resolve once for its lifetime.
+
+    A resolver returns an ordinal in its own space, which is placed in the reserved lane range
+    here -- lanes share the CUDA stream namespace, so an un-offset ordinal would be a stream id
+    (see _normalize_logical_lanes, which enforces the same invariant for windows built
+    elsewhere). Returning the op's own stream number is therefore still a distinct logical lane;
+    None is how a resolver says "leave it on its CUDA stream"."""
     gnid = frame["graph_node_id"]
     n = len(gnid)
     logical = np.array(
@@ -902,7 +911,10 @@ def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
             continue
         res = lane_resolver(g)
         if res is not None:
-            logical[i], names[i] = res
+            lane, names[i] = res
+            logical[i] = lane + (
+                0 if lane >= _LOGICAL_LANE_BASE else _LOGICAL_LANE_BASE
+            )
     return logical, names
 
 
