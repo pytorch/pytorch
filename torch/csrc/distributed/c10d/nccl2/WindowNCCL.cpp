@@ -28,7 +28,6 @@ WindowNCCL::WindowNCCL(c10::intrusive_ptr<ProcessGroupNCCL> pg)
   TORCH_CHECK(pg_, "WindowNCCL: null ProcessGroupNCCL");
   nccl_api_ = pg_->getNcclApi();
   nccl_comm_ = pg_->nccl_comm_;
-  comm_generation_ = pg_->comm_generation_.load(std::memory_order_acquire);
   TORCH_CHECK(
       nccl_comm_ != nullptr && nccl_api_ != nullptr,
       "WindowNCCL: ProcessGroupNCCL is not initialized");
@@ -94,14 +93,6 @@ void WindowNCCL::exchangePeerMetadata(
 }
 
 void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
-  tensorRegisterImpl(tensor, owning);
-}
-
-void WindowNCCL::tensorRegisterImpl(const at::Tensor& tensor, bool owning) {
-  TORCH_CHECK(
-      comm_generation_ == pg_->comm_generation_.load(std::memory_order_acquire),
-      "WindowNCCL: window belongs to a stale communicator generation; "
-      "create and register a new window after reconfigure");
   TORCH_CHECK(tensor.defined(), "WindowNCCL: a valid tensor is required");
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(win_ == nullptr, "WindowNCCL: double registration");
@@ -131,29 +122,24 @@ void WindowNCCL::tensorRegisterImpl(const at::Tensor& tensor, bool owning) {
       !c10::mul_overflows(numel, tensor.element_size(), &win_size),
       "WindowNCCL: tensor size overflows size_t");
   exchangePeerMetadata(seg_offset, win_size, tensor.scalar_type());
-  pg_->retainSegmentWindow(tensor.data_ptr());
   win_ = seg_win;
-  registered_ptr_ = tensor.data_ptr();
   if (owning) {
     buf_tensor_ = tensor;
   }
 }
 
 void WindowNCCL::tensor_deregister() {
-  checkWindowAndThrow();
-  const auto barrier = [&] {
-    ++pg_->sequence_number_;
-    pg_->barrierImpl(/*async_op=*/false, pg_->options_c10d_->timeout)->wait();
-  };
-  barrier();
-  pg_->releaseSegmentWindow(registered_ptr_);
+  // Segment-level deregistration happens automatically when the mempool frees
+  // the segment (via NCCLCachingAllocatorHook). Here we just forget the
+  // tensor; the barriers keep ranks aligned around the collective contract.
+  pg_->barrier();
+  TORCH_CHECK(win_ != nullptr, "WindowNCCL: double deregistration");
   win_ = nullptr;
   peer_win_offsets_.clear();
   peer_win_sizes_.clear();
   peer_dtypes_.clear();
-  registered_ptr_ = nullptr;
   buf_tensor_.reset();
-  barrier();
+  pg_->barrier();
 }
 
 c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
@@ -222,21 +208,31 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout, tensor);
   work->recordStart("put");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->putSignal(
+            tensor.data_ptr(),
+            tensor.numel(),
+            pg_->getNcclDataType(tensor),
+            static_cast<int>(dstRank),
+            win_,
+            peer_offset,
+            kSigIdx,
+            kCtx,
+            kFlags,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::put ncclPutSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->putSignal(
-          tensor.data_ptr(),
-          tensor.numel(),
-          pg_->getNcclDataType(tensor),
-          static_cast<int>(dstRank),
-          win_,
-          peer_offset,
-          kSigIdx,
-          kCtx,
-          kFlags,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::put ncclPutSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -253,16 +249,26 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
   work->recordStart("signal");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->signal(
+            static_cast<int>(peerRank),
+            kSigIdx,
+            kCtx,
+            kFlags,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::signal ncclSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->signal(
-          static_cast<int>(peerRank),
-          kSigIdx,
-          kCtx,
-          kFlags,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::signal ncclSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -279,16 +285,26 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
   work->recordStart("wait_signal");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->waitSignal(
+            static_cast<int>(peerRank),
+            kSigIdx,
+            kCtx,
+            /*opCnt=*/1,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::wait_signal ncclWaitSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->waitSignal(
-          static_cast<int>(peerRank),
-          kSigIdx,
-          kCtx,
-          /*opCnt=*/1,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::wait_signal ncclWaitSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -327,10 +343,6 @@ void WindowNCCL::checkWindowAndThrow() const {
   TORCH_CHECK(
       win_ != nullptr,
       "WindowNCCL: window not registered (call tensor_register first)");
-  TORCH_CHECK(
-      comm_generation_ == pg_->comm_generation_.load(std::memory_order_acquire),
-      "WindowNCCL: window belongs to a stale communicator generation; "
-      "create and register a new window after reconfigure");
 }
 
 void WindowNCCL::checkDeviceAndThrow(const at::Tensor& tensor) const {

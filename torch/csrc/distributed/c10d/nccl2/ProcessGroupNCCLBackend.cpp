@@ -88,7 +88,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      work_state_(std::make_shared<WorkNCCLState>(kDefaultMaxEventPoolSize)),
       abort_process_on_timeout_or_error_(
           SHOULD_TEAR_DOWN(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
               ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
@@ -175,21 +174,13 @@ void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
 
 void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
-  // gracefully. A live CUDA graph must retain the communicator until its graph
-  // object is released; ncclCommDestroy otherwise blocks indefinitely.
+  // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
   if (init_state_ != InitializationState::INITIALIZED) {
     return;
   }
-  TORCH_CHECK(
-      !hasCapturedGraphs(),
-      "ProcessGroupNCCL cannot be destroyed while a captured CUDA graph is "
-      "alive");
   try {
     finalize();
   } catch (const std::exception& e) {
-    if (hasCapturedGraphs()) {
-      throw;
-    }
     TC_LOG(WARNING) << "ProcessGroupNCCL::shutdown: finalize() raised, "
                     << "treating as no-op: " << e.what();
   }
@@ -245,7 +236,7 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
           this));
   if (tensor.has_value()) {
-    window->tensorRegisterImpl(*tensor, true);
+    window->tensor_register(*tensor);
   }
   return window;
 }

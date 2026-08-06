@@ -168,8 +168,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         << " was not finalized before destruction. "
         << "This may indicate a resource leak. Please call finalize() explicitly.";
 
-    work_state_->comm_state = CommState::ERROR;
-
     // Stop the watchdog so it cannot access this object after destruction. It
     // may be the caller (garbageCollect can pop a work item whose destruction
     // releases the last reference to this comm), which stopWatchdog handles.
@@ -203,7 +201,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // We need to detach the memory hook in case finalize is not called,
   // so that we don't encounter a memory corruption.
   detachMemoryHook();
-  work_state_->closeEventPool();
 }
 
 void ProcessGroupNCCL::init(at::Device device) {
@@ -262,7 +259,6 @@ void ProcessGroupNCCL::init(at::Device device) {
 void ProcessGroupNCCL::initNcclResources() {
   c10::cuda::CUDAGuard gpuGuard(device_);
 
-  comm_generation_.fetch_add(1, std::memory_order_release);
   window_registration_counter_.store(0, std::memory_order_relaxed);
 
   is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
@@ -276,6 +272,8 @@ void ProcessGroupNCCL::initNcclResources() {
     dependency_event_.emplace(cudaEventDisableTiming);
   }
 
+  max_event_pool_size_ = kDefaultMaxEventPoolSize;
+
   NCCL_CHECK(
       nccl_api_,
       nccl_comm_,
@@ -288,7 +286,9 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  startWatchdog();
+  if (!shutdown_) {
+    timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
+  }
 
   attachMemoryHook();
   publishComm();
@@ -390,7 +390,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
         ncclOpts->timeout,
         "NCCL split failed");
   } catch (...) {
-    work_state_->comm_state = CommState::ERROR;
+    comm_state_ = CommState::ERROR;
     nccl_comm_ = nullptr;
     throw;
   }
@@ -445,7 +445,7 @@ void ProcessGroupNCCL::abort() {
   TC_LOG(INFO, this) << "abort() requested on rank " << rank_
                      << "; aborting the NCCL communicator";
   if (options_c10d_->enable_reconfigure) {
-    work_state_->comm_state = CommState::ERROR;
+    comm_state_ = CommState::ERROR;
     revokeNcclComm();
   } else {
     // Stop the watchdog before publishing the error: this failure is one the
@@ -455,17 +455,13 @@ void ProcessGroupNCCL::abort() {
     // again after reconfigure(). The error is still published before the
     // teardown, so work in flight reports it instead of completing.
     stopWatchdog();
-    work_state_->comm_state = CommState::ERROR;
+    comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
 }
 
 void ProcessGroupNCCL::suspend() {
   checkInitialized();
-  TORCH_CHECK(
-      !hasCapturedGraphs(),
-      "ProcessGroupNCCL communicator cannot be suspended while a captured "
-      "CUDA graph is alive");
   c10::cuda::CUDAGuard gpuGuard(device_);
   NCCL_CHECK(
       nccl_api_,
@@ -505,7 +501,7 @@ std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
 }
 
 ::c10d::ErrorType ProcessGroupNCCL::getError() {
-  switch (work_state_->comm_state.load()) {
+  switch (comm_state_.load()) {
     case CommState::TIMEOUT:
       return ::c10d::ErrorType::TIMEOUT;
     case CommState::ERROR:
@@ -520,12 +516,6 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("ProcessGroupNCCL not initialized");
   } else if (init_state_ == InitializationState::FINALIZED) {
     throw std::runtime_error("ProcessGroupNCCL already finalized");
-  }
-  if (hasCapturedGraphs()) {
-    startWatchdog();
-    throw std::runtime_error(
-        "ProcessGroupNCCL cannot be finalized while a captured CUDA graph is "
-        "alive");
   }
   init_state_ = InitializationState::FINALIZED;
 
@@ -543,13 +533,13 @@ void ProcessGroupNCCL::finalize() {
         "WorkQ finalize returned in progress or not started state");
   }
 
-  // Update communicator state based on the work status.
+  // Update comm_state_ based on the work status
   if (work_status == WorkNCCL::WorkStatus::TIMEDOUT) {
-    work_state_->comm_state = CommState::TIMEOUT;
+    comm_state_ = CommState::TIMEOUT;
     abortNcclComm();
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
-    work_state_->comm_state = CommState::ERROR;
+    comm_state_ = CommState::ERROR;
     if (!nccl_comm_) {
       throw std::runtime_error(
           "NCCL communicator was aborted after a previous error");
@@ -566,7 +556,13 @@ void ProcessGroupNCCL::finalize() {
     throw std::move(ncclException);
   }
 
-  work_state_->closeEventPool();
+  // Clean up event pool
+  {
+    std::lock_guard<std::mutex> lock(event_pool_mutex_);
+    while (!event_pool_.empty()) {
+      event_pool_.pop();
+    }
+  }
 
   barrier_buffer_.clear();
 
@@ -602,14 +598,6 @@ void ProcessGroupNCCL::abortNcclComm() {
         "NCCL Abort failed");
     nccl_comm_ = nullptr;
   }
-}
-
-void ProcessGroupNCCL::startWatchdog() {
-  if (timeout_thread_.joinable()) {
-    return;
-  }
-  shutdown_ = false;
-  timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
 }
 
 void ProcessGroupNCCL::stopWatchdog() {
