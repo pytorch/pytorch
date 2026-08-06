@@ -40,7 +40,6 @@ from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInf
 import operator
 import string
 
-
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
