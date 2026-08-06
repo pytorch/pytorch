@@ -79,7 +79,6 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
 )
 from torch._inductor.kernel.gemm_epilogue_utils import (
     guarded_int,
-    statically_known_equal,
     statically_known_shape_equal,
 )
 from torch._inductor.virtualized import V
@@ -332,7 +331,6 @@ def match_output_contraction_use(
             not isinstance(view_normalized, NormalizedView)
             or shape is None
             or len(shape) != 3
-            or not statically_known_equal(shape[-1], group)
             or not statically_known_shape_equal(
                 (shape[0], shape[1] * group), gemm_shape
             )
