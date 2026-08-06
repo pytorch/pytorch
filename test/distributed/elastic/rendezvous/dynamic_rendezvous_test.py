@@ -148,6 +148,15 @@ class NodeDescNaturalSortKeyTest(TestCase):
             ["10.0.0.7", "10.0.0.66", "gpu-2", "gpu-10", "gpu-a", "ip-10-0-1-5"],
         )
 
+    def test_non_decimal_digit_characters_do_not_raise(self) -> None:
+        # str.isdigit() is True for characters such as superscripts that int()
+        # rejects, hence the key checks str.isdecimal().
+        nodes = [_NodeDesc("node1²2", 1, 1), _NodeDesc("node3", 1, 1)]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(ordered, ["node1²2", "node3"])
+
     def test_processes_on_same_host_stay_grouped_and_ordered(self) -> None:
         nodes = [
             _NodeDesc("node9", 7, 1),
@@ -789,6 +798,36 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
                     self._assert_action(_Action.ADD_TO_PARTICIPANTS, expected_state)
 
                     self._mock_state_holder.reset_mock()
+
+    def test_run_assigns_ranks_in_natural_host_order(self) -> None:
+        # Hostnames whose lexicographic order differs from their numeric order.
+        # With a plain sort the ranks would be node10=0, node2=1, node9=2, i.e.
+        # they would not follow the node numbering (see gh-191190).
+        self._node = _NodeDesc("node2", 1, 1)
+
+        self._state = _RendezvousState()
+
+        for addr in ["node10", "node9"]:
+            node = _NodeDesc(addr, 1, 1)
+
+            self._state.participants[node] = 0
+            self._state.last_heartbeats[node] = self._now
+
+        self._state.wait_list.add(self._node)
+
+        self._state.deadline = self._now + self._timeout.last_call
+
+        self._min_nodes = 3
+        self._max_nodes = 3
+
+        self._run_action(_Action.ADD_TO_PARTICIPANTS)
+
+        self.assertTrue(self._state.complete)
+
+        self.assertEqual(
+            {node.addr: rank for node, rank in self._state.participants.items()},
+            {"node2": 0, "node9": 1, "node10": 2},
+        )
 
     def test_run_adds_to_waitlist(self) -> None:
         expected_state = _RendezvousState()

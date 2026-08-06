@@ -254,7 +254,7 @@ def _natural_sort_key(node: _NodeDesc) -> tuple:
     ordering, so processes on the same host stay grouped exactly as before.
     """
     chunks = tuple(
-        (0, int(chunk), "") if chunk.isdigit() else (1, 0, chunk)
+        (0, int(chunk), "") if chunk.isdecimal() else (1, 0, chunk)
         for chunk in re.split(r"(\d+)", node.addr)
         if chunk
     )
