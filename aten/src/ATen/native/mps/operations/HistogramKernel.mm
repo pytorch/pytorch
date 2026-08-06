@@ -175,9 +175,10 @@ void histc_atomic_kernel_impl(Tensor& hist_output, const TensorList& bin_edges, 
         const uint32_t nDim = input.dim();
         const IntArrayRef& inputShape = input.sizes();
         std::vector<uint32_t> inputShapeData(inputShape.size());
-        std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
+        std::vector<uint32_t> strides(inputShape.size());
         for (const auto i : c10::irange(inputShape.size())) {
-          inputShapeData[i] = static_cast<uint32_t>(inputShape[i]);
+          inputShapeData[i] = c10::checked_convert<uint32_t>(inputShape[i], "uint32_t");
+          strides[i] = c10::checked_convert<uint32_t>(input.stride(i), "uint32_t");
         }
         stridedIndicesBuffer = [[device newBufferWithLength:num_elements * sizeof(uint) options:0] autorelease];
         id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
