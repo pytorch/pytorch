@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -77,6 +78,8 @@ def _run_call_with_mock_module(test, module, functional_call, device='cpu', pref
 
 
 class TestStatelessFunctionalAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _ensure_module_unchanged(self, module, message):
         orig_parameters, orig_buffers = tuple(module.parameters()), tuple(module.buffers())
@@ -858,6 +861,8 @@ class TestStatelessFunctionalAPI(TestCase):
 
 
 class TestStatelessFunctionalAPIDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
     @unittest.skip("This doesn't work right now")
     @parametrize("functional_call", [
@@ -886,6 +891,8 @@ class TestStatelessFunctionalAPIDevice(TestCase):
 
 
 class TestStatelessDeprecation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_private_stateless_warns(self):
         script = """
 import torch
@@ -916,6 +923,8 @@ exit(len(w))
             stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_runs_with_optimize_flag(self):
         script = "import torch; import torch._functorch.deprecated"
         try:
