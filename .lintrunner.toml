@@ -1053,7 +1053,7 @@ command = [
 code = 'CPYTHON_DIFF_SYNC'
 include_patterns = [
     'test/cpython/v3_13/**',
-    'test/cpython/diff_sync.py',
+    'tools/cpython_diff_sync.py',
 ]
 command = [
     'python3',

@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_range.py b/test/cpython/v3_13/test_range.py
+index 3870b153688b25fcd324a7779339e54f41a04ea4..f5f1f9544742e25c0480aac7c8713c333be73410 100644
 --- a/test/cpython/v3_13/test_range.py
 +++ b/test/cpython/v3_13/test_range.py
 @@ -1,3 +1,23 @@

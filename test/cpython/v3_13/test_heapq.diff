@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_heapq.py b/test/cpython/v3_13/test_heapq.py
+index 1aa8e4e289730d07e50313c3926c4eaf102c9193..55d1345ef55fd8f1784f093c7c0b38516194bf19 100644
 --- a/test/cpython/v3_13/test_heapq.py
 +++ b/test/cpython/v3_13/test_heapq.py
 @@ -1,3 +1,23 @@

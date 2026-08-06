@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_binop.py b/test/cpython/v3_13/test_binop.py
+index 299af09c4983dfdb83d35bc99fda5c5f95f35151..3a60b102020a47f71f11822f2fc0a7b96cbcf16d 100644
 --- a/test/cpython/v3_13/test_binop.py
 +++ b/test/cpython/v3_13/test_binop.py
 @@ -1,3 +1,24 @@

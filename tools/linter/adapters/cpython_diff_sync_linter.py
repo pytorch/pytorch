@@ -1,6 +1,6 @@
-"""Lintrunner adapter: keep test/cpython/v3_13 *.py/*.diff/manifest in sync.
+"""Lintrunner adapter: keep test/cpython/v3_13 *.py/*.diff pairs in sync.
 
-Runs the offline verify from test/cpython/diff_sync.py whenever any file under
+Runs the offline verify from tools/cpython_diff_sync.py whenever any file under
 test/cpython/v3_13/ is in the lint path set. Not a Dynamo test; repo hygiene.
 """
 
@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _load_diff_sync():
-    path = REPO_ROOT / "test" / "cpython" / "diff_sync.py"
+    path = REPO_ROOT / "tools" / "cpython_diff_sync.py"
     spec = importlib.util.spec_from_file_location("torch_cpython_diff_sync", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
@@ -60,15 +60,13 @@ def main() -> None:
     parser.parse_args()
 
     diff_sync = _load_diff_sync()
-    # Any touch under the include_patterns triggers a full directory verify.
     for err in diff_sync.verify_all():
         rel = err.split(":", 1)[0]
         candidate = REPO_ROOT / "test" / "cpython" / "v3_13" / rel
-        path = str(
-            candidate
-            if candidate.is_file()
-            else REPO_ROOT / "test" / "cpython" / "v3_13" / "upstream_manifest.json"
-        )
+        # Orphan .diff messages use the .diff relative path as the prefix.
+        if not candidate.is_file() and not rel.endswith(".diff"):
+            candidate = REPO_ROOT / "test" / "cpython" / "v3_13" / (rel + ".diff")
+        path = str(candidate if candidate.exists() else diff_sync.CPYTHON_DIR)
         msg = LintMessage(
             path=path,
             line=1,

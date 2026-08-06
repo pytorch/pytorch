@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_patma.py b/test/cpython/v3_13/test_patma.py
+index 8325b83a5932b91e5f6f66f879de3bbc59426ffe..ecff696ece4c90bb0507d18c2a4f5e1a9aecec53 100644
 --- a/test/cpython/v3_13/test_patma.py
 +++ b/test/cpython/v3_13/test_patma.py
 @@ -1,3 +1,21 @@

@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_cmath.py b/test/cpython/v3_13/test_cmath.py
+index a96a5780b31b6f134d74ce5e196d177953d67821..6b6b62fc65e60cfc9ee83b638409baf017830378 100644
 --- a/test/cpython/v3_13/test_cmath.py
 +++ b/test/cpython/v3_13/test_cmath.py
 @@ -1,5 +1,58 @@

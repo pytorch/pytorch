@@ -1,4 +1,5 @@
 diff --git a/test/cpython/v3_13/test_complex.py b/test/cpython/v3_13/test_complex.py
+index 6ff1a8ab29d0d66d062a54c8e08f9bda170aff03..9f0d704186c318f69ce90c0d60a4873f7ae18986 100644
 --- a/test/cpython/v3_13/test_complex.py
 +++ b/test/cpython/v3_13/test_complex.py
 @@ -1,16 +1,147 @@
