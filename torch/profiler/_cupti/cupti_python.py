@@ -15,7 +15,7 @@ import ctypes
 import logging
 from collections.abc import Iterable  # noqa: TC003
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,16 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiGetResultString.restype = ctypes.c_int
     lib.cuptiFinalize.argtypes = []
     lib.cuptiFinalize.restype = ctypes.c_int
+    # Subscriber callbacks. Bound on the raw CDLL rather than taken from the cupti wheel,
+    # whose enable_callback validates the subscriber against its own registry and rejects a
+    # cuptiSubscribe_v2 handle with CUPTI_ERROR_INVALID_PARAMETER.
+    lib.cuptiEnableCallback.argtypes = [
+        ctypes.c_uint32,  # enable
+        ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+        ctypes.c_int,  # CUpti_CallbackDomain domain
+        ctypes.c_uint32,  # CUpti_CallbackId cbid
+    ]
+    lib.cuptiEnableCallback.restype = ctypes.c_int
 
     # User-defined-record (subscription) API -- present in libcupti >= 13.2; guarded
     # so configuring against an older libcupti still succeeds (the monitor's
@@ -428,11 +438,18 @@ class _PyLibCupti:
 
     # --- user-defined-records (subscription API) ---------------------------
 
-    def subscribe(self, allow_multiple: bool = True) -> int:
-        """cuptiSubscribe_v2 with a no-op callback -> opaque subscriber handle
-        (the v2 activity API is subscription-scoped). ``allow_multiple`` requests
-        coexistence with another CUPTI subscriber (e.g. Kineto); CUPTI returns
-        CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED if it can't be honored."""
+    def subscribe(self, allow_multiple: bool = True, callback: Any = None) -> int:
+        """cuptiSubscribe_v2 -> opaque subscriber handle (the v2 activity API is
+        subscription-scoped). ``allow_multiple`` requests coexistence with another CUPTI
+        subscriber (e.g. Kineto); CUPTI returns
+        CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED if it can't be honored.
+
+        ``callback`` is the subscription's single ``CUpti_CallbackFunc`` -- a
+        :data:`_CB_FUNC` instance the caller must keep alive for the life of the
+        subscription. CUPTI allows exactly one per subscriber, so a consumer wanting
+        several callbacks fans out inside it. Defaults to :data:`_NOOP_CB`, read from the
+        module at call time so a consumer that swaps that global still gets its own
+        callback on subscriptions it takes itself."""
         sub = ctypes.c_void_p()
         params = _SubscriberParams(
             structSize=ctypes.sizeof(_SubscriberParams),
@@ -443,7 +460,10 @@ class _PyLibCupti:
         )
         self._check(
             self._lib.cuptiSubscribe_v2(
-                ctypes.byref(sub), _NOOP_CB, None, ctypes.byref(params)
+                ctypes.byref(sub),
+                _NOOP_CB if callback is None else callback,
+                None,
+                ctypes.byref(params),
             ),
             "cuptiSubscribe_v2",
         )
@@ -455,6 +475,19 @@ class _PyLibCupti:
         self._check(
             self._lib.cuptiUnsubscribe(ctypes.c_void_p(sub_handle)),
             "cuptiUnsubscribe",
+        )
+
+    def enable_callback(
+        self, sub_handle: int, domain: int, cbid: int, enable: bool
+    ) -> None:
+        """cuptiEnableCallback -- turn one ``(domain, cbid)`` subscriber callback on or
+        off for this subscription. Callbacks fire synchronously on the application thread
+        that made the CUDA call, unlike activity records."""
+        self._check(
+            self._lib.cuptiEnableCallback(
+                1 if enable else 0, ctypes.c_void_p(sub_handle), domain, cbid
+            ),
+            "cuptiEnableCallback",
         )
 
     def arm_user_defined_records(
