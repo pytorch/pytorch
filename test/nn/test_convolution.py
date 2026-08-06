@@ -58,6 +58,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmVersionAtLeast,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -1181,6 +1182,25 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
+    @skipMPS
+    @expectedFailureXPU
+    def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
+        inp = torch.full((1, 2, 4, 5, 4), 0.5, device=device)
+        weight = torch.full((2, 3, 2, 3, 2), 0.5, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "kernel_size.*must match weight spatial dimensions"
+        ):
+            torch.ops.aten.slow_conv_transpose3d(
+                inp,
+                weight,
+                [1, 1, 1],
+                torch.full((3,), 0.5, device=device),
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+            )
+
     def run_conv_double_back_test(
         self,
         kern,
@@ -3280,6 +3300,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
@@ -4080,6 +4101,29 @@ class TestConvolutionNNCUDA(NNTestCase):
 
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    def test_cudnn_sm120_engine_errata(self, device):
+        if torch.cuda.get_device_capability(device) != (12, 0):
+            self.skipTest("requires compute capability 12.0")
+        if cudnn.version() < 92300:
+            self.skipTest("requires cuDNN 9.23 or newer")
+
+        torch.manual_seed(0)
+        conv = nn.Conv2d(256, 18, kernel_size=1).to(device)
+        x = torch.randn(16, 256, 96, 96, device=device, requires_grad=True)
+
+        with cudnn.flags(enabled=True, benchmark=True):
+            with torch.amp.autocast("cuda"):
+                loss = conv(x).float().square().mean()
+            loss.backward()
+            torch.cuda.synchronize()
+
+        self.assertTrue(loss.isfinite())
+        self.assertTrue(x.grad.isfinite().all())
+        self.assertTrue(conv.weight.grad.isfinite().all())
+        self.assertTrue(conv.bias.grad.isfinite().all())
 
     @skipCUDAIfNoCudnn
     def test_cudnn_non_contiguous(self, device):
