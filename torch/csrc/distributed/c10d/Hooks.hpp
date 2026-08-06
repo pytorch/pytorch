@@ -11,7 +11,13 @@
 
 namespace c10d {
 
-// Identifies the operation a pre/post hook is firing for.
+// Identifies the operation a pre/post hook is firing for. One value per
+// dispatcher op rather than per collective family: the flight recorder writes
+// the name into the trace and the analyzer keys its size rules off it, so
+// folding e.g. every allgather variant into ALLGATHER would report an
+// _allgather_base as a plain all_gather and apply the wrong check to it.
+// Consumers that only care about the family (NanCheckHook) can ignore the
+// extra values.
 enum class HookOpName : uint8_t {
   SEND = 0,
   RECV,
@@ -26,6 +32,13 @@ enum class HookOpName : uint8_t {
   GATHER,
   SPLIT,
   NEW_WINDOW,
+  ALLREDUCE_COALESCED,
+  ALLGATHER_BASE,
+  ALLGATHER_COALESCED,
+  ALLGATHER_INTO_TENSOR_COALESCED,
+  REDUCE_SCATTER_BASE,
+  REDUCE_SCATTER_TENSOR_COALESCED,
+  ALLTOALL_BASE,
   UNKNOWN,
 };
 
@@ -55,6 +68,14 @@ using PostHook = std::function<void(const PostHookArgs&)>;
 
 // Abort hook - called before aborting when a collective times out or fails.
 // This allows users to capture debug information before the abort.
+//
+// A single failure may invoke the hook more than once: it is observed by the
+// backend's watchdog and again by the next collective, and a backend may run
+// its hooks both where the failure is detected and where it tears down. Make
+// the hook idempotent. Deduplicating at the call site instead is unsafe -- the
+// thread that terminates the process is not the thread that detects the
+// failure, so a hook that returned early on "already ran" would let the process
+// die mid-capture. The hook's own one-shot has to block, not skip.
 using AbortHook = std::function<void()>;
 
 } // namespace c10d

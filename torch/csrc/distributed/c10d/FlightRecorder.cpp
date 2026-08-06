@@ -105,11 +105,34 @@ float getDurationFromEvent<c10::Event>(
 // avoid linking errors.
 template struct FlightRecorder<c10::Event>;
 
+FlightRecorder<c10::Event>* getFlightRecorder(const std::string& backend) {
+  if (backend.empty() || backend == kDefaultFRBackend) {
+    return FlightRecorder<c10::Event>::get();
+  }
+  static std::mutex mutex;
+  static std::unordered_map<std::string, FlightRecorder<c10::Event>*> registry;
+  std::lock_guard<std::mutex> lock(mutex);
+  auto& instance = registry[backend];
+  if (instance == nullptr) {
+    // Intentionally leaked on exit, like FlightRecorder::get(): entries hold
+    // Python state that may already have been destructed.
+    instance = new FlightRecorder<c10::Event>();
+  }
+  return instance;
+}
+
+bool recordsFlightRecorderNatively(const std::string& backend) {
+  return backend == "gloo" || backend == "nccl" || backend == "xccl";
+}
+
 std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
-    bool onlyActive) {
-  return FlightRecorder<c10::Event>::get()->dump(
+    bool onlyActive,
+    const std::string& backend) {
+  auto* recorder = getFlightRecorder(backend);
+  observeFlightRecorderHooks(recorder);
+  return recorder->dump(
       std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>{},
@@ -118,8 +141,13 @@ std::string dump_fr_trace(
       onlyActive);
 }
 
-std::string dump_fr_trace_json(bool includeCollectives, bool onlyActive) {
-  return FlightRecorder<c10::Event>::get()->dump_json(
+std::string dump_fr_trace_json(
+    bool includeCollectives,
+    bool onlyActive,
+    const std::string& backend) {
+  auto* recorder = getFlightRecorder(backend);
+  observeFlightRecorderHooks(recorder);
+  return recorder->dump_json(
       std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>{},
@@ -131,13 +159,14 @@ void dump_fr_trace_file(
     int rank,
     bool includeCollectives,
     bool includeStackTraces,
-    bool onlyActive) {
+    bool onlyActive,
+    const std::string& backend) {
   // Serialize writes so concurrent dumps cannot interleave into the same
   // file, but take the trace before locking: dump() can block on device APIs
   // and must not hold up an unrelated caller.
   static std::mutex writeDebugInfoMutex;
-  auto trace =
-      dump_fr_trace(includeCollectives, includeStackTraces, onlyActive);
+  auto trace = dump_fr_trace(
+      includeCollectives, includeStackTraces, onlyActive, backend);
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
   LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();
@@ -147,17 +176,19 @@ void dump_fr_trace_file(
 bool try_dump_fr_trace_file(
     bool includeCollectives,
     bool includeStackTraces,
-    bool onlyActive) {
-  auto* recorder = FlightRecorder<c10::Event>::get();
+    bool onlyActive,
+    const std::string& backend) {
+  auto* recorder = getFlightRecorder(backend);
   int rank = recorder->getRank();
   if (!recorder->enabled_ || rank < 0) {
     return false;
   }
-  dump_fr_trace_file(rank, includeCollectives, includeStackTraces, onlyActive);
+  dump_fr_trace_file(
+      rank, includeCollectives, includeStackTraces, onlyActive, backend);
   return true;
 }
 
-void reset_fr_trace() {
-  FlightRecorder<c10::Event>::get()->reset_all();
+void reset_fr_trace(const std::string& backend) {
+  getFlightRecorder(backend)->reset_all();
 }
 } // namespace c10d

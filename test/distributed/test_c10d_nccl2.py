@@ -5,6 +5,7 @@
 import ctypes
 import json
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -376,6 +377,131 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
         else:
             time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dumped_on_timeout(self) -> None:
+        # The dump is written by the abort hook c10d::FlightRecorderHook
+        # registers, which nccl2 runs when it detects the timeout. NoHandling
+        # both keeps the process alive so the test can read the artifact back,
+        # and is the configuration where abortProcess() returns without running
+        # any hook -- so this only passes if the hooks fire at detection.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+        }
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+            self._check_all_reduce(pg)
+            # Gloo records into a FlightRecorder instance of its own. Give it
+            # something to hold so the dump below is evidence that only the
+            # backend whose abort hook fired reaches disk.
+            gloo_pg = dist.new_group(backend="gloo")
+            dist.all_reduce(torch.ones(7), group=gloo_pg)
+
+            path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            if self.rank == 0:
+                # Nobody else joins, so this can never complete and the
+                # watchdog trips on it.
+                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                # Healthy collectives must not have dumped anything, or the
+                # artifact below would not be evidence of the timeout.
+                self.assertFalse(os.path.exists(path))
+                # The watchdog wakes once a second; poll until the file is
+                # there and complete -- it reads back empty mid-write.
+                dump = None
+                deadline = time.time() + 60
+                while dump is None and time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            dump = pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                self.assertIn("version", dump)
+                self.assertIn("pg_config", dump)
+                self.assertIn("pg_status", dump)
+                # The collective that hung has to be in the trace -- that is the
+                # whole point of the post-mortem. timeout_ms pins it to the
+                # subgroup that timed out rather than the default group.
+                hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
+                self.assertEqual(len(hung), 1)
+                self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
+                self.assertEqual(hung[0]["timeout_ms"], 5000)
+                # A culprit with no code location is most of the diagnostic
+                # value gone, so the abort dump attempts stack traces (default
+                # on, TORCH_INCLUDE_STACK_TRACE) instead of giving up on them
+                # because symbolizing may need the GIL. Symbolizing is what is
+                # bounded, not skipped.
+                frames = hung[0]["frames"]
+                self.assertTrue(frames, msg=str(hung[0]))
+                self.assertTrue(
+                    any(f["filename"].endswith("test_c10d_nccl2.py") for f in frames),
+                    msg=str(frames),
+                )
+                # Only nccl2's instance, matching stock, whose sole
+                # DebugInfoWriter caller is ProcessGroupNCCL::dumpDebuggingInfo.
+                self.assertEqual(
+                    {e["profiling_name"].split(":")[0] for e in dump["entries"]},
+                    {"nccl2"},
+                )
+            else:
+                # A rank that saw no failure must not have written a trace.
+                time.sleep(30)
+                self.assertFalse(os.path.exists(path))
+
+        dist.destroy_process_group(gloo_pg)
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+# Its own class because the abort hook dumps at most once per process, and
+# MultiProcContinuousTest reuses the processes across a class's tests.
+class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dump_is_bounded(self) -> None:
+        # Symbolizing a traceback may need the GIL, so the attempt that
+        # includes stack traces is made under a bounded wait and abandoned for
+        # one without them if it does not land in time. What may never happen
+        # is the rank hanging in the abort hook instead of dying: the hook's
+        # one-shot mutex queues every other thread behind it. A zero bound runs
+        # both attempts out of time, and the rank still has to come back and a
+        # readable trace still has to reach disk.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+            "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC": "0",
+        }
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+            self._check_all_reduce(pg)
+            path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            if self.rank == 0:
+                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                dump = None
+                deadline = time.time() + 60
+                while dump is None and time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            dump = pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
+                self.assertEqual(len(hung), 1)
+                self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
+            else:
+                time.sleep(30)
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()

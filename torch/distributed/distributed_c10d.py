@@ -2657,7 +2657,7 @@ _FR_SELF_RECORDING_BACKENDS = frozenset(
 
 
 def _maybe_attach_flight_recorder(
-    pg: ProcessGroup, backend_config: BackendConfig
+    pg: ProcessGroup, backend_config: BackendConfig, global_ranks: list[int]
 ) -> None:
     # Same variables and precedence as FlightRecorder's own constructor in
     # FlightRecorder.hpp: first name that is set wins, 2000 if neither is, and
@@ -2671,16 +2671,13 @@ def _maybe_attach_flight_recorder(
     if buffer_size <= 0:
         return
 
-    # A hook is attached per ProcessGroup, but backends are per device, so a
-    # group that mixes a self-recording backend with one that needs the hook
-    # (e.g. "cpu:gloo,cuda:nccl2") cannot have it both ways. Skip the whole
-    # group: attaching would make ProcessGroupGloo's native entries and the
-    # hook's entries land in the same FlightRecorder<c10::Event> under the same
-    # (group_name, group_desc) key, i.e. two entries per gloo collective, and a
-    # trace that contradicts itself is worse than one that is missing the
-    # nccl2 half. Users who need the nccl2 half of a mixed group can still
-    # attach FlightRecorderHook explicitly.
-    if any(
+    # A hook is attached per ProcessGroup but backends are per device, and the
+    # hook now resolves per op: it skips whatever a self-recording backend
+    # serves and records the rest into that backend's own recorder instance. So
+    # a mixed group ("cpu:gloo,cuda:nccl2") gets its nccl2 half without
+    # duplicating gloo's native entries, and only a group that is self-recording
+    # on every device is still skipped -- a hook there would record nothing.
+    if all(
         backend_str in _FR_SELF_RECORDING_BACKENDS
         for backend_str in backend_config.get_device_backend_map().values()
     ):
@@ -2697,7 +2694,7 @@ def _maybe_attach_flight_recorder(
     # callbacks capture only a weak_ptr, so the hook detaches the moment the
     # handle returned by attach() is dropped. Park it with the rest of the
     # group's state, which destroy_process_group tears down.
-    _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg)
+    _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
 def _new_process_group_helper(
@@ -3002,7 +2999,12 @@ def _new_process_group_helper(
     # integration. Attached here (rather than lazily) so a group is recorded
     # from its very first collective, and after _set_group_name/_set_group_desc
     # because the hook keys its entries on that pair.
-    _maybe_attach_flight_recorder(pg, backend_config)
+    # global_ranks_in_group is [] for the default group, which spans the world
+    # in rank order. The hook needs the real mapping either way: it is the
+    # group's published membership and it names this rank's dump file.
+    _maybe_attach_flight_recorder(
+        pg, backend_config, global_ranks_in_group or list(range(group_size))
+    )
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
@@ -6855,7 +6857,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
-    _maybe_attach_flight_recorder(split_pg, backend_config)
+    _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
     _register_pg_in_world(

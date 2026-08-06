@@ -10,13 +10,6 @@ namespace c10d {
 template <typename EventType>
 float getDurationFromEvent(EventType& start, EventType& end);
 
-// CPU wall clock elapsed since an entry was created. This is an upper bound on
-// the collective's runtime, not a device-measured kernel duration: it also
-// covers enqueue, dispatch and retirement latency on the host.
-inline float wallClockDurationMs(c10::time_t time_created) {
-  return static_cast<float>(c10::getTime() - time_created) / 1e6f;
-}
-
 // Returns the traceback of current entry, in string form.
 // Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
 // the GIL. If you don't want to block the current thread or take the risk of a
@@ -279,8 +272,7 @@ template <typename EventType>
 void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     std::optional<size_t> reset_epoch,
-    bool compute_duration,
-    bool wall_clock_fallback) {
+    bool compute_duration) {
   if (!enabled_ || !id || !reset_epoch) {
     return;
   }
@@ -301,9 +293,6 @@ void FlightRecorder<EventType>::retire_id(
           entry->start_ && entry->end_;
       startEvent = entry->start_;
       endEvent = entry->end_;
-      if (!can_compute_duration && wall_clock_fallback) {
-        entry->duration_ = wallClockDurationMs(entry->time_created_);
-      }
     }
     entry->retired_ = true;
     entry->start_ = entry->end_ = nullptr;
@@ -331,8 +320,6 @@ void FlightRecorder<EventType>::retire_id(
     }
     if (duration.has_value()) {
       entry->duration_ = duration;
-    } else if (wall_clock_fallback) {
-      entry->duration_ = wallClockDurationMs(entry->time_created_);
     }
   }
 }
@@ -342,6 +329,35 @@ void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
   retire_id(id, 0, compute_duration);
+}
+
+template <typename EventType>
+void FlightRecorder<EventType>::retire_completed(
+    std::optional<size_t> id,
+    std::optional<size_t> reset_epoch,
+    std::optional<float> duration) {
+  if (!enabled_ || !id || !reset_epoch) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  Entry* entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
+  if (entry->id_ != *id || entry->reset_epoch_ != *reset_epoch) {
+    // Overwritten while its collective was still in flight; there is nothing
+    // left to say about it.
+    return;
+  }
+  auto now = c10::getTime();
+  if (!entry->time_discovered_started_.has_value()) {
+    entry->time_discovered_started_ = now;
+  }
+  if (!entry->time_discovered_completed_.has_value()) {
+    entry->time_discovered_completed_ = now;
+  }
+  if (duration.has_value()) {
+    entry->duration_ = duration;
+  }
+  entry->retired_ = true;
+  entry->start_ = entry->end_ = nullptr;
 }
 
 template <typename EventType>

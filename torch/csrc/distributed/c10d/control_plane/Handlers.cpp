@@ -70,18 +70,28 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                               res.setStatus(200);
                             }};
 
+// Each hooked backend records into its own FlightRecorder instance, so the
+// caller says which one to read. Defaulting to the instance ProcessGroupGloo
+// records into keeps existing callers -- the debug server's "FlightRecorder
+// CPU" page among them -- seeing what they always did.
+std::string frBackendParam(const Request& req) {
+  auto backend = req.getParam("backend");
+  return backend.empty() ? ::c10d::kDefaultFRBackend : backend;
+}
+
 RegisterHandler frTracehandler(
     "fr_trace_json",
-    [](const Request&, Response& res) {
-      auto trace = ::c10d::dump_fr_trace_json(true, true);
+    [](const Request& req, Response& res) {
+      auto trace = ::c10d::dump_fr_trace_json(true, true, frBackendParam(req));
       res.setContent(std::move(trace), "application/json");
       res.setStatus(200);
     });
 
 RegisterHandler frDumpFileHandler(
     "fr_dump_file",
-    [](const Request&, Response& res) {
-      int rank = ::c10d::FlightRecorder<c10::Event>::get()->getRank();
+    [](const Request& req, Response& res) {
+      auto backend = frBackendParam(req);
+      int rank = ::c10d::getFlightRecorder(backend)->getRank();
       // Nothing has told the recorder which rank this process is, so we would
       // write to <prefix>-1 and clobber every other rank's guess.
       if (rank < 0) {
@@ -114,12 +124,13 @@ RegisterHandler frDumpFileHandler(
         }
         // std::launch::async so the future's destructor joins the worker
         // rather than leaking a detached thread.
-        dumpFuture = std::async(std::launch::async, [rank]() {
+        dumpFuture = std::async(std::launch::async, [rank, backend]() {
           ::c10d::dump_fr_trace_file(
               rank,
               /*includeCollectives=*/true,
               /*includeStackTraces=*/false,
-              /*onlyActive=*/false);
+              /*onlyActive=*/false,
+              backend);
         });
       }
 

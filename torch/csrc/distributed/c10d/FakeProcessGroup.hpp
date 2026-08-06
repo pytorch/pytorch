@@ -17,6 +17,14 @@ class FakeWork : public Work {
     return true;
   }
 
+  // A fake collective is done the moment it is "issued". Work's default reads
+  // completed_, which nothing here ever sets, so without this a fake op would
+  // report as permanently in flight to anyone polling it (the flight recorder
+  // hook does) even though wait() returns immediately.
+  bool isCompleted() override {
+    return true;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
     auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted();
