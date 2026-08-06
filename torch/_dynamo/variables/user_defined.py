@@ -667,6 +667,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, resolved)
         return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
+    def _descriptor_defining_class_vt(
+        self,
+        tx: "InstructionTranslatorBase",
+        descriptor: types.WrapperDescriptorType | types.MethodDescriptorType,
+    ) -> VariableTracker:
+        """VT for the class that actually implements an unbound C descriptor.
+
+        Consider the following example:
+
+            # Metaclass defines __neg__, so `-SomeClass` would call Meta.__neg__(cls).
+            class Meta(type):
+                def __neg__(cls):
+                    return 999
+
+
+            class Base(metaclass=Meta):
+                # Alias int's unary __neg__ slot wrapper into this class's dict under a
+                # different name. __objclass__ == int, __name__ == '__neg__', but looked
+                # up on Base, whose metaclass separately defines __neg__.
+                sneaky = int.__neg__
+
+        This helper function determines the correct owner of the descriptor based on the `__objclass__` attribute.
+
+            class Foo(int):
+                ...
+
+            assert Foo.__neg__ == int.__neg__
+            assert Foo.__neg__.__objclass__ is int
+        """
+        objclass = descriptor.__objclass__
+        if objclass is self.value:
+            return self
+        return VariableTracker.build(tx, objclass)
+
     def resolve_cls_descriptor(
         self,
         tx: "InstructionTranslatorBase",
@@ -756,7 +790,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name not in ("__get__", "__set__", "__delete__")
         ):
             return variables.WrapperDescriptorVariable(
-                cls_attr, owner=self, source=source
+                cls_attr,
+                owner=self._descriptor_defining_class_vt(tx, cls_attr),
+                source=source,
             )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
@@ -766,7 +802,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name not in ("__get__", "__set__", "__delete__")
         ):
             return variables.MethodDescriptorVariable(
-                cls_attr, owner=self, source=source
+                cls_attr,
+                owner=self._descriptor_defining_class_vt(tx, cls_attr),
+                source=source,
             )
 
         # User-defined descriptor with Python __get__.
