@@ -115,28 +115,8 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "clamp_min",
         "convert_element_type",
         "inline_asm_elementwise",
-        "mx_e8m0_scale",
     )
 )
-
-
-def _cute_mx_scale_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-    """Lower an exact MX scale conversion for TensorSSA or scalar finalizers."""
-    max_value = args[1] if len(args) >= 2 else kwargs.get("max_value", 448.0)
-    rounding = args[2] if len(args) >= 3 else kwargs.get("rounding")
-    rounding = "rceil" if rounding is None else rounding
-    source = args[0]
-    expr = f"mx_e8m0_scale_intrinsic({source}, {max_value!r}, {rounding!r})"
-    cse_var = CuteDSLOpOverrides._get_cse_var(source)
-    if cse_var is None:
-        return expr
-    return V.kernel.cse.generate(
-        V.kernel.body,
-        expr,
-        bounds=cse_var.bounds,
-        dtype=cse_var.dtype,
-        shape=cse_var.shape,
-    )
 
 
 def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
@@ -201,8 +181,6 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
-    if op_name == "mx_e8m0_scale":
-        return _cute_mx_scale_call(args, kwargs)
     if op_name == "inline_asm_elementwise":
         # The HOP spells the asm text `asm_str`; the ops handler spells it `asm`.
         kwargs = dict(kwargs)

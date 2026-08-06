@@ -5,6 +5,7 @@ import dataclasses
 import importlib
 import logging
 import math
+import struct
 import sys
 import unittest
 from types import SimpleNamespace
@@ -16,13 +17,13 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops import flex_gemm
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
-    mx_e8m0_scale,
     nvfp4_pack,
 )
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.exc import InductorError
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
+from torch._subclasses.fake_tensor import is_fake
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, SM120OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -34,6 +35,84 @@ from torch.testing._internal.common_utils import (
     skipIfNoCuteDSL,
     TestCase,
 )
+
+
+def mx_e8m0_scale(
+    amax: torch.Tensor,
+    max_value: float = 448.0,
+    rounding: str | None = None,
+) -> torch.Tensor:
+    """Encode E8M0 scales using only public tensor ops and inline assembly."""
+    if (
+        not isinstance(max_value, float)
+        or not math.isfinite(max_value)
+        or max_value <= 0
+    ):
+        raise ValueError(
+            "mx_e8m0_scale max_value must be a finite positive float, "
+            f"got {max_value!r}"
+        )
+    if rounding is None:
+        rounding = "rceil"
+    elif rounding not in ("floor", "rceil"):
+        raise ValueError(
+            f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
+        )
+
+    max_abs = amax.float()
+    if torch.compiler.is_compiling() or is_fake(max_abs):
+        if rounding == "rceil":
+            source = max_abs / max_value
+            asm = "cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;"
+        else:
+            max_power = math.floor(math.log2(max_value))
+            source = max_abs * 2.0**-max_power
+            if max_power > 0:
+                floor_inf = struct.pack("<f", 2.0 ** (128 - max_power))
+                floor_inf_bits = struct.unpack("<I", floor_inf)[0]
+                asm = (
+                    "{ .reg .pred is_inf; .reg .f32 finite; "
+                    "testp.infinite.f32 is_inf, $1; "
+                    f"selp.f32 finite, 0f{floor_inf_bits:08x}, $1, is_inf; "
+                    "cvt.rz.ue8m0x2.f32 $0, 0.0, finite; }"
+                )
+            else:
+                asm = "cvt.rz.ue8m0x2.f32 $0, 0.0, $1;"
+        return inline_asm_elementwise(
+            source,
+            asm_str=asm,
+            constraints="=h,r",
+            dtype=torch.float8_e8m0fnu,
+        )
+
+    if rounding == "floor":
+        max_power = math.floor(math.log2(max_value))
+        max_abs_int32 = max_abs.view(torch.int32)
+        extracted_pow2 = ((max_abs_int32 >> 23) & 0xFF) - 127
+        scale_e8m0_unbiased = torch.clamp(extracted_pow2 - max_power, min=-127, max=128)
+        scale_e8m0_biased = (scale_e8m0_unbiased + 127).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(max_abs),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
+        )
+    else:
+        descale_int32 = (max_abs / max_value).view(torch.int32)
+        exponent = (descale_int32 >> 23) & 0xFF
+        mantissa = descale_int32 & 0x7FFFFF
+        scale_e8m0_biased = exponent + (mantissa != 0).to(torch.int32)
+        scale_e8m0_biased = torch.where(
+            (exponent == 0) & (mantissa <= 0x400000),
+            torch.zeros_like(scale_e8m0_biased),
+            scale_e8m0_biased,
+        )
+        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, max=254).to(torch.uint8)
+        scale_e8m0_biased = torch.where(
+            torch.isnan(max_abs),
+            torch.full_like(scale_e8m0_biased, 255),
+            scale_e8m0_biased,
+        )
+    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
 
 
 def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor:
@@ -4567,7 +4646,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
         self.assertTrue((aux.view(torch.uint8) == 255).all())
-        FileCheck().check("mx_e8m0_scale_intrinsic").check_not(
+        FileCheck().check("cvt.rz.ue8m0x2.f32").check_not(
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
@@ -4714,14 +4793,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            (None, 448.0, 450.0, 128, "448.0, 'rceil'"),
-            ("rceil", 448.0, 450.0, 128, "448.0, 'rceil'"),
-            ("floor", 448.0, 450.0, 127, "448.0, 'floor'"),
-            ("rceil", 448.0, 2.0**-140, 0, "448.0, 'rceil'"),
-            ("rceil", 448.0, float("inf"), 254, "448.0, 'rceil'"),
-            ("floor", 448.0, float("inf"), 247, "448.0, 'floor'"),
-            ("rceil", 57344.0, 60000.0, 128, "57344.0, 'rceil'"),
-            ("floor", 6.0, 7.0, 127, "6.0, 'floor'"),
+            (None, 448.0, 450.0, 128, "cvt.rp.satfinite.ue8m0x2.f32"),
+            ("rceil", 448.0, 450.0, 128, "cvt.rp.satfinite.ue8m0x2.f32"),
+            ("floor", 448.0, 450.0, 127, "cvt.rz.ue8m0x2.f32"),
+            ("rceil", 448.0, 2.0**-140, 0, "cvt.rp.satfinite.ue8m0x2.f32"),
+            ("rceil", 448.0, float("inf"), 254, "cvt.rp.satfinite.ue8m0x2.f32"),
+            ("floor", 448.0, float("inf"), 247, "cvt.rz.ue8m0x2.f32"),
+            ("rceil", 57344.0, 60000.0, 128, "cvt.rp.satfinite.ue8m0x2.f32"),
+            ("floor", 6.0, 7.0, 127, "cvt.rz.ue8m0x2.f32"),
         ),
         name_fn=lambda case: (
             f"{'default' if case[0] is None else case[0]}_max{case[1]:g}_code{case[3]}"
@@ -4764,20 +4843,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_aux_scale_via_inline_asm_matches_named_op(self):
-        """TorchAO's inline-PTX rceil spelling lowers like the named MX scale op.
-
-        TorchAO's `_to_mx_rceil` reaches E8M0 encoding through the
-        `inline_asm_elementwise` HOP rather than a FlexGEMM-specific op, so the
-        epilogue must accept that spelling and produce the same scale bytes.
-        """
+    def test_mm_aux_scale_torchao_inline_asm_spelling_matches_e8m0_result(self):
+        """TorchAO's uint16 inline-PTX spelling produces the same E8M0 bytes."""
         m = 64
         n = 128
         k = 64
         group = 32
         max_value = 448.0
 
-        def named_epilogue(acc):
+        def e8m0_epilogue(acc):
             x = acc.float().view(m, -1, group)
             return acc, mx_e8m0_scale(x.abs().amax(-1))
 
@@ -4806,13 +4880,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        _, named_scale = build(named_epilogue)(a, b)
+        _, e8m0_scale = build(e8m0_epilogue)(a, b)
         (_, asm_scale), (code,) = run_and_get_code(build(asm_epilogue), a, b)
 
-        self.assertEqual(asm_scale, named_scale.view(torch.uint8).float())
-        FileCheck().check("inline_asm_elementwise_intrinsic(").check_not(
-            "mx_e8m0_scale_intrinsic("
-        ).run(code)
+        self.assertEqual(asm_scale, e8m0_scale.view(torch.uint8).float())
+        FileCheck().check("inline_asm_elementwise_intrinsic(").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4851,11 +4923,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("mx", mx_e8m0_scale, "mx_e8m0_scale_intrinsic"),
+            ("mx", mx_e8m0_scale, "cvt.rp.satfinite.ue8m0x2.f32"),
             (
                 "mx_floor",
                 lambda x: mx_e8m0_scale(x, rounding="floor"),
-                "mx_e8m0_scale_intrinsic",
+                "cvt.rz.ue8m0x2.f32",
             ),
             ("nvfp4", nvfp4_e4m3_scale, " / 6.0"),
             (
@@ -4927,9 +4999,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         expected, expected_aux = epilogue_fn(a @ b)
         torch.testing.assert_close(actual, expected)
         torch.testing.assert_close(aux.float(), expected_aux.float())
-        FileCheck().check("mx_e8m0_scale_intrinsic").check("broadcast_to").check_not(
-            "local_reduce_finalize_fn"
-        ).run(code)
+        FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check(
+            "broadcast_to"
+        ).check_not("local_reduce_finalize_fn").run(code)
         self.assertLocalReduceAuxCode(code, group)
 
     @skipIfNoCuteDSL
@@ -4965,11 +5037,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertTrue((aux.view(torch.uint8) == 0).any())
         self.assertTrue((aux.view(torch.uint8) == 255).any())
         if group > 32:
-            FileCheck().check("mx_e8m0_scale_intrinsic").check(
+            FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check(
                 "local_reduce_finalize_fn"
             ).run(code)
         else:
-            FileCheck().check("mx_e8m0_scale_intrinsic").check_not(
+            FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check_not(
                 "local_reduce_finalize_fn"
             ).run(code)
         self.assertLocalReduceAuxCode(code, group, callbacks=group > 32)
@@ -5193,7 +5265,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(
             aux.view(torch.uint8), expected_aux.squeeze(-1).view(torch.uint8)
         )
-        FileCheck().check("mx_e8m0_scale_intrinsic").check_not(
+        FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check_not(
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
@@ -6492,7 +6564,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertPhysicalFeedMainCode(code, group)
-        FileCheck().check("mx_e8m0_scale_intrinsic").check("feeds_main=True").run(code)
+        FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check("feeds_main=True").run(
+            code
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

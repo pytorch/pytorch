@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import dataclasses
-import math
 from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any, cast
@@ -132,103 +131,6 @@ def flex_gemm_body_decomposition_table(
             flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
         )
     return merged_decompositions
-
-
-def _validate_mx_e8m0_scale_args(max_value: float, rounding: str | None) -> str:
-    """Validate MX scale options and resolve the default rounding mode."""
-    if (
-        not isinstance(max_value, float)
-        or not math.isfinite(max_value)
-        or max_value <= 0
-    ):
-        raise ValueError(
-            "mx_e8m0_scale max_value must be a finite positive float, "
-            f"got {max_value!r}"
-        )
-    match rounding:
-        case None:
-            return "rceil"
-        case "floor" | "rceil":
-            return rounding
-        case _:
-            raise ValueError(
-                f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
-            )
-
-
-@torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
-def mx_e8m0_scale(
-    amax: torch.Tensor,
-    max_value: float = 448.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    """Encode absolute block maxima as biased E8M0 scales.
-
-    ``"rceil"`` is the FlexGEMM default and matches TorchAO's Blackwell
-    ``cvt.rp.satfinite.ue8m0x2.f32`` path: values at or below ``2**-127``
-    after division by ``max_value`` encode as 0, positive infinity encodes as
-    254, and NaN encodes as 255. ``"floor"`` matches TorchAO's exponent-based
-    FLOOR scale encoding. TorchAO currently chooses FLOOR by default, so callers
-    requiring its default recipe should pass it explicitly.
-
-    Args:
-        amax: Nonnegative absolute block maxima to encode.
-        max_value: Maximum magnitude of the quantized element type.
-        rounding: Scale calculation recipe: ``"rceil"`` (the default) or
-            ``"floor"``.
-
-    Returns:
-        E8M0 scale values with the same shape as ``amax``.
-    """
-    rounding = _validate_mx_e8m0_scale_args(max_value, rounding)
-    mbits_f32 = 23
-    f32_exp_bias = 127
-    e8m0_exp_bias = 127
-    max_abs = amax.to(torch.float32)
-    if rounding == "floor":
-        max_power = math.floor(math.log2(max_value))
-        max_abs_int32 = max_abs.view(torch.int32)
-        extracted_pow2 = (
-            (torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF
-        ) - f32_exp_bias
-        scale_e8m0_unbiased = extracted_pow2 - max_power
-        scale_e8m0_unbiased = torch.clamp(
-            scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
-        )
-        scale_e8m0_biased = (scale_e8m0_unbiased + e8m0_exp_bias).to(torch.uint8)
-        scale_e8m0_biased = torch.where(
-            torch.isnan(max_abs),
-            torch.full_like(scale_e8m0_biased, 255),
-            scale_e8m0_biased,
-        )
-    else:
-        descale = max_abs / max_value
-        descale_int32 = descale.view(torch.int32)
-        exponent = torch.bitwise_right_shift(descale_int32, mbits_f32) & 0xFF
-        mantissa = descale_int32 & 0x7FFFFF
-        scale_e8m0_biased = exponent + (mantissa != 0).to(torch.int32)
-        scale_e8m0_biased = torch.where(
-            (exponent == 0) & (mantissa <= 0x400000),
-            torch.zeros_like(scale_e8m0_biased),
-            scale_e8m0_biased,
-        )
-        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, max=254).to(torch.uint8)
-        scale_e8m0_biased = torch.where(
-            torch.isnan(descale),
-            torch.full_like(scale_e8m0_biased, 255),
-            scale_e8m0_biased,
-        )
-    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
-
-
-@mx_e8m0_scale.register_fake
-def _(
-    amax: torch.Tensor,
-    max_value: float = 448.0,
-    rounding: str | None = None,
-) -> torch.Tensor:
-    _validate_mx_e8m0_scale_args(max_value, rounding)
-    return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
 
 
 def _validate_nvfp4_pack_input(input: torch.Tensor) -> None:
