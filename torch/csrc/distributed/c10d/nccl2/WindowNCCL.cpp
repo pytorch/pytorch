@@ -208,21 +208,31 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout, tensor);
   work->recordStart("put");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->putSignal(
+            tensor.data_ptr(),
+            tensor.numel(),
+            pg_->getNcclDataType(tensor),
+            static_cast<int>(dstRank),
+            win_,
+            peer_offset,
+            kSigIdx,
+            kCtx,
+            kFlags,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::put ncclPutSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->putSignal(
-          tensor.data_ptr(),
-          tensor.numel(),
-          pg_->getNcclDataType(tensor),
-          static_cast<int>(dstRank),
-          win_,
-          peer_offset,
-          kSigIdx,
-          kCtx,
-          kFlags,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::put ncclPutSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -239,16 +249,26 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
   work->recordStart("signal");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->signal(
+            static_cast<int>(peerRank),
+            kSigIdx,
+            kCtx,
+            kFlags,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::signal ncclSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->signal(
-          static_cast<int>(peerRank),
-          kSigIdx,
-          kCtx,
-          kFlags,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::signal ncclSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -265,16 +285,26 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
   work->recordStart("wait_signal");
+  NCCL_CHECK(
+      nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
+  try {
+    NCCL_CHECK_NONBLOCKING(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->waitSignal(
+            static_cast<int>(peerRank),
+            kSigIdx,
+            kCtx,
+            /*opCnt=*/1,
+            nccl_comm_,
+            stream),
+        "WindowNCCL::wait_signal ncclWaitSignal failed");
+  } catch (...) {
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
+    throw;
+  }
   pg_->waitForNcclOperation(
-      nccl_api_->waitSignal(
-          static_cast<int>(peerRank),
-          kSigIdx,
-          kCtx,
-          /*opCnt=*/1,
-          nccl_comm_,
-          stream),
-      timeout,
-      "WindowNCCL::wait_signal ncclWaitSignal failed");
+      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;

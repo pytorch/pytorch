@@ -129,6 +129,7 @@ class AbstractWindowTest:
                 device=self.device,
             )
             self.assertEqual(received, expected, msg=f"iteration {iteration}")
+            dist.barrier()
 
         torch.cuda.synchronize()
         win.tensor_deregister()

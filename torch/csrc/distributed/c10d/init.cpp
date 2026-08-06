@@ -2941,7 +2941,7 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -3099,7 +3099,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
