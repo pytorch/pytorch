@@ -343,6 +343,26 @@ class SubprocPool:
                 self.shutdown()
                 return
 
+            if not self._handle_job_result(job_id, data):
+                return
+
+    def _handle_job_result(self, job_id: int, data: bytes) -> bool:
+        """Resolve `job_id`'s future. Returns False once the pool has stopped."""
+        result: object
+        if not data:
+            # The sidecar sends no payload when it could not even pickle a
+            # failure for this job (see SubprocMain._failure_payload). Fail the
+            # job on the empty payload itself: leaving it to the unpickle below
+            # to throw would resolve the future with whatever a pickler that
+            # tolerates empty input happens to return.
+            result = _SubprocExceptionInfo(
+                f"SubprocPool failed to deliver a result for job {job_id}. This "
+                f"is an internal compile-worker error, not a failure of the code "
+                f"being compiled. The sidecar could not serialize the details; "
+                f"re-run with TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING=0 for its "
+                f"traceback."
+            )
+        else:
             try:
                 result = self.pickler.loads(data)
             except Exception as e:
@@ -351,29 +371,30 @@ class SubprocPool:
                 log.exception("unpickle failure in SubprocPool._read_thread")
                 result = e
 
-            with self.futures_lock:
-                if not self.running:
-                    return
-                if self.timer:
-                    self.timer.record_call()
-                if isinstance(result, _SubprocExceptionInfo):
-                    # An exception occurred in the submitted job
-                    self.pending_futures[job_id].set_exception(
-                        SubprocException(result.details)
-                    )
-                elif isinstance(result, Exception):
-                    # An exception occurred in some of our subprocess machinery.
-                    self.pending_futures[job_id].set_exception(result)
-                else:
-                    self.pending_futures[job_id].set_result(result)
+        with self.futures_lock:
+            if not self.running:
+                return False
+            if self.timer:
+                self.timer.record_call()
+            if isinstance(result, _SubprocExceptionInfo):
+                # An exception occurred in the submitted job
+                self.pending_futures[job_id].set_exception(
+                    SubprocException(result.details)
+                )
+            elif isinstance(result, Exception):
+                # An exception occurred in some of our subprocess machinery.
+                self.pending_futures[job_id].set_exception(result)
+            else:
+                self.pending_futures[job_id].set_result(result)
 
-                self.pending_waitcounters[job_id].__exit__()
-                del self.pending_waitcounters[job_id]
-                if self.firstjob_id == job_id:
-                    self.firstjob_waitcounter.__exit__()
+            self.pending_waitcounters[job_id].__exit__()
+            del self.pending_waitcounters[job_id]
+            if self.firstjob_id == job_id:
+                self.firstjob_waitcounter.__exit__()
 
-                del self.pending_futures[job_id]
-                self._job_compile_id.pop(job_id, None)
+            del self.pending_futures[job_id]
+            self._job_compile_id.pop(job_id, None)
+        return True
 
     def _health_monitor(self) -> None:
         # Poll the sidecar for liveness. If it dies while we still think we are
@@ -631,23 +652,73 @@ class SubprocMain:
                 )
                 self.pool = None
 
+    def _result_payload(self, job_id: int, fut: Future[Any]) -> bytes:
+        """
+        Bytes to send back for `job_id`. Never raises: returning without sending
+        would leave the parent's future pending forever, so each way this can go
+        wrong turns into a payload that fails just this job.
+        """
+        # exception() rather than result(): whatever the job raised is data the
+        # worker shipped back, and it need not be an Exception -- do_job only
+        # catches those, so a job calling sys.exit() lands a SystemExit here.
+        # Asking for it avoids re-raising it in this thread just to catch it.
+        if (exc := fut.exception()) is not None:
+            log.error("Error in subprocess", exc_info=exc)
+            try:
+                return self.pickler.dumps(exc)
+            except Exception:
+                return self._failure_payload(
+                    job_id,
+                    f"could not pickle the {type(exc).__name__} raised by the job\n"
+                    f"{traceback.format_exc()}",
+                )
+        result = fut.result()
+        if not isinstance(result, bytes):
+            return self._failure_payload(
+                job_id, f"expected bytes result, got {type(result)}"
+            )
+        return result
+
+    def _failure_payload(self, job_id: int, reason: str) -> bytes:
+        """A payload that fails `job_id` in the parent rather than hanging it."""
+        log.error("job %s: failing the job: %s", job_id, reason)
+        details = (
+            f"SubprocPool failed to deliver a result for job {job_id}: {reason}. "
+            f"This is an internal compile-worker error, not a failure of the code "
+            f"being compiled."
+        )
+        # Just in case a custom pickler doesn't like _SubprocExceptionInfo.
+        try:
+            return self.pickler.dumps(_SubprocExceptionInfo(details))
+        except Exception:
+            log.exception("job %s: could not pickle the failure payload", job_id)
+            # An empty payload is the pickler-independent way to say "this job
+            # failed": SubprocPool._handle_job_result fails the job on the empty
+            # payload alone, without unpickling anything.
+            return b""
+
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
+            # concurrent.futures swallows anything raised out of a done
+            # callback (it logs to its own logger and moves on), so an escape
+            # here leaves the parent's future pending forever with nothing sent
+            # and nothing logged on the parent side.
             with self._inflight_lock:
                 self._inflight.pop(job_id, None)
             if not self.running:
                 return
+            payload = self._result_payload(job_id, fut)
             try:
-                result = fut.result()
-            except Exception as e:
-                log.exception("Error in subprocess")
-                result = self.pickler.dumps(e)
-            if not isinstance(result, bytes):
-                raise AssertionError(f"Expected bytes result, got {type(result)}")
-            with self.write_lock:
-                if self.running:
-                    _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
-            return
+                with self.write_lock:
+                    if self.running:
+                        _send_msg(self.write_pipe, MsgHeader.JOB, job_id, payload)
+            except Exception:
+                # Pipe gone or closing, so there is nothing left to try and the
+                # parent has to notice via the health monitor or EOF. Log it
+                # anyway: unlike a dropped STATUS report this hangs a job.
+                log.exception(
+                    "job %s: failed to deliver a result to the parent", job_id
+                )
 
         self._start_pool()
         if self.pool is None:
