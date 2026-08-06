@@ -12,6 +12,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -61,7 +62,7 @@ class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
-    def test_sharding_plan_errors(self):
+    def test_sharding_plan_errors(self, device):
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
         sharding_plan_wrong_plan = ShardingPlan(
             plan={
@@ -70,8 +71,9 @@ class TestShardingPlan(ShardedTensorTestBase):
             output_plan={"": rowwise_sharding_spec},
         )
 
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(torch.device(self.device_type, self.rank)
-)
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
+            torch.device(device, self.rank)
+        )
 
         with self.assertRaisesRegex(
             TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
@@ -113,12 +115,12 @@ class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
-    def test_custom_sharding_planner(self):
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
-            self.rank
+    def test_custom_sharding_planner(self, device):
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
+            torch.device(device, self.rank)
         )
         planner = ChunkAllShardingPlanner(
-            device_count=TEST_GPU_NUM,device_type=self.device_type
+            device_count=TEST_GPU_NUM,device_type=device
         )
         sharding_plan = planner.build_plan(megatron_lm)
 
@@ -133,20 +135,20 @@ class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
-    def test_shard_module_sub_process_group(self):
+    def test_shard_module_sub_process_group(self, device):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
         colwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/{self.device_type}:2",
-                "rank:3/{self.device_type}:3",
+                f"rank:2/{device}:2",
+                f"rank:3/{device}:3",
             ],
         )
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:2/{self.device_type}:2",
-                "rank:3/{self.device_type}:3",
+                f"rank:2/{device}:2",
+                f"rank:3/{device}:3",
             ],
         )
         sharding_plan = ShardingPlan(
@@ -160,6 +162,9 @@ class TestShardingPlan(ShardedTensorTestBase):
 
         if self.rank >= 2:
             shard_module(megatron_lm, sharding_plan, process_group=pg)
+
+
+instantiate_device_type_tests(TestShardingPlan, globals())
 
 
 if __name__ == "__main__":
