@@ -2699,6 +2699,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ]
                 return variables.TupleVariable(items, source=source)
             return VariableTracker.build(tx, getattr(self.fn, name), source)
+        if isinstance(self.fn, type) and name == "__dict__":
+            return VariableTracker.build(tx, self.fn.__dict__, source)
         if self.fn is object:
             # for object, we can just directly read the attribute
             try:
