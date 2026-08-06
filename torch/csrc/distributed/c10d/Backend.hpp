@@ -94,6 +94,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     ~Options() override = default;
     Options(const Options&) = default;
 
+    // Returns an independent copy, preserving the concrete type.
+    // ProcessGroup::splitGroup()/mergeRemoteGroup() clone the options they
+    // hand to a child backend: getBackendOptions() returns the parent's live
+    // options_, and split()/merge() implementations mutate what they are given
+    // (group_name, timeout, global_ranks_in_group, split_color, ...), so
+    // sharing one object corrupts the parent. A subclass that adds fields must
+    // override this or it would be sliced; ProcessGroup detects a sliced clone
+    // and falls back to sharing rather than handing a backend the wrong type.
+    virtual c10::intrusive_ptr<Options> clone() const {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::chrono::milliseconds timeout;
 
     // backend name
@@ -177,6 +189,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         getBackendName(),
         " does not support setting timeout; the new value is ignored");
   }
+
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
 
   // Fault Tolerance / Reconfigure API
   //
