@@ -193,14 +193,17 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def _devices_supporting_triton(disable_device_detection: bool) -> list[str]:
+    """Body of functionality for ``devices_supporting_triton``.
+
+    Split the function like this so that we can still cache the result per-value
+    of ``torch._inductor.config.triton_disable_device_detection``.
+    """
     if not has_triton_package():
-        return False
+        return []
 
-    from torch._inductor.config import triton_disable_device_detection
-
-    if triton_disable_device_detection:
-        return False
+    if disable_device_detection:
+        return []
 
     from torch._dynamo.device_interface import get_interface_for_device
 
@@ -222,14 +225,27 @@ def has_triton() -> bool:
         "mtia": _return_true,
     }
 
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
+    res: list[str] = []
+    for device, extra_check in triton_supported_devices.items():
+        device_interface = get_interface_for_device(device)
+        if device_interface.is_available() and extra_check(device_interface):
+            res.append(device)
+    return res
 
-    return is_device_compatible_with_triton()
+
+def devices_supporting_triton() -> list[str]:
+    """Get the devices that support generating Triton code as a backend.
+
+    Note that returned devices may not be currently set to generate Triton, even
+    if they support it.
+    """
+    from torch._inductor.config import triton_disable_device_detection
+
+    return _devices_supporting_triton(triton_disable_device_detection)
+
+
+def has_triton() -> bool:
+    return len(devices_supporting_triton()) > 0
 
 
 @functools.cache
