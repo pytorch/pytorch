@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -68,7 +69,9 @@ def _run_call_with_mock_module(test, module, functional_call, device='cpu'):
     test.assertEqual(cur_buffer, prev_buffer)
 
 
-class TestStatelessFunctionalAPI(TestCase):
+class TestStatelessFunctionalAPICPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @contextlib.contextmanager
     def _ensure_module_unchanged(self, module, message):
         orig_parameters, orig_buffers = tuple(module.parameters()), tuple(module.buffers())
@@ -773,6 +776,8 @@ class TestStatelessFunctionalAPI(TestCase):
 
 
 class TestStatelessFunctionalAPIDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
@@ -867,6 +872,8 @@ class TestStatelessFunctionalAPIDevice(TestCase):
 
 
 class TestStatelessDeprecation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_private_stateless_warns(self):
         script = """
 import torch
@@ -897,6 +904,8 @@ exit(len(w))
             stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_runs_with_optimize_flag(self):
         script = "import torch; import torch._functorch.deprecated"
         try:
@@ -911,7 +920,7 @@ class TestPythonOptimizeMode(TestCase):
 
 
 instantiate_parametrized_tests(
-    TestStatelessFunctionalAPI,
+    TestStatelessFunctionalAPICPU,
 )
 instantiate_device_type_tests(TestStatelessFunctionalAPIDevice, globals(), allow_xpu=True)
 
