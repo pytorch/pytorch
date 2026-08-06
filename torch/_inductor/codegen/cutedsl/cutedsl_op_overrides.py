@@ -741,6 +741,7 @@ class CuteDSLOpOverrides(OpOverrides):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        scalar_sources: tuple[bool, ...] | None = None,
     ) -> CuteDSLArg:
         """Emit an inline PTX block elementwise over a fragment.
 
@@ -756,13 +757,50 @@ class CuteDSLOpOverrides(OpOverrides):
             raise NotImplementedError(
                 f"CuteDSL inline asm result dtype not supported: {dtype}"
             )
+
+        constraint_parts = [part.strip() for part in constraints.split(",")]
+        input_constraints = [
+            part.lstrip("=&") for part in constraint_parts if not part.startswith("=")
+        ]
+
+        cast_inputs = list(inputs)
+        if input_dtypes is not None:
+            for source_index, (value, input_dtype) in enumerate(
+                zip(inputs, input_dtypes)
+            ):
+                source_constraints = input_constraints[
+                    source_index * pack : (source_index + 1) * pack
+                ]
+                cse_var = CuteDSLOpOverrides._get_cse_var(value)
+                if (
+                    source_constraints
+                    and all(constraint == "h" for constraint in source_constraints)
+                    and input_dtype in (torch.float16, torch.bfloat16)
+                    and (cse_var is None or cse_var.dtype != input_dtype)
+                ):
+                    cast_inputs[source_index] = CuteDSLOpOverrides.to_dtype(
+                        value, input_dtype, use_compute_types=False
+                    )
+
         operands = ", ".join(
-            str(CuteDSLOpOverrides._as_expr(value)) for value in inputs
+            str(CuteDSLOpOverrides._as_expr(value)) for value in cast_inputs
+        )
+        if scalar_sources is None:
+            scalar_sources = (False,) * len(inputs)
+        elif len(scalar_sources) != len(inputs):
+            raise ValueError(
+                f"CuteDSL inline asm received {len(scalar_sources)} scalar-source "
+                f"flags for {len(inputs)} inputs"
+            )
+        scalar_sources = tuple(
+            source_is_scalar or CuteDSLOpOverrides._is_scalar_expr(value)
+            for source_is_scalar, value in zip(scalar_sources, cast_inputs)
         )
         expr = (
             f"inline_asm_elementwise_intrinsic({operands}, asm={asm!r}, "
             f"constraints={constraints!r}, result_type={result_type}, "
-            f"is_pure={is_pure!r}, pack={pack!r})"
+            f"is_pure={is_pure!r}, pack={pack!r}, "
+            f"scalar_sources={scalar_sources!r})"
         )
         compute_dtype = torch.float32 if dtype == torch.float8_e8m0fnu else dtype
         if not any(

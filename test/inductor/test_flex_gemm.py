@@ -41,6 +41,7 @@ def mx_e8m0_scale(
     amax: torch.Tensor,
     max_value: float = 448.0,
     rounding: str | None = None,
+    pack: int = 1,
 ) -> torch.Tensor:
     """Encode E8M0 scales using only public tensor ops and inline assembly."""
     if (
@@ -58,31 +59,61 @@ def mx_e8m0_scale(
         raise ValueError(
             f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
         )
+    if pack not in (1, 2):
+        raise ValueError(f"mx_e8m0_scale pack must be 1 or 2, got {pack}")
 
     max_abs = amax.float()
     if torch.compiler.is_compiling() or is_fake(max_abs):
+        floor_inf_bits = None
         if rounding == "rceil":
             source = max_abs / max_value
-            asm = "cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;"
+            instruction = "cvt.rp.satfinite.ue8m0x2.f32"
         else:
             max_power = math.floor(math.log2(max_value))
             source = max_abs * 2.0**-max_power
+            instruction = "cvt.rz.ue8m0x2.f32"
             if max_power > 0:
                 floor_inf = struct.pack("<f", 2.0 ** (128 - max_power))
                 floor_inf_bits = struct.unpack("<I", floor_inf)[0]
+
+        if pack == 1:
+            asm = f"{instruction} $0, 0.0, $1;"
+            if floor_inf_bits is not None:
                 asm = (
                     "{ .reg .pred is_inf; .reg .f32 finite; "
                     "testp.infinite.f32 is_inf, $1; "
                     f"selp.f32 finite, 0f{floor_inf_bits:08x}, $1, is_inf; "
-                    "cvt.rz.ue8m0x2.f32 $0, 0.0, finite; }"
+                    f"{instruction} $0, 0.0, finite; }}"
                 )
-            else:
-                asm = "cvt.rz.ue8m0x2.f32 $0, 0.0, $1;"
+            constraints = "=h,r"
+        else:
+            unpack = (
+                "cvt.u32.u16 widened, packed; "
+                "and.b32 $0, widened, 0xff; "
+                "shr.u32 $1, widened, 8; }"
+            )
+            asm = (
+                "{ .reg .b16 packed; .reg .u32 widened; "
+                f"{instruction} packed, $3, $2; " + unpack
+            )
+            if floor_inf_bits is not None:
+                asm = (
+                    "{ .reg .pred is_inf0, is_inf1; "
+                    ".reg .f32 finite0, finite1; "
+                    ".reg .b16 packed; .reg .u32 widened; "
+                    "testp.infinite.f32 is_inf0, $2; "
+                    "testp.infinite.f32 is_inf1, $3; "
+                    f"selp.f32 finite0, 0f{floor_inf_bits:08x}, $2, is_inf0; "
+                    f"selp.f32 finite1, 0f{floor_inf_bits:08x}, $3, is_inf1; "
+                    f"{instruction} packed, finite1, finite0; " + unpack
+                )
+            constraints = "=r,=r,r,r"
         return inline_asm_elementwise(
             source,
             asm_str=asm,
-            constraints="=h,r",
+            constraints=constraints,
             dtype=torch.float8_e8m0fnu,
+            pack=pack,
         )
 
     if rounding == "floor":
@@ -4930,6 +4961,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         with self.assertRaisesRegex(ValueError, "rounding must be 'floor', 'rceil'"):
             mx_e8m0_scale(amax, rounding="nearest")
+        with self.assertRaisesRegex(ValueError, "pack must be 1 or 2"):
+            mx_e8m0_scale(amax, pack=4)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5033,6 +5066,137 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_pack2_broadcasts_and_repeats_scalar(self):
+        m = k = n = 64
+
+        def fn(a, b, row, col, scalar):
+            def epilogue_fn(acc):
+                return inline_asm_elementwise(
+                    row,
+                    col,
+                    scalar,
+                    acc.float(),
+                    asm_str=(
+                        "add.f32 $0, $2, $4; add.f32 $0, $0, $6; "
+                        "add.f32 $0, $0, $8; add.f32 $1, $3, $5; "
+                        "add.f32 $1, $1, $7; add.f32 $1, $1, $9;"
+                    ),
+                    constraints="=f,=f,f,f,f,f,f,f,f,f",
+                    dtype=torch.float32,
+                    pack=2,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        row = torch.randn(1, n, device="cuda", dtype=torch.float32)
+        col = torch.randn(m, 1, device="cuda", dtype=torch.float32)
+        scalar = torch.randn(1, 1, device="cuda", dtype=torch.float32)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            row,
+            col,
+            scalar,
+        )
+
+        torch.testing.assert_close(actual, row + col + scalar)
+        FileCheck().check("constraints='=f,=f,f,f,f,f,f,f,f,f'").check("pack=2").check(
+            "scalar_sources=(False, False, True, False)"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            (torch.float16, "Float16"),
+            (torch.bfloat16, "BFloat16"),
+        ),
+        name_fn=lambda case: str(case[0]).removeprefix("torch."),
+    )
+    def test_mm_inline_asm_pack2_restores_16bit_inputs(self, case):
+        dtype, cute_type = case
+        m = k = n = 64
+
+        def fn(a, b, row):
+            def epilogue_fn(acc):
+                return inline_asm_elementwise(
+                    row,
+                    acc.float(),
+                    asm_str="mov.b16 $0, $2; mov.b16 $1, $3;",
+                    constraints="=h,=h,h,h,f,f",
+                    dtype=dtype,
+                    pack=2,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        row = torch.randn(1, n, device="cuda", dtype=dtype)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row
+        )
+
+        self.assertEqual(actual, row.expand(m, n))
+        FileCheck().check(f"to(cutlass.{cute_type})").check(
+            "constraints='=h,=h,h,h,f,f'"
+        ).check("pack=2").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("nonpositive_pack", 0, "=f,f", "requires pack >= 1"),
+            ("output_count", 2, "=f,f,f", "requires 2 output constraints"),
+            ("input_count", 2, "=f,=f,f", "requires 2 input constraints"),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_inline_asm_rejects_invalid_pack_contract(self, case):
+        _, pack, constraints, error = case
+
+        def fn(a, b):
+            def epilogue_fn(acc):
+                return inline_asm_elementwise(
+                    acc.float(),
+                    asm_str="mov.f32 $0, $1;",
+                    constraints=constraints,
+                    dtype=torch.float32,
+                    pack=pack,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex((ValueError, InductorError), error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_nvfp4_fragment_scale_feeds_main_with_e4m3_rounding(self):
         m = n = 64
         group = 16
@@ -5116,15 +5280,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_fragment_group_mx_scale_uses_tensorSSA(self):
-        m = 64
+    @parametrize("group", (16, 32))
+    def test_mm_tuple_aux_mx_scale_pack2(self, group):
+        m = k = 16
         n = 128
-        k = 64
-        group = 32
 
         def epilogue_fn(acc):
             x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
+            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1), pack=2)
 
         def fn(a, b):
             return flex_gemm(
@@ -5135,17 +5298,24 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[:, group : 2 * group] = float("inf")
+        b[:, 2 * group : 3 * group] = float("nan")
         (actual, aux), (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
         expected, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        torch.testing.assert_close(aux.float(), expected_aux.float())
+        non_nan = ~torch.isnan(expected)
+        torch.testing.assert_close(actual[non_nan], expected[non_nan])
+        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
+        for expected_code in (0, 254, 255):
+            self.assertTrue((aux.view(torch.uint8) == expected_code).any())
         FileCheck().check("cvt.rp.satfinite.ue8m0x2.f32").check(
-            "broadcast_to"
-        ).check_not("local_reduce_finalize_fn").run(code)
+            "constraints='=r,=r,r,r'"
+        ).check("pack=2").check("broadcast_to").check_not(
+            "local_reduce_finalize_fn"
+        ).run(code)
         self.assertLocalReduceAuxCode(code, group)
 
     @skipIfNoCuteDSL
