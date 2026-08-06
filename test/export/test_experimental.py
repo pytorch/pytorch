@@ -92,6 +92,8 @@ class GlobalContext:
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
