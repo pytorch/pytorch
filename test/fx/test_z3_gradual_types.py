@@ -29,6 +29,7 @@ from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
 from torch.fx.experimental.migrate_gradual_types.z3_types import D, tensor_type, z3_dyn
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -49,6 +50,8 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class TorchDynamoUseCases(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dim(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([1, 2])):
@@ -87,6 +90,8 @@ class TorchDynamoUseCases(unittest.TestCase):
 
 
 class HFOperations(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_eq_dim(self):
         """
         test dimensions and equalities
@@ -1220,6 +1225,8 @@ class HFOperations(unittest.TestCase):
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_masked_fill(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([2, 4])):
@@ -1495,6 +1502,8 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
 
 
 class GradualTypes(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_conv_reshape_unsat(self):
         class BasicBlock(torch.nn.Module):
             def __init__(
@@ -1691,6 +1700,8 @@ class GradualTypes(unittest.TestCase):
 
 
 class TestSingleOperation(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_conv_wrong_example(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self) -> None:
@@ -2591,6 +2602,8 @@ class TestSingleOperation(unittest.TestCase):
 
 
 class ConstraintGeneration(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_add_reshape(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: Dyn, y: Dyn):
@@ -2648,6 +2661,8 @@ class ConstraintGeneration(unittest.TestCase):
 
 
 class TestInternalConstraints(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_precision(self):
         c1 = BinConstraintT(Dyn, TVar("x"), op_precision)
         transformed, _ = transform_constraint(c1, 0)
@@ -2697,6 +2712,8 @@ class TestInternalConstraints(unittest.TestCase):
 
 @skipIfNoTorchVision
 class TestResNet(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_resnet50_unsat(self):
         traced = symbolic_trace(models.resnet50())
         for n in traced.graph.nodes:
@@ -2776,6 +2793,8 @@ class TestResNet(unittest.TestCase):
 
 @skipIfNoTorchVision
 class TestAlexNet(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_alexnet1(self):
         alexnet = models.alexnet()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(alexnet)
