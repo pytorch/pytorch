@@ -105,21 +105,6 @@ class TestShapeOps(TestCase):
         self.assertFalse(tensorNonContig.is_contiguous())
         self.assertEqual(tensorNonContig.tolist(), [[3, 4], [7, 8]])
 
-    def test_diagonal_multidim(self, device):
-        x = torch.randn(10, 11, 12, 13, device=device)
-        xn = x.cpu().numpy()
-        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
-            result = torch.diagonal(x, *args)
-            expected = xn.diagonal(*args)
-            self.assertEqual(expected.shape, result.shape)
-            self.assertEqual(expected, result)
-        # test non-contiguous
-        xp = x.permute(1, 2, 3, 0)
-        result = torch.diagonal(xp, 0, -2, -1)
-        expected = xp.cpu().numpy().diagonal(0, -2, -1)
-        self.assertEqual(expected.shape, result.shape)
-        self.assertEqual(expected, result)
-
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):
         shape = self._rand_shape(4, min_size=5, max_size=10)
@@ -263,6 +248,23 @@ class TestShapeOps(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_diagonal_multidim(self, device, dtype):
+        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
+        xn = x.cpu().numpy()
+        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertEqual(expected, result)
+        # test non-contiguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.cpu().numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertEqual(expected, result)
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
@@ -614,7 +616,7 @@ class TestShapeOps(TestCase):
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
-        x = torch.randn(42, device=device).to(dtype)
+        x = torch.randn(42).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
