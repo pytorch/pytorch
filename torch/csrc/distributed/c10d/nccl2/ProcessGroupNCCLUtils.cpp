@@ -368,15 +368,6 @@ void ProcessGroupNCCL::checkInitialized() const {
   }
 }
 
-std::shared_lock<std::shared_mutex> ProcessGroupNCCL::acquireCommUse() const {
-  std::shared_lock lock(comm_lifecycle_mutex_);
-  TORCH_CHECK(
-      !comm_suspended_.load(),
-      "ProcessGroupNCCL communicator is suspended; call resume() before "
-      "issuing operations");
-  return lock;
-}
-
 void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   // Nothing to check in graph capture mode
   if (getGraphCaptureMode()) {
