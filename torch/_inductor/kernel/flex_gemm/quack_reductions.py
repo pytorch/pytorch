@@ -149,7 +149,6 @@ def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
             float,
             bool,
             str,
-            type(None),
             torch.dtype,
             torch.device,
             torch.layout,
@@ -189,13 +188,12 @@ def _keepdim_and_broadcast(
 
 
 def _cute_call(
-    target: Any,
+    node: torch.fx.Node,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    *,
-    node: torch.fx.Node,
 ) -> Any:
     """Lower one FX call through the active CuTeDSL operations handler."""
+    target = node.target
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
