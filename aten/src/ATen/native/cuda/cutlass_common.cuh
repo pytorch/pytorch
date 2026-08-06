@@ -45,4 +45,14 @@ struct enable_3x_kernel_for_sm10_or_later : Kernel {
   }
 };
 
+template <typename Kernel>
+struct enable_3x_kernel_for_sm12 : Kernel {
+  template <typename... Args>
+  CUTLASS_DEVICE void operator()(Args&&... args) {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 1200 && __CUDA_ARCH__ < 1300
+    Kernel::operator()(std::forward<Args>(args)...);
+#endif
+  }
+};
+
 }  // namespace at::cuda::detail
