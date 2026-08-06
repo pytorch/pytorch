@@ -302,9 +302,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registers each mempool segment with the communicator and WindowNCCL
   // lazily upgrades the segment to a collective NCCL_WIN_COLL_SYMMETRIC
   // window on first use. Requires NCCL 2.29+ at runtime.
-  bool supportsWindow() const override {
-    return true;
-  }
+  bool supportsWindow() const override;
   c10::intrusive_ptr<::c10d::Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) override;
 
@@ -595,6 +593,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
+  std::atomic<uint64_t> window_registration_counter_{0};
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
