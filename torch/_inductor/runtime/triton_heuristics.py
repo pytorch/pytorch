@@ -4089,6 +4089,7 @@ def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...
         combo_meta.get(f"tile_hint_{i}"),
         sub_meta.get("add_persistent_rblock", False),
         sub_meta.get("has_loadstore_with_contiguous_rdim"),
+        sub_meta.get("uses_device_tma", False),
         tuple(sorted(tma.items())),
         tuple(sorted(tiling_scores.items())),
     )
