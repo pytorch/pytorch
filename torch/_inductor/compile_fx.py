@@ -281,6 +281,7 @@ def record_original_output_strides(gm: GraphModule) -> None:
             isinstance(output, torch.fx.Node)
             and (val := output.meta.get("val")) is not None
             and isinstance(val, torch.Tensor)
+            and val.layout == torch.strided
         ):
             output_strides.append(val.stride())
         else:
