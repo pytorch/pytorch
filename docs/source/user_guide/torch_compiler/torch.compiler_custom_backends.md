@@ -118,6 +118,60 @@ my_backend = aot_autograd(fw_compiler=my_compiler)  # bw_compiler=my_compiler
 model_opt = torch.compile(model, backend=my_backend)
 ```
 
+## Eager Backend Initialization
+
+Backends that need to run one-time eager setup at `torch.compile()` time
+(e.g. loading native libraries or initializing device contexts) can define a
+`_dynamo_backend_init` attribute --- a no-arg callable that fires once the
+backend is resolved, before any invocation.
+
+```python
+def my_backend(gm, example_inputs):
+    return gm.forward
+
+def my_backend_init():
+    load_native_libs()      # runs at compile() time, before any invocation
+
+my_backend._dynamo_backend_init = my_backend_init
+
+@torch.compile(backend=my_backend)
+def fn(x):
+    return x + 1
+```
+
+The hook works whether the backend is passed directly, registered by name
+with `register_backend`, or forced via
+`torch.compiler.set_stance(force_backend=...)`. It is read off the inner
+backend object, so it is found whether it is an instance attribute or a
+class method (resolved via the MRO). When using
+`aot_autograd(fw_compiler=...)`, set the hook on the inner `fw_compiler` ---
+`AotAutograd` reads it at fire time, so it may be set before or after
+`aot_autograd()` is constructed. Only `fw_compiler` is consulted; hooks set
+on `bw_compiler` or `inference_compiler` are ignored.
+
+The hook fires once per scope, per process, on both the normal and
+`fullgraph=True` paths:
+
+- a hook defined as a plain function fires once, however many backends or
+  compile sites use it;
+- a hook defined as an instance method (`def _dynamo_backend_init(self)`)
+  fires once per instance the method is bound to, so two instances can each
+  run their own per-device init;
+- a hook defined as a classmethod fires once per class.
+
+`torch._dynamo.reset()` does not refire it, since native-library
+initialization is process-global; making the hook idempotent is still good
+practice. If the hook raises, the exception propagates out of
+`torch.compile()` and a later compile retries it; under
+`torch.compiler.set_stance(force_backend=...)`, resolution happens on the
+first call, so the hook fires -- and a failure surfaces -- from the call
+instead. Concurrent `torch.compile()` calls that share a hook are
+serialized: a resolution waits for an in-flight init to complete before
+compiling. To be deduplicated, a plain-function hook must be hashable and
+weakly referenceable; for a bound-method hook, its owner (the instance, or
+the class for a classmethod) must be. Otherwise the hook fires on every
+resolution.
+
 ## Examples
 
 ### Debugging Backend

@@ -97,15 +97,6 @@ class WrapBackendDebug:
             self.get_compiler_config = cast(
                 CompilerConfigProvider, unconfigured_compiler_fn
             ).get_compiler_config
-        # Forward the eager-init hook via hasattr/getattr (reads the MRO) so it
-        # works whether it is an instance attribute or a class method.
-        # functools.wraps above only copies __dict__, which would drop a
-        # class-level _dynamo_backend_init on the direct
-        # torch._dynamo.optimize(backend=instance) path.
-        if hasattr(unconfigured_compiler_fn, "_dynamo_backend_init"):
-            self._dynamo_backend_init = (
-                unconfigured_compiler_fn._dynamo_backend_init  # type: ignore[attr-defined]
-            )
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any

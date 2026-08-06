@@ -76,6 +76,14 @@ class AotAutograd:
         self.__name__ = "compiler_fn"
         self.kwargs: AotAutogradKwargs = kwargs
 
+    # Read at fire time so the hook can be set on fw_compiler even after
+    # aot_autograd() is constructed; an explicit assignment on the instance
+    # shadows this. Only fw_compiler is consulted.
+    def __getattr__(self, name: str) -> Any:
+        if name == "_dynamo_backend_init":
+            return getattr(self.kwargs.get("fw_compiler"), "_dynamo_backend_init", None)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[Any], **kwargs: Any
     ) -> Callable[..., Any]:
