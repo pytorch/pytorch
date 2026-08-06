@@ -53,11 +53,33 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
     tensors = getattr(epilogue_args, "tensors", None)
     if not tensors:
         return ()
-    sig: list[tuple] = []
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    scalar_broadcast_names = tuple(
+        sorted(
+            getattr(
+                getattr(epilogue_args, "epilogue_fn", None),
+                "scalar_broadcast_names",
+                (),
+            )
+        )
+    )
+    sig: list[tuple] = [("scalar_broadcast_names", scalar_broadcast_names)]
     for name, val in tensors.items():
         if torch.is_tensor(val):
             sig.append(
                 (name, "tensor", val.dtype, tuple(val.shape), tuple(val.stride()))
+            )
+        elif isinstance(val, TensorWrapper):
+            sig.append(
+                (
+                    name,
+                    "tensor_wrapper",
+                    str(val.dtype),
+                    tuple(val.shape),
+                    tuple(val.stride),
+                    getattr(val, "_alignment_bytes", None),
+                )
             )
         else:
             sig.append((name, type(val).__name__))
