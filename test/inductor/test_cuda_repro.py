@@ -2990,6 +2990,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(default_output, max_autotune_output)
 
+    @tf32_on_and_off(0.005)
     def test_adaptive_avg_pool3d_issue_157248(self):
         """Test for GitHub issue #157248: Conv2d-unsqueeze-AdaptiveAvgPool3d produces incorrect results"""
 
@@ -3030,11 +3031,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     compiled_output = compiled_model(input_tensor)
 
                 # They should be identical (or very close)
-                self.assertTrue(
-                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
-                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
-                )
+                self.assertEqual(eager_output, compiled_output)
 
     @parametrize(
         "quantiles_shape,quantiles_strides,batch_size",
