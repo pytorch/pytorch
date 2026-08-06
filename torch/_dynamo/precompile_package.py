@@ -31,6 +31,7 @@ be used directly.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -92,6 +93,7 @@ class PrecompileSummary:
     guarded_codes: int
     backend_graphs: int
     bypassed: tuple[str, ...]
+    dropped_guards: tuple[tuple[str, int], ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -103,18 +105,23 @@ class PrecompileSummary:
             f"{self.guarded_codes} guarded codes, "
             f"{self.backend_graphs} backend graphs"
         )
+        if self.dropped_guards:
+            base += f", dropped guards {dict(self.dropped_guards)}"
         if self.bypassed:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         return base
 
 
-def _summarize(entry: _DynamoCacheEntry) -> PrecompileSummary:
+def _summarize(
+    entry: _DynamoCacheEntry, dropped: collections.Counter[str]
+) -> PrecompileSummary:
     return PrecompileSummary(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
         guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
         backend_graphs=len(entry.backend_ids),
         bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
+        dropped_guards=tuple(sorted(dropped.items())),
     )
 
 
@@ -136,7 +143,10 @@ class PrecompileSession:
     ) -> None:
         self._fn = fn
         self._backend = backend
-        self._guard_filter_fn = guard_filter_fn or default_guard_filter_fn
+        self._dropped_guards: collections.Counter[str] = collections.Counter()
+        self._guard_filter_fn = self._recording_filter(
+            guard_filter_fn or default_guard_filter_fn
+        )
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._entry_fn = _entry_fn_of(fn)
@@ -166,8 +176,27 @@ class PrecompileSession:
             self._stack.close()
             self._stack = None
 
+    def _recording_filter(
+        self,
+        inner: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+    ) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+        """
+        Remember which guard types were discarded. A dropped guard does not
+        fail at serving time, it silently widens what a graph is reused for, so
+        the set has to be inspectable rather than invisible.
+        """
+
+        def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = inner(entries)
+            for keep, entry in zip(decisions, entries):
+                if not keep:
+                    self._dropped_guards[entry.guard_type] += 1
+            return decisions
+
+        return filter_fn
+
     def summary(self) -> PrecompileSummary:
-        return _summarize(self._package.cache_entry())
+        return _summarize(self._package.cache_entry(), self._dropped_guards)
 
     def save(self, path: str, *, require_complete: bool = True) -> PrecompileSummary:
         """
