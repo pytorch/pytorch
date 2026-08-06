@@ -11,13 +11,13 @@ namespace {
 
 using torch::test::DeviceBuffer;
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>
 __global__ void scatter_add_kernel(
     scalar_t* out,
-    const int64_t* indices,
+    const index_t* indices,
     const scalar_t* values,
     int64_t n,
-    int64_t out_numel,
+    index_t out_numel,
     bool fast_atomics) {
   for (int64_t i = (blockIdx.x * blockDim.x) + threadIdx.x; i < n;
        i += static_cast<int64_t>(blockDim.x) * gridDim.x) {
@@ -26,45 +26,45 @@ __global__ void scatter_add_kernel(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t = int64_t>
 std::vector<scalar_t> launchScatterAdd(
-    const std::vector<int64_t>& indices,
+    const std::vector<index_t>& indices,
     int64_t buf_numel,
     int64_t out_offset,
     int64_t out_numel,
     bool fast_atomics) {
   const int64_t n = static_cast<int64_t>(indices.size());
   DeviceBuffer<scalar_t> d_buf(std::vector<scalar_t>(buf_numel, scalar_t(0.0f)));
-  DeviceBuffer<int64_t> d_indices(indices);
+  DeviceBuffer<index_t> d_indices(indices);
   DeviceBuffer<scalar_t> d_values(std::vector<scalar_t>(n, scalar_t(1.0f)));
 
   constexpr int threads = 256;
   const int blocks = static_cast<int>((n + threads - 1) / threads);
-  scatter_add_kernel<scalar_t><<<blocks, threads>>>(
+  scatter_add_kernel<scalar_t, index_t><<<blocks, threads>>>(
       d_buf.get() + out_offset,
       d_indices.get(),
       d_values.get(),
       n,
-      out_numel,
+      static_cast<index_t>(out_numel),
       fast_atomics);
   CUDA_EXPECT_OK(cudaGetLastError());
   CUDA_EXPECT_OK(cudaDeviceSynchronize());
   return d_buf.to_host();
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t = int64_t>
 void testScatterAdd(bool fast_atomics) {
   SKIP_IF_NO_CUDA_DEVICE();
   constexpr int64_t n = 2048;
   constexpr int64_t out_numel = 33;
-  std::vector<int64_t> indices(n);
+  std::vector<index_t> indices(n);
   std::vector<int> expected(out_numel, 0);
   for (int64_t i = 0; i < n; i++) {
-    indices[i] = i % out_numel;
+    indices[i] = static_cast<index_t>(i % out_numel);
     expected[i % out_numel]++;
   }
-  const auto out =
-      launchScatterAdd<scalar_t>(indices, out_numel, 0, out_numel, fast_atomics);
+  const auto out = launchScatterAdd<scalar_t, index_t>(
+      indices, out_numel, 0, out_numel, fast_atomics);
   for (int64_t j = 0; j < out_numel; j++) {
     EXPECT_EQ(static_cast<float>(out[j]), static_cast<float>(expected[j]))
         << "slot " << j << " fast_atomics=" << fast_atomics;
@@ -105,6 +105,21 @@ TEST(TestAtomicAdd, FastAtomicAddHalf) {
 TEST(TestAtomicAdd, FastAtomicAddBFloat16) {
   testScatterAdd<torch::headeronly::BFloat16>(true);
   testScatterAdd<torch::headeronly::BFloat16>(false);
+}
+
+TEST(TestAtomicAdd, FastAtomicAddInt16) {
+  testScatterAdd<int16_t>(true);
+  testScatterAdd<int16_t>(false);
+}
+
+TEST(TestAtomicAdd, FastAtomicAddInt8) {
+  testScatterAdd<int8_t>(true);
+  testScatterAdd<int8_t>(false);
+}
+
+TEST(TestAtomicAdd, FastAtomicAddIntIndex) {
+  testScatterAdd<float, int32_t>(true);
+  testScatterAdd<float, int32_t>(false);
 }
 
 TEST(TestAtomicAdd, FastAtomicAddHalfStaysInBounds) {
