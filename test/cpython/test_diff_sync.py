@@ -72,7 +72,7 @@ class CPythonDiffSyncTests(TestCase):
         self.assertNotEqual(corrupted, text)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_diff = Path(tmp) / "test_bool.diff"
-            tmp_diff.write_text(corrupted, encoding="utf-8", newline="\n")
+            tmp_diff.write_bytes(corrupted.encode("utf-8"))
             errors = diff_sync.verify_pair(py_path, tmp_diff)
         self.assertTrue(
             any("stale" in e or "adapted file hash" in e for e in errors),
@@ -88,7 +88,7 @@ class CPythonDiffSyncTests(TestCase):
         ) + "\n"
         with tempfile.TemporaryDirectory() as tmp:
             tmp_diff = Path(tmp) / "test_bool.diff"
-            tmp_diff.write_text(text, encoding="utf-8", newline="\n")
+            tmp_diff.write_bytes(text.encode("utf-8"))
             errors = diff_sync.verify_pair(py_path, tmp_diff)
         self.assertTrue(any("missing git index line" in e for e in errors), errors)
 

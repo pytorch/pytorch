@@ -27,8 +27,8 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
-import urllib.request
 from pathlib import Path
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CPYTHON_DIR = REPO_ROOT / "test" / "cpython" / "v3_13"
@@ -37,9 +37,7 @@ URL_RE = re.compile(
     r"https://raw\.githubusercontent\.com/python/cpython/refs/tags/"
     r"(v[\d.]+)/(Lib/test/\S+\.py)"
 )
-INDEX_RE = re.compile(
-    r"^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s+\d+)?$", re.MULTILINE
-)
+INDEX_RE = re.compile(r"^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s+\d+)?$", re.MULTILINE)
 
 
 def normalize_bytes(data: bytes) -> bytes:
@@ -48,6 +46,11 @@ def normalize_bytes(data: bytes) -> bytes:
 
 def normalize_text(text: str) -> str:
     return text.replace("\r\n", "\n")
+
+
+def write_utf8(path: Path, text: str) -> None:
+    """Write text as UTF-8 LF bytes (Py3.9-safe; avoids Path.write_text newline=)."""
+    path.write_bytes(normalize_text(text).encode("utf-8"))
 
 
 def git_hash_object(data: bytes) -> str:
@@ -95,13 +98,24 @@ def parse_header(py_path: Path) -> tuple[str, str]:
     return tag, upstream
 
 
-def fetch_pristine(tag: str, upstream_rel: str, timeout: float = 60.0) -> bytes:
-    url = (
+def upstream_raw_url(tag: str, upstream_rel: str) -> str:
+    return (
         f"https://raw.githubusercontent.com/python/cpython/refs/tags/"
         f"{tag}/{upstream_rel}"
     )
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return normalize_bytes(resp.read())
+
+
+def pristine_download_hint(tag: str, upstream_rel: str) -> str:
+    url = upstream_raw_url(tag, upstream_rel)
+    return (
+        "Could not reconstruct the pristine upstream file from the checked-in "
+        ".diff (refusing to download over the network).\n"
+        "Download it locally, then regenerate:\n"
+        f"  curl -fsSL {url} -o /tmp/pristine.py\n"
+        f"  # or: wget -qO /tmp/pristine.py {url}\n"
+        "  python tools/regenerate_cpython_diffs.py --force "
+        f"--pristine /tmp/pristine.py --only {Path(upstream_rel).name}"
+    )
 
 
 def _git_apply(
@@ -119,7 +133,7 @@ def _git_apply(
         target.write_bytes(normalize_bytes(base_content))
 
         patch_path = root / "patch.diff"
-        patch_path.write_text(normalize_text(diff_text), encoding="utf-8", newline="\n")
+        write_utf8(patch_path, diff_text)
 
         cmd = ["git", "apply", "--verbose"]
         if reverse:
