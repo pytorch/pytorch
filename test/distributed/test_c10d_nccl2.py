@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import concurrent.futures
 import ctypes
 import os
 import subprocess
@@ -72,6 +73,22 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_concurrent_lazy_initialization(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(backend.eager_connect_single_device, self.device)
+                for _ in range(4)
+            ]
+            for future in futures:
+                future.result()
+
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -243,6 +260,34 @@ class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
         )
         dist.scatter(output, scatter_list, src=0)
         self.assertEqual(output, tensor)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_split_with_nonblocking_communicator(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        opts = self.opts()
+        child = backend.split(dist.distributed_c10d._get_default_store(), [0], opts)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=self.device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
 
 
 class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
