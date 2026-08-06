@@ -1530,8 +1530,7 @@ class CPUReproTests(TestCase):
                 )
                 s = q @ k.transpose(-1, -2) / math.sqrt(c // NH)
                 s = (
-                    s.view(1, n, NH, WS * WS, WS * WS)
-                    + mask.unsqueeze(1).unsqueeze(0)
+                    s.view(1, n, NH, WS * WS, WS * WS) + mask.unsqueeze(1).unsqueeze(0)
                 ).view(-1, NH, WS * WS, WS * WS)
                 o = (s.softmax(-1) @ v).transpose(1, 2).reshape(n, WS * WS, c)
                 return self.out(o)
