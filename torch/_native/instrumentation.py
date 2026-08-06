@@ -67,11 +67,11 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
 
-from torch._native.flydsl.cache import flydsl_jit_cache
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+from torch._native.flydsl.cache import flydsl_jit_cache
 
 
 __all__ = [
