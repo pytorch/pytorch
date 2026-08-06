@@ -42,7 +42,11 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -55,8 +59,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-
-from torch.utils._triton import has_triton, has_triton_package
 
 try:
     import triton
@@ -2732,15 +2734,12 @@ class TestSerializeTriton(TestCase):
 
 
     def _gate_triton(self, device) -> None:
-        if not has_triton_package() or not has_triton():
-            self.skipTest("requires triton")
         if triton is None or wrap_triton is None:
             self.skipTest("triton is not installed")
 
+    @requires_capabilities(Capability.lib.triton)
     def test_triton_hop(self, device) -> None:
         self._gate_triton(device)
-        if triton is None or wrap_triton is None:
-            self.skipTest("triton is not installed")
 
         @triton.jit
         def add_kernel(
@@ -2888,10 +2887,9 @@ class TestSerializeTriton(TestCase):
                     serialized.example_inputs,
                 )
 
+    @requires_capabilities(Capability.lib.triton)
     def test_triton_constexpr_matching(self, device) -> None:
         self._gate_triton(device)
-        if triton is None or wrap_triton is None:
-            self.skipTest("triton is not installed")
 
         @triton.jit
         def kernel_with_constexprs(
