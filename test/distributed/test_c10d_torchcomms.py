@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
 class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     REDUCE_OPS = [
         subtest(dist.ReduceOp.SUM, name="SUM"),
         subtest(dist.ReduceOp.AVG, name="AVG"),
@@ -302,10 +304,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertNotEqual(g_a.group_name, g_b.group_name)
 
 
-devices = ["cpu", "cuda", "xpu"]
-instantiate_device_type_tests(
-    TestC10dTorchCommsBasic, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(TestC10dTorchCommsBasic, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
@@ -316,6 +315,8 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
     the auto-qualify logic in ``init_process_group`` should expand it to
     ``"cpu:gloo,cuda:nccl"`` so both CPU and CUDA backends are available.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -455,6 +456,8 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
     return ``NON_GROUP_MEMBER`` without any parent split.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         torch.distributed.config.use_torchcomms = True
@@ -502,6 +505,7 @@ instantiate_device_type_tests(
 
 
 class TestTorchCommsHandlesBackend(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Unit-test the pure routing logic of ``_torchcomms_handles_backend``.
 
     This decides whether a backend is one TorchComms can construct (so it goes
@@ -573,6 +577,7 @@ class TestTorchCommsHandlesBackend(TestCase):
 
 
 class TestC10dTorchCommsNewGroupHelper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Unit-test the TorchComms-specific branches of ``_new_process_group_helper``.
 
     These cover the three subgroup-init fixes: the device handed to ``new_comm``
@@ -742,6 +747,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
 
 class TestC10dGroupNameHashSalt(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Unit-test the collective-consistent group-name hash salt.
 
     ``_hash_ranks_to_str`` / ``_process_group_name`` are generic c10d helpers
@@ -867,6 +873,7 @@ class _FakeOtherBackend:
 
 
 class TestC10dTorchCommsDestroyDedup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Unit-test the comm-deduplication in ``destroy_process_group``.
 
     A gloo subgroup reports both ``cuda`` and ``cpu`` device types backed by the
@@ -1007,6 +1014,8 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
