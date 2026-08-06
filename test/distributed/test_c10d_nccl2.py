@@ -246,6 +246,34 @@ class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
         dist.scatter(output, scatter_list, src=0)
         self.assertEqual(output, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_split_with_nonblocking_communicator(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        opts = self.opts()
+        child = backend.split(dist.distributed_c10d._get_default_store(), [0], opts)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=self.device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
+
 
 class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
