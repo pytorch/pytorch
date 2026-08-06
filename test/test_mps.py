@@ -14359,21 +14359,21 @@ class TestConvolutionMPS(TestCaseMPS):
 
     @parametrize("case", ["catalog", "simd_miss"])
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_conv3d_precompiled_and_simd_miss(self, dtype, case):
+    @parametrize("with_bias", [False, True])
+    def test_conv3d_precompiled_and_simd_miss(self, dtype, case, with_bias):
         torch.manual_seed(0)
         if case == "catalog":
             input_shape = (2, 3, 7, 9, 11)
             weight_shape = (8, 3, 3, 3, 3)
             stride, padding = (1, 1, 1), (1, 1, 1)
-            bias = torch.randn(weight_shape[0]).to(dtype).float()
         else:
             input_shape = (2, 5, 8, 10, 12)
             weight_shape = (7, 5, 2, 3, 2)
             stride, padding = (1, 2, 1), (0, 1, 0)
-            bias = None
 
         x = torch.randn(input_shape).to(dtype).float()
         weight = torch.randn(weight_shape).to(dtype).float()
+        bias = torch.randn(weight_shape[0]).to(dtype).float() if with_bias else None
         expected = F.conv3d(x, weight, bias, stride=stride, padding=padding)
         actual = F.conv3d(
             x.to(device="mps", dtype=dtype),
