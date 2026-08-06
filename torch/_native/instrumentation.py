@@ -67,6 +67,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
 
+from torch._native.flydsl.cache import flydsl_jit_cache
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -540,7 +542,6 @@ def instrumented_flydsl_cache(
     Equivalent to ``instrument_flydsl_compile(op)`` stacked above
     ``@flydsl_jit_cache``.
     """
-    from torch._native.flydsl.cache import flydsl_jit_cache
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
         return instrument_flydsl_compile(op, key_fn=key_fn)(flydsl_jit_cache(fn))

@@ -154,40 +154,48 @@ class TestFlyDSLCache(TestCase):
 
         self.assertEqual(results, {"first": "first", "second": "second"})
 
-    def test_cache_clear_during_compile_does_not_repopulate(self):
-        started = threading.Event()
-        release = threading.Event()
-        result = []
+    def test_cache_clear_during_compile_frees_the_key(self):
+        stale_started = threading.Event()
+        release_stale = threading.Event()
+        fresh_done = threading.Event()
+        calls = []
+        results = {}
 
         @flydsl_jit_cache
         def compile_fn(key):
-            started.set()
-            self.assertTrue(release.wait(timeout=5))
-            return "compiled"
+            calls.append(key)
+            if len(calls) == 1:
+                stale_started.set()
+                self.assertTrue(release_stale.wait(timeout=5))
+                return "stale"
+            fresh_done.set()
+            return "fresh"
 
-        worker = threading.Thread(target=lambda: result.append(compile_fn("key")))
-        worker.start()
-        self.assertTrue(started.wait(timeout=5))
+        stale = threading.Thread(
+            target=lambda: results.setdefault("stale", compile_fn("key"))
+        )
+        stale.start()
+        self.assertTrue(stale_started.wait(timeout=5))
         compile_fn.cache_clear()
-        release.set()
-        worker.join()
 
-        # The in-flight caller gets its result, but a compile started before the
-        # clear must not repopulate the cache.
-        self.assertEqual(result, ["compiled"])
+        # The clear frees the key: this caller compiles instead of queueing
+        # behind an in-flight compile whose result it could no longer use.
+        fresh = threading.Thread(
+            target=lambda: results.setdefault("fresh", compile_fn("key"))
+        )
+        fresh.start()
+        self.assertTrue(fresh_done.wait(timeout=5))
+        fresh.join()
+
+        release_stale.set()
+        stale.join()
+
+        # The in-flight caller still gets its own result, but a compile started
+        # before the clear must not overwrite what landed after it.
+        self.assertEqual(results, {"stale": "stale", "fresh": "fresh"})
+        self.assertEqual(compile_fn("key"), "fresh")
         info = compile_fn.cache_info()
-        self.assertEqual((info.hits, info.misses), (0, 0))
-        self.assertEqual(info.currsize, 0)
-
-    def test_cache_clear_drops_key_locks(self):
-        @flydsl_jit_cache
-        def compile_fn(key):
-            return key
-
-        compile_fn("key")
-        self.assertEqual(len(compile_fn._key_locks), 1)
-        compile_fn.cache_clear()
-        self.assertEqual(len(compile_fn._key_locks), 0)
+        self.assertEqual((info.hits, info.misses, info.currsize), (1, 1, 1))
 
 
 if __name__ == "__main__":
