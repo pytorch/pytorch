@@ -153,6 +153,12 @@
 - third_party/fbgemm
 - .ci/pytorch/test.sh
 - .github/labeler.yml
+- test/distributed/test_cupy_as_tensor.py
+- test/distributed/test_symmetric_memory.py
+- test/inductor/test_flex_gemm.py
+- test/inductor/test_max_autotune_blackwell.py
+- test/inductor/test_torchinductor_strided_blocks.py
+- test/profiler/test_cupti_monitor.py
 
 "ciflow/h100":
 - test/test_matmul_cuda.py
@@ -166,6 +172,30 @@
 - third_party/fbgemm
 - .ci/pytorch/test.sh
 - .github/labeler.yml
+- test/distributed/_composable/fsdp/test_fully_shard_comm.py
+- test/distributed/tensor/test_matrix_ops.py
+- test/distributed/test_symmetric_memory.py
+- test/dynamo/test_logging.py
+- test/dynamo/test_reconstruct.py
+- test/inductor/test_aot_inductor.py
+- test/inductor/test_combo_kernels.py
+- test/inductor/test_cuda_repro.py
+- test/inductor/test_cutlass_backend.py
+- test/inductor/test_cutlass_evt.py
+- test/inductor/test_cutlass_fallback.py
+- test/inductor/test_flex_attention.py
+- test/inductor/test_flex_decoding.py
+- test/inductor/test_flex_flash.py
+- test/inductor/test_lookup_table.py
+- test/inductor/test_loop_ordering.py
+- test/inductor/test_torchinductor.py
+- test/inductor/test_triton_kernels.py
+- test/inductor/test_user_streams.py
+- test/test_cuda.py
+- test/test_foreach.py
+- test/test_linalg.py
+- test/test_nn.py
+- test/test_scatter_gather_ops.py
 
 "ciflow/rocm-mi300":
 - test/test_matmul_cuda.py
