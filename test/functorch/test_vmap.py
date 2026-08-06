@@ -4070,6 +4070,37 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(actual_backward_grads, expected_backward_grads)
         self.assertEqual(actual_grads, expected_grads)
 
+    def test_sdpa_unbatched_inputs_cpu(self, device):
+        if device != "cpu":
+            raise unittest.SkipTest("This test is only for CPU")
+
+        query = torch.randn(3, 4, 32, 64, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=FALLBACK_REGEX)
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                expected = F.scaled_dot_product_attention(query, key, value)
+                actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+                grad_output = torch.randn_like(expected)
+                expected_backward_grads = torch.autograd.grad(
+                    expected, (query, key, value), grad_output
+                )
+                actual_backward_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_output
+                )
+                expected_grads = loss_grad(query, key, value)
+                actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_backward_grads, expected_backward_grads)
+        self.assertEqual(actual_grads, expected_grads)
+
     @parametrize(
         "backend",
         [

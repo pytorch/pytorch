@@ -432,7 +432,15 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -736,10 +744,18 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  // Give fused CUDA backends a batch dimension for unbatched inputs.
-  if (query_.is_cuda() && query_.dim() == 3) {
-    auto normalized_params = sdp::normalize_unbatched_cuda_input(
-        {query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa});
+  // Give fused backends a batch dimension for unbatched inputs.
+  if ((query_.is_cpu() || query_.is_cuda() || query_.is_xpu()) &&
+      query_.dim() == 3) {
+    auto normalized_params = sdp::normalize_unbatched_input({
+        .query = query_,
+        .key = key,
+        .value = value,
+        .attn_mask = attn_mask_,
+        .dropout = dropout_p,
+        .is_causal = is_causal,
+        .enable_gqa = enable_gqa,
+    });
     if (normalized_params.query.dim() != query_.dim()) {
       return at::native::scaled_dot_product_attention(
                  normalized_params.query,
