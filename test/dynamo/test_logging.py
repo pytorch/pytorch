@@ -1667,6 +1667,8 @@ exclusions = {
     "caching",
     "overlap_scheduling",
     "partitioned_scatter",
+    # Only emits for torch._native DSL ops, not for a plain torch.compile.
+    "native_dsl_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
