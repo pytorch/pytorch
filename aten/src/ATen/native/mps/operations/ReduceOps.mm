@@ -794,11 +794,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         [ce setComputePipelineState:ps];
         if (is_outer) {
           constexpr uint32_t TG_X = 32, TG_Y = 32;
-          // 4th element is trailing pad so the host-side bind matches the
-          // kernel's `constant uint3&` slot (uint3 has 16-byte alignment in
-          // Metal even though only 12 bytes are read). Without this Metal
-          // API validation flags a buffer-length mismatch.
-          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
+          const c10::metal::vec3<uint32_t> sizes_s{M, N, 1};
           mtl_setArgs(ce, input, output_t, sizes_s);
           const auto num_tg_x = c10::metal::ceil_div(N, TG_X);
           [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
