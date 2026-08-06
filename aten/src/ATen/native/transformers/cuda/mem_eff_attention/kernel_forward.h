@@ -257,7 +257,10 @@ struct AttentionKernel {
           int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
 
       if (kSupportsBias && attn_bias_ptr != nullptr) {
-        attn_bias_ptr += (batch_id * bias_strideB) + (head_id * bias_strideH);
+        // Anchor the query row before the single-query tail remaps bias_strideM.
+        attn_bias_ptr += (batch_id * bias_strideB) +
+            (head_id * bias_strideH) +
+            (int64_t(query_start) * bias_strideM);
       }
       if (output_accum_ptr != nullptr) {
         output_accum_ptr +=
@@ -813,13 +816,8 @@ struct AttentionKernel {
         // load bias tile Bij into shared memory
         typename MM0::BiasLoader::GmemTileIterator bias_iter(
             {cutlass::layout::RowMajor(p.bias_strideM)},
-            // attn_bias_pointer points to matrix of size (n_queries, n_keys)
-            // for the relevant batch_id and head_id
-            // `query_start` is `uint32_t`, so compute the offset in 64-bit
-            // to avoid wraparound when num_queries * num_keys > 2^32
-            const_cast<scalar_t*>(
-                p.attn_bias_ptr + int64_t(query_start) * p.bias_strideM +
-                iter_key_start),
+            // attn_bias_ptr points to the first query row for this block.
+            const_cast<scalar_t*>(p.attn_bias_ptr + iter_key_start),
             {problem_size_0_m, problem_size_0_n},
             thread_id());
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
