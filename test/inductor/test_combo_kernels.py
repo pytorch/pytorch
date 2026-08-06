@@ -19,6 +19,7 @@ from torch._inductor.codegen.triton_combo_kernel import (
     _log_partition_separation_once,
     LARGE_NUMELS,
 )
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
@@ -3142,6 +3143,9 @@ class _ComboIntervalFakeNode:
     def get_name(self) -> str:
         return f"node{self.index}"
 
+    def get_device(self):
+        return None
+
 
 class _ComboIntervalFakeCombo:
     def __init__(self, nodes) -> None:
@@ -3152,13 +3156,13 @@ class _ComboIntervalFakeCombo:
         return self.nodes
 
 
-class _ComboIntervalFakeScheduler:
+class _ComboIntervalFakeScheduler(Scheduler):
     def __init__(self, nodes, accepted) -> None:
         self.nodes = nodes
         self.accepted = accepted
         self.attempts = []
         self.name_to_fused_node = {node.get_name(): node for node in nodes}
-        self.node_to_stream = {}
+        self.node_to_stream = dict.fromkeys(nodes, 0)
         self.node_to_mempool = {}
         self.mem_ctx = None
 
@@ -3184,18 +3188,6 @@ class _ComboIntervalFakeScheduler:
         self.attempts.append(indices)
         if indices in self.accepted:
             on_accept(_ComboIntervalFakeCombo(candidate), candidate, num)
-
-    def speedup_by_combo_kernel(self, nodes) -> bool:
-        return True
-
-    def get_node_stream(self, node) -> int:
-        return 0
-
-    def topological_sort_schedule(self, nodes):
-        return nodes
-
-    def prune_redundant_deps(self, nodes) -> None:
-        pass
 
 
 class ComboKernelPeakMemoryTests(InductorTestCase):
@@ -3229,7 +3221,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         }
 
     def _run_interval_case(self, groups, accepted):
-        from torch._inductor.scheduler import ForeachKernelSchedulerNode, Scheduler
+        from torch._inductor.scheduler import ForeachKernelSchedulerNode
 
         nodes = [_ComboIntervalFakeNode(i) for i in range(7)]
         scheduler = _ComboIntervalFakeScheduler(nodes, accepted)
@@ -3245,7 +3237,14 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 "combinable_nodes",
                 side_effect=lambda group: group,
             ),
+            patch.object(
+                Scheduler,
+                "topological_sort_schedule",
+                side_effect=lambda nodes: nodes,
+            ),
+            patch.object(Scheduler, "prune_redundant_deps"),
             torch._inductor.config.patch(
+                benchmark_combo_kernel=False,
                 combo_kernel_peak_memory_pct_threshold=0.05,
                 combo_kernel_peak_memory_increase_gb=None,
                 combo_kernel_max_distance=-1,

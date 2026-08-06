@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import collections
 import contextlib
 import dataclasses
@@ -6535,11 +6536,15 @@ class Scheduler:
         node_to_idx: dict[BaseSchedulerNode, int],
         reserved: list[tuple[int, int]],
     ) -> Iterator[list[BaseSchedulerNode]]:
-        """Partition nodes into the gaps between reserved baseline intervals."""
-        ordered = sorted(nodes, key=lambda n: node_to_idx[n])
+        """Partition baseline-ordered nodes between reserved intervals."""
+        if not nodes:
+            return
+        first_idx = node_to_idx[nodes[0]]
+        interval_idx = max(
+            0, bisect.bisect_right(reserved, (first_idx, sys.maxsize)) - 1
+        )
         group: list[BaseSchedulerNode] = []
-        interval_idx = 0
-        for node in ordered:
+        for node in nodes:
             idx = node_to_idx[node]
             crossed_interval = False
             while interval_idx < len(reserved) and reserved[interval_idx][1] < idx:
@@ -6605,9 +6610,11 @@ class Scheduler:
                 fused_nodes.remove(node)
             fused_nodes.add(combo_node)
             if mem_ctx is not None:
-                indices = [mem_ctx.node_to_idx[node] for node in accepted]
-                mem_ctx.accepted_intervals.append((min(indices), max(indices)))
-                mem_ctx.accepted_intervals.sort()
+                interval = (
+                    mem_ctx.node_to_idx[accepted[0]],
+                    mem_ctx.node_to_idx[accepted[-1]],
+                )
+                bisect.insort(mem_ctx.accepted_intervals, interval)
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
