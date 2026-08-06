@@ -58,55 +58,58 @@ def mx_e8m0_scale(
         raise ValueError(f"mx_e8m0_scale pack must be 1 or 2, got {pack}")
 
     max_abs = amax.float()
-    if torch.compiler.is_compiling() or is_fake(max_abs):
-        floor_inf_bits = None
+    use_inline_asm_path = torch.compiler.is_compiling() or is_fake(max_abs)
+    if use_inline_asm_path:
         if rounding == "rceil":
-            source = max_abs / max_value
-            instruction = "cvt.rp.satfinite.ue8m0x2.f32"
-        else:
+            conversion_input = max_abs / max_value
+            conversion_instruction = "cvt.rp.satfinite.ue8m0x2.f32"
+            floor_infinity_input_bits = None
+        else:  # rounding == "floor"
             max_power = math.floor(math.log2(max_value))
-            source = max_abs * 2.0**-max_power
-            instruction = "cvt.rz.ue8m0x2.f32"
-            if max_power > 0:
-                floor_inf_bits = struct.unpack(
-                    "<I", struct.pack("<f", 2.0 ** (128 - max_power))
-                )[0]
+            conversion_input = max_abs * 2.0**-max_power
+            conversion_instruction = "cvt.rz.ue8m0x2.f32"
+            floor_infinity_input_bits = (
+                struct.unpack("<I", struct.pack("<f", 2.0 ** (128 - max_power)))[0]
+                if max_power > 0
+                else None
+            )
 
         if pack == 1:
-            asm = f"{instruction} $0, 0.0, $1;"
-            if floor_inf_bits is not None:
-                asm = (
+            asm_str = f"{conversion_instruction} $0, 0.0, $1;"
+            if floor_infinity_input_bits is not None:
+                asm_str = (
                     "{ .reg .pred is_inf; .reg .f32 finite; "
                     "testp.infinite.f32 is_inf, $1; "
-                    f"selp.f32 finite, 0f{floor_inf_bits:08x}, $1, is_inf; "
-                    f"{instruction} $0, 0.0, finite; }}"
+                    f"selp.f32 finite, 0f{floor_infinity_input_bits:08x}, $1, is_inf; "
+                    f"{conversion_instruction} $0, 0.0, finite; }}"
                 )
             constraints = "=h,r"
-        else:
-            unpack = (
+        else:  # pack == 2
+            unpack_pair_asm = (
                 "cvt.u32.u16 widened, packed; "
                 "and.b32 $0, widened, 0xff; "
                 "shr.u32 $1, widened, 8; }"
             )
-            asm = (
+            asm_str = (
                 "{ .reg .b16 packed; .reg .u32 widened; "
-                f"{instruction} packed, $3, $2; " + unpack
+                f"{conversion_instruction} packed, $3, $2; " + unpack_pair_asm
             )
-            if floor_inf_bits is not None:
-                asm = (
+            if floor_infinity_input_bits is not None:
+                asm_str = (
                     "{ .reg .pred is_inf0, is_inf1; "
                     ".reg .f32 finite0, finite1; "
                     ".reg .b16 packed; .reg .u32 widened; "
                     "testp.infinite.f32 is_inf0, $2; "
                     "testp.infinite.f32 is_inf1, $3; "
-                    f"selp.f32 finite0, 0f{floor_inf_bits:08x}, $2, is_inf0; "
-                    f"selp.f32 finite1, 0f{floor_inf_bits:08x}, $3, is_inf1; "
-                    f"{instruction} packed, finite1, finite0; " + unpack
+                    f"selp.f32 finite0, 0f{floor_infinity_input_bits:08x}, $2, is_inf0; "
+                    f"selp.f32 finite1, 0f{floor_infinity_input_bits:08x}, $3, is_inf1; "
+                    f"{conversion_instruction} packed, finite1, finite0; "
+                    + unpack_pair_asm
                 )
             constraints = "=r,=r,r,r"
         return inline_asm_elementwise(
-            source,
-            asm_str=asm,
+            conversion_input,
+            asm_str=asm_str,
             constraints=constraints,
             dtype=torch.float8_e8m0fnu,
             pack=pack,
@@ -114,32 +117,30 @@ def mx_e8m0_scale(
 
     if rounding == "floor":
         max_power = math.floor(math.log2(max_value))
-        max_abs_int32 = max_abs.view(torch.int32)
-        extracted_pow2 = ((max_abs_int32 >> 23) & 0xFF) - 127
-        scale_e8m0_unbiased = torch.clamp(extracted_pow2 - max_power, min=-127, max=128)
-        scale_e8m0_biased = (scale_e8m0_unbiased + 127).to(torch.uint8)
-        scale_e8m0_biased = torch.where(
-            torch.isnan(max_abs),
-            torch.full_like(scale_e8m0_biased, 255),
-            scale_e8m0_biased,
+        max_abs_bits = max_abs.view(torch.int32)
+        unbiased_exponent = ((max_abs_bits >> 23) & 0xFF) - 127
+        unbiased_scale_exponent = torch.clamp(
+            unbiased_exponent - max_power, min=-127, max=128
         )
-    else:
-        descale_int32 = (max_abs / max_value).view(torch.int32)
-        exponent = (descale_int32 >> 23) & 0xFF
-        mantissa = descale_int32 & 0x7FFFFF
-        scale_e8m0_biased = exponent + (mantissa != 0).to(torch.int32)
-        scale_e8m0_biased = torch.where(
-            (exponent == 0) & (mantissa <= 0x400000),
-            torch.zeros_like(scale_e8m0_biased),
-            scale_e8m0_biased,
+        encoded_scale = (unbiased_scale_exponent + 127).to(torch.uint8)
+    else:  # rounding == "rceil"
+        conversion_input_bits = (max_abs / max_value).view(torch.int32)
+        biased_exponent = (conversion_input_bits >> 23) & 0xFF
+        mantissa_bits = conversion_input_bits & 0x7FFFFF
+        encoded_scale = biased_exponent + (mantissa_bits != 0).to(torch.int32)
+        encoded_scale = torch.where(
+            (biased_exponent == 0) & (mantissa_bits <= 0x400000),
+            torch.zeros_like(encoded_scale),
+            encoded_scale,
         )
-        scale_e8m0_biased = torch.clamp(scale_e8m0_biased, max=254).to(torch.uint8)
-        scale_e8m0_biased = torch.where(
-            torch.isnan(max_abs),
-            torch.full_like(scale_e8m0_biased, 255),
-            scale_e8m0_biased,
-        )
-    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
+        encoded_scale = torch.clamp(encoded_scale, max=254).to(torch.uint8)
+
+    encoded_scale = torch.where(
+        torch.isnan(max_abs),
+        torch.full_like(encoded_scale, 255),
+        encoded_scale,
+    )
+    return encoded_scale.view(torch.float8_e8m0fnu)
 
 
 def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor:
