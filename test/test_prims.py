@@ -6,16 +6,11 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    parametrize,
-    run_tests,
-    TestCase,
-    TEST_SCIPY,
-    set_default_dtype,
-)
+from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
+                                                  set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCUDA,
     dtypes,
     OpDTypes,
 )
@@ -40,7 +35,75 @@ NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim(self, device, dtype):
+        def _wrapper(a, b, broadcast_dimensions):
+            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            # Same shape
+            shape = (5, 5)
+            a = make_arg(shape)
+            b = make_arg(shape, low=0.0, high=0.0)
+            result = fn(a, b, (0, 1))
+
+            self.assertEqual(result.shape, a.shape)
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(a, result)
+
+            # Error input: reordering dims
+            with self.assertRaises(Exception):
+                result = fn(a, b, (1, 0))
+
+            # Adding outermost dimensions
+            a = make_arg((5, 5))
+            b = make_arg((3, 3, 5, 5), low=0.0, high=0.0)
+            result = fn(a, b, (2, 3))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.broadcast_to(b.shape), result)
+
+            # Expands
+            a = make_arg((1, 5, 1))
+            b = make_arg((3, 5, 7), low=0.0, high=0.0)
+            result = fn(a, b, (0, 1, 2))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.expand_as(result), result)
+
+            # Unsqueezes
+            a = make_arg((1, 2, 3))
+            b = make_arg((1, 2, 1, 3), low=0.0, high=0.0)
+            result = fn(a, b, (0, 1, 3))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.unsqueeze(2), result)
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim_sum(self, device, dtype):
+        def _wrapper(a):
+            a_sum = prims.sum(a, [0, 1])
+            a_bc = prims.broadcast_in_dim(a_sum, [], [])
+            return a_bc
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
 
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float64, torch.long)
@@ -91,6 +154,7 @@ class TestPrims(TestCase):
                 with self.assertRaises(AssertionError):
                     fn(t, start, end)
 
+
     def test_aten_overload_to_prims(self, device):
         # This test is to ensure that the torch.ops.aten calls are replaced with refs
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -110,6 +174,26 @@ class TestPrims(TestCase):
             node.target.name().startswith("prims") for node in call_function_nodes
         )
         self.assertTrue(all_prims_namespace)
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    @parametrize("correction", [0, 1])
+    def test_var(self, device, dtype, correction):
+        def _wrapper(a):
+            return prims.var(a, [0, 1], correction=correction)
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
 
     @dtypes(torch.float32)
     def test_memory_format_strides(self, device, dtype):
@@ -187,6 +271,36 @@ class TestPrims(TestCase):
         result_refs = refs.view(a, *new_shape)
         self.assertEqual(result_eager, result_refs)
 
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_philox_rand(self, device, dtype):
+        sizes = (1000, 1000000)  # offsets of 4 and 8
+        repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
+        for size in sizes:
+            torch.cuda.manual_seed(123)
+            references = []
+            results = []
+            rng_states = []
+            for _ in range(repeats):
+                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
+                references.append(torch.rand(size, device=device, dtype=dtype))
+
+            torch.cuda.manual_seed(123)
+            for idx in range(repeats):
+                seed, offset = rng_states[idx]
+                result, _ = torch.ops.rngprims.philox_rand((size,),
+                                                           seed=seed,
+                                                           offset=offset,
+                                                           stride=None,
+                                                           device=device,
+                                                           dtype=dtype)
+                results.append(result)
+
+            for a, b in zip(references, results):
+                self.assertEqual(a, b)
+
+
     @dtypes(torch.float32)
     def test_functional_rng_wrappers(self, device, dtype):
 
@@ -218,133 +332,7 @@ class TestPrims(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
-
-instantiate_device_type_tests(TestPrims, globals())
-
-
-class TestPrimsCuda(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @dtypes(torch.float32)
-    def test_broadcast_in_dim(self, device, dtype):
-        def _wrapper(a, b, broadcast_dimensions):
-            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            # Same shape
-            shape = (5, 5)
-            a = make_arg(shape)
-            b = make_arg(shape, low=0.0, high=0.0)
-            result = fn(a, b, (0, 1))
-
-            self.assertEqual(result.shape, a.shape)
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(a, result)
-
-            # Error input: reordering dims
-            with self.assertRaises(Exception):
-                result = fn(a, b, (1, 0))
-
-            # Adding outermost dimensions
-            a = make_arg((5, 5))
-            b = make_arg((3, 3, 5, 5), low=0.0, high=0.0)
-            result = fn(a, b, (2, 3))
-
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.broadcast_to(b.shape), result)
-
-            # Expands
-            a = make_arg((1, 5, 1))
-            b = make_arg((3, 5, 7), low=0.0, high=0.0)
-            result = fn(a, b, (0, 1, 2))
-
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.expand_as(result), result)
-
-            # Unsqueezes
-            a = make_arg((1, 2, 3))
-            b = make_arg((1, 2, 1, 3), low=0.0, high=0.0)
-            result = fn(a, b, (0, 1, 3))
-
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.unsqueeze(2), result)
-
-    @dtypes(torch.float32)
-    def test_broadcast_in_dim_sum(self, device, dtype):
-        def _wrapper(a):
-            a_sum = prims.sum(a, [0, 1])
-            a_bc = prims.broadcast_in_dim(a_sum, [], [])
-            return a_bc
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            shape = (5, 5)
-            a = make_arg(shape)
-            result = fn(a)
-
-            self.assertEqual(result.shape, ())
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(_wrapper(a), result)
-
-    @dtypes(torch.float32)
-    @parametrize("correction", [0, 1])
-    def test_var(self, device, dtype, correction):
-        def _wrapper(a):
-            return prims.var(a, [0, 1], correction=correction)
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            shape = (5, 5)
-            a = make_arg(shape)
-            result = fn(a)
-
-            self.assertEqual(result.shape, ())
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(_wrapper(a), result)
-
-    @dtypes(torch.float32)
-    def test_philox_rand(self, device, dtype):
-        sizes = (1000, 1000000)  # offsets of 4 and 8
-        repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
-        for size in sizes:
-            torch.cuda.manual_seed(123)
-            references = []
-            results = []
-            rng_states = []
-            for _ in range(repeats):
-                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
-                references.append(torch.rand(size, device=device, dtype=dtype))
-
-            torch.cuda.manual_seed(123)
-            for idx in range(repeats):
-                seed, offset = rng_states[idx]
-                result, _ = torch.ops.rngprims.philox_rand((size,),
-                                                           seed=seed,
-                                                           offset=offset,
-                                                           stride=None,
-                                                           device=device,
-                                                           dtype=dtype)
-                results.append(result)
-
-            for a, b in zip(references, results):
-                self.assertEqual(a, b)
-
-
-instantiate_device_type_tests(TestPrimsCuda, globals(), only_for="cuda")
-
 class TestPrimsBasic(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
         self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
@@ -380,10 +368,10 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
             torch._prims_common.check(True, lambda: 'message')
 
 
+instantiate_device_type_tests(TestPrims, globals())
+
 
 class TestRefs(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
         # Test memory format is preserved in unambiguous cases
@@ -452,8 +440,6 @@ instantiate_device_type_tests(TestRefs, globals())
 
 
 class TestDecomp(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):
         # some ops have vararg variants for the methods. this tests it.
