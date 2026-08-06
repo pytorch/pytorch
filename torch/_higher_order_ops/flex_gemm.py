@@ -231,7 +231,7 @@ def _(
     return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
 
 
-def validate_nvfp4_pack_input(input: torch.Tensor) -> None:
+def _validate_nvfp4_pack_input(input: torch.Tensor) -> None:
     """Require paired Float32 values along the innermost dimension."""
     if input.dtype is not torch.float32 or input.ndim == 0 or input.shape[-1] != 2:
         raise ValueError(
@@ -251,9 +251,9 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
             contract used by TorchAO.
 
     Returns:
-        Contiguous Uint8 storage with the innermost pair dimension removed.
+        Contiguous packed E2M1 values with the innermost pair dimension removed.
     """
-    validate_nvfp4_pack_input(input)
+    _validate_nvfp4_pack_input(input)
     input_bits = input.view(torch.int32)
     sign = input_bits & 0x80000000
     magnitude = (input_bits ^ sign).view(torch.float32)
@@ -270,13 +270,15 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
     codes = torch.where(denormal, denormal_code, codes)
     codes = torch.where(normal, normal_code, codes)
     codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
-    return (codes[..., 1] << 4) | codes[..., 0]
+    return ((codes[..., 1] << 4) | codes[..., 0]).view(torch.float4_e2m1fn_x2)
 
 
 @nvfp4_pack.register_fake
 def _(input: torch.Tensor) -> torch.Tensor:
-    validate_nvfp4_pack_input(input)
-    return torch.empty(tuple(input.shape[:-1]), device=input.device, dtype=torch.uint8)
+    _validate_nvfp4_pack_input(input)
+    return torch.empty(
+        tuple(input.shape[:-1]), device=input.device, dtype=torch.float4_e2m1fn_x2
+    )
 
 
 @torch.library.custom_op("flex_gemm::to_blocked", mutates_args=())
