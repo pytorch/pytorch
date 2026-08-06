@@ -352,6 +352,14 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: dropping every global guard is what
+                # torch.compiler.skip_guard_on_globals_unsafe does explicitly,
+                # and the "unsafe" in that name applies here too: a dropped
+                # global guard does not fail, it silently reuses a graph traced
+                # under a different global value. Narrowing this default needs
+                # guard construction to resolve arbitrary global references
+                # first (today they can raise KeyError on G['...']), so callers
+                # who need a specific global guarded must pass guard_filter_fn.
                 return [
                     (
                         not (
@@ -490,8 +498,26 @@ class AOTCompiledModel:
         for result in self.compiled_results:
             if result.guard_check(self.model, *args, **kwargs):
                 return result(self.model, *args, **kwargs)
-        # All guards failed, just run one of them and throw the guard check error.
-        return self.compiled_results[0](self.model, *args, **kwargs)
+        raise RuntimeError(self._no_match_message(*args, **kwargs))
+
+    def _no_match_message(self, *args: Any, **kwargs: Any) -> str:
+        # Report why every compiled input was rejected, not just the first one,
+        # so it is clear which ModelInput is missing.
+        lines = [
+            f"No AOT compiled graph matched this call. Tried "
+            f"{len(self.compiled_results)} compiled input(s):"
+        ]
+        for i, result in enumerate(self.compiled_results):
+            if result._artifacts.guard_manager is None:
+                raise AssertionError("guard_manager must not be None")
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            reason = result._artifacts.guard_manager.check_verbose(f_locals)
+            lines.append(f"  [{i}] {reason}")
+        lines.append(
+            "Add a ModelInput covering this call, or check whether a guard that "
+            "distinguishes it was dropped by guard_filter_fn."
+        )
+        return "\n".join(lines)
 
     def serialize(self) -> bytes:
         data: list[bytes] = []
@@ -504,6 +530,13 @@ class AOTCompiledModel:
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
 
+        # Guards on globals resolve against the traced function's global scope,
+        # which is not reconstructible from the serialized bytecode alone: a
+        # global that was specialized away never appears in it. Supply the
+        # model's own scope, matching what aot_compile_fullgraph captured.
+        traced_fn, _ = convert_frame.get_traced_fn(model)
+        f_globals = traced_fn.__globals__
+
         results: list[bytes] = pickle.loads(data)
         compiled_results = []
         for result in results:
@@ -511,7 +544,9 @@ class AOTCompiledModel:
                 compile_context(CompileContext(convert_frame.get_compile_id({}))),
                 get_metrics_context(),
             ):
-                compiled_results.append(AOTCompiledFunction.deserialize(result))
+                compiled_results.append(
+                    AOTCompiledFunction.deserialize(result, f_globals=f_globals)
+                )
         return cls(model, compiled_results)
 
 
