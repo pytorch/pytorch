@@ -8,6 +8,46 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
+#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(NCCL_HAS_LSA_PEER_PTR)
+#include <mutex>
+#include <unordered_map>
+// HIP shims required to compile RCCL's device-side reduce/copy API. Must precede
+// <nccl_device.h>.
+//   1. RCCL selects the real (non-static_assert) reduce_copy implementation on
+//      __CUDACC_EXTENDED_LAMBDA__. hipcc does not define it, but HIP supports
+//      extended device lambdas natively, so defining it takes the real branch.
+//   2. RCCL's int8 sum-reduce specialization uses CUDA's __vadd4 per-byte SIMD
+//      intrinsic, which HIP lacks. It is an explicit specialization (compiled
+//      eagerly even though these float/half/bf16 tests never use int8), so a
+//      byte-wise wrapping-add equivalent must be visible.
+#ifndef __CUDACC_EXTENDED_LAMBDA__
+#define __CUDACC_EXTENDED_LAMBDA__ 1
+#endif
+__device__ __forceinline__ unsigned int __vadd4(unsigned int a, unsigned int b) {
+  unsigned int res;
+  auto* r = reinterpret_cast<unsigned char*>(&res);
+  auto* pa = reinterpret_cast<unsigned char*>(&a);
+  auto* pb = reinterpret_cast<unsigned char*>(&b);
+#pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    r[i] = static_cast<unsigned char>(pa[i] + pb[i]);
+  }
+  return res;
+}
+//   3. ATen compiles this TU with __HIP_NO_HALF_OPERATORS__, which strips
+//      __half's native operator+. RCCL's OpSum<__half> needs it: although the
+//      reduction accumulates in float (AccumulateType<OpSum<half>>::Type ==
+//      float), AT_DISPATCH_NV_FLOATS eagerly instantiates the __half kernel.
+//      Provide a convert-to-float add so the instantiation compiles; the runtime
+//      reduction precision is unaffected. bf16 keeps its own operator+.
+#if defined(__HIP_NO_HALF_OPERATORS__)
+__device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
+  return __float2half(__half2float(a) + __half2float(b));
+}
+#endif
+#include <nccl_device.h>
+#endif // NCCL_DEVICE_HAS_REDUCE_COPY && NCCL_HAS_LSA_PEER_PTR
+
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
 // Only the destination rank writes the reduced value to a contiguous output
@@ -45,48 +85,41 @@ constexpr int RS_MAX_BLOCKS_PER_RANK = 16;  // max blocks owned by a single rank
 constexpr int RS_MAX_CTAS_PER_BLOCK = 16;   // max CTAs assigned to one block
 // Threads per CTA; defaults to a medium value to fit medium-width blocks.
 constexpr int RS_THREADS_PER_CTA = 128;
-// Total LSA barrier slots needed: one per CTA across all owned blocks.
+// Upper bound on LSA barrier slots to request for the devcomm.  Per-slot launches
+// use at most RS_MAX_CTAS_PER_BLOCK barrier indices each; this over-allocation is
+// harmless and keeps a single devcomm requirement across all launch shapes.
 constexpr int RS_MAX_CTA_COUNT = (RS_MAX_BLOCKS_PER_RANK * RS_MAX_CTAS_PER_BLOCK);
 
-// Per-slot data passed to the kernel in a single struct to avoid multiple
-// kernel arguments.  Indexed by owned slot (0..n_owned-1).
-struct ReduceScatterOffsetsInfo {
-  size_t byte_offsets[RS_MAX_BLOCKS_PER_RANK]; // byte offset into the NCCL window
-  void* dst_ptrs[RS_MAX_BLOCKS_PER_RANK];      // output pointer (contiguous)
-  uint16_t dst_block_size[RS_MAX_BLOCKS_PER_RANK]; // per-slot size along the sharding dim
-  uint16_t ctas_offset[RS_MAX_BLOCKS_PER_RANK]; // inclusive prefix sum of per-slot CTA counts
-  uint8_t cta_slot[RS_MAX_CTA_COUNT];          // slot index for each flat CTA
-  int n_owned;
-};
-
-// Grid: 1D, total_ctas = sum of per-slot CTA counts (info.ctas_offset[n_owned]).
-// Each CTA belongs to one slot; blockIdx.x is the flat CTA index used as the
-// LSA barrier index, ensuring all ranks assign the same index to each logical
-// (slot, local_block) pair (because owned_sizes[j] is consistent across ranks).
+// Reduces ONE owned block ("slot") per launch.  Grid: 1D, gridDim.x == number of
+// CTAs (row tiles) cooperating on this slot; blockIdx.x is both the row-tile
+// index and the LSA barrier index.  All ranks launch the per-slot kernels in the
+// same order with the same per-slot CTA count (owned_sizes[j] is consistent
+// across ranks), so every rank agrees on the barrier index for each row tile.
+//
+// Slots are launched sequentially on the stream (one launch per owned block) so
+// that at most one destination allocation is being written at a time.  On ROCm,
+// running the LSA device reduce concurrently across CTAs that write to DIFFERENT
+// destination allocations triggers a memory-aperture fault in RCCL's device
+// reduce; serializing per destination avoids it.  Row tiles within a single slot
+// all write the same destination allocation, which is safe.
 //
 // UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
-// NVLink multicast; requires devcomm created with lsaMultimem=true.
+// multicast; requires devcomm created with lsaMultimem=true.
 // UseMultimem=false: uses ncclLsaReduceSum (software reduce via LSA reads).
 template <typename T, bool UseMultimem>
 __global__ void reduce_scatter_offset_kernel(
     ncclWindow_t window,
-    ReduceScatterOffsetsInfo info,
-    int fixed_dim_size,   // input.size(1-dim): constant across all slots
-    bool col_sharded,     // true when dim==1
-    int64_t outer_stride, // row stride of the input buffer (in elements)
+    size_t base_byte_offset, // window byte offset of this slot's block start
+    T* dst_base,             // this slot's output pointer (contiguous)
+    int rows,                // number of rows to reduce for this slot
+    int cols,                // elements per row
+    int64_t outer_stride,    // row stride of the input buffer (in elements)
     ncclDevComm devComm) {
-  // cta_slot maps the flat CTA index to its owned slot.
-  const int slot = info.cta_slot[blockIdx.x];
-  // ctas_offset is an inclusive prefix sum, so slot_start is the flat index
-  // of the first CTA assigned to this slot.
-  const int slot_start = slot > 0 ? info.ctas_offset[slot - 1] : 0;
-  // local_block is this CTA's position within its slot (0-based row tile index).
-  const int local_block = static_cast<int>(blockIdx.x) - slot_start;
-  // Number of CTAs sharing this slot; used as the row-loop stride.
-  const int ctas_for_slot = info.ctas_offset[slot] - slot_start;
+  const int ctas_for_slot = gridDim.x;
+  const int local_block = static_cast<int>(blockIdx.x);
   const ncclCoopCta coop{};
 
-  // One LSA barrier per CTA; all ranks must call both syncs unconditionally.
+  // One LSA barrier per row tile; all ranks must call both syncs unconditionally.
   ncclLsaBarrierSession<ncclCoopCta> bar{
       coop,
       devComm,
@@ -96,18 +129,11 @@ __global__ void reduce_scatter_offset_kernel(
   // Acquire: wait until all peers have written their data into the window.
   bar.sync(coop, cuda::memory_order_acquire);
 
-  const size_t base_byte_offset = info.byte_offsets[slot]; // start of this block in the window
-  T* dst_base = reinterpret_cast<T*>(info.dst_ptrs[slot]); // start of out[slot]
-  const int block_size = info.dst_block_size[slot]; // size along the sharding dim
-  const int rows = col_sharded ? fixed_dim_size : block_size;
-  const int cols = col_sharded ? block_size : fixed_dim_size;
-
   // Each CTA handles a strided subset of rows; the reduce reads from all peers
   // and writes cols elements starting at dst_row.
   for (int row = local_block; row < rows; row += ctas_for_slot) {
     const size_t row_offset =
-        base_byte_offset +
-        static_cast<size_t>(row * outer_stride) * sizeof(T);
+        base_byte_offset + static_cast<size_t>(row * outer_stride) * sizeof(T);
     T* dst_row = dst_base + row * cols;
     if constexpr (UseMultimem) {
       ncclMultimemReduceSum(
@@ -121,10 +147,42 @@ __global__ void reduce_scatter_offset_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
+#if defined(NCCL_HAS_LSA_PEER_PTR)
+// File-local ncclDevComm cache for the ROCm path. The shared NCCLDevCommManager
+// stores ncclDevComm only under NCCL_HAS_SYMMEM_DEVICE_SUPPORT (CUDA): its
+// header is included by host-only translation units (init.cpp,
+// ProcessGroupNCCL.cpp) compiled with the plain host compiler, which cannot
+// parse RCCL's <nccl_device.h> (it needs HIP device builtins). Caching the
+// devcomm here keeps the ncclDevComm type confined to hipcc-compiled TUs.
+// Keyed by group_name; devcomm lifetime spans the process (not destroyed), same
+// as the CUDA registry which only tears down in the manager destructor.
+static std::mutex g_rs_devcomm_mutex;
+static std::unordered_map<std::string, ncclDevComm> g_rs_devcomm_cache;
+
+static ncclDevComm& get_or_create_rs_devcomm(
+    ncclComm_t comm,
+    const std::string& group_name,
+    bool use_multimem) {
+  std::lock_guard<std::mutex> lock(g_rs_devcomm_mutex);
+  auto it = g_rs_devcomm_cache.find(group_name);
+  if (it == g_rs_devcomm_cache.end()) {
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
+    reqs.lsaMultimem = use_multimem;
+    ncclDevComm devcomm;
+    C10D_NCCL_CHECK(
+        ncclDevCommCreate(comm, &reqs, &devcomm),
+        "ncclDevCommCreate failed in nccl_reduce_scatter_offset");
+    it = g_rs_devcomm_cache.emplace(group_name, devcomm).first;
+  }
+  return it->second;
+}
+#endif // NCCL_HAS_LSA_PEER_PTR
+
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
 
-// Host entry point.  Validates arguments, resolves defaults, builds the
-// per-slot ReduceScatterOffsetsInfo, and launches the kernel.
+// Host entry point.  Validates arguments, resolves defaults, and launches one
+// reduce kernel per owned slot (sequentially on the stream).
 // See file-level comment for semantics.
 void nccl_reduce_scatter_offset(
     const at::Tensor& input,
@@ -173,10 +231,15 @@ void nccl_reduce_scatter_offset(
 
   const bool use_multimem = nccl_hdl->has_multicast_support();
 
-  // The devcomm is cached per (group, key); create it on first use.
+  // The devcomm is cached per group and created on first use.
   // lsaBarrierCount must cover the maximum number of concurrent CTAs.
   // lsaMultimem is set when the allocation has multicast support, so that
   // devComm.lsaMultimem is valid for ncclMultimemReduceSum in the kernel.
+#if defined(NCCL_HAS_LSA_PEER_PTR)
+  // ROCm: NCCLDevCommManager cannot hold ncclDevComm (see the file-local cache
+  // comment above), so cache it here instead.
+  ncclDevComm& devcomm = get_or_create_rs_devcomm(comm, group_name, use_multimem);
+#else
   static constexpr char const kDevcommKey[] = "nccl_reduce_scatter_offset";
   auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
   if (!devcomm_opt) {
@@ -191,6 +254,7 @@ void nccl_reduce_scatter_offset(
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
+#endif
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;
@@ -312,61 +376,50 @@ void nccl_reduce_scatter_offset(
         "nccl_reduce_scatter_offset: out[", j, "] must have the same dtype as input");
   }
 
-  // Per-slot CTA count: sized for each slot independently.  owned_sizes[j] is
-  // consistent across ranks, so ctas_offset is identical on every rank, which
-  // guarantees all ranks launch the same total CTA count and agree on the
-  // flat barrier index for each (slot, local_block) pair.
+  // Per-slot geometry.  owned_sizes[j] is consistent across ranks, so every rank
+  // computes the same per-slot CTA count and launches the same per-slot kernels
+  // in the same order, which keeps LSA barrier participation consistent.
   const bool col_sharded = (dim == 1);
   const int fixed_dim_size = static_cast<int>(col_sharded ? input.size(0) : input.size(1));
   const int unroll = 4 * 16 / static_cast<int>(input.element_size());
   const int elems_per_cta = RS_THREADS_PER_CTA * unroll;
   const size_t window_base_offset = nccl_hdl->get_window_offset();
 
-  // Build the per-slot info struct.
-  // For dim=1: byte_offsets encodes the column-block start within the window.
-  // For dim=0: byte_offsets encodes the row-block start within the window.
-  ReduceScatterOffsetsInfo info;
-  info.n_owned = n_owned;
-  for (int j = 0; j < n_owned; j++) {
-    const int i = owned_indices[j];
-    const int64_t block_start = (i > 0 ? effective_offsets[i - 1] : 0);
-    const size_t elem_offset = col_sharded
-        ? static_cast<size_t>(input.storage_offset() + block_start)
-        : static_cast<size_t>(input.storage_offset()) +
-              static_cast<size_t>(block_start) * outer_stride;
-    info.byte_offsets[j] = window_base_offset + elem_offset * input.element_size();
-    info.dst_ptrs[j] = out[j].data_ptr();
-    info.dst_block_size[j] = static_cast<uint16_t>(owned_sizes[j]);
-    const int numel_j = static_cast<int>(owned_sizes[j]) * fixed_dim_size;
-    const int ctas_j = std::max(1, std::min(
-        (numel_j + elems_per_cta - 1) / elems_per_cta, RS_MAX_CTAS_PER_BLOCK));
-    info.ctas_offset[j] = static_cast<uint16_t>((j > 0 ? info.ctas_offset[j - 1] : 0) + ctas_j);
-    const int slot_start = j > 0 ? info.ctas_offset[j - 1] : 0;
-    for (int k = slot_start; k < info.ctas_offset[j]; ++k) {
-      info.cta_slot[k] = static_cast<uint8_t>(j);
-    }
-  }
-  const int total_ctas = info.ctas_offset[n_owned - 1];
-
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
 
-  // Each owned (slot, local_block) pair gets one CTA; the flat CTA index is
-  // the LSA barrier index.  All ranks launch the same total_ctas because
-  // owned_sizes[j] is consistent, so every rank's ctas_offset is identical.
+  // Launch one kernel per owned slot, sequentially on the stream.  Reducing to
+  // different destination allocations concurrently faults in RCCL's device
+  // reduce on ROCm (see the kernel comment); stream-ordered per-slot launches
+  // keep at most one destination in flight while still tiling rows across CTAs.
   AT_DISPATCH_NV_FLOATS(
       input.scalar_type(),
       "nccl_reduce_scatter_offset",
       [&]() {
-        if (use_multimem) {
-          reduce_scatter_offset_kernel<scalar_t, true>
-              <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
-                  window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        } else {
-          reduce_scatter_offset_kernel<scalar_t, false>
-              <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
-                  window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
+        for (int j = 0; j < n_owned; j++) {
+          const int i = owned_indices[j];
+          const int64_t block_start = (i > 0 ? effective_offsets[i - 1] : 0);
+          const size_t elem_offset = col_sharded
+              ? static_cast<size_t>(input.storage_offset() + block_start)
+              : static_cast<size_t>(input.storage_offset()) +
+                    static_cast<size_t>(block_start) * outer_stride;
+          const size_t base_byte_offset =
+              window_base_offset + elem_offset * input.element_size();
+          auto* dst_base = static_cast<scalar_t*>(out[j].data_ptr());
+          const int rows = col_sharded ? fixed_dim_size : static_cast<int>(owned_sizes[j]);
+          const int cols = col_sharded ? static_cast<int>(owned_sizes[j]) : fixed_dim_size;
+          const int numel_j = static_cast<int>(owned_sizes[j]) * fixed_dim_size;
+          const int ctas_j = ::max(1, ::min(
+              (numel_j + elems_per_cta - 1) / elems_per_cta, RS_MAX_CTAS_PER_BLOCK));
+          if (use_multimem) {
+            reduce_scatter_offset_kernel<scalar_t, true>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window, base_byte_offset, dst_base, rows, cols, outer_stride, devcomm);
+          } else {
+            reduce_scatter_offset_kernel<scalar_t, false>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window, base_byte_offset, dst_base, rows, cols, outer_stride, devcomm);
+          }
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       });
