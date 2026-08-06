@@ -6,6 +6,8 @@
 #include <torch/csrc/stable/tensor.h>
 #include <torch/headeronly/util/Exception.h>
 
+#include <functional>
+
 using torch::stable::Tensor;
 
 namespace {
@@ -25,40 +27,15 @@ kernel void scale_negate_clamp(device const float* input [[buffer(0)]],
 }
 )MPS_SCALE_CLAMP";
 
-struct ScaleNegateClampArgs {
-  AtenTensorHandle input;
-  AtenTensorHandle output;
-  float scale;
-  bool negate;
-  float bounds[2];
-  uint64_t numel;
-};
-
-void scale_negate_clamp_encode(
-    AOTIMetalKernelFunctionHandle func,
-    void* user_data) {
-  auto* args = static_cast<ScaleNegateClampArgs*>(user_data);
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 1, args->output));
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 2, &args->scale, sizeof(float)));
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 3, &args->negate, sizeof(bool)));
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 4, args->bounds, sizeof(args->bounds)));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(func, args->numel));
-}
-
 AOTIMetalKernelFunctionHandle get_scale_negate_clamp_kernel() {
   static AOTIMetalShaderLibraryHandle lib_handle = []() {
     AOTIMetalShaderLibraryHandle handle = nullptr;
-    TORCH_ERROR_CODE_CHECK(
+    STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_mps_create_shader_library(SCALE_NEGATE_CLAMP_SHADER, &handle));
     return handle;
   }();
   AOTIMetalKernelFunctionHandle func = nullptr;
-  TORCH_ERROR_CODE_CHECK(
+  STABLE_TORCH_ERROR_CODE_CHECK(
       aoti_torch_mps_get_kernel_function(lib_handle, "scale_negate_clamp", &func));
   return func;
 }
@@ -76,35 +53,30 @@ Tensor my_mps_scale_negate_clamp(
 
   Tensor input_ = torch::stable::contiguous(input);
   Tensor output = torch::stable::empty_like(input_);
-
   AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
 
-  ScaleNegateClampArgs args{
-      input_.get(),
-      output.get(),
-      static_cast<float>(scale),
-      negate,
-      {static_cast<float>(low), static_cast<float>(high)},
-      static_cast<uint64_t>(input_.numel())};
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_mps_run_command_block(func, &scale_negate_clamp_encode, &args));
+  float scale_f = static_cast<float>(scale);
+  float bounds[2] = {static_cast<float>(low), static_cast<float>(high)};
+  auto numel = static_cast<uint64_t>(input_.numel());
+
+  std::function<void(AOTIMetalKernelFunctionHandle)> encode =
+      [&](AOTIMetalKernelFunctionHandle f) {
+        STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(f));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_set_arg_tensor(f, 0, input_.get()));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_set_arg_tensor(f, 1, output.get()));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 2, &scale_f, sizeof(float)));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 3, &negate, sizeof(bool)));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 4, bounds, sizeof(bounds)));
+        STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(f, numel));
+      };
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_run_command_block(
+      func, aoti_torch_mps_shared_callback, &encode));
   return output;
-}
-
-struct SetArgBytesRawArgs {
-  AtenTensorHandle input;
-  const void* ptr;
-  uint64_t size;
-};
-
-void set_arg_bytes_raw_encode(
-    AOTIMetalKernelFunctionHandle func,
-    void* user_data) {
-  auto* args = static_cast<SetArgBytesRawArgs*>(user_data);
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 2, args->ptr, args->size));
 }
 
 Tensor my_mps_set_arg_bytes_raw(Tensor input, int64_t size, bool null_ptr) {
@@ -112,52 +84,52 @@ Tensor my_mps_set_arg_bytes_raw(Tensor input, int64_t size, bool null_ptr) {
   AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
 
   static const char blob[4096] = {};
-  SetArgBytesRawArgs args{
-      input_.get(),
-      null_ptr ? nullptr : blob,
-      static_cast<uint64_t>(size)};
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_mps_run_command_block(func, &set_arg_bytes_raw_encode, &args));
+  const void* ptr = null_ptr ? nullptr : blob;
+  auto size_u = static_cast<uint64_t>(size);
+
+  std::function<void(AOTIMetalKernelFunctionHandle)> encode =
+      [&](AOTIMetalKernelFunctionHandle f) {
+        STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(f));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_set_arg_tensor(f, 0, input_.get()));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 2, ptr, size_u));
+      };
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_run_command_block(
+      func, aoti_torch_mps_shared_callback, &encode));
   return torch::stable::empty_like(input_);
-}
-
-struct LifetimeArgs {
-  AtenTensorHandle input;
-  AtenTensorHandle output;
-  uint64_t numel;
-};
-
-void scale_negate_clamp_lifetime_encode(
-    AOTIMetalKernelFunctionHandle func,
-    void* user_data) {
-  auto* args = static_cast<LifetimeArgs*>(user_data);
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(func));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 0, args->input));
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_set_arg_tensor(func, 1, args->output));
-  float scale = 3.0f;
-  bool negate = false;
-  float bounds[2] = {-1e30f, 1e30f};
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 2, &scale, sizeof(float)));
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 3, &negate, sizeof(bool)));
-  TORCH_ERROR_CODE_CHECK(
-      torch_mps_set_arg_bytes(func, 4, bounds, sizeof(bounds)));
-  scale = -7.0f;
-  negate = true;
-  bounds[0] = 0.0f;
-  bounds[1] = 0.0f;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(func, args->numel));
 }
 
 Tensor my_mps_set_arg_bytes_lifetime(Tensor input) {
   Tensor input_ = torch::stable::contiguous(input);
   Tensor output = torch::stable::empty_like(input_);
   AOTIMetalKernelFunctionHandle func = get_scale_negate_clamp_kernel();
-  LifetimeArgs args{
-      input_.get(), output.get(), static_cast<uint64_t>(input_.numel())};
-  TORCH_ERROR_CODE_CHECK(aoti_torch_mps_run_command_block(
-      func, &scale_negate_clamp_lifetime_encode, &args));
+  auto numel = static_cast<uint64_t>(input_.numel());
+
+  std::function<void(AOTIMetalKernelFunctionHandle)> encode =
+      [&](AOTIMetalKernelFunctionHandle f) {
+        STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_start_encoding(f));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_set_arg_tensor(f, 0, input_.get()));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_set_arg_tensor(f, 1, output.get()));
+        float scale = 3.0f;
+        bool negate = false;
+        float bounds[2] = {-1e30f, 1e30f};
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 2, &scale, sizeof(float)));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 3, &negate, sizeof(bool)));
+        STABLE_TORCH_ERROR_CODE_CHECK(
+            torch_mps_set_arg_bytes(f, 4, bounds, sizeof(bounds)));
+        scale = -7.0f;
+        negate = true;
+        bounds[0] = 0.0f;
+        bounds[1] = 0.0f;
+        STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_dispatch_single(f, numel));
+      };
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_mps_run_command_block(
+      func, aoti_torch_mps_shared_callback, &encode));
   return output;
 }
 
