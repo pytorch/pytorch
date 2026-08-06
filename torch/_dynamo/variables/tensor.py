@@ -147,6 +147,15 @@ def is_bound_tensor_method(value: object) -> bool:
 # are common keys.
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
+# Tensor attributes that are plain views of the tensor. Each maps to the aten op
+# that the C++ getter dispatches to, see native_functions.yaml.
+_VIEW_ATTR_TO_ATEN_OP = {
+    "T": torch.ops.aten.numpy_T,
+    "mT": torch.ops.aten.mT,
+    "H": torch.ops.aten.matrix_H,
+    "mH": torch.ops.aten.mH,
+}
+
 
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:
     """True if vt can be the other operand of a SymNode arithmetic op
@@ -518,6 +527,32 @@ class TensorVariable(VariableTracker):
         )
         return VariableTracker.build(tx, real_value, attr_source)
 
+    def _view_attr(self, tx: "InstructionTranslatorBase", name: str) -> VariableTracker:
+        """Trace a view attribute as a call to the aten op behind the C++ getter.
+
+        Going through the op keeps the node on the current tracer. Reading the
+        attribute off the base proxy instead puts the node in whichever graph
+        owns the base, so inside a higher order op it lands in the parent graph
+        and then has to be lifted back in as a subgraph input.
+        """
+        from .torch import TorchInGraphFunctionVariable
+
+        return TorchInGraphFunctionVariable(_VIEW_ATTR_TO_ATEN_OP[name]).call_function(
+            tx, [self], {}
+        )
+
+    def method_attr_T(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "T")
+
+    def method_attr_mT(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "mT")
+
+    def method_attr_H(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "H")
+
+    def method_attr_mH(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self._view_attr(tx, "mH")
+
     def method_attr_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.ndim is not None:
             return VariableTracker.build(tx, self.ndim)
@@ -717,6 +752,10 @@ class TensorVariable(VariableTracker):
             result is not None
             and self.source
             and self.source.subguards_allowed()
+            # A view attribute is the output of an op we just traced, like any
+            # other view. An AttrSource would instead make Dynamo drop it from
+            # the graph outputs and rebuild it in bytecode from the base.
+            and name not in _VIEW_ATTR_TO_ATEN_OP
             and not (
                 name not in ("grad", "requires_grad") and result.is_python_constant()
             )
@@ -754,7 +793,6 @@ class TensorVariable(VariableTracker):
 
             def try_generic_attr_handling() -> VariableTracker | None:
                 from .builder import wrap_fx_proxy
-                from .misc import GetAttrVariable
 
                 static_attr = all_tensor_attrs.get(name, None)
                 if static_attr is None:
@@ -769,7 +807,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
-                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                # Create the node on the current tracer, not on the tracer that
+                # owns the base proxy. Otherwise, inside a higher order op, the
+                # node lands in the parent graph and has to be lifted back in as
+                # a subgraph input.
+                proxy = tx.output.current_tracer.create_proxy(
+                    "call_function", getattr, (self.as_proxy(), name), {}
+                )
                 if self.source is not None:
                     return wrap_fx_proxy(
                         tx=tx, proxy=proxy, source=AttrSource(self.source, name)
