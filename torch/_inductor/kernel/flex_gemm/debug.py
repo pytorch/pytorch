@@ -289,7 +289,6 @@ def format_flex_gemm_lowering_plan(
     local_reduce_metas: Sequence[torch.Tensor],
     *,
     local_reduce_layout: Any,
-    zero_init_local_reduce: bool,
     swap_ab_alignment: int,
 ) -> str:
     """Render buffer allocation and runtime-ABI decisions."""
@@ -318,17 +317,9 @@ def format_flex_gemm_lowering_plan(
             ),
         )
         layout = "dense" if local_reduce_layout is None else local_reduce_layout.value
-        initialization = (
-            "zero-filled padded carrier"
-            if zero_init_local_reduce
-            else "allocation-only (full coverage)"
-        )
-        lines.extend(
-            (
-                f"  layout: {layout}",
-                f"  initialization: {initialization}",
-            )
-        )
+        lines.append(f"  layout: {layout}")
+        if local_reduce_layout is not None:
+            lines.append("  initialization: zero-filled at runtime when padded")
     else:
         lines.append("local_reduction_storage: (none)")
     return "\n".join(lines)

@@ -293,6 +293,8 @@ def to_blocked(input_matrix: torch.Tensor) -> torch.Tensor:
     if input_matrix.ndim != 2:
         raise ValueError(f"to_blocked expects a 2-D tensor, got {input_matrix.ndim}-D")
     rows, cols = input_matrix.shape
+    if rows == 0 or cols == 0:
+        return input_matrix.new_empty(0)
     row_blocks = (rows + 127) // 128
     col_blocks = (cols + 3) // 4
     padded_rows = row_blocks * 128
