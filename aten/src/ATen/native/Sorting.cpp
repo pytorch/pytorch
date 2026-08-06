@@ -290,7 +290,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
 void quantile_checks(const Tensor& self, const Tensor& q) {
   TORCH_SYM_CHECK(self.sym_numel().sym_gt(0), "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
       "quantile() input tensor must be either float or double dtype");
   TORCH_CHECK(
