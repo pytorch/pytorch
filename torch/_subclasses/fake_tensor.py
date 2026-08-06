@@ -3203,7 +3203,13 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            with in_kernel_invocation_manager(self):
+            # sparse invariant checks read index data, which meta tensors lack
+            suppress_invariants = (
+                torch.sparse.check_sparse_tensor_invariants(False)
+                if any(is_sparse_any(t) for t in flat_arg_fake_tensors)
+                else contextlib.nullcontext()
+            )
+            with in_kernel_invocation_manager(self), suppress_invariants:
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
