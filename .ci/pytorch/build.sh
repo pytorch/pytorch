@@ -183,15 +183,14 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# FlashAttention kernels for CUDA architectures 8.0+ need large amounts of memory
-# to compile and can OOM at full build parallelism.
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ;' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   FLASH_ATTENTION_MAX_JOBS=2
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      FLASH_ATTENTION_MAX_JOBS=24
-      ;;
-  esac
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
   export FLASH_ATTENTION_MAX_JOBS
   echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
 fi
