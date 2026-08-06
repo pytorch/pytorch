@@ -88,6 +88,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
+      work_state_(std::make_shared<WorkNCCLState>(kDefaultMaxEventPoolSize)),
       abort_process_on_timeout_or_error_(
           SHOULD_TEAR_DOWN(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
               ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
@@ -95,6 +96,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
+      "with RCCL");
+#endif
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -108,6 +115,7 @@ std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
 void ProcessGroupNCCL::ensureInitialized(at::Device device) {
   TORCH_CHECK(
       device.is_cuda(), "ProcessGroupNCCL requires CUDA tensors/devices");
+  std::lock_guard initializationLock(initialization_mutex_);
   if (init_state_ == InitializationState::INITIALIZED) {
     TORCH_CHECK(
         device_.index() == device.index(),
@@ -168,13 +176,21 @@ void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
 
 void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
-  // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
+  // gracefully. A live CUDA graph must retain the communicator until its graph
+  // object is released; ncclCommDestroy otherwise blocks indefinitely.
   if (init_state_ != InitializationState::INITIALIZED) {
     return;
   }
+  TORCH_CHECK(
+      !hasCapturedGraphs(),
+      "ProcessGroupNCCL cannot be destroyed while a captured CUDA graph is "
+      "alive");
   try {
     finalize();
   } catch (const std::exception& e) {
+    if (hasCapturedGraphs()) {
+      throw;
+    }
     TC_LOG(WARNING) << "ProcessGroupNCCL::shutdown: finalize() raised, "
                     << "treating as no-op: " << e.what();
   }
@@ -239,6 +255,7 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const ::c10d::BroadcastOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -258,6 +275,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -279,6 +297,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceCoalescedOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
   ensureInitialized(tensors.at(0).device());
   ++sequence_number_;
@@ -298,6 +317,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::ReduceOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -324,6 +344,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllgatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
@@ -367,6 +388,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& outputTensorLists,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllgatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -398,6 +420,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         std::vector<at::Tensor>& outputs,
         std::vector<at::Tensor>& inputs,
         const ::c10d::AllgatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -423,6 +446,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   ensureInitialized(inputBuffer.device());
   ++sequence_number_;
   auto work = allGatherSingleImpl(
@@ -435,6 +459,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::GatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(inputTensors.size() == 1, "Only single input tensor supported");
   ensureInitialized(inputTensors.at(0).device());
   if (getRank() == opts.rootRank) {
@@ -459,6 +484,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::GatherOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       opts.rootRank >= 0 && opts.rootRank < getSize(),
       "invalid root rank: ",
@@ -498,6 +524,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ::c10d::ScatterOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(outputTensors.size() == 1, "Only single output tensor supported");
   ensureInitialized(outputTensors.at(0).device());
   if (getRank() == opts.rootRank) {
@@ -521,6 +548,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ::c10d::ReduceScatterOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
@@ -541,6 +569,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         std::vector<at::Tensor>& outputs,
         std::vector<at::Tensor>& inputs,
         const ::c10d::ReduceScatterOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -567,6 +596,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::ReduceScatterOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   ensureInitialized(outputBuffer.device());
   ++sequence_number_;
   auto work = reduceScatterSingleImpl(
@@ -585,6 +615,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const ::c10d::AllToAllOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   ensureInitialized(outputBuffer.device());
   ++sequence_number_;
   auto timeout = operationTimeout(opts.timeout);
@@ -611,6 +642,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllToAllOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(!inputTensors.empty(), "alltoall requires input tensors");
   ensureInitialized(inputTensors.at(0).device());
   ++sequence_number_;
@@ -625,6 +657,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::barrier(
     const ::c10d::BarrierOptions& opts) {
+  auto commUseGuard = acquireCommUse();
   // Resolve a device for lazy init: prefer an explicit device id, then the
   // bound device, then the conventional rank-to-device mapping.
   if (init_state_ != InitializationState::INITIALIZED) {
@@ -647,6 +680,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     [[maybe_unused]] int tag) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   ensureInitialized(tensors.at(0).device());
   if (coalescing_batch_.has_value()) {
@@ -663,6 +697,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     [[maybe_unused]] int tag) {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   ensureInitialized(tensors.at(0).device());
   if (coalescing_batch_.has_value()) {
@@ -676,6 +711,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
 }
 
 void ProcessGroupNCCL::startCoalescing() {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       !coalescing_batch_.has_value(),
       "startCoalescing called while a batch is already active");
@@ -684,6 +720,7 @@ void ProcessGroupNCCL::startCoalescing() {
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
+  auto commUseGuard = acquireCommUse();
   TORCH_CHECK(
       coalescing_batch_.has_value(),
       "endCoalescing called without a matching startCoalescing");
