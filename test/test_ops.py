@@ -1652,10 +1652,12 @@ class TestCommon(TestCase):
                 try:
                     result = op(sample.input, *sample.args, **sample.kwargs)
                     supported_dtypes.add(dtype)
-                except Exception as e:
-                    # NOTE: some ops will fail in forward if their inputs
-                    #   require grad but they don't support computing the gradient
-                    #   in that type! This is a bug in the op!
+                except (NotImplementedError, TypeError) as e:
+                    # An unsupported dtype must be reported as NotImplementedError
+                    # (no kernel for this dtype) or TypeError (the op cannot be
+                    # defined for this dtype, e.g. ordering on complex). Any other
+                    # exception is an actual bug in the op (e.g. an opaque
+                    # backend/internal error) and should fail the test.
                     unsupported(dtype, e)
                     continue
 
