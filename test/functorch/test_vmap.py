@@ -4039,6 +4039,53 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             )
 
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa_unbatched_inputs(self, device, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+
+        query = torch.randn(3, 4, 32, 64, dtype=torch.float16, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value)
+            actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+            expected_grads = loss_grad(query, key, value)
+            actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grads, expected_grads)
+
+    @parametrize(
+        "backend",
+        [
+            backend
+            for backend in PLATFORM_SPECIFIC_SDPA
+            if backend != SDPBackend.FLASH_ATTENTION
+        ],
+    )
+    def test_sdpa_unbatched_inputs_with_mask(self, device, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+
+        query = torch.randn(3, 4, 32, 64, dtype=torch.float16, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        attn_mask = torch.randn(3, 1, 32, 32, dtype=torch.float16, device=device)
+
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value, attn_mask)
+            actual = vmap(F.scaled_dot_product_attention)(
+                query, key, value, attn_mask[:, 0]
+            )
+
+        self.assertEqual(actual, expected)
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
         if device == "cpu":
