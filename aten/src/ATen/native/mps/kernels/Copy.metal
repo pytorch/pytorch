@@ -1,8 +1,59 @@
+#include <ATen/native/mps/kernels/Copy.h>
 #include <c10/metal/indexing.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 using namespace c10::metal;
+
+// Each thread copies a 16-byte chunk of a CONTIGUOUS input into the output,
+// using the widest aligned vector store both endpoints allow, with a per-byte
+// fallback for runs that cross a slice boundary (or the dispatch tail). The
+// output is regularly-strided blocks; see StridedBlockParams /
+// inner_contiguous_scatter_mps.
+template <typename I>
+kernel void inner_contiguous_scatter(
+    constant uchar* input [[buffer(0)]],
+    device uchar* output [[buffer(1)]],
+    constant StridedBlockParams<I>& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint pos = tid * 16;
+  if (pos >= params.nbytes) {
+    return;
+  }
+  I g = params.chunk_base + pos;
+  I o = g / params.slice_bytes;
+  I j = g - o * params.slice_bytes;
+  constant uchar* inp = input + g;
+
+  // A run that crosses a slice boundary (or the dispatch tail) maps to
+  // discontiguous output, so copy it byte by byte, recomputing the destination.
+  if (params.slice_bytes - j < 16 || pos + 16 > params.nbytes) {
+    uint stop = min(pos + 16u, params.nbytes) - pos;
+    for (uint i = 0; i < stop; i++) {
+      I gg = g + i;
+      I oo = gg / params.slice_bytes;
+      I jj = gg - oo * params.slice_bytes;
+      output[oo * params.out_stride_bytes + params.off_bytes + jj] = inp[i];
+    }
+    return;
+  }
+
+  // Whole 16-byte run into a contiguous slice of the output.
+  device uchar* out =
+      output + o * params.out_stride_bytes + params.off_bytes + j;
+  copy_bytes_aligned(out, inp, 16);
+}
+
+#define REGISTER_INNER_CONTIGUOUS_SCATTER_OP(I, SUFFIX)       \
+  template [[host_name("inner_contiguous_scatter_" #SUFFIX)]] \
+  kernel void inner_contiguous_scatter<I>(                    \
+      constant uchar * input [[buffer(0)]],                   \
+      device uchar * output [[buffer(1)]],                    \
+      constant StridedBlockParams<I> & params [[buffer(2)]],  \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_INNER_CONTIGUOUS_SCATTER_OP(uint, u32);
+REGISTER_INNER_CONTIGUOUS_SCATTER_OP(ulong, u64);
 
 // Castout: input is loaded at compile-time Tin (the registered input dtype) and
 // the result is cast to the user-supplied output dtype on store (runtime
