@@ -5,6 +5,7 @@ import enum
 import inspect
 import logging
 import operator
+import os
 import sys
 import traceback
 import types
@@ -300,15 +301,20 @@ class TracerBase:
         # for the recorded stack trace
         user_frames: list[traceback.FrameSummary] = []
         if self._record_forward_stack_traces_only:
-            user_frames = [
-                frame
-                for frame in user_stack_summary
+            torch_dir = os.path.dirname(torch.__file__) + os.sep
+            for i, frame in enumerate(user_stack_summary):
+                if frame.filename.startswith(torch_dir):
+                    continue
                 if (
                     frame.name == "forward"
-                    or frame.filename.endswith("torch/__init__.py")
                     or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
-                )
-            ]
+                ):
+                    user_frames = [
+                        f
+                        for f in user_stack_summary[i:]
+                        if not f.filename.startswith(torch_dir)
+                    ]
+                    break
         else:
             first_forward = -1
             for i, frame in enumerate(user_stack_summary):

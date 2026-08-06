@@ -14708,6 +14708,27 @@ graph():
         trace_x = [node for node in graph.nodes if node.name == "x"][0].stack_trace
         self.assertTrue(re.search(r"proxy.py.*in create_node\n", trace_x))
 
+    def test_stack_trace_nonstrict_preserves_helper_frames(self):
+        # Non-strict export should keep frames from helper methods a
+        # forward() delegates to, not just literal "forward" frames.
+        class Foo(torch.nn.Module):
+            def forward_impl(self, x, y):
+                return (x + y).relu()
+
+            def forward(self, x, y):
+                return self.forward_impl(x, y)
+
+        ep = torch.export.export(
+            Foo(), (torch.randn(3, 4), torch.randn(3, 4)), strict=False
+        )
+        trace_relu = [node for node in ep.graph.nodes if node.name == "relu"][
+            0
+        ].meta.get("stack_trace", "")
+        self.assertTrue(re.search(r"in forward\n.*forward_impl", trace_relu))
+        self.assertTrue(
+            re.search(r"in forward_impl\n.*\(x \+ y\)\.relu\(\)", trace_relu)
+        )
+
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
