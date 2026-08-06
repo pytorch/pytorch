@@ -10288,7 +10288,6 @@ class TestLinalgCudaOnly(TestCase):
             fastest_time = min(info["timings"].values())
             self.assertEqual(winner_time, fastest_time, (key, info))
 
-    @skipIfRocm
     @dtypes(torch.half)
     def test_invalid_cublaslt_candidate_fallback_tunableop(self, device, dtype):
         with self._tunableop_ctx():
@@ -10307,8 +10306,11 @@ class TestLinalgCudaOnly(TestCase):
 
             A = torch.randn(128, 256, device=device, dtype=dtype)
             B = torch.randn(256, 96, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-            self.assertEqual(C.shape, (128, 96))
+            torch.cuda.tunable.enable(False)
+            expected = torch.matmul(A, B)
+            torch.cuda.tunable.enable(True)
+            actual = torch.matmul(A, B)
+            torch.testing.assert_close(actual, expected)
 
     @skipIfRocm
     @dtypes(torch.half)
