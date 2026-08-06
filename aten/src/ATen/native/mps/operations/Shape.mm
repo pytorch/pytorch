@@ -6,6 +6,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Shape.h>
 
@@ -65,28 +66,24 @@ std::string get_type_str<int32_t>() {
   return "int32_t";
 }
 
-// If all tensors are contiguous with the same dtype and the cat dimension is 0,
-// then we can simply copy each tensor's underlying buffer contiguously into the
-// output.
-static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, const Tensor& output) {
-  MPSStream* stream = getCurrentMPSStream();
-  id<MTLBuffer> output_buffer = getMTLBufferStorage(output);
-  size_t output_offset = output.storage_offset() * output.itemsize();
+// Contiguous, same-dtype cat along any dim: copy each input's bytes into a
+// strided blocks of the output via the shared inner_contiguous_scatter kernel. Uses a
+// compute encoder, not an MTLBlit (issue #188198).
+static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
+  uint64_t inner_bytes = output.itemsize();
+  for (const auto d : c10::irange(dimension + 1, output.dim())) {
+    inner_bytes *= output.size(d);
+  }
+  uint64_t out_stride_bytes = output.size(dimension) * inner_bytes;
 
+  int64_t cat_dim_offset = 0;
   for (const Tensor& input : inputs) {
     if (cat_should_skip_tensor(input)) {
       continue;
     }
-
-    id<MTLBuffer> input_buffer = getMTLBufferStorage(input);
-    size_t input_offset = input.storage_offset() * input.itemsize();
-    auto nbytes = input.nbytes();
-    auto profile_id =
-        getMPSProfiler().beginProfileCopy(input_buffer, output_buffer, input, output, nbytes, /*non_blocking=*/true);
-
-    stream->copy(input_buffer, output_buffer, nbytes, input_offset, output_offset, profile_id, SyncType::NONE);
-
-    output_offset += nbytes;
+    uint64_t slice_bytes = input.size(dimension) * inner_bytes;
+    inner_contiguous_scatter_mps(input, output, slice_bytes, out_stride_bytes, cat_dim_offset * inner_bytes);
+    cat_dim_offset += input.size(dimension);
   }
 }
 
@@ -176,8 +173,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
         return !cat_should_skip_tensor(t) && isTooLargeForMPSGraph(t);
       });
 
-  if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous) && (dimension == 0)) {
-    return mps::cat_out_mps_contiguous_impl(materialized_inputs, out);
+  if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous)) {
+    return mps::cat_out_mps_contiguous_impl(materialized_inputs, dimension, out);
   } else if (has_large_tensor) {
     return mps::cat_out_mps_impl<int64_t>(materialized_inputs, dimension, out);
   } else {
