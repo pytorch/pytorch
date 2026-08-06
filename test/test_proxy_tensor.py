@@ -2,9 +2,10 @@
 # ruff: noqa: F841
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
     skipIfTorchDynamo,
     TestCase,
-    run_tests,
     xfailIfNoAcceleratorTriton,
 )
 import torch
@@ -154,6 +155,8 @@ class UnwrapTensor(torch.Tensor):
         return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # WARNING: if any of your inputs are index tensors, DO NOT use this
     # function
     def _test(self, f, inps):
@@ -783,23 +786,6 @@ def forward(self, x_1):
         traced = make_fx(f, decomposition_table={torch.ops.aten.t.default: nop})(torch.randn(5))
         self.assertEqual(len([n for n in traced.graph.nodes if n.target == torch.ops.aten.t.default]), 0)
 
-
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_amp_cache(self):
-        layer = torch.nn.Conv2d(3, 3, 3).cuda()
-
-        def f(x, w):
-            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
-
-        inp = torch.randn(4, 3, 10, 10, device='cuda')
-        with torch.autocast('cuda'):
-            out_graph = make_fx(f)(inp, layer.weight).graph
-            out_graph2 = make_fx(f)(inp, layer.weight).graph
-
-        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
-        for a, b in zip(out_graph.nodes, out_graph2.nodes):
-            self.assertEqual(a.op, b.op)
-
     def test_strides(self):
         def f(x):
             self.assertTrue(x.is_contiguous())
@@ -827,37 +813,19 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
-    @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_T244632748(self):
-        class TestModule(torch.nn.Module):
-            def forward(self, x):
-                return x + (x.shape[0] * 2)
-
-        mod = TestModule()
-        sample = torch.randn((5, 5)).to("cuda")
-        dim0 = torch.export.Dim.DYNAMIC(max=100)
-        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
-        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
-        gm = ep.module()
-        symint = list(gm.graph.nodes)[3].meta["val"]
-        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
-        gm.graph.eliminate_dead_code()
-
-        inductor_fx = torch._inductor.aot_compile(
-            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
-        )
-
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
+    hw_classification = HardwareClassification.GENERIC
     tracing_mode = "real"
 
 
 class TestGenericProxyTensorFake(TestGenericProxyTensor):
+    hw_classification = HardwareClassification.GENERIC
     tracing_mode = "fake"
 
 
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
+    hw_classification = HardwareClassification.GENERIC
     tracing_mode = "symbolic"
 
 
@@ -865,6 +833,8 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_error_on_data_dependent_ops(self):
         def f():
             x = torch.randn([])
@@ -904,6 +874,8 @@ class TestRealProxyTensor(TestCase):
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
 class TestFakeProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_issue82547(self):
         x = nn.Parameter(torch.randn(3, 3))
 
@@ -1032,6 +1004,8 @@ def _trace(f, *args):
 
 # TODO: Need to test the guards themselves specifically as well
 class TestSymbolicTracing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
@@ -2317,6 +2291,8 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
@@ -2347,8 +2323,50 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
-only_for = ("cpu")
+only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
+
+
+class TestProxyTensor(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_amp_cache(self):
+        layer = torch.nn.Conv2d(3, 3, 3).cuda()
+
+        def f(x, w):
+            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
+
+        inp = torch.randn(4, 3, 10, 10, device='cuda')
+        with torch.autocast('cuda'):
+            out_graph = make_fx(f)(inp, layer.weight).graph
+            out_graph2 = make_fx(f)(inp, layer.weight).graph
+
+        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
+        for a, b in zip(out_graph.nodes, out_graph2.nodes):
+            self.assertEqual(a.op, b.op)
+
+    @xfailIfNoAcceleratorTriton
+    def test_T244632748(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + (x.shape[0] * 2)
+
+        mod = TestModule()
+        sample = torch.randn((5, 5)).to("cuda")
+        dim0 = torch.export.Dim.DYNAMIC(max=100)
+        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
+        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
+        gm = ep.module()
+        symint = list(gm.graph.nodes)[3].meta["val"]
+        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
+        gm.graph.eliminate_dead_code()
+
+        inductor_fx = torch._inductor.aot_compile(
+            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
+        )
+
+
+instantiate_device_type_tests(TestProxyTensor, globals(), only_for='cuda')
 
 
 if __name__ == '__main__':
