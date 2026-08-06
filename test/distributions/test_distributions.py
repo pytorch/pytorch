@@ -1358,7 +1358,6 @@ class TestDistributions(DistributionsTestCase):
 
         gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
 
-
     def _check_forward_ad(self, fn):
         with fwAD.dual_level():
             x = torch.tensor(1.0)
@@ -4556,7 +4555,7 @@ class TestDistributions(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
-    hw_classification = HardwareClassification.DEVICE_GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
     def test_default_device(self, device):
         device_type = torch.device(device).type
         self.assertEqual(torch.get_default_device().type, device_type)
@@ -4787,7 +4786,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
         dev_type = torch.device(device).type
-        # 所有加速设备(cuda/xpu/mps/npu等)统一使用宽松atol=0.12，cpu用0.05
+        # Use atol=0.12 for accelerated devices (cuda/xpu/mps/npu etc.), atol=0.05 for CPU.
         atol = 0.12 if dev_type != "cpu" else 0.05
         self.assertEqual(frac_zeros, 0.5, atol=atol, rtol=0)
         self.assertEqual(frac_ones, 0.5, atol=atol, rtol=0)
