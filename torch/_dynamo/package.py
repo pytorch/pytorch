@@ -25,6 +25,7 @@ import platform
 import shutil
 import sys
 import types
+import weakref
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
@@ -53,7 +54,8 @@ if TYPE_CHECKING:
 
 _CODE_CACHE = WeakIdKeyDictionary()
 
-# code object -> ids of the live CompilePackages that installed entries on it.
+# code object -> the live CompilePackages that installed entries on it. Weak on
+# both sides: a package dropped without unloading must not block a later one.
 _PRECOMPILE_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
@@ -827,7 +829,10 @@ class CompilePackage:
             raise AssertionError(
                 "_current_entry is not set in mark_current_entry_truncated"
             )
-        self._truncated_frames.add(self._current_entry.python_code.co_name)
+        code = self._current_entry.python_code
+        self._truncated_frames.add(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
+        )
 
     @property
     def truncated_frames(self) -> frozenset[str]:
@@ -912,25 +917,29 @@ class CompilePackage:
         self._skipped_codes = []
 
         # _reset_precompile_entries clears every entry on a code object and there
-        # is no per-entry removal, so unloading would silently take another live
-        # package's entries with it. Fail loudly instead of corrupting it.
+        # is no per-entry removal, so unloading also drops any other live
+        # package's entries for the same frame. Warn rather than raise: refusing
+        # would deadlock two packages that share a frame, since neither could
+        # ever go first.
         for code in self._installed_precompile_codes:
-            others = _PRECOMPILE_INSTALLERS.get(code, set()) - {id(self)}
+            others = [p for p in _PRECOMPILE_INSTALLERS.get(code, ()) if p is not self]
             if others:
-                raise PackageError(
-                    f"Cannot uninstall {self!r}: another loaded CompilePackage is "
-                    f"also installed on code object {code.co_name} "
-                    f"({code.co_filename}:{code.co_firstlineno}). Precompile "
-                    f"entries can only be cleared en masse, so unloading now "
-                    f"would break the other package. Unload it first."
+                logger.warning(
+                    "Uninstalling a CompilePackage from code object %s (%s:%d) that "
+                    "%d other loaded package(s) also installed on. Precompile "
+                    "entries can only be cleared en masse, so those packages will "
+                    "stop serving this frame and fall back to compiling it.",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    len(others),
                 )
 
-        _reset_precompile_entries(self._innermost_fn.__code__)
-        for code in self._installed_precompile_codes:
+        for code in [self._innermost_fn.__code__, *self._installed_precompile_codes]:
             _reset_precompile_entries(code)
             installers = _PRECOMPILE_INSTALLERS.get(code)
             if installers is not None:
-                installers.discard(id(self))
+                installers.discard(self)
         self._installed_precompile_codes = []
 
     def install(self, backends: dict[_BackendId, Any]) -> None:
@@ -1052,7 +1061,9 @@ class CompilePackage:
                         )
                     if target_code not in self._installed_precompile_codes:
                         self._installed_precompile_codes.append(target_code)
-                    _PRECOMPILE_INSTALLERS.setdefault(target_code, set()).add(id(self))
+                    _PRECOMPILE_INSTALLERS.setdefault(
+                        target_code, weakref.WeakSet()
+                    ).add(self)
                     _load_precompile_entry(
                         target_code,
                         guard_manager,

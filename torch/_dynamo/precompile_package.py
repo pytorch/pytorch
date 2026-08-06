@@ -25,6 +25,29 @@ Capture is by execution: a resume function only exists once the frame ahead of
 it has actually run, so every variant must be exercised. Whatever you do not
 run is not in the artifact.
 
+Know these before relying on an artifact in production:
+
+* Capture inference artifacts under ``torch.no_grad()`` or
+  ``torch.inference_mode()``. AOTAutograd only records a bundled backend once
+  the BACKWARD compiles, so a forward-only capture with grad enabled -- the
+  default, and what ``model.eval()`` still leaves you in -- records no backends
+  and cannot be saved. Capturing a training step that calls ``.backward()``
+  works too.
+* A value that crosses a graph break is guarded by equality, so a model whose
+  breaks come from ``.item()`` or other data-dependent control flow yields an
+  artifact that only serves inputs reproducing those exact values.
+  ``summary().wont_generalize`` lists them; expect poor coverage on new data.
+  ``dynamic=True`` helps with shapes but not with pinned values.
+* Identity guards cannot be serialized, so precompiling gives up on noticing
+  that a guarded object was rebound. ``summary().dropped_guards`` is the
+  authoritative list and ``risky_dropped_guards`` is a lint over it, not a
+  proof -- see ``_is_risky_drop`` for what it does and does not catch.
+* The model must live in an importable module. Source is checksummed, so a
+  class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
+* ``install()`` patches code objects process-globally, so an artifact is not
+  scoped to the object it was loaded onto: other instances of the same class
+  are served from it too, and ``torch._dynamo.reset()`` unloads it.
+
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 """
@@ -36,7 +59,6 @@ import contextlib
 import dataclasses
 import functools
 import logging
-import re
 import types
 from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
@@ -104,6 +126,12 @@ class PrecompileSummary:
     backend_graphs: int
     bypassed: tuple[str, ...]
     truncated: tuple[str, ...] = ()
+    # Frames Dynamo produced but compiled nothing for. The entry frame landing
+    # here means the model runs eager despite the artifact existing.
+    uncovered_frames: tuple[str, ...] = ()
+    # Guards pinning a value that crossed a graph break. These make the artifact
+    # serve only the inputs it was captured with.
+    wont_generalize: tuple[str, ...] = ()
     # (guard_type, source_name) for every guard the filter discarded / retained.
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
@@ -130,6 +158,10 @@ class PrecompileSummary:
             base += f", dropped guards {self.dropped_guard_types()}"
         if self.risky_dropped_guards:
             base += f", RISKY drops {[n for _, n in self.risky_dropped_guards]}"
+        if self.uncovered_frames:
+            base += f", {len(self.uncovered_frames)} UNCOVERED: {list(self.uncovered_frames)}"
+        if self.wont_generalize:
+            base += f", {len(self.wont_generalize)} value-pinned guards"
         if self.truncated:
             base += f", {len(self.truncated)} TRUNCATED: {list(self.truncated)}"
         if self.bypassed:
@@ -137,27 +169,37 @@ class PrecompileSummary:
         return base
 
 
-# A bare global binding: G['NAME'], with no further attribute or item access.
-_BARE_GLOBAL = re.compile(r"""^G\[['"][^'"]+['"]\]$""")
+def _owning_module(value: object) -> str | None:
+    if isinstance(value, types.ModuleType):
+        return value.__name__
+    owner = getattr(value, "__module__", None)
+    return owner if isinstance(owner, str) else None
 
 
 def _is_risky_drop(source: str, value: object) -> bool:
     """
     Whether losing this identity guard can plausibly change results.
 
-    Modules are effectively immutable bindings for the life of a process, and so
-    is anything reached through one (``G['torch'].foo``), so dropping identity
-    guards on those is noise. A BARE global holding a non-module -- the classic
-    ``ACT = some_fn`` dispatch switch -- is the case that silently serves a graph
-    traced against the old object when it is rebound.
+    Classify by what the guarded object IS, not by how the source is spelled.
+    Source spelling cannot work: guard names have their local scope stripped, so
+    a guard on ``self.act`` arrives as ``'self.act'`` and is indistinguishable
+    from a global by pattern. Provenance survives that -- an object owned by
+    torch or by builtins is library machinery whose binding no serving setup
+    rebinds, while anything owned by user code is a candidate for the
+    ``self.act = ACT2FN[cfg.act]`` dispatch shape, where a rebind silently serves
+    the graph traced against the old callable.
 
-    This is a heuristic, not a proof: rebinding a module attribute, or mutating
-    an object a kept guard only checks by type, is still not caught. Treat
-    ``dropped_guards`` as the authoritative list.
+    KNOWN GAP: only the capture-time value is visible. Capturing with a
+    torch-owned callable and rebinding to a different one (``relu`` ->
+    ``sigmoid``) is classified benign and is NOT caught. ``dropped_guards`` is
+    the authoritative list; this predicate is a lint over it, not a proof of
+    safety.
     """
-    if isinstance(value, types.ModuleType):
-        return False
-    return bool(_BARE_GLOBAL.match(source))
+    owner = _owning_module(value)
+    if owner is None:
+        # Unknown provenance: assume it matters rather than quietly allowing it.
+        return True
+    return not (owner == "builtins" or owner == "torch" or owner.startswith("torch."))
 
 
 def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
@@ -174,6 +216,19 @@ def _summarize(
     risky: set[tuple[str, str]],
     truncated: frozenset[str],
 ) -> PrecompileSummary:
+    # An entry with no guarded codes is skip_code()'d at install time, so that
+    # frame runs eager forever. Resume frames legitimately have none when the
+    # continuation was folded into a parent, so only flag the entry frame.
+    uncovered = tuple(
+        c.python_code.co_name
+        for c in entry.codes[:1]
+        if not c.guarded_codes and not c.bypassed
+    )
+    # Dynamo names the value that crossed a graph break ___stackN. Any guard
+    # retained on one pins the artifact to the exact value seen at capture, and
+    # the guard type varies (CONSTANT_MATCH, EQUALS_MATCH, ...), so key on the
+    # source rather than the type.
+    wont_generalize = tuple(sorted({n for _, n in kept if "___stack" in n}))
     return PrecompileSummary(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
@@ -181,6 +236,8 @@ def _summarize(
         backend_graphs=len(entry.backend_ids),
         bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
         truncated=tuple(sorted(truncated)),
+        uncovered_frames=uncovered,
+        wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
@@ -326,13 +383,47 @@ class PrecompileSession:
                     f"This usually means their guards could not be serialized. Pass "
                     f"require_complete=False to accept a partial artifact."
                 )
+        if summary.uncovered_frames:
+            # Not fatal: an entry frame that only dispatches to submodules has no
+            # graph of its own while the submodules are still served. It IS how a
+            # frame Dynamo gave up on looks though (gb0124), in which case the
+            # model runs eager despite the artifact existing.
+            log.warning(
+                "precompile: no compiled code for entry frame(s) %s; install() will "
+                "skip them, so they run eager. Expected if the frame only "
+                "dispatches to submodules, otherwise check TORCH_LOGS=graph_breaks "
+                "for a frame Dynamo could not handle.",
+                list(summary.uncovered_frames),
+            )
+        if summary.wont_generalize:
+            log.warning(
+                "precompile: %d guard(s) pin a value that crossed a graph break "
+                "(%s...). The artifact will only serve inputs producing those exact "
+                "values; anything else misses every graph.",
+                len(summary.wont_generalize),
+                summary.wont_generalize[0],
+            )
         store = DiskDynamoStore()
         if self._backend == "eager":
             # Eager "backends" are fx graphs with no compiled artifact of their
             # own, so they have to be handed to the store explicitly.
             for backend_id, backend in self._package.cached_backends.items():
                 store.record_eager_backend(backend_id, backend)
-        store.save_package(self._package, path)
+        try:
+            store.save_package(self._package, path)
+        except RuntimeError as e:
+            if "is not found in the given backends" not in str(e):
+                raise
+            raise PackageError(
+                "Precompilation captured graphs but their compiled backends were "
+                "never recorded, so there is nothing to serialize. AOTAutograd only "
+                "records the bundled artifact once the BACKWARD compiles, so a "
+                "forward-only capture with grad enabled -- the default, and what "
+                "model.eval() still leaves you in -- records nothing. Capture under "
+                "torch.no_grad() or torch.inference_mode() for an inference "
+                "artifact, or run .backward() inside the capture block for a "
+                "training one."
+            ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
 

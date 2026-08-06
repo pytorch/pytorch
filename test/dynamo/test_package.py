@@ -108,6 +108,30 @@ def staged_with_local_dict_conditional(x, cfg):
     return x.sum() * cfg["scale"]
 
 
+def _precompile_user_act(t):
+    return -t
+
+
+class PrecompileSelfAct(torch.nn.Module):
+    """self.act = <callable> -- how configurable activations are usually written."""
+
+    def __init__(self, act):
+        super().__init__()
+        self.act = act
+
+    def forward(self, x):
+        y = self.act(x)
+        torch._dynamo.graph_break()
+        return (y + 1).sum()
+
+
+class PrecompileValuePinned(torch.nn.Module):
+    def forward(self, x):
+        scale = x.abs().max().item()
+        y = x * 2 if scale > 0.5 else x * 3
+        return y.sum()
+
+
 def _precompile_sin(t):
     return t.sin()
 
@@ -1197,6 +1221,75 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             session.save(self.path())
         # The risk is acknowledgeable, not a hard block.
         session.save(self.path(), require_no_risky_drops=False)
+
+    def test_risky_drop_detected_through_a_module_attribute(self):
+        # The guard on self.act is dropped as an unserializable identity guard,
+        # and its source is reported with local scope stripped ("self.act"), so
+        # it cannot be recognised by matching the source against a global
+        # pattern. Classify by what the guarded value is instead.
+        session = precompile_capture(
+            PrecompileSelfAct(_precompile_user_act), backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(3, 4))
+        risky = [name for _, name in session.summary().risky_dropped_guards]
+        self.assertIn("self.act", risky)
+        with self.assertRaisesRegex(PackageError, "self.act"):
+            session.save(self.path())
+
+    def test_torch_owned_drops_are_not_risky(self):
+        # Identity guards on torch internals are dropped for every model. If
+        # those counted as risky the check would refuse ordinary code and get
+        # switched off.
+        session = precompile_capture(
+            PrecompileSelfAct(torch.relu), backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(3, 4))
+        summary = session.summary()
+        self.assertTrue(summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        session.save(self.path())
+
+    def test_summary_reports_value_pinned_guards(self):
+        # A value crossing a graph break is guarded by equality, so the artifact
+        # only serves inputs reproducing it. Nothing else in the summary says so.
+        session = precompile_capture(
+            PrecompileValuePinned(), backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(3, 4))
+        summary = session.summary()
+        self.assertTrue(summary.wont_generalize)
+        self.assertTrue(any("___stack" in n for n in summary.wont_generalize))
+        self.assertIn("value-pinned", str(summary))
+
+    def test_two_packages_on_a_shared_frame_can_both_unload(self):
+        # Two instances of one class share a forward code object. Refusing to
+        # uninstall while another package is installed would deadlock them,
+        # since neither could go first.
+        paths = []
+        for act in (torch.relu, torch.sigmoid):
+            torch._dynamo.reset()
+            session = precompile_capture(
+                PrecompileSelfAct(act), backend="eager", dynamic=False
+            )
+            with session as compiled, torch.no_grad():
+                compiled(torch.randn(3, 4))
+            path = os.path.join(self.path(), f"pkg_{act.__name__}")
+            os.makedirs(path, exist_ok=True)
+            session.save(path)
+            paths.append(path)
+
+        torch._dynamo.reset()
+        first = precompile_load(
+            PrecompileSelfAct(torch.relu), paths[0], backend="eager", dynamic=False
+        )
+        second = precompile_load(
+            PrecompileSelfAct(torch.sigmoid), paths[1], backend="eager", dynamic=False
+        )
+        first.unload()
+        second.unload()
 
     def test_load_rejects_artifact_from_a_different_callable(self):
         x = torch.randn(4, 8)

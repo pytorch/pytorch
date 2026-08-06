@@ -2020,7 +2020,7 @@ def _compile(
             )
 
             if package is not None and package.has_current_entry():
-                # This frame is about to be pinned to RUN_ONLY, so the variants
+                # This frame will stop compiling new variants, so the ones
                 # past the limit will never be captured. Record that so a caller
                 # building an artifact can detect the gap. Deliberately not a
                 # bypass: the variants captured so far are still valid and must
@@ -2029,7 +2029,7 @@ def _compile(
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": "dynamo_cache_bypass",
+                        "name": "dynamo_cache_truncated",
                         "encoding": "json",
                     },
                     payload_fn=lambda: json.dumps(
