@@ -23,6 +23,13 @@ def _tma_arg_helpers():
     return make_arg, TensorDescriptor
 
 
+@functools.lru_cache(None)
+def _triton_allocator_var():
+    from triton.runtime._allocation import _allocator
+
+    return _allocator
+
+
 class StaticallyLaunchedTritonKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
@@ -53,6 +60,8 @@ class StaticallyLaunchedTritonKernel:
     @cached_property
     def C_impl(self):
         raise NotImplementedError
+
+    supports_global_scratch = False
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
@@ -108,7 +117,13 @@ class StaticallyLaunchedTritonKernel:
         # pyrefly: ignore [missing-attribute]
         metadata = kernel.metadata
         self.global_scratch_size = getattr(metadata, "global_scratch_size", None)
-        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1)
+        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1) or 1
+        if (
+            self.global_scratch_size
+            and self.global_scratch_size > 0
+            and not self.supports_global_scratch
+        ):
+            raise NotImplementedError("Global scratch not yet supported")
         self.has_global_scratch = self.global_scratch_size is not None
         # same situation for profile scratch - triton-lang/triton#7258
         self.profile_scratch_size = getattr(metadata, "profile_scratch_size", None)
@@ -343,31 +358,7 @@ class StaticallyLaunchedTritonKernel:
         arg_tys = self.arg_tys
 
         if is_rocm():
-            # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
-            # global_scratch and profile_scratch parameters in the kernel signature,
-            # even when the kernel doesn't use them (i.e., when has_*_scratch is False).
-            #
-            # This differs fundamentally from CUDA, where these parameters are only
-            # present in the signature if the corresponding has_*_scratch flag is True.
-            #
-            # The flags indicate whether memory will be allocated/used:
-            # - has_global_scratch: Whether global scratch workspace is needed
-            # - has_profile_scratch: Whether profiling instrumentation is enabled
-            #
-            # However, regardless of flag values, we MUST always pass both parameters
-            # to match the HIP kernel ABI. Passing None is safe:
-            #
-            # - If scratch is not needed (has_*_scratch=False or scratch_size=0):
-            #   The None becomes nullptr, which the kernel never dereferences
-            #
-            # - If scratch is needed (has_*_scratch=True and scratch_size>0):
-            #   The None becomes nullptr initially, but the HIP runtime intercepts
-            #   the kernel launch, allocates the required scratch memory based on
-            #   kernel metadata, and replaces the nullptr with a valid pointer before
-            #   the kernel actually executes
-            #
-            # Not passing both parameters causes segmentation faults because the kernel
-            # expects them at specific positions in the argument array.
+            # HIP always includes both scratch slots in the kernel ABI.
             arg_tys = arg_tys + "OO"
             args = (*args, None, None)
 
@@ -375,14 +366,10 @@ class StaticallyLaunchedTritonKernel:
             if self.has_global_scratch:
                 global_scratch = None
                 if self.global_scratch_size:
-                    from triton.runtime import _allocation
-
-                    allocator = _allocation._allocator
-                    if hasattr(allocator, "get"):
-                        allocator = allocator.get()
+                    allocator = _triton_allocator_var().get()
                     global_scratch = allocator(
-                        # num_ctas == 1 is required above, so it drops out of
-                        # Triton's grid * num_ctas * global_scratch_size formula.
+                        # Keep grid scaling in sync with _generate_lazy_scratch and
+                        # test_lazy_tma_global_scratch_scales_with_launch_grid.
                         grid_x * grid_y * grid_z * self.global_scratch_size,
                         self.global_scratch_align,
                         stream,
@@ -412,6 +399,8 @@ class StaticallyLaunchedTritonKernel:
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    supports_global_scratch = not is_rocm()
+
     @cached_property
     def C_impl(self):
         from torch._C import _StaticCudaLauncher
