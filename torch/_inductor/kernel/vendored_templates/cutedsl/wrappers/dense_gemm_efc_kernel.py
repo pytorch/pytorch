@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from types import FunctionType
+from typing import Any
+
 from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
 from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
+from cutlass.operators.fusion import trace_in_out
 from cutlass.operators.fusion.library import ActivationOp
+from cutlass.operators.providers.cutedsl.evt import common_efc
 from cutlass.operators.providers.cutedsl.evt.converter import (
+    _build_source_mode_map,
     EFCConverter,
     OpToCuteImpl,
     OpToCuteImplStr,
@@ -14,15 +21,123 @@ from cutlass.operators.providers.cutedsl.evt.converter import (
 from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
     PersistentDenseGemmEFCOperator,
 )
+from cutlass.operators.providers.cutedsl.operator import CuteDslOperator
 from cutlass.operators.status import Status
 
 from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     DENSE_GEMM_REDUCTION_CAPABILITIES,
 )
 from torch._inductor.kernel.gemm_epilogue import GemmReductionDescriptor
-from torch._inductor.kernel.gemm_epilogue_codegen import GemmReductionCompileConfig
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    gemm_epilogue_op_scope,
+    GemmReductionCompileConfig,
+    materialize_epilogue_function,
+)
+from torch.utils._ordered_set import OrderedSet
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
+
+
+class _EFCOpScope:
+    """Expose an EFC configuration through the shared CuTeDSL op namespace."""
+
+    def __init__(self, efc_config):
+        self.efc_config = efc_config
+        self.math = self
+
+    def __getattr__(self, name):
+        return getattr(self.efc_config, name)
+
+
+def _direct_cutedsl_epilogue(metadata):
+    """Adapt generated CuTeDSL source to EFC's accumulator and parameter API."""
+
+    import cutlass.cute as cute
+
+    direct_fn = materialize_epilogue_function(metadata.epilogue.epilogue_fn, cute)
+    inputs, outputs = trace_in_out(metadata.epilogue.epilogue_fn)
+    inputs = ["accum", *inputs] if "accum" not in inputs else inputs
+    parameter_names = metadata.epilogue.parameter_names
+    tensors = metadata.epilogue.tensors
+    output_shape = tuple(tensors[outputs[-1]].shape)
+
+    def source_mode_map(name):
+        shape = tuple(tensors[name].shape)
+        if not shape or len(shape) > 3:
+            raise NotImplementedError(f"unsupported dense EFC broadcast shape: {shape}")
+        stride: Any = tensors[name].stride
+        if callable(stride):
+            stride = stride()
+        assert isinstance(stride, Iterable)  # noqa: S101
+        stride = tuple(stride)
+        padded_shape = (1,) * (3 - len(shape)) + shape
+        padded_stride = (0,) * (3 - len(stride)) + stride
+        propagated_stride = tuple(
+            0 if size == 1 else step
+            for size, step in zip(padded_shape, padded_stride, strict=True)
+        )
+        if shape == output_shape and all(propagated_stride):
+            return None
+        return _build_source_mode_map(propagated_stride, len(shape))
+
+    input_mode_maps = {
+        name: source_mode_map(name) for name in inputs if name != "accum"
+    }
+    broadcast_names = OrderedSet(
+        name for name, mode_map in input_mode_maps.items() if mode_map is not None
+    )
+
+    def load(name, parameter):
+        mode_map = input_mode_maps[name]
+        return (
+            parameter.load()
+            if mode_map is None
+            else parameter.remap_modes[mode_map].load()
+        )
+
+    def epilogue(efc_config, *parameters):
+        by_name = dict(zip(parameter_names, parameters, strict=True))
+        if efc_config.phase == common_efc.EFC.Phase.ParameterAnalysis:
+            efc_config.accum()
+            for name in inputs:
+                if name != "accum":
+                    load(name, by_name[name])
+            for name in outputs:
+                by_name[name].store(1)
+            return
+
+        values = [
+            efc_config.accum() if name == "accum" else load(name, by_name[name])
+            for name in inputs
+        ]
+        op_scope = _EFCOpScope(efc_config)
+        call_scope = direct_fn.__globals__.copy()
+        call_scope.update(gemm_epilogue_op_scope(op_scope))
+        call_scope["mlir_math"] = op_scope
+        # Rebind globals because the traced function targets CuTeDSL operations,
+        # while EFC exposes the same operations through its configuration object.
+        call_fn = FunctionType(
+            direct_fn.__code__,
+            call_scope,
+            direct_fn.__name__,
+            direct_fn.__defaults__,
+            direct_fn.__closure__,
+        )
+        call_fn.__kwdefaults__ = direct_fn.__kwdefaults__
+        results = call_fn(*values)
+        if len(outputs) == 1:
+            result_values = (results,)
+        else:
+            assert isinstance(results, tuple)  # noqa: S101
+            result_values = results
+        for name, value in zip(outputs, result_values, strict=True):
+            by_name[name].store(value)
+
+    named_epilogue = common_efc.create_named_epilogue(
+        ["efc_config", *parameter_names], epilogue
+    )
+    named_epilogue._broadcast_source_names = broadcast_names
+    return named_epilogue
 
 
 class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
@@ -32,11 +147,14 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
     designed_for_min_cc = 100
 
     def __init__(self, metadata):
-        super().__init__(metadata)
+        CuteDslOperator.__init__(self, metadata)
         OpToCuteImpl.setdefault(ActivationOp.Identity, lambda efc_config, value: value)
         OpToCuteImplStr.setdefault(ActivationOp.Identity, lambda value: value)
         epilogue_op = (
-            EFCConverter.convert(
+            _direct_cutedsl_epilogue(metadata)
+            if metadata.epilogue is not None
+            and metadata.epilogue.traced_epilogue is None
+            else EFCConverter.convert(
                 metadata.epilogue.traced_epilogue.dag_ir,
                 metadata.epilogue.parameter_names,
                 parameter_tensors=metadata.epilogue.tensors,
@@ -60,7 +178,12 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
     def _supports(
         self, args: GemmArguments, target_sm: TargetSm | None = None
     ) -> Status:
-        status = super()._supports(args, target_sm)
+        epilogue = args.epilogue
+        status = (
+            Status.success()
+            if epilogue is not None and getattr(epilogue, "_is_direct_cutedsl", False)
+            else super()._supports(args, target_sm)
+        )
         if not status:
             return status
         reduction = args.local_reduce
@@ -118,7 +241,7 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
             reduction_tensors.output,
             reduction_tensors.feed_output,
             reduction_tensors.secondary_feed_output,
-            *reduction_config.constexprs(include_consumers=False),
+            *reduction_config.constexprs(),
             *epilogue_params,
             target_sm=target_sm,
         )
