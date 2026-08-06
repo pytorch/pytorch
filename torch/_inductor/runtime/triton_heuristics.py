@@ -89,7 +89,6 @@ from .triton_compat import (
     ASTSource,
     autograd_profiler,
     CompiledKernel,
-    Config,
     GPUTarget,
     HAS_WARP_SPEC,
     IntelGPUError,
@@ -100,6 +99,12 @@ from .triton_compat import (
     triton,
 )
 from .triton_helpers import get_constexprs
+
+
+if TYPE_CHECKING:
+    from triton import Config
+else:
+    from .triton_compat import Config
 
 
 class BenchmarkFailureReason(enum.Enum):
