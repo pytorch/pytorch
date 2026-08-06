@@ -28,7 +28,6 @@ WindowNCCL::WindowNCCL(c10::intrusive_ptr<ProcessGroupNCCL> pg)
 }
 
 void WindowNCCL::tensor_register(const at::Tensor& tensor, bool owning) {
-  auto commUseGuard = pg_->acquireCommUse();
   TORCH_CHECK(tensor.defined(), "WindowNCCL: a valid tensor is required");
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(win_ == nullptr, "WindowNCCL: double registration");
@@ -79,7 +78,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
     int64_t targetOffsetNelems,
     bool asyncOp,
     const ::c10d::PutOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   checkDeviceAndThrow(tensor);
   TORCH_CHECK(
@@ -137,7 +135,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
     int64_t peerRank,
     bool asyncOp,
     const ::c10d::SignalOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
@@ -163,7 +160,6 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
     int64_t peerRank,
     bool asyncOp,
     const ::c10d::WaitSignalOptions& opts) {
-  auto commUseGuard = pg_->acquireCommUse();
   checkWindowAndThrow();
   c10::cuda::CUDAGuard device_guard(pg_->getDevice());
   cudaStream_t stream = pg_->getOperationStream(asyncOp);

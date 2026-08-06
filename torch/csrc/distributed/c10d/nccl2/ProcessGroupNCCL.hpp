@@ -22,7 +22,6 @@
 #include <optional>
 #include <queue>
 #include <set>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -252,6 +251,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const c10::intrusive_ptr<::c10d::Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
+  void performNocolorSplit(at::Device device);
   c10::intrusive_ptr<::c10d::Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
       int shrink_flags = 0,
@@ -361,7 +361,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
-  [[nodiscard]] std::shared_lock<std::shared_mutex> acquireCommUse() const;
   // Tears the NCCL communicator down. This NEVER terminates the process --
   // a user-initiated abort()/shutdown() must be survivable, matching
   // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
@@ -586,12 +585,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     UNINITIALIZED,
     INITIALIZED,
     FINALIZED,
-  };
-  std::atomic<InitializationState> init_state_{
-      InitializationState::UNINITIALIZED};
-  std::mutex initialization_mutex_;
-  mutable std::shared_mutex comm_lifecycle_mutex_;
-  std::atomic<bool> comm_suspended_{false};
+  } init_state_{InitializationState::UNINITIALIZED};
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
