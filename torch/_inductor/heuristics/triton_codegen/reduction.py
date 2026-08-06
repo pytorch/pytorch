@@ -21,7 +21,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from torch._inductor.runtime.triton_compat import Config
+    from triton import Config
 
 
 # ------------------------------------------------------------------
@@ -130,7 +130,13 @@ def _adapt_config_for_tiling(
 
 
 def _outer_config_opt(
-    make_config, size_hints, rnumel, inductor_meta, num_dynamic, register_intensive
+    make_config,
+    size_hints,
+    rnumel,
+    inductor_meta,
+    num_dynamic,
+    register_intensive,
+    is_cooperative,
 ):
     """Optimized outer config for CUDA (non-HIP)."""
     max_x_block, x_block = 256, 64
@@ -138,7 +144,10 @@ def _outer_config_opt(
     x = size_hints["x"]
     num_warps = None
 
-    if x <= 1024:
+    if is_cooperative:
+        x_block = x
+        outer_r_block = min(rnumel, 512)
+    elif x <= 1024:
         x_block = max(min(x // 128, 8), 2)
         outer_r_block = min(rnumel, 64)
     elif x // 4096 <= 8:
@@ -202,6 +211,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
             "max_autotune_pointwise"
         )
+        is_cooperative = triton_meta.get("launch_cooperative_grid", False)
 
         register_intensive = False
         loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
@@ -288,6 +298,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             inductor_meta,
             num_dynamic,
             register_intensive,
+            is_cooperative,
         )
 
         configs: list[Config] = []
@@ -483,6 +494,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         inductor_meta,
         num_dynamic,
         register_intensive,
+        is_cooperative: bool,
     ):
         """Outer config. CUDA uses optimized heuristic."""
         return _outer_config_opt(
@@ -492,6 +504,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             inductor_meta,
             num_dynamic,
             register_intensive,
+            is_cooperative,
         )
 
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
@@ -542,7 +555,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:
@@ -550,9 +562,21 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 "Cooperative reductions don't support tiling reduction dims"
             )
         xnumel, rnumel = size_hints["x"], size_hints["r0_"]
+        # The xnumel size hint is rounded up to the nearest power of 2.  For a normal
+        # reduction that doesn't matter, but in a cooperative reduction that can result in
+        # spawning completely empty blocks and thus underutilizing the GPU.  inductor_meta
+        # contains the actual xnumel, specifically for this.
+        real_xnumel = inductor_meta.get("real_xnumel", xnumel)
 
-        target = last_power_of_2(triton_meta["device"].multi_processor_count)
-        split = max(1, min((rnumel, target // xnumel, TRITON_MAX_RSPLIT)))
+        def get_valid_rsplit(desired_rsplit: int) -> int:
+            return max(1, min((desired_rsplit, rnumel, TRITON_MAX_RSPLIT)))
+
+        # Note that we must never create more CTAs than there are SMs, because we
+        # depend on synchronizing between the CTAs in x_grid_barrier, and that will
+        # deadlock if some of the CTAs are not running. In order to maximize use of
+        # the GPU, we want to create as many CTAs as possible.
+        target = triton_meta["device"].multi_processor_count
+        split = get_valid_rsplit(target // real_xnumel)
         if inductor_meta["persistent_reduction"]:
             configs = self.get_persistent_configs(
                 size_hints={"x": xnumel, "r0_": rnumel // split},
@@ -566,8 +590,13 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 inductor_meta=inductor_meta,
                 triton_meta=triton_meta,
             )
+
         for config in configs:
-            config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
+            # If XBLOCK > 1, increase the number of splits to get closer to the target value.
+            xblock: int = config.kwargs["XBLOCK"]
+            xsplit = (real_xnumel + xblock - 1) // xblock
+            config.kwargs["RSPLIT"] = get_valid_rsplit(target // xsplit)
+
         return configs
 
     def apply_rsplit_size(
@@ -679,6 +708,7 @@ class ROCmReductionHeuristic(ReductionHeuristic):
         inductor_meta,
         num_dynamic,
         register_intensive,
+        is_cooperative: bool,
     ):
         # HIP uses simple outer config (no outer_config_opt)
         return make_config(64, 8, register_intensive=register_intensive)
