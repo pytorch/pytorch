@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_JETSON,
@@ -128,6 +129,8 @@ except ModuleNotFoundError:
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def payload(self, device="cpu", tensor_size=10):
         x = torch.randn(tensor_size, tensor_size).to(device)
         y = torch.randn(tensor_size, tensor_size).to(device)
@@ -414,6 +417,8 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_custom_module_input_op_ids(self):
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -442,6 +447,8 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -2125,6 +2132,8 @@ class MockNode:
 class TestProfilerDevice(TestCase):
     """Tests that should run on multiple backends (CPU, CUDA, XPU, etc.)."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def payload(self, device="cpu", tensor_size=10):
         x = torch.randn(tensor_size, tensor_size).to(device)
         y = torch.randn(tensor_size, tensor_size).to(device)
@@ -3024,6 +3033,8 @@ instantiate_device_type_tests(TestProfilerDevice, globals())
 
 
 class TestExperimentalUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
@@ -3246,6 +3257,9 @@ class TestExperimentalUtils(TestCase):
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+class TestExperimentalUtilsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/158727",
@@ -3302,6 +3316,8 @@ class TestExperimentalUtils(TestCase):
 class TestPrivateUse1ProfilerState(TestCase):
     """Tests for PrivateUse1 profiler state selection logic."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_kineto_privateuse1_state_with_use_kineto_true(self):
         """Test that KINETO_PRIVATEUSE1 state is selected when use_kineto=True."""
         from unittest.mock import patch
@@ -3355,8 +3371,6 @@ class TestPrivateUse1ProfilerState(TestCase):
                 )
 
 
-@instantiate_parametrized_tests
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerDeviceStopped(TestCase):
     """Tests for the DEVICE_STOPPED transition: when Kineto signals that
     device collection has stopped (e.g. CUPTI buffer overflow), the profiler
@@ -3364,16 +3378,18 @@ class TestProfilerDeviceStopped(TestCase):
     cycle, and resumes normal scheduling on the next cycle. The Kineto signal
     is mocked so no actual overflow is needed.
 
-    Note that we don't actually depend on any CUDA specific behavior. But the
-    DEVICE_STOPPED logic does behave different if the user has only requested
-    CPU-only profiling. Explicitly specifying a GPU device seems cleaner than
-    patching the `use_device` attributes in the profiler."""
+    Note that we don't actually depend on any specific accelerator behavior.
+    But the DEVICE_STOPPED logic does behave different if the user has only
+    requested CPU-only profiling. Explicitly specifying a device activity
+    seems cleaner than patching the `use_device` attributes in the profiler."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     PATCH_TARGET = "torch.autograd._is_kineto_stopped"
 
     def _make_profiler(self, **schedule_kwargs):
         return profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=torch.profiler.schedule(**schedule_kwargs),
         )
 
@@ -3416,7 +3432,7 @@ class TestProfilerDeviceStopped(TestCase):
             callback_count[0] += 1
 
         p = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=2, repeat=2),
             on_trace_ready=handler,
         )
@@ -3604,7 +3620,7 @@ class TestProfilerDeviceStopped(TestCase):
         # on every step the entry guard converts each cycle's R&S to DS via
         # (W, DS), and DS exits at cycle boundary via (DS, W).
         p = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=3),
             on_trace_ready=handler,
         )
@@ -3638,7 +3654,7 @@ class TestProfilerDeviceStopped(TestCase):
             callback_count[0] += 1
 
         p = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=1),
             on_trace_ready=handler,
         )
@@ -3675,7 +3691,7 @@ class TestProfilerDeviceStopped(TestCase):
         no-op the (NONE, DS) transition and leave the profiler dead."""
         with self.assertRaisesRegex(ValueError, "DEVICE_STOPPED is set internally"):
             profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                activities=get_profiler_activities(self.device_type),
                 schedule=lambda step: ProfilerAction.DEVICE_STOPPED,
             )
 
@@ -3690,7 +3706,7 @@ class TestProfilerDeviceStopped(TestCase):
             return ProfilerAction.DEVICE_STOPPED
 
         p = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=bad_schedule,
         )
         p.start()
@@ -3827,7 +3843,7 @@ class TestProfilerDeviceStopped(TestCase):
             event_counts.append(len(list(prof.events())))
 
         p = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=get_profiler_activities(self.device_type),
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=4, repeat=2),
             on_trace_ready=handler,
         )
@@ -3876,9 +3892,10 @@ class TestProfilerDeviceStopped(TestCase):
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestProfilerEventsParity(TestCase):
-    """Tests validating parity between events() and export_chrome_trace() JSON."""
+class TestProfilerEventsParityGeneric(TestCase):
+    """Tests validating parity between events() and export_chrome_trace() JSON (CPU-only)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_python_function_events_in_events(self):
         class DummyModule(nn.Module):
@@ -3952,55 +3969,6 @@ class TestProfilerEventsParity(TestCase):
             "key_averages(include_python_functions=True) should include threading.py events",
         )
 
-    def test_profiler_flow_events_parity(self):
-        """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            x = torch.randn(32, 32, device="cuda")
-            torch.mm(x, x)
-
-        # Collect async CPU->GPU flow info from events()
-        events_with_flow = [
-            e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
-        ]
-        self.assertGreater(
-            len(events_with_flow), 0, "No flow events found via events()"
-        )
-
-        for e in events_with_flow:
-            self.assertIsInstance(e.flow_id, int)
-            self.assertIsInstance(e.flow_type, int)
-            self.assertIsInstance(e.flow_start, bool)
-
-        # Verify parity with Chrome trace JSON for async CPU->GPU flow
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
-
-            json_flow_events = [
-                e
-                for e in j["traceEvents"]
-                if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
-            ]
-            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
-            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
-
-            # kLinkAsyncCpuGpu = 2
-            ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
-            events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
-            events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
-
-            self.assertEqual(
-                json_flow_starts,
-                events_flow_starts,
-                "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
-            )
-            self.assertEqual(
-                json_flow_ends,
-                events_flow_ends,
-                "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
-            )
-
     def test_profiler_fwdbwd_flow_events_parity(self):
         """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU]) as prof:
@@ -4043,46 +4011,6 @@ class TestProfilerEventsParity(TestCase):
                 json_flow_ends,
                 events_flow_ends,
                 "fwdbwd flow end IDs differ between events() and Chrome trace",
-            )
-
-    def test_profiler_timestamp_consistency(self):
-        """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            x = torch.randn(32, 32, device="cuda")
-            torch.mm(x, x)
-
-        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
-
-            # Chrome trace is relative to a different base time which is not exposed in Python.
-            # It's probably not important to do so as we still have the relative differences
-            # in duration.
-            base_time_ns = j.get("baseTimeNanoseconds", 0)
-
-            # Grab mm timestamp from events() and json
-            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
-            json_mm = next(
-                (
-                    e
-                    for e in j["traceEvents"]
-                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
-                ),
-                None,
-            )
-
-            # Reconstruct Chrome trace ts from events():
-            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
-            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
-            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
-            recovered_ts = (absolute_ns - base_time_ns) / 1000
-            self.assertEqual(
-                recovered_ts,
-                json_mm["ts"],
-                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
     def test_profiler_op_args_events_parity(self):
@@ -4136,17 +4064,114 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(fe_cat.structured_input_strides, args_cat["Input Strides"])
             self.assertEqual(fe_cat.input_dtypes, args_cat["Input type"])
 
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+class TestProfilerEventsParity(TestCase):
+    """Tests validating parity between events() and export_chrome_trace() JSON."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_profiler_flow_events_parity(self):
+        """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
+        with profile(activities=get_profiler_activities(self.device_type)) as prof:
+            x = torch.randn(32, 32, device=self.device_type)
+            torch.mm(x, x)
+
+        # Collect async CPU->GPU flow info from events()
+        events_with_flow = [
+            e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(events_with_flow), 0, "No flow events found via events()"
+        )
+
+        for e in events_with_flow:
+            self.assertIsInstance(e.flow_id, int)
+            self.assertIsInstance(e.flow_type, int)
+            self.assertIsInstance(e.flow_start, bool)
+
+        # Verify parity with Chrome trace JSON for async CPU->GPU flow
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            # kLinkAsyncCpuGpu = 2
+            ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
+            events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
+            events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+            )
+
+    def test_profiler_timestamp_consistency(self):
+        """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
+        with profile(activities=get_profiler_activities(self.device_type)) as prof:
+            x = torch.randn(32, 32, device=self.device_type)
+            torch.mm(x, x)
+
+        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            # Chrome trace is relative to a different base time which is not exposed in Python.
+            # It's probably not important to do so as we still have the relative differences
+            # in duration.
+            base_time_ns = j.get("baseTimeNanoseconds", 0)
+
+            # Grab mm timestamp from events() and json
+            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
+            json_mm = next(
+                (
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
+                ),
+                None,
+            )
+
+            # Reconstruct Chrome trace ts from events():
+            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
+            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
+            recovered_ts = (absolute_ns - base_time_ns) / 1000
+            self.assertEqual(
+                recovered_ts,
+                json_mm["ts"],
+                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
+            )
+
     def test_profiler_external_id_parity(self):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        with profile(activities=get_profiler_activities(self.device_type)) as prof:
             with torch.profiler.record_function("test_region"):
-                x = torch.randn(32, 32, device="cuda")
+                x = torch.randn(32, 32, device=self.device_type)
                 y = torch.mm(x, x)
                 z = y + x
                 z.cpu()
-                torch.cuda.synchronize()
+                if self.device_type != "cpu":
+                    getattr(torch, self.device_type).synchronize()
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
@@ -4170,8 +4195,8 @@ class TestProfilerEventsParity(TestCase):
 
     def test_profiler_activity_type_parity(self):
         """Verify activity_type on events() matches Chrome trace cat field."""
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            x = torch.randn(32, 32, device="cuda")
+        with profile(activities=get_profiler_activities(self.device_type)) as prof:
+            x = torch.randn(32, 32, device=self.device_type)
             torch.mm(x, x)
 
         events = prof.events()
@@ -4199,6 +4224,13 @@ class TestProfilerEventsParity(TestCase):
                     json_name_cats,
                     lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestProfilerEventsParityCUDA(TestCase):
+    """CUDA-specific event parity tests (checks cuda_runtime categories)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
@@ -4353,18 +4385,20 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestPythonChromeTraceExport(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _profile_workload(self):
-        x = torch.randn(64, 64, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        x = torch.randn(64, 64, device=self.device_type)
+        with profile(activities=get_profiler_activities(self.device_type)) as prof:
             for _ in range(20):
                 torch.mm(x, x)
                 torch.add(x, x)
-            torch.cuda.synchronize()
+            if self.device_type != "cpu":
+                getattr(torch, self.device_type).synchronize()
         return prof
 
     def test_python_export_matches_kineto(self):
@@ -4495,6 +4529,8 @@ class TestMetadataJsonFormat(TestCase):
     downstream consumers don't silently break.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _get_kernel_metadata(self):
         x = torch.randn(64, 64, device="cuda")
         # The first profiled iteration(s) can drop CUDA kernels while CUPTI
@@ -4580,6 +4616,13 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIn('"graph node id": ', md)
         self.assertIn('"correlation": ', md)
         self.assertIn('"stream": ', md)
+
+
+instantiate_device_type_tests(
+    TestProfilerDeviceStopped, globals(), except_for=("cpu",)
+)
+instantiate_device_type_tests(TestProfilerEventsParity, globals(), except_for=("cpu",))
+instantiate_device_type_tests(TestPythonChromeTraceExport, globals(), except_for=("cpu",))
 
 
 if __name__ == "__main__":
