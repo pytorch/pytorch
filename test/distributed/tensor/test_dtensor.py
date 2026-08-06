@@ -77,7 +77,7 @@ class DummyMLP(torch.nn.Module):
 
 
 class DTensorTest(DTensorTestBase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     def test_dtensor_constructor(self):
@@ -1012,7 +1012,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 
 
 class DTensorSubclassTest(DTensorTestBase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _make_dtensor(self, cls, mesh):
         base = DTensor.from_local(
@@ -1081,7 +1081,7 @@ class DTensorSubclassTest(DTensorTestBase):
 
 
 class DTensorMeshTest(DTensorTestBase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
@@ -1527,7 +1527,7 @@ DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
 
 
 class TestDTensorPlacementTypes(DTensorTestBase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
@@ -1598,7 +1598,7 @@ TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
 
 
 class TestDTensorSpec(DTensorTestBase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
