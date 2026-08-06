@@ -15,6 +15,7 @@ from torch._dynamo.testing import (
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
+    associative_scan_op,
 )
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
@@ -10328,6 +10329,314 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
 
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_simple(self, combine_mode):
+        x = torch.randn(3, 4, 2)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # Only generic mode is compile-checked here. Generic never builds a HOP
+        # (it lowers to the pure-Python scan recursion), so vmap composes with
+        # compile cleanly. pointwise + vmap + compile is unsupported: Inductor's
+        # associative_scan pointwise lowering assumes a flat combine graph with
+        # 2 * len(xs) inputs and cannot handle the batched combine subgraph that
+        # vmap produces. See test_associative_scan_in_vmap_pointwise_compile_xfail.
+        # The pointwise vmap tests below skip compile for the same reason.
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_pytree(self, combine_mode):
+        xs = {"a": torch.randn(3, 5, 2), "b": torch.randn(3, 5, 2)}
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["b"]}
+
+        def fn(a, b):
+            def inner_fn(a, b):
+                return associative_scan(
+                    combine_fn, {"a": a, "b": b}, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(a, b)
+
+        out = fn(xs["a"], xs["b"])
+        exp = {
+            k: torch.stack(
+                [
+                    _fake_associative_scan(
+                        combine_fn,
+                        {"a": xs["a"][i], "b": xs["b"][i]},
+                        dim=0,
+                    )[k]
+                    for i in range(xs["a"].shape[0])
+                ]
+            )
+            for k in ("a", "b")
+        }
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_reverse(self, combine_mode):
+        x = torch.randn(3, 4, 2)
+
+        def combine_fn(a, b):
+            return a * b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, reverse=True, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0, reverse=True)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_nested(self, combine_mode):
+        x = torch.randn(2, 3, 4, 2)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(torch.vmap(inner_fn, in_dims=0), in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                torch.stack(
+                    [
+                        _fake_associative_scan(combine_fn, x[i, j], dim=0)
+                        for j in range(x.shape[1])
+                    ]
+                )
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2)
+        h = torch.randn(3, 2)
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h[i], x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode):
+        x = torch.randn(3, 1, 2)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
+    @requires_cuda
+    @unittest.expectedFailure
+    def test_associative_scan_in_vmap_pointwise_compile_xfail(self):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
+        x = torch.randn(4, 3, 2)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[:, i], dim=0)
+                for i in range(x.shape[1])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode):
+        x = torch.randn(3, 4, 2)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0, out_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0)
+                for i in range(x.shape[0])
+            ],
+            dim=1,
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    def test_associative_scan_in_vmap_unbatched_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2)
+        h = torch.randn(2)
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, None))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_unbatched_xs_error(self):
+        xs = torch.randn(4, 2)
+        h = torch.randn(3, 2)
+
+        def vmap_fn(xs, h):
+            def inner_fn(hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(h)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "The size of tensor a \\(3\\) must match the size of tensor b \\(2\\) "
+            "at non-singleton dimension 3",
+        ):
+            vmap_fn(xs, h)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_op_in_vmap_eager(self):
+        x = torch.randn(3, 4, 2)
+
+        # The raw HOP receives the flattened operator: 2 * num_leaves args
+        # (lhs leaves, then rhs leaves), returning a list of num_leaves outputs.
+        def flat_combine_fn(lhs, rhs):
+            return [lhs + rhs]
+
+        def inner_fn(xi):
+            return associative_scan_op(flat_combine_fn, [xi], ())[0]
+
+        out = torch.vmap(inner_fn, in_dims=0)(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
 
     @skipIfTorchDynamo("not a dynamo test")
     def test_scan_in_vmap_unbatched_init_error(self):
