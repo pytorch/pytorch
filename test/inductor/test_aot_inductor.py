@@ -317,6 +317,31 @@ class AOTInductorTestsTemplate:
             )
             FileCheck().check("&kernels_.loaded_modules_").run(code)
 
+    @config.patch(
+        {
+            "triton.autotune_at_compile_time": True,
+            "dump_python_module": True,
+            "benchmark_kernel": True,
+        }
+    )
+    def test_dump_python_module(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
     def test_triton_kernel_bool_param(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
