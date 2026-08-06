@@ -40,7 +40,7 @@ from torch._inductor.ir import (
     PermuteView,
     TensorBox,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -541,11 +541,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         def make_kernel_render(
             out_node,
             hint_override=None,
-            epilogue_fn_code=None,
-            epilogue_is_cutedsl=False,
-            epilogue_reads=None,
-            epilogue_writes=None,
-            epilogue_var_renames=None,
+            epilogue: GemmEpiloguePlan | None = None,
             local_reduce=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
@@ -580,11 +576,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 scale_type_b=scale_type_b,
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
-                epilogue_fn_code=epilogue_fn_code,
-                epilogue_is_cutedsl=epilogue_is_cutedsl,
-                epilogue_reads=epilogue_reads,
-                epilogue_writes=epilogue_writes,
-                epilogue_var_renames=epilogue_var_renames,
+                epilogue=epilogue,
                 local_reduce=local_reduce,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
