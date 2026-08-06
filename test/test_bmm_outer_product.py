@@ -11,10 +11,16 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestBmmOuterProductDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_bmm(self, a, b, **kwargs):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
