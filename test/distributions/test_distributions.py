@@ -126,6 +126,7 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     skipIfTorchDynamo,
     onlyAccelerator,
+    HardwareClassification,
     TEST_XPU,
     TestCase,
 )
@@ -4555,6 +4556,7 @@ class TestDistributions(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
     def test_default_device(self, device):
         device_type = torch.device(device).type
         self.assertEqual(torch.get_default_device().type, device_type)
