@@ -103,7 +103,7 @@ jiterator_also_stringify_as(jiterator_code(
     T x = std::fabs(_x);
 
     if (x <= T{8.0}) {
-      static constexpr T coefficients[] = {
+      static const T coefficients[] = {
           -4.41534164647933937950E-18, 3.33079451882223809783E-17,
           -2.43127984654795469359E-16, 1.71539128555513303061E-15,
           -1.16853328779934516808E-14, 7.67618549860493561688E-14,
@@ -125,7 +125,7 @@ jiterator_also_stringify_as(jiterator_code(
     }
 
     // x > 8
-    static constexpr T coefficients[] = {
+    static const T coefficients[] = {
         -7.23318048787475395456E-18, -4.83050448594418207126E-18,
         4.46562142029675999901E-17,  3.46122286769746109310E-17,
         -2.82762398051658348494E-16, -3.42548561967721913462E-16,
@@ -1565,7 +1565,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   constexpr T zero = 0;
 
   /* approximation for 0 <= |y - 0.5| <= 3/8 */
-  static constexpr T P0[5] = {
+  static const T P0[5] = {
       -5.99633501014107895267E1,
       9.80010754185999661536E1,
       -5.66762857469070293439E1,
@@ -1573,7 +1573,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       -1.23916583867381258016E0,
   };
 
-  static constexpr T Q0[9] = {
+  static const T Q0[9] = {
       1.00000000000000000000E0,
       1.95448858338141759834E0,
       4.67627912898881538453E0,
@@ -1588,7 +1588,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
   * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
   */
-  static constexpr T P1[9] = {
+  static const T P1[9] = {
       4.05544892305962419923E0,
       3.15251094599893866154E1,
       5.71628192246421288162E1,
@@ -1600,7 +1600,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       -8.57456785154685413611E-4,
   };
 
-  static constexpr T Q1[9] = {
+  static const T Q1[9] = {
       1.00000000000000000000E0,
       1.57799883256466749731E1,
       4.53907635128879210584E1,
@@ -1616,7 +1616,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
   */
 
-  static constexpr T P2[9] = {
+  static const T P2[9] = {
       3.23774891776946035970E0,
       6.91522889068984211695E0,
       3.93881025292474443415E0,
@@ -1628,7 +1628,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       6.23974539184983293730E-9,
   };
 
-  static constexpr T Q2[9] = {
+  static const T Q2[9] = {
       1.00000000000000000000E0,
       6.02427039364742014255E0,
       3.67983563856160859403E0,
@@ -2165,7 +2165,7 @@ calc_erfcx(T x)
 
   if (x >= 0) {
     if (x > 50) { // continued-fraction expansion is faster
-      constexpr T ispi = 0.56418958354775628694807945156; // 1 / sqrt(pi)
+      const T ispi = 0.56418958354775628694807945156; // 1 / sqrt(pi)
       if (x > 5e7) { // 1-term expansion, important to avoid overflow
         return ispi / x;
       }
@@ -2207,7 +2207,7 @@ inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T airy_ai_forward(T x) {
-    static constexpr T AN[] = {
+    static const T AN[] = {
             +3.46538101525629032477e-01,
             +1.20075952739645805542e+01,
             +7.62796053615234516538e+01,
@@ -2218,7 +2218,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             +9.99999999999999995305e-01,
     };
 
-    static constexpr T AD[] = {
+    static const T AD[] = {
             +5.67594532638770212846e-01,
             +1.47562562584847203173e+01,
             +8.45138970141474626562e+01,
@@ -2229,7 +2229,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             +1.00000000000000000470e+00,
     };
 
-    static constexpr T AFN[] = {
+    static const T AFN[] = {
             -1.31696323418331795333e-01,
             -6.26456544431912369773e-01,
             -6.93158036036933542233e-01,
@@ -2241,7 +2241,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             -1.67787698489114633780e-08,
     };
 
-    static constexpr T AFD[] = {
+    static const T AFD[] = {
             +1.33560420706553243746e+01,
             +3.26825032795224613948e+01,
             +2.67367040941499554804e+01,
@@ -2253,7 +2253,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             +4.51850092970580378464e-07,
     };
 
-    static constexpr T AGN[] = {
+    static const T AGN[] = {
             +1.97339932091685679179e-02,
             +3.91103029615688277255e-01,
             +1.06579897599595591108e+00,
@@ -2267,7 +2267,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             +3.41551784765923618484e-10,
     };
 
-    static constexpr T AGD[] = {
+    static const T AGD[] = {
             +9.30892908077441974853e+00,
             +1.98352928718312140417e+01,
             +1.55646628932864612953e+01,
@@ -2386,7 +2386,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
-    static constexpr T PP[] = {
+    static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
             +1.23953371646414299388e+00,
@@ -2396,7 +2396,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
             +9.99999999999999997821e-01,
     };
 
-    static constexpr T PQ[] = {
+    static const T PQ[] = {
             +9.24408810558863637013e-04,
             +8.56288474354474431428e-02,
             +1.25352743901058953537e+00,
@@ -2406,7 +2406,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
             +1.00000000000000000218e+00,
     };
 
-    static constexpr T QP[] = {
+    static const T QP[] = {
             -1.13663838898469149931e-02,
             -1.28252718670509318512e+00,
             -1.95539544257735972385e+01,
@@ -2417,7 +2417,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
             -6.05014350600728481186e+00,
     };
 
-    static constexpr T QQ[] = {
+    static const T QQ[] = {
             +6.43178256118178023184e+01,
             +8.56430025976980587198e+02,
             +3.88240183605401609683e+03,
@@ -2427,14 +2427,14 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
             +2.42005740240291393179e+02,
     };
 
-    static constexpr T RP[] = {
+    static const T RP[] = {
             -4.79443220978201773821e+09,
             +1.95617491946556577543e+12,
             -2.49248344360967716204e+14,
             +9.70862251047306323952e+15,
     };
 
-    static constexpr T RQ[] = {
+    static const T RQ[] = {
             +4.99563147152651017219e+02,
             +1.73785401676374683123e+05,
             +4.84409658339962045305e+07,
@@ -2498,7 +2498,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
-    static constexpr T PP[] = {
+    static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
             +1.12719608129684925192e+00,
@@ -2508,7 +2508,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
             +1.00000000000000000254e+00,
     };
 
-    static constexpr T PQ[] = {
+    static const T PQ[] = {
             +5.71323128072548699714e-04,
             +6.88455908754495404082e-02,
             +1.10514232634061696926e+00,
@@ -2518,7 +2518,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
             +9.99999999999999997461e-01,
     };
 
-    static constexpr T QP[] = {
+    static const T QP[] = {
             +5.10862594750176621635e-02,
             +4.98213872951233449420e+00,
             +7.58238284132545283818e+01,
@@ -2529,7 +2529,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
             +2.52070205858023719784e+01,
     };
 
-    static constexpr T QQ[] = {
+    static const T QQ[] = {
             +7.42373277035675149943e+01,
             +1.05644886038262816351e+03,
             +4.98641058337653607651e+03,
@@ -2539,14 +2539,14 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
             +3.36093607810698293419e+02,
     };
 
-    static constexpr T RP[] = {
+    static const T RP[] = {
             -8.99971225705559398224e+08,
             +4.52228297998194034323e+11,
             -7.27494245221818276015e+13,
             +3.68295732863852883286e+15,
     };
 
-    static constexpr T RQ[] = {
+    static const T RQ[] = {
             +6.20836478118054335476e+02,
             +2.56987256757748830383e+05,
             +8.35146791431949253037e+07,
@@ -2606,7 +2606,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
-    static constexpr T PP[] = {
+    static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
             +1.23953371646414299388e+00,
@@ -2616,7 +2616,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             +9.99999999999999997821e-01,
     };
 
-    static constexpr T PQ[] = {
+    static const T PQ[] = {
             +9.24408810558863637013e-04,
             +8.56288474354474431428e-02,
             +1.25352743901058953537e+00,
@@ -2626,7 +2626,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             +1.00000000000000000218e+00,
     };
 
-    static constexpr T QP[] = {
+    static const T QP[] = {
             -1.13663838898469149931e-02,
             -1.28252718670509318512e+00,
             -1.95539544257735972385e+01,
@@ -2637,7 +2637,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             -6.05014350600728481186e+00,
     };
 
-    static constexpr T QQ[] = {
+    static const T QQ[] = {
             +6.43178256118178023184e+01,
             +8.56430025976980587198e+02,
             +3.88240183605401609683e+03,
@@ -2647,7 +2647,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             +2.42005740240291393179e+02,
     };
 
-    static constexpr T YP[] = {
+    static const T YP[] = {
             +1.55924367855235737965e+04,
             -1.46639295903971606143e+07,
             +5.43526477051876500413e+09,
@@ -2658,7 +2658,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             -1.84950800436986690637e+16,
     };
 
-    static constexpr T YQ[] = {
+    static const T YQ[] = {
             +1.04128353664259848412e+03,
             +6.26107330137134956842e+05,
             +2.68919633393814121987e+08,
@@ -2721,7 +2721,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
-    static constexpr T PP[] = {
+    static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
             +1.12719608129684925192e+00,
@@ -2731,7 +2731,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             +1.00000000000000000254e+00,
     };
 
-    static constexpr T PQ[] = {
+    static const T PQ[] = {
             +5.71323128072548699714e-04,
             +6.88455908754495404082e-02,
             +1.10514232634061696926e+00,
@@ -2741,7 +2741,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             +9.99999999999999997461e-01,
     };
 
-    static constexpr T QP[] = {
+    static const T QP[] = {
             +5.10862594750176621635e-02,
             +4.98213872951233449420e+00,
             +7.58238284132545283818e+01,
@@ -2752,7 +2752,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             +2.52070205858023719784e+01,
     };
 
-    static constexpr T QQ[] = {
+    static const T QQ[] = {
             +7.42373277035675149943e+01,
             +1.05644886038262816351e+03,
             +4.98641058337653607651e+03,
@@ -2762,7 +2762,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             +3.36093607810698293419e+02,
     };
 
-    static constexpr T YP[] = {
+    static const T YP[] = {
             +1.26320474790178026440e+09,
             -6.47355876379160291031e+11,
             +1.14509511541823727583e+14,
@@ -2771,7 +2771,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             -7.78877196265950026825e+17,
     };
 
-    static constexpr T YQ[] = {
+    static const T YQ[] = {
             +5.94301592346128195359e+02,
             +2.35564092943068577943e+05,
             +7.34811944459721705660e+07,
@@ -3207,7 +3207,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
 
 template<typename T>
 inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             -4.41534164647933937950e-18,
             +3.33079451882223809783e-17,
             -2.43127984654795469359e-16,
@@ -3240,7 +3240,7 @@ inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
             +6.76795274409476084995e-01,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             -7.23318048787475395456e-18,
             -4.83050448594418207126e-18,
             +4.46562142029675999901e-17,
@@ -3296,7 +3296,7 @@ inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             +2.77791411276104639959e-18,
             -2.11142121435816608115e-17,
             +1.55363195773620046921e-16,
@@ -3328,7 +3328,7 @@ inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
             +2.52587186443633654823e-01,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             +7.51729631084210481353e-18,
             +4.41434832307170791151e-18,
             -4.65030536848935832153e-17,
@@ -3392,7 +3392,7 @@ inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
             +1.03496952576338420167e-11,
@@ -3405,7 +3405,7 @@ inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
             -5.35327393233902768720e-01,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             +5.30043377268626276149e-18,
             -1.64758043015242134646e-17,
             +5.21039150503902756861e-17,
@@ -3469,7 +3469,7 @@ inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
             -6.66690169419932900609e-13,
@@ -3483,7 +3483,7 @@ inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
             +1.52530022733894777053e+00,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             -5.75674448366501715755e-18,
             +1.79405087314755922667e-17,
             -5.68946255844285935196e-17,
@@ -3547,7 +3547,7 @@ inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
             +1.03496952576338420167e-11,
@@ -3560,7 +3560,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
             -5.35327393233902768720e-01,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             +5.30043377268626276149e-18,
             -1.64758043015242134646e-17,
             +5.21039150503902756861e-17,
@@ -3624,7 +3624,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
 
 template<typename T>
 inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
-    static constexpr T A[] = {
+    static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
             -6.66690169419932900609e-13,
@@ -3638,7 +3638,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
             +1.52530022733894777053e+00,
     };
 
-    static constexpr T B[] = {
+    static const T B[] = {
             -5.75674448366501715755e-18,
             +1.79405087314755922667e-17,
             -5.68946255844285935196e-17,
