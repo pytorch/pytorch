@@ -2021,10 +2021,11 @@ def _compile(
 
             if package is not None and package.has_current_entry():
                 # This frame is about to be pinned to RUN_ONLY, so the variants
-                # past the limit will never be captured. Mark the entry bypassed
-                # rather than letting the package serialize a partial guard set
-                # that silently stops matching at serving time.
-                package.bypass_current_entry()
+                # past the limit will never be captured. Record that so a caller
+                # building an artifact can detect the gap. Deliberately not a
+                # bypass: the variants captured so far are still valid and must
+                # stay installable, and for a cache a miss just recompiles.
+                package.mark_current_entry_truncated()
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {

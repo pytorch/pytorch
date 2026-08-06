@@ -36,6 +36,8 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import re
+import types
 from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
 from typing_extensions import Self
@@ -45,11 +47,10 @@ import torch._functorch.config as functorch_config
 
 from .exc import PackageError
 from .guards import CheckFunctionManager
-from .package import CompilePackage, DiskDynamoStore
+from .package import _DynamoCacheEntry, CompilePackage, DiskDynamoStore
 
 
 if TYPE_CHECKING:
-    from .package import _DynamoCacheEntry
     from .types import GuardFilterEntry
 
 
@@ -69,12 +70,21 @@ def default_guard_filter_fn(
     guard_entries: Sequence[GuardFilterEntry],
 ) -> Sequence[bool]:
     """
-    Keep every guard we can actually serialize.
+    Drop the guard types that cannot be serialized, and keep everything else.
 
-    Dropping a guard is not free: it does not fail at serving time, it makes a
-    graph traced under one condition get reused under another. So drop only the
-    types that cannot be written to disk at all, and let serialization raise for
-    anything else.
+    Read this before trusting an artifact. The unserializable set is exactly the
+    IDENTITY guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH,
+    NN_MODULE, CLASS_MATCH, DICT_VERSION, WEAKREF_ALIVE -- so precompiling
+    inherently gives up on noticing that a guarded object was REBOUND to a
+    different object of the same shape. Most such guards are on modules and
+    builtins and are stable in practice, but one on a global holding a function
+    is not: rebind it between capture and load and the artifact serves the graph
+    traced against the old one, with no error.
+
+    There is no safe alternative default -- keeping these makes serialization
+    raise for essentially every function -- so instead every drop is recorded
+    with its source name in ``PrecompileSummary.dropped_guards``, and ``save()``
+    refuses by default when a drop looks load-bearing. See ``risky_dropped_guards``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
@@ -93,11 +103,22 @@ class PrecompileSummary:
     guarded_codes: int
     backend_graphs: int
     bypassed: tuple[str, ...]
-    dropped_guards: tuple[tuple[str, int], ...] = ()
+    truncated: tuple[str, ...] = ()
+    # (guard_type, source_name) for every guard the filter discarded / retained.
+    dropped_guards: tuple[tuple[str, str], ...] = ()
+    kept_guards: tuple[tuple[str, str], ...] = ()
+    # Subset of dropped_guards whose loss can plausibly change results.
+    risky_dropped_guards: tuple[tuple[str, str], ...] = ()
 
     @property
     def complete(self) -> bool:
-        return not self.bypassed
+        return not self.bypassed and not self.truncated and self.guarded_codes > 0
+
+    def dropped_guard_types(self) -> dict[str, int]:
+        return _count_types(self.dropped_guards)
+
+    def kept_guard_types(self) -> dict[str, int]:
+        return _count_types(self.kept_guards)
 
     def __str__(self) -> str:
         base = (
@@ -106,14 +127,52 @@ class PrecompileSummary:
             f"{self.backend_graphs} backend graphs"
         )
         if self.dropped_guards:
-            base += f", dropped guards {dict(self.dropped_guards)}"
+            base += f", dropped guards {self.dropped_guard_types()}"
+        if self.risky_dropped_guards:
+            base += f", RISKY drops {[n for _, n in self.risky_dropped_guards]}"
+        if self.truncated:
+            base += f", {len(self.truncated)} TRUNCATED: {list(self.truncated)}"
         if self.bypassed:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         return base
 
 
+# A bare global binding: G['NAME'], with no further attribute or item access.
+_BARE_GLOBAL = re.compile(r"""^G\[['"][^'"]+['"]\]$""")
+
+
+def _is_risky_drop(source: str, value: object) -> bool:
+    """
+    Whether losing this identity guard can plausibly change results.
+
+    Modules are effectively immutable bindings for the life of a process, and so
+    is anything reached through one (``G['torch'].foo``), so dropping identity
+    guards on those is noise. A BARE global holding a non-module -- the classic
+    ``ACT = some_fn`` dispatch switch -- is the case that silently serves a graph
+    traced against the old object when it is rebound.
+
+    This is a heuristic, not a proof: rebinding a module attribute, or mutating
+    an object a kept guard only checks by type, is still not caught. Treat
+    ``dropped_guards`` as the authoritative list.
+    """
+    if isinstance(value, types.ModuleType):
+        return False
+    return bool(_BARE_GLOBAL.match(source))
+
+
+def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
+    counts: collections.Counter[str] = collections.Counter()
+    for guard_type, _ in pairs:
+        counts[guard_type] += 1
+    return dict(counts)
+
+
 def _summarize(
-    entry: _DynamoCacheEntry, dropped: collections.Counter[str]
+    entry: _DynamoCacheEntry,
+    dropped: set[tuple[str, str]],
+    kept: set[tuple[str, str]],
+    risky: set[tuple[str, str]],
+    truncated: frozenset[str],
 ) -> PrecompileSummary:
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -121,7 +180,10 @@ def _summarize(
         guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
         backend_graphs=len(entry.backend_ids),
         bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
-        dropped_guards=tuple(sorted(dropped.items())),
+        truncated=tuple(sorted(truncated)),
+        dropped_guards=tuple(sorted(dropped)),
+        kept_guards=tuple(sorted(kept)),
+        risky_dropped_guards=tuple(sorted(risky)),
     )
 
 
@@ -143,7 +205,9 @@ class PrecompileSession:
     ) -> None:
         self._fn = fn
         self._backend = backend
-        self._dropped_guards: collections.Counter[str] = collections.Counter()
+        self._dropped_guards: set[tuple[str, str]] = set()
+        self._kept_guards: set[tuple[str, str]] = set()
+        self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._guard_filter_fn = self._recording_filter(
             guard_filter_fn or default_guard_filter_fn
         )
@@ -189,35 +253,79 @@ class PrecompileSession:
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             for keep, entry in zip(decisions, entries):
-                if not keep:
-                    self._dropped_guards[entry.guard_type] += 1
+                target = self._kept_guards if keep else self._dropped_guards
+                target.add((entry.guard_type, entry.name))
+                if not keep and _is_risky_drop(entry.name, entry.value):
+                    self._risky_dropped_guards.add((entry.guard_type, entry.name))
             return decisions
 
         return filter_fn
 
     def summary(self) -> PrecompileSummary:
-        return _summarize(self._package.cache_entry(), self._dropped_guards)
+        return _summarize(
+            self._package.cache_entry(),
+            self._dropped_guards,
+            self._kept_guards,
+            self._risky_dropped_guards,
+            self._package.truncated_frames,
+        )
 
-    def save(self, path: str, *, require_complete: bool = True) -> PrecompileSummary:
+    def save(
+        self,
+        path: str,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> PrecompileSummary:
         """
-        Write the artifact. Raises if any frame was bypassed, which is what
-        happens when a frame exceeds ``recompile_limit`` -- that frame is pinned
-        to eager and its remaining variants were never captured, so the artifact
-        would silently stop matching at serving time.
+        Write the artifact, refusing by default to write one that cannot serve
+        what it claims. See ``PrecompileSummary.complete``.
         """
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
         summary = self.summary()
-        if require_complete and not summary.complete:
+        if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
-                f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
-                f"were bypassed and will fall back to eager: {list(summary.bypassed)}. "
-                f"This usually means a frame exceeded recompile_limit "
-                f"(currently {self._recompile_limit}); a frame needs one slot per "
-                f"variant, and frames shared across module instances accumulate "
-                f"them. Raise recompile_limit, or pass require_complete=False to "
-                f"accept a partial artifact."
+                f"Precompilation dropped identity guard(s) on "
+                f"{[n for _, n in summary.risky_dropped_guards]}, which cannot be "
+                f"serialized. Each of those is a bare global holding a non-module: "
+                f"rebinding one between capture and load would silently serve a "
+                f"graph traced against the old value, with no error. Read the value "
+                f"from a module attribute or pass it as an argument so it can be "
+                f"guarded, or pass require_no_risky_drops=False to accept the risk."
             )
+        if require_no_dropped_guards and summary.dropped_guards:
+            raise PackageError(
+                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
+                f"cannot be serialized: {list(summary.dropped_guards)}. Rebinding any "
+                f"of those sources between capture and load would silently serve a "
+                f"graph traced against the old value."
+            )
+        if require_complete:
+            if summary.guarded_codes == 0:
+                raise PackageError(
+                    "Precompilation captured no compiled code. Capture happens by "
+                    "execution, so the callable must actually be run inside the "
+                    "capture block; a callable Dynamo traced to an empty graph also "
+                    "lands here and cannot be precompiled."
+                )
+            if summary.truncated:
+                raise PackageError(
+                    f"Precompilation is incomplete: {len(summary.truncated)} frame(s) "
+                    f"exceeded recompile_limit (currently {self._recompile_limit}) and "
+                    f"are missing variants: {list(summary.truncated)}. A frame needs "
+                    f"one slot per variant, and frames shared across module instances "
+                    f"accumulate them. Raise recompile_limit, or pass "
+                    f"require_complete=False to accept a partial artifact."
+                )
+            if summary.bypassed:
+                raise PackageError(
+                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
+                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
+                    f"This usually means their guards could not be serialized. Pass "
+                    f"require_complete=False to accept a partial artifact."
+                )
         store = DiskDynamoStore()
         if self._backend == "eager":
             # Eager "backends" are fx graphs with no compiled artifact of their
@@ -275,8 +383,14 @@ def precompile_load(
     ``torch._dynamo.reset()`` does not undo, so the result is also a context
     manager that unloads on exit.
     """
+    entry_fn = _entry_fn_of(fn)
     store = DiskDynamoStore()
-    package, backends = store.load_package(_entry_fn_of(fn), path)
+    cache_entry = store.load_cache_entry(path)
+    _check_artifact_matches(cache_entry.dynamo, entry_fn, path)
+    package, backends = (
+        CompilePackage(entry_fn, cache_entry.dynamo),
+        cache_entry.backends,
+    )
     compiled = torch._dynamo.optimize(
         backend,
         package=package,
@@ -319,6 +433,37 @@ def serving() -> Iterator[None]:
     """
     with torch.compiler.set_stance("fail_on_recompile"):
         yield
+
+
+def _check_artifact_matches(
+    dynamo: _DynamoCacheEntry, entry_fn: Callable[..., object], path: str
+) -> None:
+    """
+    Refuse an artifact captured from a different callable.
+
+    CompilePackage.initialize discards the serialized entry code object and
+    rebinds the stored guards and bytecode onto whatever function it is given,
+    and the source checksum only covers the ORIGINAL function's source, so a
+    mismatch is not otherwise detected: the wrong callable simply returns the
+    captured one's results.
+    """
+    code = getattr(entry_fn, "__code__", None)
+    if code is None:
+        return
+    expected = dynamo.fn_name
+    actual = getattr(entry_fn, "__qualname__", None)
+    if expected is not None and actual is not None and expected != actual:
+        raise PackageError(
+            f"Artifact at {path} was captured from {expected!r} but is being "
+            f"loaded onto {actual!r}. Loading it would serve the captured "
+            f"function's graphs for this one."
+        )
+    stored = dynamo.codes[0].python_code if dynamo.codes else None
+    if stored is not None and stored.co_name != code.co_name:
+        raise PackageError(
+            f"Artifact at {path} was captured from code object "
+            f"{stored.co_name!r} but is being loaded onto {code.co_name!r}."
+        )
 
 
 @functools.singledispatch

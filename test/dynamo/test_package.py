@@ -108,6 +108,19 @@ def staged_with_local_dict_conditional(x, cfg):
     return x.sum() * cfg["scale"]
 
 
+def _precompile_sin(t):
+    return t.sin()
+
+
+PRECOMPILE_ACTIVATION = _precompile_sin
+
+
+def staged_with_global_function_ref(x):
+    y = PRECOMPILE_ACTIVATION(x) + 1
+    torch._dynamo.graph_break()
+    return (y * 10).sum()
+
+
 @contextlib.contextmanager
 def _precompile_mode(mode):
     old = PRECOMPILE_CONFIG["mode"]
@@ -963,6 +976,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         n = 5
         model = PrecompileStack(n)
         inputs = [torch.randn(*s) for s in [(4, 8), (5, 8), (6, 8)]]
+        expected_first = model(inputs[0])
 
         session = precompile_capture(
             model, backend="eager", recompile_limit=8, dynamic=False
@@ -973,12 +987,24 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         summary = session.summary()
         self.assertFalse(summary.complete)
-        self.assertIn("forward", summary.bypassed)
-        with self.assertRaisesRegex(PackageError, "Precompilation is incomplete"):
+        self.assertTrue(summary.truncated)
+        self.assertEqual(summary.bypassed, ())
+        with self.assertRaisesRegex(PackageError, "exceeded recompile_limit"):
             session.save(self.path())
 
-        # Opting in to a partial artifact is still allowed.
+        # Opting in to a partial artifact is still allowed, and the variants
+        # that WERE captured must still serve -- truncation records a gap, it
+        # does not throw away the coverage already obtained.
+        self.assertGreater(summary.guarded_codes, 0)
         session.save(self.path(), require_complete=False)
+        torch._dynamo.reset()
+        with (
+            precompile_load(
+                model, self.path(), backend="eager", recompile_limit=8, dynamic=False
+            ) as loaded,
+            serving(),
+        ):
+            self.assertEqual(loaded(inputs[0]), expected_first)
 
     def test_global_dict_conditional_guard_round_trip(self):
         modes = ["sum", "mean"]
@@ -1073,10 +1099,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 compiled(x, cfg)
         summary = session.summary()
         self.assertTrue(summary.complete)
-        # the key-set and membership guards must survive the filter, otherwise
-        # a config with different keys would reuse the wrong graph
-        self.assertNotIn("DICT_KEYS_MATCH", dict(summary.dropped_guards))
-        self.assertNotIn("DICT_CONTAINS", dict(summary.dropped_guards))
+        # Assert positively that the key-set and membership guards were emitted
+        # AND retained. Checking only that they are absent from dropped_guards
+        # would pass just as well if Dynamo never emitted them at all.
+        kept = summary.kept_guard_types()
+        self.assertIn("DICT_KEYS_MATCH", kept)
+        self.assertIn("DICT_CONTAINS", kept)
+        self.assertNotIn("DICT_KEYS_MATCH", summary.dropped_guard_types())
+        self.assertNotIn("DICT_CONTAINS", summary.dropped_guard_types())
         session.save(self.path())
 
         torch._dynamo.reset()
@@ -1096,20 +1126,28 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 loaded(x, {"gamma": {"kind": "wide", "dims": [1], "weight": 2}})
 
     def test_summary_reports_dropped_guards(self):
-        # Guard types the filter discards are recorded rather than silently
-        # disappearing; dropping one widens what a graph gets reused for.
+        # Guard types the filter discards are recorded with their source name
+        # rather than silently disappearing; dropping one widens what a graph
+        # gets reused for, and only the name says whether that matters.
         session = precompile_capture(
-            staged_with_graph_breaks, backend="eager", dynamic=False
+            staged_with_global_dict_conditional, backend="eager", dynamic=False
         )
         with session as compiled:
             compiled(torch.randn(4, 8))
         summary = session.summary()
-        # The function calls torch._dynamo.graph_break(), so the default filter
-        # always discards a MODULE_MATCH on the torch global.
-        dropped = dict(summary.dropped_guards)
-        self.assertIn("MODULE_MATCH", dropped)
-        self.assertGreater(dropped["MODULE_MATCH"], 0)
+        # The filter cannot serialize identity guards, so referencing the torch
+        # module at all produces at least one drop, reported as (type, source).
+        self.assertTrue(summary.dropped_guards)
+        for guard_type, source in summary.dropped_guards:
+            self.assertIsInstance(guard_type, str)
+            self.assertIsInstance(source, str)
+        self.assertEqual(
+            sum(summary.dropped_guard_types().values()), len(summary.dropped_guards)
+        )
         self.assertIn("dropped guards", str(summary))
+        # save() can be made to enforce that nothing was dropped.
+        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
+            session.save(self.path(), require_no_dropped_guards=True)
 
     def test_raised_recompile_limit_is_complete(self):
         n = 5
@@ -1137,6 +1175,94 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             for x, want in zip(inputs, expected):
                 self.assertEqual(loaded(x), want)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                loaded(torch.randn(7, 8))
+
+    def test_save_refuses_risky_dropped_identity_guard(self):
+        # Identity guards cannot be serialized, so a bare global holding a
+        # function loses its guard. Rebinding it between capture and load would
+        # then silently serve the graph traced against the old value.
+        global PRECOMPILE_ACTIVATION
+        session = precompile_capture(
+            staged_with_global_function_ref, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(torch.randn(4, 8))
+        summary = session.summary()
+        risky = [name for _, name in summary.risky_dropped_guards]
+        self.assertIn("G['PRECOMPILE_ACTIVATION']", risky)
+        # Guards on the torch module itself are dropped too but are not risky.
+        self.assertNotIn("G['torch']", risky)
+        with self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"):
+            session.save(self.path())
+        # The risk is acknowledgeable, not a hard block.
+        session.save(self.path(), require_no_risky_drops=False)
+
+    def test_load_rejects_artifact_from_a_different_callable(self):
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(x)
+        session.save(self.path())
+
+        # CompilePackage rebinds the stored guards onto whatever callable it is
+        # given, and the source checksum only covers the captured function, so
+        # without an explicit check this silently serves the wrong graphs.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(PackageError, "captured from"):
+            precompile_load(
+                staged_with_local_dict_conditional,
+                self.path(),
+                backend="eager",
+                dynamic=False,
+            )
+
+    def test_save_rejects_capture_that_ran_nothing(self):
+        # Capture is by execution. A session whose callable was never run has
+        # nothing to serve, and install() would just skip the frame, so
+        # serving() could not report the gap either.
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session:
+            pass
+        summary = session.summary()
+        self.assertEqual(summary.guarded_codes, 0)
+        self.assertFalse(summary.complete)
+        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+            session.save(self.path())
+
+    def test_unload_clears_resume_function_entries(self):
+        # uninstall() used to clear precompile entries only for the entry frame,
+        # leaving resume functions installed on module-level code objects for
+        # the rest of the process.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        x = torch.randn(4, 8)
+        session = precompile_capture(
+            staged_with_graph_breaks, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(x)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        loaded = precompile_load(
+            staged_with_graph_breaks, self.path(), backend="eager", dynamic=False
+        )
+        installed = [
+            code
+            for code in loaded._package._installed_precompile_codes
+            if code.co_name.startswith("torch_dynamo_resume_in")
+        ]
+        self.assertTrue(installed, "expected resume frames to be installed")
+        self.assertTrue(all(_debug_get_precompile_entries(c) for c in installed))
+
+        loaded.unload()
+        for code in installed:
+            self.assertEqual(_debug_get_precompile_entries(code), [])
 
 
 if __name__ == "__main__":
