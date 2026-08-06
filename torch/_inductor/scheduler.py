@@ -3738,6 +3738,8 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         fx_extern_fqns before any Triton kernel codegen runs, making
         get_fused_kernel_module_fqn's pass-2 filter order-independent.
         """
+        if not isinstance(self.node, ir.ExternKernel):
+            raise AssertionError("expected self.node to be an ir.ExternKernel")
         from torch._inductor.fx_passes.graph_view import (
             _clean_stack_name,
             _strip_instance_suffix,
