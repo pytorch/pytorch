@@ -398,63 +398,11 @@ def has_mutated_vars(
     return False
 
 
-def user_arg_proxy_indices(
-    flat_vts: list[tuple[InputTag, VariableTracker]],
-) -> dict[torch.fx.Node, int]:
-    """Map the proxy node of each tensor/symnode user arg to its flat index."""
-    proxy_node_to_idx: dict[torch.fx.Node, int] = {}
-    idx = 0
-    for tag, vt in flat_vts:
-        if tag in (InputTag.TENSOR, InputTag.SYMNODE):
-            node = vt.as_proxy().node
-            if node not in proxy_node_to_idx:
-                proxy_node_to_idx[node] = idx
-                idx += 1
-    return proxy_node_to_idx
-
-
-def lifted_freevar_info(outer_proxy: Any) -> tuple[Source | None, Any]:
-    """Source and example value of a lifted arg that is not a user arg."""
-    grapharg = outer_proxy.node.meta.get("grapharg", None)
-    if grapharg is not None:
-        return grapharg.source, grapharg.example
-    return None, outer_proxy.node.meta.get("example_value", None)
-
-
-def has_unresolvable_freevar(
-    p_args: tuple[Any, ...],
-    flat_vts: list[tuple[InputTag, VariableTracker]],
-) -> bool:
-    """Whether some lifted freevar cannot be re-derived at a future call site.
-
-    A region that captured a graph intermediate lifts it as a freevar with no
-    source, so stamp_out_subgraph has no way to produce it at the next call
-    site. This also backstops an under-recorded read: had the region's
-    traced_sources named whatever produced the value, the mutation check would
-    have rejected reuse first.
-    """
-    proxy_node_to_idx = user_arg_proxy_indices(flat_vts)
-    for outer_proxy in p_args[2:]:
-        if outer_proxy.node in proxy_node_to_idx:
-            continue
-        source, example = lifted_freevar_info(outer_proxy)
-        if source is None and not isinstance(example, torch.SymInt):
-            hc_log.debug(
-                "subgraph_reuse: not eligible -- freevar has no source: "
-                "node.op=%s node.name=%s",
-                outer_proxy.node.op,
-                outer_proxy.node.name,
-            )
-            return True
-    return False
-
-
 def is_reuse_eligible(
     tx: "InstructionTranslatorBase",
     body_r: Any,
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
-    p_args: tuple[Any, ...],
     traced_sources: OrderedSet[Source] | None = None,
     has_reuse_hash_fn: bool = False,
 ) -> bool:
@@ -473,8 +421,6 @@ def is_reuse_eligible(
         (nn.Modules included) — for sourceless or other input types we
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
-      - Every lifted freevar must have a source, so that stamp_out_subgraph
-        can re-derive it at the next call site.
 
     When ``has_reuse_hash_fn`` is True, side-effect and mutation checks are
     skipped because the hash key replaces guards — there are no guards to
@@ -519,9 +465,6 @@ def is_reuse_eligible(
         hc_log.debug(
             "subgraph_reuse: not eligible -- unsupported input VT types",
         )
-        return False
-
-    if has_unresolvable_freevar(p_args, fingerprint.flat_vts):
         return False
 
     return True
@@ -1174,11 +1117,15 @@ def build_subgraph_input_mapping(
     - LiftedCapturedSource: a captured variable (e.g. a weight or parameter)
     - LiftedSyntheticObject: a TorchScriptObject with a SyntheticLocalSource
     - LiftedBoundSymbol: a SymInt already bound as a graph input
-
-    Every lifted arg must be re-derivable at a future call site;
-    is_reuse_eligible rejects the region otherwise.
     """
-    proxy_node_to_idx = user_arg_proxy_indices(flat_vts)
+    proxy_node_to_idx: dict[torch.fx.Node, int] = {}
+    idx = 0
+    for tag, vt in flat_vts:
+        if tag in (InputTag.TENSOR, InputTag.SYMNODE):
+            node = vt.as_proxy().node
+            if node not in proxy_node_to_idx:
+                proxy_node_to_idx[node] = idx
+                idx += 1
 
     subgraph_input_mapping: list[LiftedArgOrigin] = []
     for outer_proxy in p_args[2:]:
@@ -1186,7 +1133,8 @@ def build_subgraph_input_mapping(
         if matched_idx >= 0:
             subgraph_input_mapping.append(LiftedUserArg(matched_idx))
         else:
-            source, example = lifted_freevar_info(outer_proxy)
+            grapharg = outer_proxy.node.meta.get("grapharg", None)
+            source = grapharg.source if grapharg is not None else None
             # SymInt freevars must reuse the existing symbolic proxy rather
             # than resolving via source.get_value() (which returns the
             # concrete int). They appear as either:
@@ -1194,6 +1142,11 @@ def build_subgraph_input_mapping(
             # - call_function nodes (e.g. sym_size_int) with no grapharg
             # In both cases, store the sympy expression and look it up in
             # bound_symbols during stamp-out.
+            example = (
+                grapharg.example
+                if grapharg is not None
+                else outer_proxy.node.meta.get("example_value", None)
+            )
             if isinstance(example, torch.SymInt):
                 # _expr rather than expr: expr applies the ShapeEnv's
                 # replacements, so a symbol the region lifted before it was
@@ -1203,8 +1156,9 @@ def build_subgraph_input_mapping(
                 continue
             if source is None:
                 raise AssertionError(
-                    f"lifted freevar {outer_proxy.node.name} has no source -- "
-                    f"is_reuse_eligible should have rejected this"
+                    f"Freevar has no source: node.op={outer_proxy.node.op} "
+                    f"node.name={outer_proxy.node.name} -- this likely means a "
+                    f"function argument was not included in the proxy matching"
                 )
             if isinstance(source, SyntheticLocalSource):
                 ctor_info = tx.output.synthetic_source_ctor_info.get(source)
@@ -1430,7 +1384,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     body_r,
                     fingerprint,
                     tracing_info,
-                    p_args,
                     traced_sources,
                     has_reuse_hash_fn=True,
                 ):
@@ -1455,7 +1408,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             else:
                 traced_sources = tracing_info.traced_sources
                 if is_reuse_eligible(
-                    tx, body_r, fingerprint, tracing_info, p_args, traced_sources
+                    tx, body_r, fingerprint, tracing_info, traced_sources
                 ):
                     condition = build_reuse_condition(
                         tx,

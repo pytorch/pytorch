@@ -4522,10 +4522,10 @@ class GraphModule(torch.nn.Module):
     def test_subgraph_reuse_closure_item_mutated_to_intermediate(self):
         """A region reading a closed-over list slot set to a graph intermediate.
 
-        Reads through a closure cell are not recorded in traced_sources, so
-        unlike the global in the test above, the mutation check does not see
-        the write and the region reaches the lifted-freevar check instead.
-        Before that check existed this raised "Freevar has no source".
+        Unlike the global above, the read goes through a closure cell. Before
+        load_cell recorded the source the contents carry, the read and the
+        write named the cell differently, the mutation check found no overlap,
+        and this aborted with "Freevar has no source".
         """
         buf = [torch.tensor(0.0)]
 
@@ -4541,6 +4541,34 @@ class GraphModule(torch.nn.Module):
         ref = fn(x)
         with self._count_speculate_calls() as count:
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_closure_item_rebound_between_calls(self):
+        """A closed-over slot rebound to another tensor between two calls.
+
+        The same naming mismatch as the test above, but the new value has a
+        source, so nothing downstream rejects the region: the second call
+        silently reused the first call's tensor and returned 20 instead of 110.
+        """
+        buf = [None]
+
+        @nested_compile_region
+        def gn(x):
+            return x + buf[0]
+
+        def fn(x, y, z):
+            buf[0] = y
+            first = gn(x)
+            buf[0] = z
+            return first + gn(x)
+
+        x = torch.zeros(4)
+        y = torch.full((4,), 10.0)
+        z = torch.full((4,), 100.0)
+        ref = fn(x, y, z)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
         self.assertEqual(res, ref)
         self.assertEqual(count(), 2)
 

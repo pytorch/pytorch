@@ -650,7 +650,9 @@ class SideEffects:
         # Recorded here rather than only in load_attr because an unmutated cell
         # returns pre_existing_contents below without going through load_attr,
         # and a mutation landing after that read must still be detected.
-        self._record_traced_source(cellvar, "cell_contents", None)
+        contents = cellvar.pre_existing_contents
+        contents_source = getattr(contents, "source", None) if contents else None
+        self._record_traced_source(cellvar, "cell_contents", contents_source)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
