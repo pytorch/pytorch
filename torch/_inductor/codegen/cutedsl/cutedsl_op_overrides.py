@@ -114,6 +114,7 @@ class CuteDSLOpOverrides(OpOverrides):
         torch.uint16: "cutlass.Uint16",
         torch.bool: "cutlass.Boolean",
         torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
+        torch.float8_e8m0fnu: "cutlass.Float8E8M0FNU",
         torch.float8_e5m2: "cutlass.Float8E5M2",
     }
 
@@ -743,8 +744,8 @@ class CuteDSLOpOverrides(OpOverrides):
     ) -> CuteDSLArg:
         """Emit an inline PTX block elementwise over a fragment.
 
-        The requested dtype is used verbatim rather than upcast to a compute
-        type, because the asm operands name specific register classes.
+        The requested dtype controls the logical result and eventual storage.
+        E8M0 results may stay decoded as Float32 while fused consumers use them.
         """
         if constraints is None:
             raise NotImplementedError(
@@ -758,12 +759,20 @@ class CuteDSLOpOverrides(OpOverrides):
         operands = ", ".join(
             str(CuteDSLOpOverrides._as_expr(value)) for value in inputs
         )
-        return V.kernel.cse.generate(
-            V.kernel.body,
+        expr = (
             f"inline_asm_elementwise_intrinsic({operands}, asm={asm!r}, "
             f"constraints={constraints!r}, result_type={result_type}, "
-            f"is_pure={is_pure!r}, pack={pack!r})",
-            dtype=dtype,
+            f"is_pure={is_pure!r}, pack={pack!r})"
+        )
+        compute_dtype = torch.float32 if dtype == torch.float8_e8m0fnu else dtype
+        if not any(
+            CuteDSLOpOverrides._get_cse_var(value) is not None for value in inputs
+        ):
+            return expr
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            expr,
+            dtype=compute_dtype,
         )
 
     @staticmethod
