@@ -15,9 +15,12 @@ from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS, parametrize
-from torch.utils._triton import has_triton, has_triton_package
 from torch.utils import _pytree as pytree
 
 
@@ -285,11 +288,9 @@ class TestNativeRT(TestCase):
             )
         raise AssertionError(f"unknown aoti case: {case}")
 
+    @requires_capabilities(Capability.lib.triton)
     @parametrize("case", ["basic", "multi_output", "pytree"])
     def test_aoti(self, device, case):
-        if torch.device(device).type != "cpu":
-            if not has_triton_package() or not has_triton():
-                self.skipTest("requires triton")
         m, sample_inputs = self._aoti_case(device, case)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
