@@ -359,19 +359,19 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
-    @parametrize("use_nccl2", [False, True])
-    def test_nccl_backend_registration(self, use_nccl2):
+    @parametrize("nccl2_override", [None, "0", "1"])
+    def test_nccl_backend_registration(self, nccl2_override):
         with unittest.mock.patch.dict(os.environ):
-            if use_nccl2:
-                os.environ["TORCH_DIST_USE_NCCL2"] = "1"
-            else:
+            if nccl2_override is None:
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            else:
+                os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
             c10d._register_builtin_nccl_backend()
 
         expected_creator = (
-            c10d._create_nccl2_process_group
-            if use_nccl2
-            else c10d._create_nccl_process_group
+            c10d._create_nccl_process_group
+            if nccl2_override == "0"
+            else c10d._create_nccl2_process_group
         )
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
