@@ -99,7 +99,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         childOptions->timeout,
         "NCCL commShrink failed");
   } catch (...) {
-    work_state_->comm_state = CommState::ERROR;
+    comm_state_ = CommState::ERROR;
     nccl_comm_ = nullptr;
     throw;
   }
