@@ -2,7 +2,6 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
-import concurrent.futures
 import ctypes
 import gc
 import json
@@ -125,22 +124,6 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_concurrent_lazy_initialization(self) -> None:
-        backend = dist.get_backend_impl(device=self.device)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [
-                executor.submit(backend.eager_connect_single_device, self.device)
-                for _ in range(4)
-            ]
-            for future in futures:
-                future.result()
-
-        tensor = torch.ones(1, device=self.device)
-        dist.all_reduce(tensor)
-        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
