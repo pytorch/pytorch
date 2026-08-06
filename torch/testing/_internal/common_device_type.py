@@ -12,7 +12,7 @@ import unittest
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
-from functools import lru_cache, partial, wraps
+from functools import cache, partial, wraps
 from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
@@ -320,39 +320,35 @@ def _update_param_kwargs(param_kwargs, name, value):
 
 
 class Capability:
-    """Registry of common test capability constants.
+    """Structured namespace of device capability identifiers.
 
-    These constants are used in two places:
+    Each constant is a ``"<category>.<name>"`` string. The inner classes group
+    them by category so tests can reference capabilities as
+    ``Capability.dtype.fp8`` instead of bare strings.
 
-    1. As arguments to ``@requires_capabilities`` when tests declare their
-       required capabilities::
+    Tests declare requirements with :func:`requires_capabilities`::
 
-            @requires_capabilities(
-                Capability.dtype.fp8,
-                Capability.lib.triton,
-            )
+        @requires_capabilities(Capability.lib.triton, Capability.dtype.fp8)
+        def test_foo(self, device): ...
 
-    2. As keys in ``_capabilities()`` implementations when device test bases
-       declare supported capabilities::
-
-            return {
-                Capability.dtype: {
-                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-                },
-                Capability.lib: {
-                    Capability.lib.triton: lambda: has_triton(),
-                },
-            }
+    Device test bases declare what they support by overriding
+    :meth:`DeviceTypeTestBase._capabilities` with the same constants as keys.
     """
 
     class dtype:
+        """Data type capabilities (fp8, bf16, etc.)."""
+
         fp8 = "dtype.fp8"
         bf16 = "dtype.bf16"
 
     class lib:
+        """Third-party library capabilities (triton, etc.)."""
+
         triton = "lib.triton"
 
     class attention:
+        """Attention backend capabilities."""
+
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
 
@@ -430,7 +426,7 @@ class DeviceTypeTestBase(TestCase):
     # declare supported capabilities grouped by namespace. This method flattens
     # the nested map, evaluates the support checks, and caches the result.
     @classmethod
-    @lru_cache(maxsize=1)
+    @cache()
     def get_capabilities(cls) -> dict[str, bool]:
         return {
             k: fn() for sub in cls._capabilities().values() for k, fn in sub.items()
@@ -801,12 +797,11 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
         from torch.utils._triton import has_triton
 
         return {
             Capability.dtype: {
-                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: False,
             },
             Capability.lib: {
@@ -938,24 +933,19 @@ class XPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        from torch.testing._internal.common_cuda import (
-            PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            PLATFORM_SUPPORTS_FP8,
-            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        )
         from torch.utils._triton import has_triton
 
         return {
             Capability.dtype: {
-                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: False,
             },
             Capability.lib: {
                 Capability.lib.triton: lambda: has_triton(),
             },
             Capability.attention: {
-                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                Capability.attention.flash_attention: lambda: True,
+                Capability.attention.mem_efficient_attention: lambda: True,
             },
         }
 
