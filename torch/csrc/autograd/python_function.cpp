@@ -659,9 +659,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 
   THPFunction_assert(
       PyTuple_Check(self->dirty_tensors),
-      "autograd "
-      "internal error: dirty_tensors attribute is expected to be a tuple "
-      "but is ",
+      "autograd internal error: dirty_tensors attribute is expected to be a "
+      "tuple but is %s",
       THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
@@ -669,10 +668,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
     PyObject* obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(
         THPVariable_Check(obj),
-        "mark_dirty can "
-        "only accept variables, but argument ",
+        "mark_dirty can only accept variables, but argument %zd is of type %s",
         i,
-        " is of type ",
         THPUtils_typename(obj));
 
     const auto& tensor = THPVariable_Unpack(obj);
@@ -704,7 +701,8 @@ static void _wrap_outputs(
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    c10::intrusive_ptr<Node>& attached_node) {
   auto cdata_if_executable = is_executable ? self->cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -817,7 +815,8 @@ static void _wrap_outputs(
       jvp_user_function,
       to_save_if_setup_context,
       view_as_self_fn,
-      self->pure_view);
+      self->pure_view,
+      attached_node);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -859,8 +858,8 @@ static void _get_tensors_to_save(
     // to_save_if_setup_context, the actual saving is not done here.
     THPFunction_assert(
         PyTuple_Check(self->saved_for_forward),
-        "autograd internal "
-        "error: saved_for_forward attribute is expected to be a tuple but is ",
+        "autograd internal error: saved_for_forward attribute is expected to "
+        "be a tuple but is %s",
         THPUtils_typename(self->saved_for_forward));
     Py_ssize_t num_saved_for_forward =
         PyTuple_GET_SIZE(self->saved_for_forward);
@@ -875,8 +874,8 @@ static void _get_tensors_to_save(
   if (self->to_save) {
     THPFunction_assert(
         PyTuple_Check(self->to_save),
-        "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is ",
+        "autograd internal error: to_save attribute is expected to be a tuple "
+        "but is %s",
         THPUtils_typename(self->to_save));
 
     Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
@@ -953,9 +952,8 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
   THPFunction_assert(
       PyTuple_Check(self->non_differentiable),
-      "autograd "
-      "internal error: non_differentiable attribute is expected to be a "
-      "tuple but is ",
+      "autograd internal error: non_differentiable attribute is expected to be "
+      "a tuple but is %s",
       THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
@@ -963,8 +961,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     PyObject* t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(
         THPVariable_Check(t),
-        "mark_non_differentiable "
-        "only accepts variable arguments, but got ",
+        "mark_non_differentiable only accepts variable arguments, but got %s",
         THPUtils_typename(t));
     set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
@@ -1252,13 +1249,15 @@ PyObject* process_outputs(
       is_executable);
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
+  c10::intrusive_ptr<Node> attached_node;
   _wrap_outputs(
       grad_fn,
       unpacked.input_vars,
       raw_output,
       outputs,
       is_executable,
-      to_save_if_setup_context);
+      to_save_if_setup_context,
+      attached_node);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -1267,6 +1266,10 @@ PyObject* process_outputs(
   // we save them.
   if (is_executable) {
     _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
@@ -1803,8 +1806,8 @@ PyObject* THPFunction_apply(
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      THPObjectPtr result(
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }

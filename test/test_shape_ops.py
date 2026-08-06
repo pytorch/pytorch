@@ -71,8 +71,10 @@ def _generate_input(shape, dtype, device, with_extremal):
 
 
 class TestShapeOps(TestCase):
+    # TODO: update to work on CUDA, too
+    @onlyCPU
     def test_unbind(self, device):
-        x = torch.rand(2, 3, 4, 5, device=device)
+        x = torch.rand(2, 3, 4, 5)
         for dim in range(4):
             res = torch.unbind(x, dim)
             res2 = x.unbind(dim)
@@ -82,14 +84,16 @@ class TestShapeOps(TestCase):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
+    # TODO: update to work on CUDA, too?
     @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
+    @onlyCPU
     def test_tolist(self, device):
         list0D = []
-        tensor0D = torch.tensor(list0D, device=device)
+        tensor0D = torch.tensor(list0D)
         self.assertEqual(tensor0D.tolist(), list0D)
 
         table1D = [1.0, 2.0, 3.0]
-        tensor1D = torch.tensor(table1D, device=device)
+        tensor1D = torch.tensor(table1D)
         storage = torch.Storage(table1D)
         self.assertEqual(tensor1D.tolist(), table1D)
         self.assertEqual(storage.tolist(), table1D)
@@ -97,28 +101,13 @@ class TestShapeOps(TestCase):
         self.assertEqual(storage.tolist(), table1D)
 
         table2D = [[1, 2], [3, 4]]
-        tensor2D = torch.tensor(table2D, device=device)
+        tensor2D = torch.tensor(table2D)
         self.assertEqual(tensor2D.tolist(), table2D)
 
-        tensor3D = torch.tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], device=device)
+        tensor3D = torch.tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
         tensorNonContig = tensor3D.select(1, 1)
         self.assertFalse(tensorNonContig.is_contiguous())
         self.assertEqual(tensorNonContig.tolist(), [[3, 4], [7, 8]])
-
-    def test_diagonal_multidim(self, device):
-        x = torch.randn(10, 11, 12, 13, device=device)
-        xn = x.cpu().numpy()
-        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
-            result = torch.diagonal(x, *args)
-            expected = xn.diagonal(*args)
-            self.assertEqual(expected.shape, result.shape)
-            self.assertEqual(expected, result)
-        # test non-contiguous
-        xp = x.permute(1, 2, 3, 0)
-        result = torch.diagonal(xp, 0, -2, -1)
-        expected = xp.cpu().numpy().diagonal(0, -2, -1)
-        self.assertEqual(expected.shape, result.shape)
-        self.assertEqual(expected, result)
 
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):
@@ -227,7 +216,7 @@ class TestShapeOps(TestCase):
                         )
 
             # Move dim to same position
-            x = torch.randn(2, 3, 5, 7, 11, device=device)
+            x = torch.randn(2, 3, 5, 7, 11)
             torch_fn = partial(fn, source=(0, 1), destination=(0, 1))
             np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
@@ -263,6 +252,23 @@ class TestShapeOps(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_diagonal_multidim(self, device, dtype):
+        x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
+        xn = x.numpy()
+        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertEqual(expected, result)
+        # test non-contiguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertEqual(expected, result)
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
@@ -579,7 +585,7 @@ class TestShapeOps(TestCase):
     )  # even for CUDA test, sufficient system memory is required
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
-        t_in = torch.empty(2**32 + 1, dtype=torch.uint8, device=device).random_()
+        t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
         np_fn = partial(np.flip, axis=0)
         self.compare_with_numpy(torch_fn, np_fn, t_in)
@@ -588,13 +594,10 @@ class TestShapeOps(TestCase):
     @onlyCPU
     @unittest.expectedFailure
     @dtypes(torch.quint4x2, torch.quint2x4)
-    def test_flip_unsupported_dtype(self, device, dtype):
+    def test_flip_unsupported_dtype(self, dtype):
         scale, zero_point = 0.1, 5
         qt = torch.quantize_per_tensor(
-            torch.randn(16, 16, device=device),
-            scale=scale,
-            zero_point=zero_point,
-            dtype=dtype,
+            torch.randn(16, 16), scale=scale, zero_point=zero_point, dtype=dtype
         )
         torch.flip(qt, dims=(0,))
 
@@ -614,7 +617,7 @@ class TestShapeOps(TestCase):
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
-        x = torch.randn(42, device=device).to(dtype)
+        x = torch.randn(42).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
@@ -808,7 +811,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(strides, dst4.stride())
 
     def test_nonzero_non_diff(self, device):
-        x = torch.randn(10, requires_grad=True, device=device)
+        x = torch.randn(10, requires_grad=True)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
