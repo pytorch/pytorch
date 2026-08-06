@@ -36,8 +36,22 @@ class TestTritonClusterDims(TestCase):
 
         self.assertEqual(_get_binary_cta_args(binary), (4, 1, 2, 3))
 
+    def test_binary_cluster_dims_take_precedence_over_metadata(self):
+        binary = SimpleNamespace(
+            num_ctas=4,
+            cluster_dims=(1, 2, 3),
+            metadata=SimpleNamespace(cluster_dims=(4, 5, 6)),
+        )
+
+        self.assertEqual(_get_binary_cta_args(binary), (4, 1, 2, 3))
+
     def test_cluster_dims_returns_empty_tuple_without_cluster_info(self):
         self.assertEqual(_get_binary_cta_args(SimpleNamespace()), ())
+
+    def test_num_ctas_without_cluster_dims_returns_empty_tuple(self):
+        binary = SimpleNamespace(num_ctas=4)
+
+        self.assertEqual(_get_binary_cta_args(binary), ())
 
 
 if __name__ == "__main__":

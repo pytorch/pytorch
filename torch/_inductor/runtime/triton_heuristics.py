@@ -3081,8 +3081,6 @@ class StaticTritonCompileResult(CompileResult[_T]):
 
 
 def _get_binary_cta_args(binary: Any) -> tuple[int, ...]:
-    """Read cluster launch metadata from either the binary or metadata object."""
-
     metadata = getattr(binary, "metadata", None)
     num_ctas = getattr(binary, "num_ctas", None)
     if num_ctas is None and metadata is not None:
