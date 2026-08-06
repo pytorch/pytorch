@@ -455,6 +455,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-jammy-rocm-py3.10-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
