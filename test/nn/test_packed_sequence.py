@@ -1,11 +1,19 @@
 # Owner(s): ["module: nn"]
-
 import itertools
 import random
+import sys
+import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 class PackedSequenceTest(TestCase):
@@ -47,6 +55,10 @@ class PackedSequenceTest(TestCase):
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
         for input_type, _ in self._type_by_name.values():
@@ -85,6 +97,10 @@ class PackedSequenceTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.utils.rnn.pad_sequence(5)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
@@ -130,6 +146,10 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
     def test_to(self):
         for enforce_sorted in (True, False):
             padded, lengths = self._padded_sequence(torch.IntTensor)
@@ -492,127 +512,130 @@ class PackedSequenceTest(TestCase):
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
 
-    def test_pad_packed_sequence_autograd(self):
+    @parametrize(
+        "dtype,batch_first,total_length",
+        list(itertools.product((torch.double, torch.cdouble), (True, False), (5, 7))),
+    )
+    def test_pad_packed_sequence_autograd(self, dtype, batch_first, total_length):
         lengths = [5, 3, 2]
 
-        for dtype, batch_first, total_length in itertools.product(
-            (torch.double, torch.cdouble), (True, False), (5, 7)
-        ):
-            padded = torch.randn(5, 3, 2, dtype=dtype)
-            src = padded.transpose(0, 1).contiguous() if batch_first else padded
-            packed = rnn_utils.pack_padded_sequence(
-                src,
-                lengths,
-                batch_first=batch_first,
-                enforce_sorted=True,
-            )
-            data = packed.data.detach().clone().requires_grad_()
+        padded = torch.randn(5, 3, 2, dtype=dtype)
+        src = padded.transpose(0, 1).contiguous() if batch_first else padded
+        packed = rnn_utils.pack_padded_sequence(
+            src,
+            lengths,
+            batch_first=batch_first,
+            enforce_sorted=True,
+        )
+        data = packed.data.detach().clone().requires_grad_()
 
-            unpacked, out_lengths = torch.ops.aten._pad_packed_sequence.default(
-                data,
-                packed.batch_sizes,
-                batch_first,
-                0.0,
-                total_length,
-            )
-            grad_output = torch.randn_like(unpacked)
-            (actual_grad,) = torch.autograd.grad(unpacked, data, grad_output)
-            expected_grad = rnn_utils.pack_padded_sequence(
-                grad_output,
-                out_lengths,
-                batch_first=batch_first,
-                enforce_sorted=True,
-            ).data
+        unpacked, out_lengths = torch.ops.aten._pad_packed_sequence.default(
+            data,
+            packed.batch_sizes,
+            batch_first,
+            0.0,
+            total_length,
+        )
+        grad_output = torch.randn_like(unpacked)
+        (actual_grad,) = torch.autograd.grad(unpacked, data, grad_output)
+        expected_grad = rnn_utils.pack_padded_sequence(
+            grad_output,
+            out_lengths,
+            batch_first=batch_first,
+            enforce_sorted=True,
+        ).data
 
-            self.assertEqual(actual_grad, expected_grad)
+        self.assertEqual(actual_grad, expected_grad)
 
     @skipIfTorchDynamo("compiled autograd cannot fake PackPaddedSequenceBackward0")
-    def test_pad_packed_sequence_gradgrad(self):
+    @parametrize(
+        "batch_first,total_length",
+        list(itertools.product((True, False), (5, 7))),
+    )
+    def test_pad_packed_sequence_gradgrad(self, batch_first, total_length):
         lengths = [5, 3, 2]
         padded = torch.randn(5, 3, 2, dtype=torch.cdouble)
 
-        for batch_first, total_length in itertools.product((True, False), (5, 7)):
-            src = padded.transpose(0, 1).contiguous() if batch_first else padded
-            packed = rnn_utils.pack_padded_sequence(
-                src,
-                lengths,
-                batch_first=batch_first,
-                enforce_sorted=True,
-            )
-            data = packed.data.detach().clone().requires_grad_()
+        src = padded.transpose(0, 1).contiguous() if batch_first else padded
+        packed = rnn_utils.pack_padded_sequence(
+            src,
+            lengths,
+            batch_first=batch_first,
+            enforce_sorted=True,
+        )
+        data = packed.data.detach().clone().requires_grad_()
 
-            unpacked, _ = torch.ops.aten._pad_packed_sequence.default(
-                data,
-                packed.batch_sizes,
-                batch_first,
-                0.0,
-                total_length,
-            )
-            grad_output = torch.randn_like(unpacked, requires_grad=True)
-            (grad_data,) = torch.autograd.grad(
-                unpacked, data, grad_output, create_graph=True
-            )
-            grad_grad_data = torch.randn_like(grad_data)
-            (actual_grad_grad_output,) = torch.autograd.grad(
-                grad_data, grad_output, grad_grad_data
-            )
-            expected_grad_grad_output, _ = torch.ops.aten._pad_packed_sequence.default(
-                grad_grad_data,
-                packed.batch_sizes,
-                batch_first,
-                0.0,
-                total_length,
-            )
+        unpacked, _ = torch.ops.aten._pad_packed_sequence.default(
+            data,
+            packed.batch_sizes,
+            batch_first,
+            0.0,
+            total_length,
+        )
+        grad_output = torch.randn_like(unpacked, requires_grad=True)
+        (grad_data,) = torch.autograd.grad(
+            unpacked, data, grad_output, create_graph=True
+        )
+        grad_grad_data = torch.randn_like(grad_data)
+        (actual_grad_grad_output,) = torch.autograd.grad(
+            grad_data, grad_output, grad_grad_data
+        )
+        expected_grad_grad_output, _ = torch.ops.aten._pad_packed_sequence.default(
+            grad_grad_data,
+            packed.batch_sizes,
+            batch_first,
+            0.0,
+            total_length,
+        )
 
-            self.assertEqual(actual_grad_grad_output, expected_grad_grad_output)
+        self.assertEqual(actual_grad_grad_output, expected_grad_grad_output)
 
-    def test_pad_packed_sequence_forward_ad(self):
+    @parametrize(
+        "batch_first,total_length",
+        list(itertools.product((True, False), (5, 7))),
+    )
+    def test_pad_packed_sequence_forward_ad(self, batch_first, total_length):
         lengths = [5, 3, 2]
         padded = torch.randn(5, 3, 2, dtype=torch.double)
 
-        for batch_first, total_length in itertools.product((True, False), (5, 7)):
-            src = padded.transpose(0, 1).contiguous() if batch_first else padded
-            packed = rnn_utils.pack_padded_sequence(
-                src,
-                lengths,
-                batch_first=batch_first,
-                enforce_sorted=True,
-            )
-            tangent = torch.randn_like(packed.data)
+        src = padded.transpose(0, 1).contiguous() if batch_first else padded
+        packed = rnn_utils.pack_padded_sequence(
+            src,
+            lengths,
+            batch_first=batch_first,
+            enforce_sorted=True,
+        )
+        tangent = torch.randn_like(packed.data)
 
-            with torch.autograd.forward_ad.dual_level():
-                dual_data = torch.autograd.forward_ad.make_dual(packed.data, tangent)
-                dual_output, out_lengths = torch.ops.aten._pad_packed_sequence.default(
-                    dual_data,
-                    packed.batch_sizes,
-                    batch_first,
-                    3.0,
-                    total_length,
-                )
-                output, output_tangent = torch.autograd.forward_ad.unpack_dual(
-                    dual_output
-                )
-
-            expected_output, expected_lengths = (
-                torch.ops.aten._pad_packed_sequence.default(
-                    packed.data,
-                    packed.batch_sizes,
-                    batch_first,
-                    3.0,
-                    total_length,
-                )
-            )
-            expected_tangent, _ = torch.ops.aten._pad_packed_sequence.default(
-                tangent,
+        with torch.autograd.forward_ad.dual_level():
+            dual_data = torch.autograd.forward_ad.make_dual(packed.data, tangent)
+            dual_output, out_lengths = torch.ops.aten._pad_packed_sequence.default(
+                dual_data,
                 packed.batch_sizes,
                 batch_first,
-                0.0,
+                3.0,
                 total_length,
             )
+            output, output_tangent = torch.autograd.forward_ad.unpack_dual(dual_output)
 
-            self.assertEqual(output, expected_output)
-            self.assertEqual(output_tangent, expected_tangent)
-            self.assertEqual(out_lengths, expected_lengths)
+        expected_output, expected_lengths = torch.ops.aten._pad_packed_sequence.default(
+            packed.data,
+            packed.batch_sizes,
+            batch_first,
+            3.0,
+            total_length,
+        )
+        expected_tangent, _ = torch.ops.aten._pad_packed_sequence.default(
+            tangent,
+            packed.batch_sizes,
+            batch_first,
+            0.0,
+            total_length,
+        )
+
+        self.assertEqual(output, expected_output)
+        self.assertEqual(output_tangent, expected_tangent)
+        self.assertEqual(out_lengths, expected_lengths)
 
     def test_empty_packed_sequence(self):
         """
@@ -643,6 +666,9 @@ class PackedSequenceTest(TestCase):
         # Should not crash - either return empty list or raise informative error
         with self.assertRaises(RuntimeError):
             rnn_utils.unpack_sequence(packed)
+
+
+instantiate_parametrized_tests(PackedSequenceTest)
 
 
 if __name__ == "__main__":

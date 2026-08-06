@@ -297,7 +297,7 @@ def adagrad(
     differentiable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,
@@ -369,7 +369,7 @@ def _single_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,
@@ -410,7 +410,8 @@ def _single_tensor_adagrad(
             std = state_sum.sparse_mask(grad)
             std_values = std._values().sqrt_().add_(eps)
             param.add_(
-                _make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr
+                _make_sparse(grad, grad_indices, grad_values / std_values),
+                alpha=-clr,  # type: ignore[arg-type]
             )
         else:
             is_complex = torch.is_complex(param)
@@ -423,7 +424,7 @@ def _single_tensor_adagrad(
                 std = state_sum.sqrt() + eps
             else:
                 std = state_sum.sqrt().add_(eps)
-            param.addcdiv_(grad, std, value=-clr)
+            param.addcdiv_(grad, std, value=-clr)  # type: ignore[arg-type]
             if is_complex:
                 param = torch.view_as_complex(param)
                 state_sum = torch.view_as_complex(state_sum)
@@ -437,7 +438,7 @@ def _multi_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,

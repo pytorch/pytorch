@@ -2253,20 +2253,22 @@ def _pack_padded_sequence(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+    packed_data_size = fake_mode.shape_env.create_unbacked_symint()
+    batch_sizes_size = fake_mode.shape_env.create_unbacked_symint()
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    _constrain_range_for_size(new_batch_size)
+    _constrain_range_for_size(packed_data_size)
+    _constrain_range_for_size(batch_sizes_size)
 
     if not batch_first:
         # Inputs should have shape (batch_size, seq_len, *)
         inputs = inputs.transpose(0, 1)  # type: ignore[assignment]
 
-    res_size = inputs.shape[1:]
+    res_size = (packed_data_size, *inputs.shape[2:])
     packed_data = inputs.new_empty(res_size)
-    batch_size = inputs.new_empty((new_batch_size,))
-    return (packed_data, batch_size)  # type: ignore[return]
+    batch_sizes = lengths.new_empty((batch_sizes_size,))
+    return (packed_data, batch_sizes)  # type: ignore[return]
 
 
 def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
@@ -2296,14 +2298,23 @@ def _pad_packed_sequence(
     padding_value: Any,
     total_length: IntLikeType,
 ) -> tuple[FakeTensor, FakeTensor]:
+    torch._check(
+        batch_sizes.dim() == 1
+        and batch_sizes.device.type == "cpu"
+        and batch_sizes.dtype == torch.int64,
+        lambda: (
+            "'lengths' argument should be a 1D CPU int64 tensor, but got "
+            f"{batch_sizes.dim()}D {batch_sizes.device} {batch_sizes.dtype} tensor"
+        ),
+    )
+    torch._check(batch_sizes.numel() > 0, lambda: "batch_sizes can not be empty")
+
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
     ):
         # batch_sizes[0] determines the output batch dimension.
         raise DynamicOutputShapeException(func)
-
-    torch._check(batch_sizes.numel() > 0, lambda: "batch_sizes can not be empty")
 
     max_batch_size = fake_mode.shape_env.create_unbacked_symint()
 
@@ -2312,17 +2323,15 @@ def _pad_packed_sequence(
     _constrain_range_for_size(max_batch_size)
 
     max_real_seq_length = batch_sizes.shape[0]
-    max_seq_length = max_real_seq_length
-    if total_length > 0:
-        torch._check(
-            total_length >= max_real_seq_length,
-            lambda: (
-                "Expected total_length to be at least the length of the longest "
-                "sequence in input, but got total_length="
-                f"{total_length} and max sequence length being {max_real_seq_length}"
-            ),
-        )
-        max_seq_length = total_length
+    torch._check(
+        (total_length <= 0) | (total_length >= max_real_seq_length),
+        lambda: (
+            "Expected total_length to be at least the length of the longest "
+            "sequence in input, but got total_length="
+            f"{total_length} and max sequence length being {max_real_seq_length}"
+        ),
+    )
+    max_seq_length = torch.sym_max(total_length, max_real_seq_length)
 
     output = data.new_empty((max_seq_length, max_batch_size, *data.shape[1:]))
     lengths = batch_sizes.new_empty((max_batch_size,))

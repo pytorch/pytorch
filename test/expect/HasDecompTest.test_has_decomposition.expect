@@ -506,6 +506,7 @@ aten::_nnpack_spatial_convolution.out
 aten::_nnz
 aten::_pack_padded_sequence
 aten::_pack_padded_sequence.out
+aten::_pad_packed_sequence
 aten::_padded_dense_to_jagged_forward
 aten::_pdist_backward
 aten::_pdist_backward.out
@@ -543,6 +544,7 @@ aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_grouped_mm
 aten::_scaled_grouped_mm_v2
+aten::_scaled_grouped_mm_v2.out
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_scaled_mm_v2
