@@ -168,7 +168,9 @@ class ProcessGroupUCCTest(MultiProcContinuousTest):
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
 
     def _set_device(self, device: str) -> None:
-        self._dev = torch.device(device, self.rank) if device != "cpu" else torch.device("cpu")
+        self._dev = (
+            torch.device(device, self.rank) if device != "cpu" else torch.device("cpu")
+        )
 
     @requires_ucc()
     def test_empty_tensors(self, device):
