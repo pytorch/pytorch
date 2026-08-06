@@ -2,6 +2,10 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <torch/headeronly/cuda/AtomicAdd.h>
 
+#if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#include <cuda_bf16.h>
+#endif
+
 #if defined(USE_ROCM)
 #include <device_functions.h>
 #include <hip/hip_fp16.h>
@@ -23,55 +27,17 @@ idx(const size_t nc,
 }
 
 // for channels-last
-__device__ __forceinline__ size_t
+template <typename index_t = size_t>
+__device__ __forceinline__ index_t
 idx_cl(
-  const size_t n, const size_t h, const size_t w, const size_t c,
-  const size_t height, const size_t width, const size_t channel
+  const index_t n, const index_t h, const index_t w, const index_t c,
+  const index_t height, const index_t width, const index_t channel
 ) {
   return ((n * height + h) * width + w) * channel + c;
 }
 
-template <
-    typename scalar_t,
-    typename index_t,
-    typename std::enable_if_t<
-        std::is_same_v<c10::Half, scalar_t> ||
-        std::is_same_v<c10::BFloat16, scalar_t>>* = nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value) {
-  torch::headeronly::fastSpecializedAtomicAdd(tensor, index, numel, value);
-}
-
-template <
-    typename scalar_t,
-    typename index_t,
-    typename std::enable_if_t<!std::is_same_v<c10::Half, scalar_t> && !std::is_same_v<c10::BFloat16, scalar_t>>* =
-        nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value) {
-  gpuAtomicAddNoReturn(tensor + index, value);
-}
-
-template <class scalar_t, class index_t>
-__device__ __forceinline__ void fastAtomicAdd(
-    scalar_t* tensor,
-    index_t index,
-    const index_t numel,
-    scalar_t value,
-    bool fast_atomics) {
-  if (fast_atomics) {
-    fastSpecializedAtomicAdd(tensor, index, numel, value);
-  } else {
-    gpuAtomicAddNoReturn(tensor + index, value);
-  }
-}
-
+using torch::headeronly::fastSpecializedAtomicAdd;
+using torch::headeronly::fastAtomicAdd;
 
 #ifdef USE_ROCM
 // This function implements a committed store.
@@ -268,5 +234,8 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
   }
 }
 #endif
+
+#undef ATOMICADD
+#undef NATIVE_ZERO_BF16
 
 } // namespace at::native
