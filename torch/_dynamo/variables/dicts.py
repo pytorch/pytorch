@@ -716,6 +716,7 @@ class ConstDictVariable(VariableTracker):
             reversed_keys, mutation_type=ValueMutationNew()
         )
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
         "items": Method(dict_items),
         "keys": Method(dict_keys),
@@ -916,6 +917,7 @@ class OrderedDictVariable(ConstDictVariable):
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
@@ -1237,6 +1239,7 @@ class DictViewVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L6992-L6998
     tp_methods = {
         "__reversed__": Method(dict_view_reversed),
     }
@@ -1734,6 +1737,7 @@ class DunderDictVariable(ConstDictVariable):
             dict(self.items), mutation_type=ValueMutationNew(), source=None
         )
 
+    # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
         "copy": Method(dict_copy),
     }
