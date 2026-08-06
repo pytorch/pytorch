@@ -672,22 +672,54 @@ def my_subtract(self, other, alpha=1.0) -> Tensor:
 
 
 def my_bitwise_and(self, other) -> Tensor:
-    """Stable bitwise_and.Tensor."""
+    """
+    Computes the element-wise bitwise AND of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise AND
+    """
     return torch.ops.libtorch_agn_2_10.my_bitwise_and.default(self, other)
 
 
 def my_bitwise_or(self, other) -> Tensor:
-    """Stable bitwise_or.Tensor."""
+    """
+    Computes the element-wise bitwise OR of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise OR
+    """
     return torch.ops.libtorch_agn_2_10.my_bitwise_or.default(self, other)
 
 
 def my_bitwise_left_shift(self, other) -> Tensor:
-    """Stable bitwise_left_shift.Tensor."""
+    """
+    Computes the element-wise left bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the left bitwise shift
+    """
     return torch.ops.libtorch_agn_2_10.my_bitwise_left_shift.default(self, other)
 
 
 def my_bitwise_right_shift(self, other) -> Tensor:
-    """Stable bitwise_right_shift.Tensor."""
+    """
+    Computes the element-wise right bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the right bitwise shift
+    """
     return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
 
 
