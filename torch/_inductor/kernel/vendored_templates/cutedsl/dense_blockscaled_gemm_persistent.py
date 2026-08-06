@@ -2063,9 +2063,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         and group_warp_idx > 0
                                         and group_warp_idx < group_warps
                                     ):
-                                        sLocalReduce[
-                                            n_idx, warp_m_idx - group_idx - 1
-                                        ] = reduced_flt[i]
+                                        offset = n_idx * 3 + warp_m_idx - group_idx - 1
+                                        shared_value = cute.make_tensor(
+                                            sLocalReduce.iterator + offset,
+                                            cute.make_layout(1),
+                                        )
+                                        shared_value[0] = reduced_flt[i]
                                 self.epilog_sync_barrier.arrive_and_wait()
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
@@ -2086,20 +2089,29 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                         for warp_offset in cutlass.range_constexpr(
                                             1, group_warps
                                         ):
-                                            other = sLocalReduce[
-                                                n_idx,
-                                                group_warp_start
+                                            offset = (
+                                                n_idx * 3
+                                                + group_warp_start
                                                 + warp_offset
                                                 - group_idx
-                                                - 1,
-                                            ]
+                                                - 1
+                                            )
+                                            other = cute.make_tensor(
+                                                sLocalReduce.iterator + offset,
+                                                cute.make_layout(1),
+                                            )[0]
                                             group_value = self.local_reduce_combine(
                                                 group_value, other
                                             )
                                         if cutlass.const_expr(
                                             self.local_reduce_feeds_main
                                         ):
-                                            sLocalReduce[n_idx, group_idx] = group_value
+                                            offset = n_idx * 3 + group_idx
+                                            shared_value = cute.make_tensor(
+                                                sLocalReduce.iterator + offset,
+                                                cute.make_layout(1),
+                                            )
+                                            shared_value[0] = group_value
                                 if cutlass.const_expr(local_reduce_tensor is not None):
                                     if (
                                         row_idx % group == 0
@@ -2127,9 +2139,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                     ):
                                         row_idx = coord_flt[i][0]
                                         n_idx = coord_flt[i][1]
-                                        reduced_flt[i] = sLocalReduce[
-                                            n_idx, row_idx // group
-                                        ]
+                                        offset = n_idx * 3 + row_idx // group
+                                        reduced_flt[i] = cute.make_tensor(
+                                            sLocalReduce.iterator + offset,
+                                            cute.make_layout(1),
+                                        )[0]
                                     self.epilog_sync_barrier.arrive_and_wait()
                                 assert self.local_reduce_consumer is not None
                                 consumer_result = self.local_reduce_consumer(
