@@ -34,9 +34,30 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 import operator
 import string
+
+try:
+    from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+except ImportError:
+    # PyTorch can be built without distributed support (USE_DISTRIBUTED=0),
+    # e.g. standard macOS CI, where torch._C._distributed_c10d is absent and
+    # common_distributed cannot be imported. This file must stay importable
+    # there, so provide a no-op stand-in and skip the test class below.
+    _SKIP_IF_LT_X_GPU_DISTRIBUTED = False
+
+    def skip_if_lt_x_gpu(x, *, allow_cpu=False):
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+else:
+    _SKIP_IF_LT_X_GPU_DISTRIBUTED = True
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -2986,6 +3007,10 @@ instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
 
 
+@unittest.skipIf(
+    not _SKIP_IF_LT_X_GPU_DISTRIBUTED,
+    "requires a distributed build (USE_DISTRIBUTED=1)",
+)
 class TestSkipIfLtXGpu(TestCase):
     @unittest.mock.patch("torch.get_device_module")
     @unittest.mock.patch("torch._C._accelerator_getAccelerator")
