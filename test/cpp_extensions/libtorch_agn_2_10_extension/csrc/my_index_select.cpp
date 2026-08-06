@@ -4,7 +4,7 @@
 
 using torch::stable::Tensor;
 
-Tensor my_index_select(Tensor self, int64_t dim, Tensor index) {
+Tensor my_index_select(const Tensor& self, int64_t dim, const Tensor& index) {
   return torch::stable::index_select(self, dim, index);
 }
 

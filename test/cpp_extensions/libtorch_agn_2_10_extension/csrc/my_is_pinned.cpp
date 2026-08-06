@@ -4,7 +4,7 @@
 
 using torch::stable::Tensor;
 
-bool my_is_pinned(Tensor self) {
+bool my_is_pinned(const Tensor& self) {
   return torch::stable::is_pinned(self);
 }
 

@@ -341,8 +341,8 @@ class TestLibtorchAgnostic(TestCase):
 
         t = torch.randn(3, 4, device=device)
         index = torch.tensor([0, 2], device=device)
-        result = libtorch_agnostic.ops.my_index_select(t, 0, index)
-        self.assertEqual(result, torch.index_select(t, 0, index))
+        result = libtorch_agnostic.ops.my_index_select(t, -2, index)
+        self.assertEqual(result, torch.index_select(t, -2, index))
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_floor_divide(self, device):
@@ -370,13 +370,18 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 10)
-    def test_my_is_pinned(self, device):
+    def test_my_is_pinned_cpu_false(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
 
-        pinned = torch.randn(2, 3, device=device).pin_memory()
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_is_pinned_cuda_true(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
 
     # These exercise the use case: a raw PyObject passed straight from Python
