@@ -67,7 +67,7 @@ Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double ep
 Tensor pdist(const Tensor& self, const double p) {
   TORCH_CHECK(self.dim() == 2,
       "pdist only supports 2D tensors, got: ", self.dim(), "D");
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "pdist only supports floating-point dtypes");
+  TORCH_CHECK_TYPE(at::isFloatingType(self.scalar_type()), "pdist only supports floating-point dtypes");
   TORCH_CHECK(p >= 0, "pdist only supports non-negative p values");
   return at::_pdist_forward(self.contiguous(), p);
 }
@@ -88,9 +88,9 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
 }
 
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
-  TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
+  TORCH_CHECK_TYPE(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
-  TORCH_CHECK(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
+  TORCH_CHECK_TYPE(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.device().type();
   TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
@@ -302,7 +302,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
    */
 
   auto commonDtype = at::result_type(x1_, x2_);
-  TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
+  TORCH_CHECK_TYPE(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
   TORCH_CHECK(eps >= 0, "eps must be non-negative, got: ", eps);
 
   // We accept integral types (and bools lol) but vector_norm does not
