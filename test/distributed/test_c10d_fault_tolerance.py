@@ -145,6 +145,57 @@ class AbstractFaultToleranceTest:
         recv_work.wait()
         self.assertEqual(recv_tensor.cpu(), torch.full((4,), recv_rank + 1.0))
 
+    def test_reconfigure_invalidates_windows(self):
+        self._create_reconfigured_pg("ft_window_generation", 1302)
+        if not self.backend.supports_window:
+            self.skipTest(f"{self.backend_name} does not support windows")
+        pool = torch.cuda.MemPool(self.backend.mem_allocator)
+        with torch.cuda.use_mem_pool(pool):
+            win_buf = torch.zeros(16, device=self.device)
+        try:
+            win = dist._new_window(win_buf)
+            unregistered_win = dist._new_window()
+        except RuntimeError as e:
+            self.skipTest(f"symmetric window registration unsupported: {e}")
+
+        handles = self._collect_handles("ft_window_generation_post")
+        self._reconfigure(1303, handles)
+        with self.assertRaisesRegex(RuntimeError, "stale communicator generation"):
+            win.signal((self.rank + 1) % self.world_size, False)
+        with self.assertRaisesRegex(RuntimeError, "stale communicator generation"):
+            unregistered_win.tensor_register(win_buf)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_timeout_with_live_window_is_retryable(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 window teardown behavior")
+        self._create_reconfigured_pg("ft_window_timeout", 1400)
+        if not self.backend.supports_window:
+            self.skipTest("nccl2 windows are unavailable")
+        pool = torch.cuda.MemPool(self.backend.mem_allocator)
+        with torch.cuda.use_mem_pool(pool):
+            win_buf = torch.zeros(16, device=self.device)
+        try:
+            win = dist._new_window(win_buf)
+        except RuntimeError as e:
+            self.skipTest(f"symmetric window registration unsupported: {e}")
+
+        handles = self._collect_handles("ft_window_timeout_initial")
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist._reconfigure(
+                    1402,
+                    handles[:2],
+                    timeout=timedelta(milliseconds=500),
+                ).wait()
+        self._store_barrier("ft_window_timeout_observed")
+
+        handles = self._collect_handles("ft_window_timeout_current")
+        self._reconfigure(1403, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        with self.assertRaisesRegex(RuntimeError, "stale communicator generation"):
+            win.signal((self.rank + 1) % self.world_size, False)
+
     def test_work_explicit_timeout_includes_prelaunch_stall(self):
         if not self.supports_work_result:
             self.skipTest(f"{self.backend_name} does not report work results")
@@ -332,10 +383,38 @@ class AbstractFaultToleranceTest:
 
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
-        uuid = 1100 + self.rank
-        self._reconfigure(uuid, [dist._get_reconfigure_handle()])
-        with self.assertRaisesRegex(RuntimeError, "already used"):
+        if self.backend_name != "nccl2":
+            uuid = 1100 + self.rank
             self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            with self.assertRaisesRegex(RuntimeError, "already used"):
+                self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            return
+
+        uuid = 1100
+        handles = self._collect_handles("ft_reused_uuid_initial")
+        self._reconfigure(uuid, handles)
+        handles = self._collect_handles("ft_reused_uuid_current")
+        with self.assertRaisesRegex(RuntimeError, "already used"):
+            self._reconfigure(uuid, handles)
+
+    def test_reconfigure_timeout_is_retryable(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL initialization behavior")
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_timeout_retry_initial")
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist._reconfigure(
+                    1400,
+                    handles[:2],
+                    timeout=timedelta(milliseconds=500),
+                ).wait()
+        self._store_barrier("ft_timeout_retry_observed")
+
+        handles = self._collect_handles("ft_timeout_retry_current")
+        self._reconfigure(1401, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
 
 def _make_fault_tolerance_test_class(backend):

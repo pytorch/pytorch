@@ -6,6 +6,7 @@
 # 2.29.7+), but other backends can be enabled by extending
 # SUSPEND_RESUME_BACKENDS.
 
+import gc
 import os
 import sys
 import unittest
@@ -20,7 +21,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
@@ -125,6 +126,61 @@ class AbstractSuspendResumeTest:
         self.assertEqual(tensor, expected)
         if self.create_pair_channel:
             self._exchange_with_peer()
+
+    def test_operations_rejected_while_suspended(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 lifecycle serialization")
+        self._init_pg()
+        self.backend.suspend()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "communicator is suspended"):
+                dist.all_reduce(torch.ones(1, device=self.device))
+            with self.assertRaisesRegex(RuntimeError, "communicator is suspended"):
+                dist._new_window()
+        finally:
+            self.backend.resume()
+
+    def test_suspend_rejects_pending_work(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 lifecycle serialization")
+        self._init_pg()
+        torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+        work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "work is pending"):
+            self.backend.suspend()
+        work.wait()
+        torch.cuda.synchronize()
+        self.backend.suspend()
+        self.backend.resume()
+
+    def test_suspend_rejects_active_coalescing_batch(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 lifecycle serialization")
+        self._init_pg()
+        self.backend._start_coalescing()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "coalescing batch is active"):
+                self.backend.suspend()
+        finally:
+            self.backend._end_coalescing().wait()
+
+    def test_suspend_rejects_live_cuda_graph(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 captured-work lifecycle")
+        if torch.version.hip is not None:
+            self.skipTest("RCCL graph capture is not supported")
+        self._init_pg()
+        tensor = torch.ones(1, device=self.device)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            dist.all_reduce(tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "captured CUDA graph is alive"):
+            self.backend.suspend()
+        del graph
+        gc.collect()
+        self.backend.suspend()
+        self.backend.resume()
 
 
 def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):

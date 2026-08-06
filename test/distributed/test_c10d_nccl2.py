@@ -2,7 +2,9 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import concurrent.futures
 import ctypes
+import gc
 import os
 import subprocess
 import sys
@@ -26,6 +28,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -43,9 +46,10 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -65,6 +69,53 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_work_outlives_process_group(self) -> None:
+        group = dist.new_group(ranks=list(range(self.world_size)), backend="nccl2")
+        tensor = torch.tensor([self.rank + 1], device=self.device)
+        work = dist.all_reduce(tensor, group=group, async_op=True)
+        work.wait()
+        torch.cuda.synchronize(self.device)
+        self.assertEqual(
+            tensor,
+            torch.tensor([sum(range(1, self.world_size + 1))], device=self.device),
+        )
+
+        dist.destroy_process_group(group)
+        del group
+        gc.collect()
+        self.assertTrue(work.is_completed())
+        del work
+        gc.collect()
+        dist.barrier()
+
+    @unittest.skipIf(TEST_WITH_ROCM, "RCCL graph capture is not supported")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_live_cuda_graph_blocks_process_group_destruction(self) -> None:
+        group = dist.new_group(ranks=list(range(self.world_size)), backend="nccl2")
+        tensor = torch.tensor([self.rank + 1], device=self.device)
+        dist.all_reduce(torch.ones(1, device=self.device), group=group)
+        torch.cuda.synchronize(self.device)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            dist.all_reduce(tensor, group=group)
+        graph.replay()
+        torch.cuda.synchronize(self.device)
+
+        with self.assertRaisesRegex(RuntimeError, "captured CUDA graph is alive"):
+            dist.destroy_process_group(group)
+        graph.replay()
+        torch.cuda.synchronize(self.device)
+        del graph
+        gc.collect()
+        dist.destroy_process_group(group)
+        del group
+        gc.collect()
+        dist.barrier()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_shared_options_type(self) -> None:
         self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
         opts = dist.ProcessGroupNCCL2.Options()
@@ -72,6 +123,22 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_concurrent_lazy_initialization(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(backend.eager_connect_single_device, self.device)
+                for _ in range(4)
+            ]
+            for future in futures:
+                future.result()
+
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -162,15 +229,56 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     def _check_all_reduce(self) -> None:
         t = torch.full((4,), float(self.rank), device=self.device)
         dist.all_reduce(t)
         expected = float(sum(range(self.world_size)))
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
+    world_size = 4
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        torch.cuda.set_device(rank)
+        os.environ["LOCAL_RANK"] = str(rank)
+        store = dist.FileStore(rdvz_file, world_size)
+        dist.init_process_group(
+            backend=cls.backend_str(),
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            pg_options=cls.opts(),
+            timeout=cls.timeout,
+            device_id=torch.device("cuda", rank),
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_with_nonmembers(self) -> None:
+        ranks = [0, 1]
+        group = dist.new_group(ranks=ranks)
+        if self.rank in ranks:
+            tensor = torch.tensor([self.rank + 1], device=self.device)
+            dist.all_reduce(tensor, group=group)
+            self.assertEqual(tensor, torch.tensor([3], device=self.device))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+
+        store = dist.distributed_c10d._get_default_store()
+        store.set(f"eager_new_group/{self.rank}", b"1")
+        store.wait([f"eager_new_group/{rank}" for rank in range(self.world_size)])
+        self._check_all_reduce()
 
 
 class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
@@ -244,6 +352,34 @@ class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
         dist.scatter(output, scatter_list, src=0)
         self.assertEqual(output, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_split_with_nonblocking_communicator(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        opts = self.opts()
+        child = backend.split(dist.distributed_c10d._get_default_store(), [0], opts)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=self.device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group(excluded, group=group)
+        tensor = torch.ones(1, device=self.device)
+        dist.all_reduce(tensor, group=shrunk)
+        self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
+
 
 class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
@@ -295,9 +431,10 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     def _new_subgroup(self, timeout=timedelta(seconds=60)):
         return dist.new_group(
@@ -392,12 +529,9 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
-
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
         torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
         super()._init_pg(rank, world_size, rdvz_file)
 
@@ -613,12 +747,9 @@ class _DeterministicNVLSTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.rank)
-
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        torch.cuda.set_device(rank)
         if cls.preset_nccl_algo is not None:
             os.environ["NCCL_ALGO"] = cls.preset_nccl_algo
         else:
