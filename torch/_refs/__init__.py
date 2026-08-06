@@ -3431,7 +3431,17 @@ def native_group_norm(
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
-    mem_fmt = utils.suggest_memory_format(input)
+    supports_memory_format = input.device.type in (
+        "cpu",
+        "cuda",
+        "meta",
+        torch._C._get_privateuse1_backend_name(),
+    )
+    mem_fmt = (
+        utils.suggest_memory_format(input)
+        if supports_memory_format
+        else torch.contiguous_format
+    )
     input = input.contiguous(memory_format=mem_fmt)
     weight = weight.contiguous() if weight is not None else None
     bias = bias.contiguous() if bias is not None else None

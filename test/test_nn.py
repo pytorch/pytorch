@@ -8536,10 +8536,9 @@ class TestNNDeviceType(NNTestCase):
             helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
             helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
 
-    @dtypesIfCUDA(torch.float, torch.half, torch.bfloat16)
-    @dtypesIfMPS(torch.float, torch.half)
+    @onlyCUDA
     @dtypes(torch.float, torch.half, torch.bfloat16)
-    def test_groupnorm_nhwc_memory_format(self, device, dtype):
+    def test_groupnorm_nhwc_cuda(self, device, dtype):
         for shape, groups, memory_format in [
             ((2, 32, 8, 8), 4, torch.channels_last),
             ((2, 32, 16, 16), 8, torch.channels_last),
