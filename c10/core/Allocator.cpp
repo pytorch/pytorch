@@ -1,6 +1,8 @@
 #include <c10/core/Allocator.h>
 #include <array>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
@@ -46,18 +48,64 @@ static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     allocator_priority{};
 
 namespace {
+std::atomic<bool> global_memory_reporting_enabled{false};
+std::mutex global_memory_reporter_mutex;
+std::condition_variable global_memory_reporter_cv;
 std::shared_ptr<MemoryReportingInfoBase> global_memory_reporter;
+size_t global_memory_reports_in_flight{0};
 
-std::shared_ptr<MemoryReportingInfoBase> getGlobalMemoryReportingInfo() {
-  return std::atomic_load_explicit(
-      &global_memory_reporter, std::memory_order_acquire);
-}
+class GlobalMemoryReporterGuard {
+ public:
+  GlobalMemoryReporterGuard() {
+    if (!global_memory_reporting_enabled.load(std::memory_order_acquire)) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> guard(global_memory_reporter_mutex);
+    if (global_memory_reporter) {
+      reporter_ = global_memory_reporter;
+      ++global_memory_reports_in_flight;
+    }
+  }
+
+  GlobalMemoryReporterGuard(const GlobalMemoryReporterGuard&) = delete;
+  GlobalMemoryReporterGuard& operator=(const GlobalMemoryReporterGuard&) =
+      delete;
+
+  ~GlobalMemoryReporterGuard() {
+    if (!reporter_) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> guard(global_memory_reporter_mutex);
+    if (--global_memory_reports_in_flight == 0) {
+      global_memory_reporter_cv.notify_all();
+    }
+  }
+
+  MemoryReportingInfoBase* operator->() const {
+    return reporter_.get();
+  }
+
+  explicit operator bool() const {
+    return reporter_ != nullptr;
+  }
+
+ private:
+  std::shared_ptr<MemoryReportingInfoBase> reporter_;
+};
 } // namespace
 
 void setGlobalMemoryReportingInfo(
     std::shared_ptr<MemoryReportingInfoBase> reporter) {
-  std::atomic_store_explicit(
-      &global_memory_reporter, std::move(reporter), std::memory_order_release);
+  global_memory_reporting_enabled.store(false, std::memory_order_release);
+  std::unique_lock<std::mutex> lock(global_memory_reporter_mutex);
+  global_memory_reporter.reset();
+  global_memory_reporter_cv.wait(
+      lock, [] { return global_memory_reports_in_flight == 0; });
+  global_memory_reporter = std::move(reporter);
+  global_memory_reporting_enabled.store(
+      global_memory_reporter != nullptr, std::memory_order_release);
 }
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
@@ -79,7 +127,7 @@ bool memoryProfilingEnabled() {
   if (reporter_ptr) {
     return reporter_ptr->memoryProfilingEnabled();
   }
-  auto global_reporter = getGlobalMemoryReportingInfo();
+  GlobalMemoryReporterGuard global_reporter;
   return global_reporter && global_reporter->memoryProfilingEnabled();
 }
 
@@ -94,9 +142,12 @@ void reportMemoryUsageToProfiler(
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(
         ptr, alloc_size, total_allocated, total_reserved, device);
-  } else if (auto global_reporter = getGlobalMemoryReportingInfo()) {
-    global_reporter->reportMemoryUsage(
-        ptr, alloc_size, total_allocated, total_reserved, device);
+  } else {
+    GlobalMemoryReporterGuard global_reporter;
+    if (global_reporter) {
+      global_reporter->reportMemoryUsage(
+          ptr, alloc_size, total_allocated, total_reserved, device);
+    }
   }
 }
 
@@ -110,9 +161,12 @@ void reportOutOfMemoryToProfiler(
   if (reporter_ptr) {
     reporter_ptr->reportOutOfMemory(
         alloc_size, total_allocated, total_reserved, device);
-  } else if (auto global_reporter = getGlobalMemoryReportingInfo()) {
-    global_reporter->reportOutOfMemory(
-        alloc_size, total_allocated, total_reserved, device);
+  } else {
+    GlobalMemoryReporterGuard global_reporter;
+    if (global_reporter) {
+      global_reporter->reportOutOfMemory(
+          alloc_size, total_allocated, total_reserved, device);
+    }
   }
 }
 
