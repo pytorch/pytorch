@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
@@ -232,6 +233,7 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):

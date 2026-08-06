@@ -45,7 +45,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -55,6 +55,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     getRocmVersion,
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     parametrize,
@@ -619,6 +620,8 @@ def compile_fn(fn, backend):
 class TestOpInfoProperties(TestCase):
     """Test op properties under various inductor modes using OpInfo on CUDA."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -677,7 +680,7 @@ class TestOpInfoProperties(TestCase):
     # Batch Invariance Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -813,7 +816,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -885,7 +888,7 @@ class TestOpInfoProperties(TestCase):
     # Bitwise Equivalence with Eager Mode Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -936,7 +939,7 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -998,7 +1001,7 @@ class TestOpInfoProperties(TestCase):
     # Sampled Binary Ufunc Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_binary_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)

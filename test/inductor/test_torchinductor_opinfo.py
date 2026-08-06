@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
@@ -1277,6 +1278,8 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
