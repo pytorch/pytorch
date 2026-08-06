@@ -2389,13 +2389,15 @@ def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
     return padded_tensor, last_dim_size
 
 
-class TestSDPA(NNTestCase):
+class TestSDPAGeneric(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
     Summary:
         If you are adding a new test to this class, make sure that it runs
         for both cpu and cuda. If you're test is only applicable to cuda,
-        add it to TestSDPACudaOnly.
+        add it to TestSDPAAccelerator.
     """
+    hw_classification = HardwareClassification.GENERIC
+
     @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
@@ -2559,8 +2561,9 @@ class TestSDPA(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
-class TestSDPACpuOnly(NNTestCase):
+class TestSDPACPU(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
+    hw_classification = HardwareClassification.CPU
 
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
@@ -2943,8 +2946,10 @@ class TestSDPACpuOnly(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
-class TestSDPACudaOnly(NNTestCase):
-    """ Used to test CUDA only functionality of scaled_dot_product_attention
+class TestSDPAAccelerator(NNTestCase):
+    """ Used to test GPU only functionality of scaled_dot_product_attention.
+    Generalized from TestSDPACudaOnly; CUDA-specific tests remain guarded by
+    PLATFORM_SUPPORTS_* gates that are False on non-CUDA accelerators.
     Quarks:
         There is some trickiness with this function. Its runtime behavior
         is dependent on the CUDA architecture you are testing it on. See
@@ -2956,6 +2961,7 @@ class TestSDPACudaOnly(NNTestCase):
     """
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
@@ -4148,7 +4154,8 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
-        if torch.cuda.get_device_properties('cuda').total_memory < 80 * 2**30:
+        device_module = getattr(torch, torch.device(device).type)
+        if device_module.get_device_properties(device).total_memory < 80 * 2**30:
             unittest.skip("This test requires substatnial GPU memory.")
             return
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -4689,11 +4696,12 @@ class TestSDPACudaOnly(NNTestCase):
             tester_p = p if not TEST_WITH_ROCM else 0.0
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+        device_mod = getattr(torch, torch.device(device).type)
+        if max(seq_len_q, seq_len_k) >= 2048 and device_mod.get_device_properties(device).total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
-            torch.cuda.empty_cache()  # Prevent memory fragmentation
+            device_mod.empty_cache()  # Prevent memory fragmentation
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -4803,6 +4811,8 @@ class TestSDPACudaOnly(NNTestCase):
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
                                                                  scale: str):
+        device_mod = getattr(torch, torch.device(device).type)
+
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
@@ -4810,11 +4820,11 @@ class TestSDPACudaOnly(NNTestCase):
             tester_p = p if not TEST_WITH_ROCM else 0.0
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+        if max(seq_len_q, seq_len_k) >= 2048 and device_mod.get_device_properties(device).total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
-            torch.cuda.empty_cache()  # Prevent memory fragmentation
+            device_mod.empty_cache()  # Prevent memory fragmentation
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -5570,7 +5580,7 @@ class TestSDPACudaOnly(NNTestCase):
 
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
-    Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
+    Mostly migrate from TestSDPAAccelerator in test/test_transformers.py
     """
 
 
@@ -5825,7 +5835,7 @@ class TestSDPAXpuOnly(NNTestCase):
         mask_type,
         train,
     ):
-        # Migrate from TestSDPACpuOnly
+        # Migrate from TestSDPACPU
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
@@ -6228,9 +6238,9 @@ if TEST_XPU:
 
 instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
+instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
