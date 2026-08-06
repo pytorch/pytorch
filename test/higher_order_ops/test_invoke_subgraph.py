@@ -2,10 +2,12 @@
 # flake8: noqa: E731
 
 import contextlib
+import enum
 import re
 import unittest
 import unittest.mock as mock
 import warnings
+from dataclasses import dataclass
 
 from parameterized import parameterized_class
 
@@ -3495,6 +3497,9 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+_reuse_test_global = None
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
     @contextlib.contextmanager
@@ -4401,7 +4406,43 @@ class GraphModule(torch.nn.Module):
 
         build_input_fingerprint's has_unknown flag is set instead, which
         gates reuse off for that call (the region is simply retraced) rather
-        than raising or misclassifying the object.
+        than raising or misclassifying the object. The object is built during
+        tracing so it has no source and no guards; a sourceful one is reusable,
+        see test_subgraph_reuse_pytree_sourceful_object_leaf.
+        """
+
+        class Opaque:
+            def __init__(self, v):
+                self.v = v
+
+        @nested_compile_region
+        def gn(pair):
+            t, _opaque = pair
+            return t.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn((out, Opaque(1)))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # has_unknown must actually be reached: every call retraces rather
+        # than misclassifying Opaque as something reusable.
+        self.assertEqual(count(), 4)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_sourceful_object_leaf(self):
+        """An opaque object with a source is a reusable leaf inside a pytree.
+
+        classify_vt tags it InputTag.OBJECT and reuse safety comes from
+        re-evaluating the guards on its source, so unlike the sourceless case
+        above the region is traced once.
         """
 
         class Opaque:
@@ -4426,9 +4467,7 @@ class GraphModule(torch.nn.Module):
         with self._count_speculate_calls() as count:
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
 
-        # has_unknown must actually be reached: every call retraces rather
-        # than misclassifying Opaque as something reusable.
-        self.assertEqual(count(), 4)
+        self.assertEqual(count(), 1)
         self.assertEqual(ref, res)
 
     def test_subgraph_reuse_pytree_registry_change_stays_correct(self):
@@ -4636,6 +4675,299 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(4)
         with self.assertRaisesRegex(RuntimeError, "exceeded maximum reuse entries"):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_subgraph_reuse_enum_arg(self):
+        """Enum members are UserDefinedObjectVariable but reuse like constants."""
+
+        class Mode(enum.IntEnum):
+            ADD = 1
+            SUB = 2
+
+        @nested_compile_region
+        def gn(x, mode):
+            if mode == Mode.ADD:
+                return x.sin()
+            return x.cos()
+
+        def fn(x, mode):
+            return gn(x, mode) + gn(x, mode)
+
+        x = torch.randn(8)
+        for mode in (Mode.ADD, Mode.SUB):
+            torch._dynamo.reset()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, mode)
+            self.assertEqual(res, fn(x, mode))
+            self.assertEqual(count(), 1)
+
+        # Distinct enum members must not share a traced subgraph.
+        def fn2(x):
+            return gn(x, Mode.ADD) + gn(x, Mode.SUB)
+
+        torch._dynamo.reset()
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn2(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_constant_equal_but_different_type(self):
+        """Constants that compare equal but differ in type must not be reused.
+
+        Mode.ADD == 1 and True == 1, yet an isinstance() check inside the
+        region traces differently for each.
+        """
+
+        class Mode(enum.IntEnum):
+            ADD = 1
+
+        @nested_compile_region
+        def gn(x, c):
+            return x.sin() if isinstance(c, Mode) else x.cos()
+
+        @nested_compile_region
+        def hn(x, c):
+            return x.sin() if isinstance(c, bool) else x.cos()
+
+        x = torch.randn(8)
+        fns = (
+            lambda x: gn(x, Mode.ADD) + gn(x, 1),
+            lambda x: hn(x, True) + hn(x, 1),
+        )
+        for fn in fns:
+            torch._dynamo.reset()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            self.assertEqual(res, fn(x))
+            self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_user_defined_object_arg(self):
+        """A sourceful user-defined object arg reuses via guards on its source."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x, batch):
+            return gn(x, batch) + gn(x, batch)
+
+        x = torch.randn(8)
+        batch = Batch(torch.randn(8))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, batch)
+        self.assertEqual(res, fn(x, batch))
+        self.assertEqual(count(), 1)
+
+        # Two distinct objects with matching attribute metadata: the guards on
+        # b1's source are re-evaluated against b2's, so this is reusable.
+        def fn3(x, b1, b2):
+            return gn(x, b1) + gn(x, b2)
+
+        torch._dynamo.reset()
+        batch2 = Batch(torch.randn(8))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn3, backend="aot_eager", fullgraph=True)(
+                x, batch, batch2
+            )
+        self.assertEqual(res, fn3(x, batch, batch2))
+        self.assertEqual(count(), 1)
+
+        # An attribute whose tensor metadata differs must not be reused.
+        def fn2(x, b1, b2):
+            return gn(x, b1) + gn(x, b2)
+
+        torch._dynamo.reset()
+        b2 = Batch(torch.randn(1))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x, batch, b2)
+        self.assertEqual(res, fn2(x, batch, b2))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_sourceless_object_not_eligible(self):
+        """An object created during tracing has no guards, so it is not reused."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x):
+            return gn(x, Batch(x.cos())) + gn(x, Batch(x.cos()))
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_rebound_global_read_via_side_effects(self):
+        """A region reading a global that is rebound between calls must retrace."""
+        global _reuse_test_global
+
+        @dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        @nested_compile_region
+        def gn():
+            return _reuse_test_global.hidden + 1
+
+        def fn(hidden):
+            global _reuse_test_global
+            for _ in range(2):
+                _reuse_test_global = RegionInput(hidden)
+                hidden = gn()
+            return hidden
+
+        try:
+            x = torch.tensor(0)
+            ref = fn(x)
+            backend = EagerAndRecordGraphs()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            # Both calls retrace: the global is rebound every iteration, so
+            # GlobalSource lands in both traced_sources and mutated_sources and
+            # no reuse entry is ever saved.
+            self.assertEqual(count(), 2)
+            # The captured tensor is lifted as a subgraph input, and the second
+            # trace dedups onto the first graph via are_same_graph_modules, so
+            # the retrace costs Dynamo time but yields one shared subgraph.
+            # Getting to a single trace needs the capture re-read at the new
+            # call site: it is not a user arg, so reuse would re-resolve its
+            # recorded source, and on the second call the right value is an
+            # intermediate that no source names.
+            if not TEST_WITH_CROSSREF:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(False)),
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_hidden_: "i64[]"):
+        l_hidden_ = L_hidden_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_hidden_);  subgraph_0 = l_hidden_ = None
+        hidden: "i64[]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
+        hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (hidden, hidden_1)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_hidden_: "i64[]"):
+            add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
+            return (add,)
+""",
+                )
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_rebound_global_read_via_builder(self):
+        """A rebound global whose first read predates the rebinding.
+
+        Unlike test_subgraph_reuse_rebound_global_read_via_side_effects, the
+        region's first read goes through VariableBuilder rather than being
+        served out of side effects.
+        """
+        global _reuse_test_global
+
+        @nested_compile_region
+        def gn(x):
+            return x + _reuse_test_global
+
+        def fn(x):
+            global _reuse_test_global
+            a = gn(x)
+            _reuse_test_global = torch.tensor(100)
+            return a + gn(x)
+
+        try:
+            x = torch.tensor(0)
+            _reuse_test_global = torch.tensor(10)
+            ref = fn(x)
+            _reuse_test_global = torch.tensor(10)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            # The first call saves a reuse entry, but the second call's lookup
+            # rejects it: GlobalSource is in traced_sources and the rebinding
+            # put it in mutated_sources. The global does get lifted as a
+            # subgraph input, so both call sites share one graph module and the
+            # second correctly receives the new tensor -- only the Dynamo trace
+            # is duplicated. Reaching 1 needs the read re-resolved against
+            # side-effect state at the second call site; replaying the saved
+            # source yields the pre-rebinding value, which miscompiles.
+            self.assertEqual(count(), 2)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_global_written_once_before_loop(self):
+        """Conservative: a global written once, before any region runs, blocks reuse.
+
+        has_mutated_vars asks whether a source was ever mutated, not whether it
+        changed since the entry was saved, so every call retraces even though
+        the global is stable by the time the first region runs. Results stay
+        correct; only reuse is lost. Versioning mutations per source would let
+        this collapse back to a single trace -- update the count here if that
+        lands.
+        """
+        global _reuse_test_global
+
+        class Ctx:
+            def __init__(self, scale):
+                self.scale = scale
+
+        @nested_compile_region
+        def gn(w, x):
+            return x * w + _reuse_test_global.scale
+
+        def fn(x, ws):
+            global _reuse_test_global
+            _reuse_test_global = Ctx(2.0)
+            for w in ws:
+                x = gn(w, x)
+            return x
+
+        try:
+            ws = [torch.full((4,), float(i + 1)) for i in range(4)]
+            x = torch.ones(4)
+            ref = fn(x, ws)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, ws)
+            self.assertEqual(res, ref)
+            self.assertEqual(count(), 4)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_sourceless_module_not_eligible(self):
+        """Sourceless modules carry no guards, so differing attrs must retrace."""
+
+        class Scale(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        @nested_compile_region
+        def gn(mod, x):
+            return mod(x)
+
+        def fn(x):
+            return gn(Scale(3.0), x) + gn(Scale(5.0), x)
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_module_different_instances_retrace(self):
         """Different module instances with different weights require separate traces."""
