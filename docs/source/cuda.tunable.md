@@ -99,3 +99,15 @@
 ```{eval-rst}
 .. autofunction:: set_numerical_check_tolerances
 ```
+
+```{eval-rst}
+.. autofunction:: push_dynamic_dims_mask
+```
+
+```{eval-rst}
+.. autofunction:: pop_dynamic_dims_mask
+```
+
+```{eval-rst}
+.. autofunction:: dynamic_dims_mask
+```

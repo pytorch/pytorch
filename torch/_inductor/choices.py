@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import typing
 from typing import Any, TYPE_CHECKING
 
@@ -32,6 +33,9 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -392,7 +396,18 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+
+        # Only ExternKernelCaller (aten) reads this mask to drive TunableOp
+        # wildcard persistence; Triton/CUTLASS callers ignore it.
+        from torch._inductor.select_algorithm import ExternKernelCaller
+
+        mask = kernel_inputs.dynamic_dim_mask(op_name)
+        for caller in callers:
+            if isinstance(caller, ExternKernelCaller):
+                caller.tunable_dyn_dims_mask = mask
+
+        return callers
 
     def triton_kernel_kwargs(
         self,
