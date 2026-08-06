@@ -11,6 +11,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch.vmap import restore_vmap
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
@@ -100,6 +101,53 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _move_batch_dims_to_last(unbatched_args, in_dims):
+    # Batch dim goes last so it never collides with the scan dim (0).
+    return pytree.tree_map(
+        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
+        unbatched_args,
+        in_dims,
+    )
+
+
+def _batch_dims_as_last(in_dims):
+    # Flat markers matching _move_batch_dims_to_last: -1 where batched, else None.
+    return tuple(
+        -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
+    )
+
+
+class _VmapCombineFnWrapper:
+    # Re-vmaps a scan/associative_scan combine_fn, keeping the batch dim on the
+    # last axis so it does not collide with the scan dim (0). After the op runs,
+    # out_dims holds the flat per-output markers aligned to the op's flat outputs.
+
+    def __init__(self, combine_fn, in_dims, batch_size, randomness):
+        self.combine_fn = combine_fn
+        self.in_dims = in_dims
+        self.batch_size = batch_size
+        self.randomness = randomness
+        self.out_dims: tuple[Any, ...] | None = None
+
+    def __call__(self, *args):
+        outputs, per_slice_out_dims = restore_vmap(
+            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+        )(*args)
+        outputs = pytree.tree_map(
+            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
+            outputs,
+            per_slice_out_dims,
+        )
+        out_dims = _batch_dims_as_last(per_slice_out_dims)
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
+            )
+        self.out_dims = out_dims
+        return outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):
