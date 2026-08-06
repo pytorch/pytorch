@@ -2,9 +2,12 @@
 
 import torch
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipGPUIf,
+)
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
-from torch.testing._internal.inductor_utils import ensure_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -38,8 +41,8 @@ class TestTorchbindAOTI(TestCase):
 
         return M()
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_custom_objs_exposed_through_loader(self, device):
-        ensure_triton(self, device, required_on_cpu=False)
         m = self._make_model().to(device)
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -62,6 +65,7 @@ class TestTorchbindAOTI(TestCase):
             msg=lambda msg: f"{msg}\nExpected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_mutating_custom_obj_after_load_affects_run(self, device):
         # The central contract: IValues returned by get_custom_objs() share
         # intrusive_ptr ownership with the live entries inside
@@ -69,7 +73,6 @@ class TestTorchbindAOTI(TestCase):
         # custom-class instance affects subsequent run() invocations.
         # Forward computes self.attr.add_tensor(x) + x, where Foo.add_tensor
         # returns (x + y) * z. Foo.increment(k) does x += k, y += k.
-        ensure_triton(self, device, required_on_cpu=False)
         m = self._make_model().to(device)  # Foo(10, 20), so x+y == 30
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -98,10 +101,9 @@ class TestTorchbindAOTI(TestCase):
         after = loader.run([x])[0]
         torch.testing.assert_close(after, 40 * x + x)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_custom_objs_empty_when_no_torchbind(self, device):
         # A plain model with no torchbind attrs should yield an empty map.
-        ensure_triton(self, device, required_on_cpu=False)
-
         class Plain(torch.nn.Module):
             def forward(self, x):
                 return x + 1
