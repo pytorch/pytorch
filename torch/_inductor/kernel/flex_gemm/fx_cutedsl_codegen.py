@@ -680,28 +680,49 @@ class FlexGemmEpilogueEmitter:
             return
         self.env[node] = lowered_reduce
 
-    def lower_mx_scale(self, node: torch.fx.Node) -> bool:
-        """Encode a stored MX scale before broadcasting its compact reduction.
-
-        Feed-main reductions arrive as already-broadcast epilogue parameters, so
-        their scale operation follows the ordinary pointwise lowering path.
-        """
-        if _cute_op_name(node.target) != "mx_e8m0_scale":
+    def lower_compact_inline_asm(self, node: torch.fx.Node) -> bool:
+        """Apply inline asm before broadcasting a compact reduction value."""
+        if (
+            self.feed_main is not None
+            or _cute_op_name(node.target) != "inline_asm_elementwise"
+            or not is_shape_preserving_pointwise_node(node)
+        ):
             return False
-        if self.feed_main is not None:
+        tensor_inputs = [
+            input_node
+            for input_node in node.all_input_nodes
+            if tensor_meta_shape(input_node) is not None
+        ]
+        if len(tensor_inputs) != 1:
             return False
-        source = node.all_input_nodes[0]
+        source = tensor_inputs[0]
         normalized = self.graph.normalized_nodes.get(source)
+        env = self.env
         if not isinstance(normalized, NormalizedReduction):
-            return False
+            if not is_shape_preserving_pointwise_node(source):
+                return False
+            source_inputs = [
+                input_node
+                for input_node in source.all_input_nodes
+                if tensor_meta_shape(input_node) is not None
+            ]
+            if len(source_inputs) != 1:
+                return False
+            normalized = self.graph.normalized_nodes.get(source_inputs[0])
+            if not isinstance(normalized, NormalizedReduction):
+                return False
+            source_args = tuple(_cute_arg(arg, self.env) for arg in source.args)
+            source_kwargs = {
+                key: _cute_arg(value, self.env) for key, value in source.kwargs.items()
+            }
+            env = dict(self.env)
+            env[source] = _cute_call(source.target, source_args, source_kwargs)
         reduction_input = normalized.source
         layout = self.grouped_tensors.get(reduction_input)
         if layout is None:
             return False
-        node_args = tuple(_cute_arg(arg, self.env) for arg in node.args)
-        node_kwargs = {
-            key: _cute_arg(value, self.env) for key, value in node.kwargs.items()
-        }
+        node_args = tuple(_cute_arg(arg, env) for arg in node.args)
+        node_kwargs = {key: _cute_arg(value, env) for key, value in node.kwargs.items()}
         self.env[node] = _cute_call(node.target, node_args, node_kwargs)
         _, self.store_sources[node] = _keepdim_and_broadcast(
             self.kernel,
@@ -862,7 +883,7 @@ class FlexGemmEpilogueEmitter:
             if physical_finalize is not None:
                 self.env[node] = physical_finalize
                 return
-        if self.lower_mx_scale(node) or self.lower_pointwise_store(node):
+        if self.lower_compact_inline_asm(node) or self.lower_pointwise_store(node):
             return
         node_args = tuple(_cute_arg(arg, self.env) for arg in node.args)
         node_kwargs = {
@@ -899,9 +920,6 @@ class FlexGemmEpilogueEmitter:
     def render(self) -> tuple[str, str]:
         """Render the generated epilogue and physical callback source."""
         from torch._inductor.codegen.cutedsl.inline_asm import inline_asm_cache_key
-        from torch._inductor.kernel.flex_gemm.quant_intrinsics import (
-            quant_intrinsics_cache_key,
-        )
 
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
@@ -938,7 +956,6 @@ class FlexGemmEpilogueEmitter:
             )
         )
         key_payload = (
-            f"quant_intrinsics={quant_intrinsics_cache_key()}\n"
             f"inline_asm={inline_asm_cache_key()}\n"
             f"fast_math={self.fast_math}\n{self.graph_module.code}\n"
             f"{body}\nreturn {result}{physical_reduction_payload}"
@@ -966,9 +983,6 @@ class FlexGemmEpilogueEmitter:
             "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.codegen.cutedsl.inline_asm import (\n"
             "    inline_asm_elementwise_intrinsic,\n"
-            ")\n"
-            "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
-            "    mx_e8m0_scale_intrinsic,\n"
             ")\n\n"
             f"{local_reduce_source}"
             f"@cute.jit\ndef {name}({epilogue_params}):\n"
