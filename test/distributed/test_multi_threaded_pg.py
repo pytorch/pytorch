@@ -311,7 +311,7 @@ class TestCollectivesWithBaseClassGeneric(MultiThreadedTestCase):
 
 
 class TestCollectivesWithBaseClassMultiAccelerator(MultiThreadedTestCase):
-    hw_classification = HardwareClassification.MULTI_ACCELERATOR
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
@@ -373,8 +373,6 @@ instantiate_device_type_tests(
     TestCollectivesWithBaseClassMultiAccelerator,
     globals(),
     except_for="cpu",
-    allow_mps=True,
-    allow_xpu=True,
 )
 
 
