@@ -2032,6 +2032,39 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("mn_sf_k", [(128, 4), (197, 3), (1025, 5)], name_fn=lambda mn_sf_k: f"{mn_sf_k[0]}_{mn_sf_k[1]}")
+    @parametrize("scale_dtype", [torch.float8_e8m0fnu, torch.float8_e4m3fn])
+    def test_blocked_scale_roundtrip_helpers(self, mn_sf_k, scale_dtype, device) -> None:
+        from torch._vendor.quack.blockscaled_layout_utils import (
+            pack_scale_2d_to_blocked_contig,
+            scale_2d_from_cublas,
+            scale_blocked_for_cublas,
+            unpack_scale_blocked_contig,
+        )
+
+        mn, sf_k = mn_sf_k
+        base = torch.tensor(
+            [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
+            device=device,
+            dtype=torch.float32,
+        )
+        idx = torch.arange(2 * mn * sf_k, device=device).remainder(base.numel())
+        scale_stack = base[idx].reshape(2, mn, sf_k).to(scale_dtype)
+
+        blocked = pack_scale_2d_to_blocked_contig(scale_stack)
+        self.assertEqual(unpack_scale_blocked_contig(blocked, mn, sf_k), scale_stack)
+        self.assertEqual(unpack_scale_blocked_contig(blocked[1], mn, sf_k), scale_stack[1])
+
+        flat0 = scale_blocked_for_cublas(blocked, mn, sf_k, l_idx=0)
+        flat1 = scale_blocked_for_cublas(blocked, mn, sf_k, l_idx=1)
+        self.assertEqual(flat0, to_blocked(scale_stack[0]))
+        self.assertEqual(flat1, to_blocked(scale_stack[1]))
+        self.assertEqual(scale_2d_from_cublas(flat0, mn, sf_k), scale_stack[0])
+        self.assertEqual(scale_2d_from_cublas(flat1, mn, sf_k), scale_stack[1])
+
+    @skipIfRocm
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [

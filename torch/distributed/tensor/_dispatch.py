@@ -12,7 +12,16 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
 from torch._prims.rng_prims import run_dtensor_rng_op
+from torch._vendor.quack.blockscaled_layout_utils import (
+    ceil_div as blockscaled_ceil_div,
+    MX_BLOCK_SIZE,
+    NVFP4_BLOCK_SIZE,
+    pack_scale_2d_to_blocked_contig,
+    scale_2d_from_cublas,
+    scale_blocked_for_cublas,
+)
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._local_tensor import _map_to_rank_local_val
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._nonlinear_redux import argminmax_handler
@@ -31,6 +40,7 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import (
     _format_implicit_redistribution_msg,
+    compute_local_shape_and_global_offset,
     ExplicitRedistributionContext,
     try_find_mesh_from_args,
 )
@@ -75,6 +85,205 @@ def _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
     # per-rank tensor are implementation details and may not appear in the
     # returned DTensor object.
     return _ignore_fresh_unbacked_symbols_tls_context()
+
+
+def _flat_blockwise_scale_numel(
+    rows: int, logical_k: int, block_size: int
+) -> tuple[int, int]:
+    sf_k = blockscaled_ceil_div(logical_k, block_size)
+    return 128 * blockscaled_ceil_div(rows, 128) * 4 * blockscaled_ceil_div(
+        sf_k, 4
+    ), sf_k
+
+
+def _current_rank_int(
+    value: int | torch.SymInt, *, current_rank: int | None = None
+) -> int:
+    rank = current_rank
+    if rank is None:
+        if not (dist.is_available() and dist.is_initialized()):
+            raise RuntimeError(
+                "_current_rank_int requires current_rank when distributed is not initialized"
+            )
+        rank = dist.distributed_c10d.get_rank()
+    resolved = _map_to_rank_local_val(value, rank)
+    if not isinstance(resolved, int):
+        raise TypeError(
+            f"expected int-like value for current rank, got {type(resolved)}"
+        )
+    return resolved
+
+
+def _localize_blockwise_scaled_mm_scale_from_offsets(
+    scale_local: torch.Tensor,
+    rows: int,
+    global_logical_k: int,
+    local_logical_k: int,
+    logical_k_offset: int,
+    block_size: int,
+) -> torch.Tensor:
+    global_expected_numel, global_sf_k = _flat_blockwise_scale_numel(
+        rows, global_logical_k, block_size
+    )
+    _, local_sf_k = _flat_blockwise_scale_numel(rows, local_logical_k, block_size)
+    if scale_local.numel() != global_expected_numel:
+        # Callers may hand us an already-localized scale or a non-blockwise case
+        # that happens to share the dtype/shape predicate. In those cases there is
+        # nothing left to localize here.
+        return scale_local
+    if logical_k_offset == 0 and local_logical_k == global_logical_k:
+        return scale_local
+    if logical_k_offset % block_size != 0:
+        raise ValueError(
+            f"blockwise scale localization requires block-aligned K offsets, got offset={logical_k_offset} "
+            f"for block_size={block_size}"
+        )
+    if local_logical_k % block_size != 0:
+        raise ValueError(
+            f"blockwise scale localization requires block-aligned local K sizes, got local_k={local_logical_k} "
+            f"for block_size={block_size}"
+        )
+
+    start_sf_k = logical_k_offset // block_size
+    stop_sf_k = start_sf_k + local_sf_k
+    scale_2d = scale_2d_from_cublas(scale_local, rows, global_sf_k)
+    local_scale_2d = scale_2d[:, start_sf_k:stop_sf_k]
+    local_blocked = pack_scale_2d_to_blocked_contig(local_scale_2d)
+    return scale_blocked_for_cublas(local_blocked, rows, local_sf_k)
+
+
+def _localize_blockwise_scaled_mm_scale(
+    scale_local: torch.Tensor,
+    data_local: torch.Tensor,
+    data_spec: DTensorSpec,
+    *,
+    contracting_dim: int,
+    non_contracting_dim: int,
+) -> torch.Tensor:
+    if scale_local.is_meta or data_local.is_meta:
+        return scale_local
+    if (
+        data_spec.tensor_meta is None
+        or scale_local.dim() != 1
+        or scale_local.numel() <= 1
+    ):
+        return scale_local
+    if scale_local.dtype == torch.float8_e4m3fn:
+        block_size = NVFP4_BLOCK_SIZE
+    elif scale_local.dtype == torch.float8_e8m0fnu:
+        block_size = MX_BLOCK_SIZE
+    else:
+        return scale_local
+
+    current_rank = data_spec.mesh._rank
+    global_shape = tuple(
+        _current_rank_int(dim, current_rank=current_rank)
+        for dim in data_spec.tensor_meta.shape
+    )
+    _, global_offset = compute_local_shape_and_global_offset(
+        data_spec.tensor_meta.shape, data_spec.mesh, data_spec.placements
+    )
+    local_shape = tuple(data_local.shape)
+    global_offset = tuple(
+        _current_rank_int(offset, current_rank=current_rank) for offset in global_offset
+    )
+    logical_k_factor = 2 if data_local.dtype == torch.float4_e2m1fn_x2 else 1
+    return _localize_blockwise_scaled_mm_scale_from_offsets(
+        scale_local,
+        rows=local_shape[non_contracting_dim],
+        global_logical_k=global_shape[contracting_dim] * logical_k_factor,
+        local_logical_k=local_shape[contracting_dim] * logical_k_factor,
+        logical_k_offset=global_offset[contracting_dim] * logical_k_factor,
+        block_size=block_size,
+    )
+
+
+def _maybe_localize_scaled_mm_blockwise_args(
+    local_tensor_args: tuple[object, ...], op_schema: OpSchema
+) -> tuple[object, ...]:
+    if len(local_tensor_args) < 4:
+        return local_tensor_args
+    data_a, data_b, scale_a, scale_b = local_tensor_args[:4]
+    data_a_spec = op_schema.args_schema[0]
+    data_b_spec = op_schema.args_schema[1]
+    if not (
+        isinstance(data_a, torch.Tensor)
+        and isinstance(data_b, torch.Tensor)
+        and isinstance(scale_a, torch.Tensor)
+        and isinstance(scale_b, torch.Tensor)
+        and isinstance(data_a_spec, DTensorSpec)
+        and isinstance(data_b_spec, DTensorSpec)
+    ):
+        return local_tensor_args
+
+    updated_args = list(local_tensor_args)
+    # _scaled_mm strategy is planned as mk,kn->mn: operand A contracts on dim 1
+    # and operand B_t contracts on dim 0.
+    updated_args[2] = _localize_blockwise_scaled_mm_scale(
+        scale_a,
+        data_a,
+        data_a_spec,
+        contracting_dim=1,
+        non_contracting_dim=0,
+    )
+    updated_args[3] = _localize_blockwise_scaled_mm_scale(
+        scale_b,
+        data_b,
+        data_b_spec,
+        contracting_dim=0,
+        non_contracting_dim=1,
+    )
+    return tuple(updated_args)
+
+
+def _current_op_schema_for_local_args(
+    op_call: torch._ops.OpOverload,
+    op_info: OpInfo,
+    output_sharding: OutputSharding,
+) -> OpSchema:
+    current_op_schema = output_sharding.redistribute_schema or op_info.schema
+    if current_op_schema is not None:
+        return current_op_schema
+
+    current_args_schema = (
+        pytree.tree_unflatten(
+            cast(list[object], op_info.flat_args_schema),
+            # pyrefly: ignore [bad-argument-type]
+            op_info.args_tree_spec,
+        )
+        if op_info.args_tree_spec
+        else tuple(op_info.flat_args_schema)
+    )
+    return OpSchema(op_call, current_args_schema, {})
+
+
+def _local_results_for_non_participating_rank(
+    op_call: torch._ops.OpOverload, spec: OutputSpecType
+) -> object:
+    ret_list = op_call._schema.returns
+    if spec is None:
+        return None
+
+    def default_tensor(default_spec: DTensorSpec) -> torch.Tensor:
+        if default_spec.tensor_meta is None:
+            raise RuntimeError(f"{default_spec} has no tensor metadata.")
+        shape = default_spec.tensor_meta.shape
+        dtype = default_spec.tensor_meta.dtype
+        if len(shape) == 0:
+            return torch.zeros((), dtype=dtype)
+        return torch.tensor([], dtype=dtype)
+
+    if isinstance(spec, DTensorSpec):
+        return default_tensor(spec)
+    if isinstance(spec, Sequence):
+        local_results = [default_tensor(s) if s is not None else None for s in spec]
+        if None in local_results:
+            ret_type = str(ret_list[0].type)
+            raise NotImplementedError(
+                f"return type {ret_type} in DTensor op is not supported"
+            )
+        return local_results
+    raise AssertionError(f"output spec type {type(spec)} is not supported")
 
 
 def _as_strided_permutation(
@@ -192,6 +401,75 @@ def found_inf_reduce_handler(
     target_tensor.copy_(found_inf)
 
 
+def scaled_mm_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    # _scaled_mm must localize replicated flat blockwise scales before the
+    # local tensor call. The DTensor custom-op path is consulted ahead of the
+    # generic dispatcher fast path, so do the localization here rather than in
+    # the generic local-call slow path.
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    if output_sharding is None:
+        raise AssertionError("output sharding should not be None")
+    debug_mode = get_active_debug_mode()
+    if debug_mode is not None and output_sharding.output_spec is not None:
+        debug_mode.record_output_placements(output_sharding.output_spec)
+    mesh = op_info.compute_mesh
+    if not mesh._is_current_rank_part_of_mesh():
+        local_results = _local_results_for_non_participating_rank(
+            op_call, output_sharding.output_spec
+        )
+        return dtensor.DTensor._op_dispatcher.wrap(
+            local_results, output_sharding.output_spec
+        )
+    if output_sharding.needs_redistribute:
+        if output_sharding.redistribute_schema is None:
+            raise AssertionError
+        with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+            output_sharding.output_spec
+        ):
+            dtensor.DTensor._op_dispatcher.redistribute_local_args(
+                op_info,
+                output_sharding.redistribute_schema,
+                output_sharding.use_val_from_redistribute_schema,
+            )
+
+    local_tensor_args = (
+        pytree.tree_unflatten(
+            cast(list[object], op_info.local_args),
+            op_info.args_tree_spec,  # type: ignore[arg-type]
+        )
+        if op_info.args_tree_spec
+        else op_info.local_args
+    )
+    local_tensor_args = cast(tuple[object, ...], local_tensor_args)
+    current_op_schema = _current_op_schema_for_local_args(
+        op_call, op_info, output_sharding
+    )
+    local_op_call = op_call
+    if (
+        output_sharding.needs_redistribute
+        and output_sharding.redistribute_schema is not None
+        and output_sharding.redistribute_schema.op != op_call
+    ):
+        local_op_call = output_sharding.redistribute_schema.op
+    else:
+        local_tensor_args = _maybe_localize_scaled_mm_blockwise_args(
+            local_tensor_args, current_op_schema
+        )
+    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+        output_sharding.output_spec
+    ):
+        local_results = local_op_call(*local_tensor_args, **op_info.local_kwargs)
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
+
+
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
@@ -233,6 +511,7 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
+            aten._scaled_mm.default: scaled_mm_handler,
         }
 
     # ********************************************************************************************
@@ -482,42 +761,10 @@ class OpDispatcher:
             #   2. if the return type is Tensor or List[Tensor], return empty
             #   tensor(s) with correct dtype.
             spec = output_sharding.output_spec
-            ret_list = op_call._schema.returns
-
             if spec is None:
-                # For a scalar return type, the non-participating device has None
-                # as its local result
                 local_results = None
             else:
-
-                def default_tensor(spec: DTensorSpec) -> torch.Tensor:
-                    if spec.tensor_meta is not None:
-                        shape = spec.tensor_meta.shape
-                        dtype = spec.tensor_meta.dtype
-                        if len(shape) == 0:
-                            # scalar tensor
-                            return torch.zeros((), dtype=dtype)
-                        else:
-                            # non-scalar tensor
-                            return torch.tensor([], dtype=dtype)
-                    else:
-                        raise RuntimeError(f"{spec} has no tensor metadata.")
-
-                if isinstance(spec, DTensorSpec):
-                    # return a Tensor value
-                    local_results = default_tensor(spec)
-                elif isinstance(spec, Sequence):
-                    # return a List[Tensor] value
-                    local_results = [
-                        default_tensor(s) if s is not None else None for s in spec
-                    ]
-                    if not isinstance(local_results, list):
-                        raise AssertionError
-                    if None in local_results:
-                        ret_type = str(ret_list[0].type)
-                        raise NotImplementedError(
-                            f"return type {ret_type} in DTensor op is not supported"
-                        )
+                local_results = _local_results_for_non_participating_rank(op_call, spec)
         return local_results
 
     def _dispatch_fast_path_python_tail(
