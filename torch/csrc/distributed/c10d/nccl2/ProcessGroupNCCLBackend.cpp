@@ -95,6 +95,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
+      "with RCCL");
+#endif
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
