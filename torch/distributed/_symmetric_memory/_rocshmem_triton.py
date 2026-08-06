@@ -28,8 +28,8 @@ class RocshmemLibFinder:
 
     Environment variable:
         ``ROCSHMEM_LIB_DIR`` (Optional[str]): directory containing
-        ``librocshmem_device_{arch}.bc``.  When not set, the standard
-        ROCm installation at ``/opt/rocm/lib`` is searched.
+        ``librocshmem_device_{arch}.bc``.  When not set, the active ROCm SDK
+        and standard installation paths are searched.
 
     Example::
         export ROCSHMEM_LIB_DIR=/opt/rocm/lib
@@ -54,13 +54,6 @@ class RocshmemLibFinder:
 
         lib_name = f"librocshmem_device_{arch}.bc"
 
-        search_paths = [
-            os.path.join(sysconfig.get_path("purelib"), "amd", "rocshmem", "lib"),
-            "/opt/rocm/lib",
-            "/usr/local/lib",
-            "/usr/lib",
-        ]
-
         user_lib_dir = os.environ.get("ROCSHMEM_LIB_DIR")
         if user_lib_dir is not None:
             lib_path = os.path.join(user_lib_dir, lib_name)
@@ -71,6 +64,21 @@ class RocshmemLibFinder:
             logger.info("Found rocSHMEM device library: %s", lib_path)
             cls.found_device_lib_path = lib_path
             return lib_path
+
+        search_paths = []
+        for rocm_root_var in ("ROCM_HOME", "ROCM_PATH"):
+            if rocm_root := os.environ.get(rocm_root_var):
+                rocm_lib_dir = os.path.join(rocm_root, "lib")
+                if rocm_lib_dir not in search_paths:
+                    search_paths.append(rocm_lib_dir)
+        search_paths.extend(
+            [
+                os.path.join(sysconfig.get_path("purelib"), "amd", "rocshmem", "lib"),
+                "/opt/rocm/lib",
+                "/usr/local/lib",
+                "/usr/lib",
+            ]
+        )
 
         lib_path = None
         for path in search_paths:

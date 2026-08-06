@@ -5,7 +5,13 @@ set -ex
 install_ubuntu() {
     apt-get update
     # kmod is used by GPU diagnostics; libc++ lets torch._C load at runtime.
-    apt-get install -y --no-install-recommends kmod libc++1 libc++abi1
+    # libnuma-dev lets CMake enable rocSHMEM and provides the unversioned
+    # libnuma.so name used by ROCm 7.14 at runtime.
+    apt-get install -y --no-install-recommends \
+        kmod \
+        libc++1 \
+        libc++abi1 \
+        libnuma-dev
 
     install_rocm
 
