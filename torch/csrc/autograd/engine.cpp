@@ -1675,7 +1675,7 @@ auto Engine::start_device_threads() -> void {
   }
 }
 
-void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
+void Engine::add_thread_pool_task(std::weak_ptr<GraphTask> graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the new task that will be
@@ -1683,7 +1683,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   bool create_thread =
       (thread_pool_shared_->num_workers_ <=
        thread_pool_shared_->graphtasks_queue_.size());
-  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  thread_pool_shared_->graphtasks_queue_.push(std::move(graph_task));
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {
