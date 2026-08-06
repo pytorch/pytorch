@@ -181,7 +181,8 @@ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
 
   using accscalar_t = opmath_t<scalar_t>;
-  const accscalar_t MACHEP = 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      ::metal::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   const int MAXITER = 2000;
 
   int i;
@@ -219,7 +220,8 @@ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   accscalar_t sum = 0;
   accscalar_t term, logx;
   const int MAXITER = 2000;
-  const accscalar_t MACHEP = 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      ::metal::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
 
   for (n = 1; n < MAXITER; n++) {
     fac *= -x / n;
@@ -485,7 +487,8 @@ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam) {
 
   int k, n, sgn;
   int maxpow = 0;
-  const accscalar_t MACHEP = 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      ::metal::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   accscalar_t lambda = x / a;
   accscalar_t sigma = (x - a) / a;
   accscalar_t eta, res, ck, ckterm, term, absterm;
@@ -548,7 +551,8 @@ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   const int MAXITER = 2000;
-  const accscalar_t MACHEP = 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      ::metal::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   const accscalar_t BIG = 16777216.;
   const accscalar_t BIGINV = 5.9604644775390625E-8;
 

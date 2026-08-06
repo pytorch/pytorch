@@ -484,7 +484,7 @@ inline float log_gamma(const T x) {
 }
 
 inline float zeta(float x, float q) {
-  constexpr float MACHEP = 1.11022302462515654042E-16;
+  constexpr float MACHEP = ::metal::numeric_limits<float>::epsilon() / 2.0f;
   constexpr float ZETA_EXPANSION[] = {
       12.0,
       -720.0,

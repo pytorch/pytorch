@@ -6,6 +6,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 
+#include <limits>
+
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
@@ -158,8 +160,8 @@ __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      std::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   constexpr int MAXITER = 2000;
 
   int i;
@@ -197,8 +199,8 @@ __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   accscalar_t sum = 0;
   accscalar_t term, logx;
   constexpr int MAXITER = 2000;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      std::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
 
   for (n = 1; n < MAXITER; n++) {
     fac *= -x / n;
@@ -248,8 +250,8 @@ __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t
 
   int k, n, sgn;
   int maxpow = 0;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      std::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   accscalar_t lambda = x / a;
   accscalar_t sigma = (x - a) / a;
   accscalar_t eta, res, ck, ckterm, term, absterm;
@@ -315,8 +317,8 @@ __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   constexpr int MAXITER = 2000;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  constexpr accscalar_t MACHEP =
+      std::numeric_limits<accscalar_t>::epsilon() / accscalar_t{2};
   constexpr accscalar_t BIG = std::is_same_v<accscalar_t,double> ?
     4.503599627370496e15 : 16777216.;
   constexpr accscalar_t BIGINV = std::is_same_v<accscalar_t,double> ?
