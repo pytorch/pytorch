@@ -201,24 +201,21 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
     With ``specialize_args=True``, arguments are guarded by value instead, so a
     fresh but equal argument (e.g. a new dataclass every call) only triggers a
     recompile when a value actually changes. Supported argument values are
-    constants and containers of them (anything ``ConstantVariable.is_literal``
-    accepts, e.g. ``int``/``float``/``bool``/``str``/``bytes``/``None``/
-    ``torch.dtype``/``torch.device`` and tuples/lists/sets of those), enums,
-    classes registered as constants via
-    :func:`torch.utils._pytree.register_constant` or
+    constants (``int``/``float``/``bool``/``str``/``bytes``/``None``/
+    ``torch.dtype``/``torch.device``/...), enums, classes registered as
+    constants via :func:`torch.utils._pytree.register_constant` or
     ``torch._library.opaque_object.register_custom_class`` with
-    ``typ="constant"`` (guarded via their ``__eq__``), dicts with literal
-    keys, and dataclasses whose fields are recursively supported. Symbolic
-    scalars (an ``int``/``float``/``bool`` made dynamic by automatic dynamic
-    shapes) are specialized to their traced value with a shape-env guard.
-    Anything
-    else - arbitrary objects, tensors, or arguments mutated inside the
-    compiled region before the call - triggers a graph break rather than
-    silently falling back to identity guarding. In particular, tensor
-    arguments are only permitted in the default mode (where they are passed
-    to ``fn`` as real values with no guard); with ``specialize_args=True``
-    they are rejected, since tensor data cannot be value-guarded and the
-    baked result could silently go stale.
+    ``typ="constant"`` (guarded via their ``__eq__``), tuples and lists of
+    supported values, dicts with literal keys, and dataclasses whose fields
+    are recursively supported. Symbolic scalars (an ``int``/``float``/``bool``
+    made dynamic by automatic dynamic shapes) are specialized to their traced
+    value with a shape-env guard. Anything else - arbitrary objects, sets,
+    tensors, or arguments mutated inside the compiled region before the call -
+    triggers a graph break rather than silently falling back to identity
+    guarding. In particular, tensor arguments are only permitted in the
+    default mode (where they are passed to ``fn`` as real values with no
+    guard); with ``specialize_args=True`` they are rejected, since tensor data
+    cannot be value-guarded and the baked result could silently go stale.
     """
     if fn is None:
         return functools.partial(

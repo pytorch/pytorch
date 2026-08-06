@@ -1872,15 +1872,6 @@
         "Perform the mutation outside the torch.compile region",
         "Pass the already-mutated value in as an input instead"
       ]
-    },
-    {
-      "Gb_type": "assume_constant_result specialize_args argument mutated in graph",
-      "Context": "function {name}, source {x.source.name}",
-      "Explanation": "Argument `{x.source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was mutated inside the torch.compile region before the call, so value guards derived from it would not match the value at frame entry.",
-      "Hints": [
-        "Perform the mutation outside the torch.compile region",
-        "Pass the already-mutated value in as an input instead"
-      ]
     }
   ],
   "GB0127": [
@@ -5703,46 +5694,13 @@
     {
       "Gb_type": "assume_constant_result specialize_args unguardable argument",
       "Context": "function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
-      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants and containers of them (per ConstantVariable.is_literal), enums, registered constant classes (torch.utils._pytree.register_constant or torch._library opaque typ=\"constant\"), and dataclasses whose fields are recursively supported.",
+      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants, enums, registered constant classes (torch.utils._pytree.register_constant or torch._library opaque typ=\"constant\"), tuples/lists of them, dicts with literal keys, and dataclasses whose fields are recursively supported.",
       "Hints": [
         "Restructure this argument to use value-guardable types",
         "Register the argument's class with torch.utils._pytree.register_constant ",
         "to guard it by equality",
         "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
         "to guard this argument by object identity instead"
-      ]
-    },
-    {
-      "Gb_type": "assume_constant_result specialize_args unguardable argument",
-      "Context": "function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
-      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants and containers of them (per ConstantVariable.is_literal), enums, pytree-registered constant classes, and dataclasses whose fields are recursively supported.",
-      "Hints": [
-        "Restructure this argument to use value-guardable types",
-        "Register the argument's class with torch.utils._pytree.register_constant ",
-        "to guard it by equality",
-        "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
-        "to guard this argument by object identity instead"
-      ]
-    },
-    {
-      "Gb_type": "assume_constant_result specialize_args unguardable argument",
-      "Context": "function {name}, source {source.name}, value type {type(value).__name__}",
-      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True). Only simple scalar types, tuples/lists/dicts of them, and shallow dataclasses/objects built from those are supported.",
-      "Hints": [
-        "Restructure this argument to use simple guardable types",
-        "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
-        "to guard this argument by object identity instead"
-      ]
-    }
-  ],
-  "GB0931": [
-    {
-      "Gb_type": "assume_constant_result specialize_args sourceless argument conversion failed",
-      "Context": "function {name}, variable type {type(x).__name__}",
-      "Explanation": "Cannot convert sourceless argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True).",
-      "Hints": [
-        "Pass this argument from outside the torch.compile region so it has a source",
-        "Ensure all arguments can be converted to constants"
       ]
     }
   ],
@@ -6077,6 +6035,28 @@
       "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
       "Hints": [
         "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB1008": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable argument source",
+      "Context": "function {name}, source {source.name}",
+      "Explanation": "Argument `{source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) comes from a source whose guards are skipped (e.g. a function's __annotations__ or a stdlib module global), so the baked result could not be invalidated when the argument changes.",
+      "Hints": [
+        "Pass this value in as a regular argument to the compiled function",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args)"
+      ]
+    }
+  ],
+  "GB3576": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable-source argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True). The argument has no guardable source, so it must already be a constant.",
+      "Hints": [
+        "Pass this argument from outside the torch.compile region so it has a source",
+        "Ensure all arguments can be converted to constants"
       ]
     }
   ],

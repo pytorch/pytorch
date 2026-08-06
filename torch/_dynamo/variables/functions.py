@@ -47,7 +47,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import is_opaque_constant_type
 from torch.utils._pytree import is_constant_class, is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -76,6 +76,8 @@ from ..source import (
     DictGetItemSource,
     GetItemSource,
     ImportSource,
+    is_constant_source,
+    is_from_skip_guard_source,
     SkipGuardSource,
     TypeMROSource,
     TypeSource,
@@ -117,7 +119,6 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import (
         InliningGeneratorInstructionTranslator,
         InliningInstructionTranslator,
@@ -1943,6 +1944,41 @@ def _mutated_constant_arg(name: str, source_name: str) -> Never:
     )
 
 
+def _unguardable_constant_arg_source(source: Source, name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args unguardable argument source",
+        context=f"function {name}, source {source.name}",
+        explanation=f"Argument `{source.name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) comes from a "
+        f"source whose guards are skipped (e.g. a function's __annotations__ or a "
+        f"stdlib module global), so the baked result could not be invalidated when "
+        f"the argument changes.",
+        hints=[
+            "Pass this value in as a regular argument to the compiled function",
+            "Use plain torch._dynamo.assume_constant_result (without specialize_args)",
+        ],
+    )
+
+
+def _check_no_in_graph_mutation(
+    x: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    name: str,
+    source: Source,
+) -> None:
+    side_effects = tx.output.side_effects
+    mutated = False
+
+    def check(vt: VariableTracker) -> None:
+        nonlocal mutated
+        if vt.mutation_type is not None and side_effects.is_modified(vt):
+            mutated = True
+
+    VariableTracker.visit(check, x, side_effects=side_effects)
+    if mutated:
+        _mutated_constant_arg(name, source.name)
+
+
 def _unguardable_constant_arg(
     source: Source, value: Any, name: str, reason: str
 ) -> Never:
@@ -1952,10 +1988,10 @@ def _unguardable_constant_arg(
         explanation=f"Cannot install value guards for argument `{source.name}` of type "
         f"{type(value).__name__} passed to function {name} marked with "
         f"torch._dynamo.assume_constant_result(specialize_args=True): {reason}. "
-        f"Supported argument values are constants and containers of them "
-        f"(per ConstantVariable.is_literal), enums, registered constant classes "
-        f"(torch.utils._pytree.register_constant or torch._library opaque "
-        f'typ="constant"), and dataclasses whose fields are recursively supported.',
+        f"Supported argument values are constants, enums, registered constant "
+        f"classes (torch.utils._pytree.register_constant or torch._library opaque "
+        f'typ="constant"), tuples/lists of them, dicts with literal keys, and '
+        f"dataclasses whose fields are recursively supported.",
         hints=[
             "Restructure this argument to use value-guardable types",
             "Register the argument's class with torch.utils._pytree.register_constant "
@@ -1971,30 +2007,34 @@ def _install_constant_arg_guards(
     value: Any,
     name: str,
     ancestors: set[int],
-    side_effects: "SideEffects",
+    tx: "InstructionTranslatorBase",
 ) -> None:
     """
     Install value guards rooted at `source` so the baked constant is invalidated
-    when `value` changes. Wholly-literal values (per ConstantVariable.is_literal,
-    which covers containers of common constant types), enums, and
-    constant classes (pytree ``register_constant`` or opaque ``typ="constant"``)
-    get a single EQUALS_MATCH on the whole value. Mixed tuples/lists/dicts guard their length/keys and recurse;
-    dataclasses guard their type and recurse into fields. Anything else is a
-    graph break: value-based invalidation is the point of specialize_args, so
-    there is deliberately no identity fallback.
+    when `value` changes. Only structureless values get a whole-value
+    EQUALS_MATCH: literals (per ConstantVariable.is_base_literal), enums, and
+    constant classes (pytree ``register_constant`` or opaque ``typ="constant"``,
+    which are guarded by their own __eq__). Containers are always walked -
+    tuples/lists guard their length, dicts their keys, dataclasses their type -
+    because EQUALS_MATCH short-circuits on pointer equality and would not see a
+    mutation reachable through them. Anything else, sets included (their
+    elements have no stable source to walk), is a graph break: value-based
+    invalidation is the point of specialize_args, so there is deliberately no
+    identity fallback.
     """
     # A nested object mutated in-graph before the call has guards derived from
     # its traced (post-mutation) state, which cannot match the frame-entry
     # value; the top-level VariableTracker check in convert cannot see it.
+    side_effects = tx.output.side_effects
     if value in side_effects:
         vt = side_effects[value]
         if vt.mutation_type is not None and side_effects.is_modified(vt):
             _mutated_constant_arg(name, source.name)
     if (
-        ConstantVariable.is_literal(value)
+        ConstantVariable.is_base_literal(value)
         or isinstance(value, enum.Enum)
         or is_constant_class(type(value))
-        or is_opaque_value_type(type(value))
+        or is_opaque_constant_type(type(value))
     ):
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
         return
@@ -2008,7 +2048,7 @@ def _install_constant_arg_guards(
         install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         for i, item in enumerate(value):
             _install_constant_arg_guards(
-                GetItemSource(source, i), item, name, ancestors, side_effects
+                GetItemSource(source, i), item, name, ancestors, tx
             )
     elif isinstance(value, dict):
         for k in value:
@@ -2020,11 +2060,25 @@ def _install_constant_arg_guards(
                     f"non-literal dict key of type {type(k).__name__}",
                 )
         install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+        tx.output.guard_on_key_order.add(source)
         for k, v in value.items():
             _install_constant_arg_guards(
-                DictGetItemSource(source, k), v, name, ancestors, side_effects
+                DictGetItemSource(source, k), v, name, ancestors, tx
             )
     elif not isinstance(value, type) and dataclasses.is_dataclass(value):
+        # dataclasses.fields() omits attributes set outside the generated
+        # __init__ (assigned directly or in __post_init__); fn can read those,
+        # so walking fields alone would leave them under TYPE_MATCH only.
+        extra = set(getattr(value, "__dict__", {})) - {
+            f.name for f in dataclasses.fields(value)
+        }
+        if extra:
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"dataclass has non-field attributes {sorted(extra)}",
+            )
         install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
         for field in dataclasses.fields(value):
             if not hasattr(value, field.name):
@@ -2036,7 +2090,7 @@ def _install_constant_arg_guards(
                 getattr(value, field.name),
                 name,
                 ancestors,
-                side_effects,
+                tx,
             )
     else:
         _unguardable_constant_arg(source, value, name, "no value-guardable structure")
@@ -2083,6 +2137,7 @@ def invoke_and_store_as_constant(
     def convert_specialized(x: VariableTracker, source: Source | None = None) -> Any:
         # `source` is threaded when recursing into a container whose leaves are
         # not all python constants; at the top level it is the argument's source.
+        top_level = source is None
         if source is None:
             source = x.source
         if x.is_tensor():
@@ -2108,28 +2163,32 @@ def invoke_and_store_as_constant(
             # also how a container's nested scalar is handled once automatic
             # dynamic promotes it, via the structural walk below.
             return x.evaluate_expr(tx.output)
-        if source is None:
+        # A sourceless value is built by the traced bytecode itself and a
+        # constant-source one is already baked into the graph: neither can vary
+        # across calls, so no guard is needed (and none can be installed).
+        if source is None or is_constant_source(source):
             try:
                 return x.as_python_constant()
             except AsPythonConstantNotImplementedError:
                 unimplemented(
-                    gb_type="assume_constant_result specialize_args sourceless argument conversion failed",
+                    gb_type="assume_constant_result specialize_args unguardable-source argument conversion failed",
                     context=f"function {name}, variable type {type(x).__name__}",
-                    explanation=f"Cannot convert sourceless argument of type {type(x).__name__} "
-                    f"to a Python constant for function {name} marked with "
-                    f"torch._dynamo.assume_constant_result(specialize_args=True).",
+                    explanation=f"Cannot convert argument of type {type(x).__name__} to a "
+                    f"Python constant for function {name} marked with "
+                    f"torch._dynamo.assume_constant_result(specialize_args=True). The "
+                    f"argument has no guardable source, so it must already be a constant.",
                     hints=[
                         "Pass this argument from outside the torch.compile region so it has a source",
                         "Ensure all arguments can be converted to constants",
                     ],
                 )
-        if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
-            _mutated_constant_arg(name, source.name)
+        if top_level:
+            if is_from_skip_guard_source(source):
+                _unguardable_constant_arg_source(source, name)
+            _check_no_in_graph_mutation(x, tx, name, source)
         if isinstance(x, UserDefinedObjectVariable):
             value = x.value
-            _install_constant_arg_guards(
-                source, value, name, set(), tx.output.side_effects
-            )
+            _install_constant_arg_guards(source, value, name, set(), tx)
             return value
         # Fast path: a fully-constant argument (covers wholly-literal containers,
         # enums, and constant classes) bakes as one value with whole-value guards.
@@ -2138,9 +2197,7 @@ def invoke_and_store_as_constant(
         except AsPythonConstantNotImplementedError:
             pass
         else:
-            _install_constant_arg_guards(
-                source, value, name, set(), tx.output.side_effects
-            )
+            _install_constant_arg_guards(source, value, name, set(), tx)
             return value
         # A container whose structure is guardable but whose leaves are not all
         # python constants (e.g. a nested int promoted to a dynamic SymInt by
@@ -2158,6 +2215,7 @@ def invoke_and_store_as_constant(
             for key in x.items
         ):
             install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            tx.output.guard_on_key_order.add(source)
             result = {}
             for key, val in x.items.items():
                 py_key = key.vt.as_python_constant()

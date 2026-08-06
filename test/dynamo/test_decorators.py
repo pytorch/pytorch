@@ -1736,7 +1736,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(fn(x, sizes, cfg), expected)
         self.assertEqual(cnts.frame_count, 3)
 
-    def test_assume_constant_result_specialize_args_set_and_enum(self):
+    def test_assume_constant_result_specialize_args_enum(self):
         import enum
 
         class Mode(enum.Enum):
@@ -1744,20 +1744,34 @@ class DecoratorTests(PytreeRegisteringTestCase):
             BWD = "bwd"
 
         @torch._dynamo.assume_constant_result(specialize_args=True)
-        def select(s, m):
-            return float(len(s)) if m is Mode.FWD else -1.0
+        def select(m):
+            return 1.0 if m is Mode.FWD else -1.0
 
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
-        def fn(x, s, m):
-            return x * select(s, m)
+        def fn(x, m):
+            return x * select(m)
 
         for _ in range(3):
-            fn(torch.ones(4), {1, 2, 3}, Mode.FWD)
-        fn(torch.ones(4), {1, 2}, Mode.FWD)
-        fn(torch.ones(4), {1, 2}, Mode.BWD)
-        self.assertEqual(cnts.frame_count, 3)
+            fn(torch.ones(4), Mode.FWD)
+        fn(torch.ones(4), Mode.BWD)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_set(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(s):
+            return float(len(s))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            return x * select(s)
+
+        # Set elements have no stable source to walk, so a whole-value
+        # EQUALS_MATCH would be the only option and its pointer short-circuit
+        # cannot see a mutation reachable through the set.
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), {1, 2, 3})
 
     def test_assume_constant_result_specialize_args_unguardable_object(self):
         class Holder:
@@ -1776,6 +1790,29 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # must not silently pass with a stale baked constant.
         with self.assertRaisesRegex(Unsupported, "unguardable argument"):
             fn(torch.ones(4), Holder(torch.ones(4)))
+
+    def test_assume_constant_result_specialize_args_dataclass_non_field_attr(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Params:
+            seqlen: int
+
+            def __post_init__(self):
+                self.scale = 2.0
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return float(p.scale)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        # scale is read by select but is not a dataclass field, so the field
+        # walk would leave it guarded by TYPE_MATCH only -> stale constant.
+        with self.assertRaisesRegex(Unsupported, "non-field attributes"):
+            fn(torch.ones(4), Params(128))
 
     def test_assume_constant_result_specialize_args_on_method(self):
         import dataclasses
@@ -1801,27 +1838,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(torch.ones(4), Params(128, True))
         fn(torch.ones(4), Params(256, True))
         self.assertEqual(cnts.frame_count, 2)
-
-    def test_assume_constant_result_specialize_args_cycle(self):
-        class Node:
-            def __init__(self):
-                self.val = 1
-                self.other = None
-
-        n1, n2 = Node(), Node()
-        n1.other = n2
-        n2.other = n1
-
-        @torch._dynamo.assume_constant_result(specialize_args=True)
-        def select(n):
-            return float(n.val)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, n):
-            return x * select(n)
-
-        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
-            fn(torch.ones(4), n1)
 
     def test_assume_constant_result_specialize_args_dataclass_cycle(self):
         import dataclasses
@@ -1954,6 +1970,157 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaisesRegex(Unsupported, "mutated in graph"):
             fn(torch.ones(4), P({"scale": 2.0}))
 
+    def test_assume_constant_result_specialize_args_tuple_holding_list(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class P:
+            cfg: tuple
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return float(sum(p.cfg[0]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        x, inner = torch.ones(4), [1, 2, 3]
+        p = P((inner,))
+        self.assertEqual(fn(x, p), x * 6.0)
+        # EQUALS_MATCH deepcopies only exact list/set, so a whole-value guard on
+        # the tuple would short-circuit on pointer equality and miss this.
+        inner[0] = 100
+        self.assertEqual(fn(x, p), x * 105.0)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_dict_key_order(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(cfg):
+            return float(next(iter(cfg.values())))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, cfg):
+            return x * select(cfg)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x, {"a": 1.0, "b": 2.0}), x * 1.0)
+        self.assertEqual(fn(x, {"b": 2.0, "a": 1.0}), x * 2.0)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_nested_dict_key_order(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class P:
+            cfg: dict
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return float(next(iter(p.cfg.values())))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x, P({"a": 1.0, "b": 2.0})), x * 1.0)
+        self.assertEqual(fn(x, P({"b": 2.0, "a": 1.0})), x * 2.0)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_nested_container_mutation(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(d):
+            return d["scale"] + d.get("extra", 0.0)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            d["inner"]["extra"] = 1.0
+            return x * select(d["inner"])
+
+        with self.assertRaisesRegex(Unsupported, "mutated in graph"):
+            fn(torch.ones(4), {"inner": {"scale": 2.0}})
+
+    def test_assume_constant_result_specialize_args_nested_list_mutation(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(items):
+            return float(len(items))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            d["items"].append(5)
+            return x * select(d["items"])
+
+        with self.assertRaisesRegex(Unsupported, "mutated in graph"):
+            fn(torch.ones(4), {"items": [1, 2]})
+
+    def test_assume_constant_result_specialize_args_new_object_mutated(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(d):
+            return float(d["a"] + d["b"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            d = {"a": 1.0}
+            d["b"] = 2.0
+            return x * select(d)
+
+        # The dict is built by the traced bytecode, so it has no source and
+        # cannot diverge from a frame-entry value: mutating it must not break.
+        self.assertEqual(fn(torch.ones(4)), torch.ones(4) * 3.0)
+
+    def test_assume_constant_result_specialize_args_nested_decorator(self):
+        @torch._dynamo.assume_constant_result
+        def get_scale():
+            return 2.0
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(s):
+            return s * 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x * select(get_scale())
+
+        # The inner result is registered with a ConstantSource, which cannot
+        # carry guards but also cannot vary across calls.
+        self.assertEqual(fn(torch.ones(4)), torch.ones(4) * 4.0)
+
+    def test_assume_constant_result_specialize_args_skip_guard_source(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(ann):
+            return 1.0 if ann.get("return") is float else 2.0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, g):
+            return x * select(g.__annotations__)
+
+        def g(a: int) -> float:
+            return 0.0
+
+        with self.assertRaisesRegex(Unsupported, "unguardable argument source"):
+            fn(torch.ones(4), g)
+
+    def test_assume_constant_result_specialize_args_self_referential_list(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(lst):
+            return float(lst[0])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            return x * select(lst)
+
+        lst = [1.0]
+        lst.append(lst)
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), lst)
+
     def test_assume_constant_result_specialize_args_tensor_arg(self):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(t):
@@ -1967,8 +2134,11 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(torch.ones(4), torch.ones(4))
 
     def test_assume_constant_result_specialize_args_registered_constants(self):
-        import torch.utils._pytree as pytree
-        from torch._library.opaque_object import register_custom_class
+        from torch._library.opaque_object import (
+            _OPAQUE_TYPES_BY_NAME,
+            get_opaque_type_name,
+            register_custom_class,
+        )
 
         class PytreeCfg:
             def __init__(self, algo):
@@ -1993,8 +2163,19 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def __fx_repr__(self):
                 return f"OpaqueCfg({self.algo!r})", {"OpaqueCfg": OpaqueCfg}
 
-        pytree.register_constant(PytreeCfg)
+        self.register_constant(PytreeCfg)
+
+        # register_custom_class raises on a repeated name, so undo it: the
+        # weak-keyed _OPAQUE_TYPES drops OpaqueCfg on its own, the by-name dict
+        # and the C++ registry do not.
         register_custom_class(OpaqueCfg, typ="constant")
+        opaque_name = get_opaque_type_name(OpaqueCfg)
+
+        def deregister_opaque():
+            torch._C._unregister_opaque_type(opaque_name)
+            _OPAQUE_TYPES_BY_NAME.pop(opaque_name, None)
+
+        self.addCleanup(deregister_opaque)
 
         for cfg_cls in (PytreeCfg, OpaqueCfg):
             torch._dynamo.reset()
