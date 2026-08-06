@@ -74,8 +74,11 @@ inline void check_and_update_common_device(std::optional<Device>& common_device,
 }
 
 inline void check_and_update_common_device(std::optional<Device>& common_device, const List<std::optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
-  for (const auto& tensor : tensors) {
-    check_and_update_common_device(common_device, tensor, methodName, argName);
+  for (const auto& element : tensors) {
+    const IValue& ivalue = element.get();
+    if (!ivalue.isNone()) {
+      check_and_update_common_device(common_device, ivalue.toTensor(), methodName, argName);
+    }
   }
 }
 } // namespace c10::impl
