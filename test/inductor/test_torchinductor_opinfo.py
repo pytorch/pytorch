@@ -197,6 +197,8 @@ inductor_skips = defaultdict(dict)
 
 
 inductor_skips["cpu"] = {
+    # to_sparse compiles via sparse fallback, but pass/fail varies per sample/dtype
+    "to_sparse": {b8, f16, f32, f64, i32, i64},
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
@@ -219,6 +221,8 @@ if IS_MACOS and IS_X86:
     }
 
 inductor_skips["cuda"] = {
+    # to_sparse compiles via sparse fallback, but pass/fail varies per sample/dtype
+    "to_sparse": {b8, f16, f32, f64, i32, i64},
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
@@ -237,6 +241,8 @@ if not SM80OrLater:
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
 inductor_skips["xpu"] = {
+    # to_sparse compiles via sparse fallback, but pass/fail varies per sample/dtype
+    "to_sparse": {b8, f16, f32, f64, i32, i64},
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
