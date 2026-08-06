@@ -245,7 +245,7 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
           this));
   if (tensor.has_value()) {
-    window->tensor_register(*tensor);
+    window->tensorRegisterImpl(*tensor, true);
   }
   return window;
 }
