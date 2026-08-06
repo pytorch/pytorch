@@ -296,6 +296,18 @@ class SIMDKernelFeatures:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
 
+    def get_grid_split(self) -> int:
+        """
+        If this kernel's stage-1 reduction was tagged for split-as-grid-dim
+        lowering, return the split factor; otherwise 0. The tag is set on the
+        realized stage-1 buffer by ``Reduction.create_multilayer_split_as_grid``.
+        """
+        for n in self.reduction_nodes():
+            factor = getattr(n.node, "_grid_split_factor", 0)
+            if factor:
+                return factor
+        return 0
+
     @cache_on_self
     def buffer_read_counts(self) -> dict[str, int]:
         """Counts how many times each buffer is read within the kernel"""
