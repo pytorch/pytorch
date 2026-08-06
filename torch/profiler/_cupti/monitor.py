@@ -1457,6 +1457,18 @@ def configure(
         CuptiMonitor._configured = True
 
 
+def has_live_subscription() -> bool:
+    """True when the singleton exists and holds a CUPTI subscription.
+
+    The gate a capture-time callback consumer checks before choosing the CUPTI path.
+    Deliberately does NOT construct the monitor: doing so would take the subscription, and
+    once we hold one, kineto's one-shot CUPTI init fails permanently -- so a *probe* must
+    never be what locks the stock profiler out.
+    """
+    instance = CuptiMonitor._instance
+    return instance is not None and instance._subscriber is not None
+
+
 def get_config() -> dict[str, Any]:
     """The process-wide config the singleton will snapshot (or snapshotted): buffer_size,
     the two cadences, the approx-clock flag, and whether configure()/construction has pinned
