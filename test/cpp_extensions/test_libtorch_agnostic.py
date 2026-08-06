@@ -298,19 +298,41 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3, 4, device=device)
-        result = libtorch_agnostic.ops.my_permute(t, [2, 0, 1])
-        self.assertEqual(result, t.permute(2, 0, 1))
+        result = libtorch_agnostic.ops.my_permute(t, [-1, -3, 1])
+        self.assertEqual(result, t.permute(-1, -3, 1))
         self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Permute a non-contiguous view
+        t_view = t[:, :, ::2]
+        result = libtorch_agnostic.ops.my_permute(t_view, [1, -1, 0])
+        self.assertEqual(result, t_view.permute(1, -1, 0))
+        self.assertEqual(result.data_ptr(), t_view.data_ptr())
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_view_dtype(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 4, device=device, dtype=torch.float32)
+
+        # Same element size: shape unchanged
         result = libtorch_agnostic.ops.my_view_dtype(t, torch.int32)
         expected = t.view(torch.int32)
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Smaller element size: last dim expands (float32 -> int16)
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int16)
+        expected = t.view(torch.int16)
+        self.assertEqual(result.shape, (2, 8))
+        self.assertEqual(result, expected)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Larger element size: last dim shrinks (float32 -> int64)
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int64)
+        expected = t.view(torch.int64)
+        self.assertEqual(result.shape, (2, 2))
+        self.assertEqual(result, expected)
         self.assertEqual(result.data_ptr(), t.data_ptr())
 
     # These exercise the use case: a raw PyObject passed straight from Python

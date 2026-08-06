@@ -6,7 +6,7 @@ using torch::stable::Tensor;
 
 Tensor my_permute(
     Tensor self,
-    torch::headeronly::HeaderOnlyArrayRef<int64_t> dims) {
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
   return torch::stable::permute(self, dims);
 }
 
