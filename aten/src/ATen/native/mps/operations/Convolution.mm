@@ -719,7 +719,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     auto outputPlaceholder = output_c
         ? Placeholder(cachedGraph->outputTensor_, *output_c)
         : make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
@@ -905,7 +907,9 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     const auto grad_out_for_graph =
         grad_input_c ? grad_output_t.contiguous() : materialize_for_conv(grad_output_t, desc_layout);
     auto gradOutputPlaceholder = make_conv_placeholder(cachedGraph->gradOutputTensor_, grad_out_for_graph, desc_layout);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, grad_input_c ? weight_t.contiguous() : weight_t);
+    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+    auto weightsPlaceholder =
+        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
     auto outputPlaceholder = grad_input_c
         ? Placeholder(cachedGraph->gradInputTensor_, *grad_input_c)
         : make_conv_placeholder(cachedGraph->gradInputTensor_, grad_input_t, desc_layout);
