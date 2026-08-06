@@ -177,7 +177,14 @@ def _keepdim_and_broadcast(
     )
 
 
-def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+def _cute_call(
+    target: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    node: torch.fx.Node,
+) -> Any:
+    """Lower one FX call through the active CuTeDSL operations handler."""
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
@@ -185,6 +192,23 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
         # The HOP spells the asm text `asm_str`; the ops handler spells it `asm`.
         kwargs = dict(kwargs)
         kwargs["asm"] = kwargs.pop("asm_str")
+        input_values = []
+        for input_node in node.args[: len(args)]:
+            value = (
+                input_node.meta.get("val")
+                if isinstance(input_node, torch.fx.Node)
+                else None
+            )
+            if not isinstance(value, torch.Tensor):
+                raise NotImplementedError(
+                    "FlexGEMM inline asm inputs require tensor metadata"
+                )
+            input_values.append(value)
+        kwargs["input_dtypes"] = tuple(value.dtype for value in input_values)
+        kwargs["scalar_sources"] = tuple(
+            all(isinstance(dim, int) and dim == 1 for dim in value.shape)
+            for value in input_values
+        )
     if op_name == "nvfp4_pack":
         return V.kernel.cse.generate(
             V.kernel.body,
