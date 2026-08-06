@@ -4,7 +4,12 @@ import importlib
 import pkgutil
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -24,6 +29,8 @@ do_imports()
 
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_hops_have_opinfo(self):
         """All HOPs should have an OpInfo in torch/testing/_internal/hop_db.py"""
         from torch._ops import _higher_order_ops
