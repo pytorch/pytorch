@@ -291,7 +291,7 @@ void nccl_get_out(
     int64_t offset,
     int64_t size,
     int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
   TORCH_CHECK(dst.is_cuda(), "symm_mem.get: expected a CUDA tensor");
   TORCH_CHECK(
       dst.device() == hdl->get_device(),

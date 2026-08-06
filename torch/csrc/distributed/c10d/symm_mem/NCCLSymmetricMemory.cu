@@ -16,11 +16,18 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 #include <mutex>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+
+#ifdef NCCL_HAS_LSA_PEER_PTR
+// Device-side ncclGetLsaPointer helper (RCCL). The host-side symmem headers do
+// not pull this in on ROCm since NCCL_HAS_SYMMEM_DEVICE_SUPPORT is off there.
+#include <nccl_device.h>
+#endif
 
 namespace c10d {
 namespace symmetric_memory {
@@ -127,9 +134,14 @@ NCCLAllocMap::iterator find_allocation_covering(
 
 } // namespace
 
-// Before NCCL 2.29, we can use device-side APIs to get peer pointers.
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+// Device-side peer-pointer resolution. Used on two paths:
+//   - CUDA/NCCL before 2.29 (no host-side peer-pointer API yet), and
+//   - ROCm/RCCL (NCCL_HAS_LSA_PEER_PTR), which has the device-side
+//     ncclGetLsaPointer helper but not the host ncclGetPeerDevicePointer API.
+#if (NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0) && \
+     defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)) ||   \
+    defined(NCCL_HAS_LSA_PEER_PTR)
+#define NCCL_SYMMEM_BUILD_PTR_DEV
 // Fill both peer pointer arrays in a single kernel launch. For each peer,
 // NCCL returns the window base (== signal pad base); the data buffer pointer
 // is derived as `base + buffer_offset`, mirroring the host-side layout.
@@ -150,8 +162,7 @@ static __global__ void build_ptr_dev(
           : static_cast<char*>(buf) + buffer_offset;
   }
 }
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif
 
 class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
@@ -192,7 +203,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
-    const size_t total_size = buffer_offset_ + aligned_buffer_size;
+    const size_t total_size = at::round_up(
+        buffer_offset_ + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
@@ -203,7 +216,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
           " on rank ",
           rank_));
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
     // (Host comm is already published into NCCLDevCommManager by the
     // owning backend at comm-init time. The earlier mgr.get_comm() call
     // above relied on that. No re-register here.)
@@ -217,9 +230,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-    // Lack of host-side API to get peer pointers, so a kernel writes both
-    // peer arrays at once and copies the results to host.
+#if defined(NCCL_HAS_LSA_PEER_PTR) || \
+    NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+    // No usable host-side API to get peer pointers (either NCCL < 2.29, or
+    // ROCm/RCCL which lacks ncclGetPeerDevicePointer), so a kernel resolves
+    // both peer arrays at once via ncclGetLsaPointer and copies to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(
@@ -277,8 +292,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       mc_addr != nullptr) {
     mc_addr_ = mc_addr;
   }
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_HAS_LSA_PEER_PTR || NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT || NCCL_HAS_LSA_PEER_PTR
   }
 
   // Exact copy is not needed / supported
@@ -371,7 +386,7 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
   TORCH_CHECK(
       pai_->signal_pads_dev_ != nullptr,
       "NCCLSymmetricMemory::barrier requires peer signal pad pointers, which "
@@ -506,7 +521,86 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
-    const size_t total_size = buffer_offset + aligned_buffer_size;
+    const size_t total_size = at::round_up(
+        buffer_offset + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+
+#ifdef USE_ROCM
+    // On ROCm, ncclMemAlloc (hipMem virtual memory) is illegal during HIP
+    // graph capture. To support graph-captured symm_mem.empty() we maintain a
+    // free-block cache: freed blocks are stashed here instead of being freed
+    // back to the OS, and reused on the next alloc of the same size. Warmup
+    // iterations (outside capture) pre-populate the cache; the capture-time
+    // alloc() finds a cached block and returns it without calling ncclMemAlloc.
+    {
+      std::unique_ptr<NCCLAllocation> cached_alloc;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        FreeCacheKey cache_key{total_size, device_idx};
+        auto cache_it = free_cache_.find(cache_key);
+        if (cache_it != free_cache_.end() && !cache_it->second.empty()) {
+          cached_alloc = std::move(cache_it->second.back());
+          cache_it->second.pop_back();
+        }
+      }
+      if (cached_alloc) {
+        // Reuse a cached block from the free list.
+        //
+        // Signal pad: no re-zero here. free() already zeroed the pad before
+        // caching the block, so it is all-zero on reuse. Zeroing inside a
+        // captured graph would be wrong anyway: it would race with peer kernels
+        // that may have already written to this rank's slots before the memset
+        // runs (and ncclMemAlloc/hipMemset are illegal during capture).
+        //
+        // Symm-mem handle: if the user-visible buffer size is unchanged from
+        // the prior use, the existing NCCLSymmetricMemory handle (keyed by
+        // buffer_ptr + group_name in symm_mems_) remains valid. rendezvous()
+        // inside graph capture hits that cache entry and skips
+        // ncclCommWindowRegister, which is illegal during HIP graph capture.
+        // If the size changed (e.g., a different test reuses the same physical
+        // block for a larger tensor), we evict the stale handle so that the
+        // next rendezvous() registers a fresh window with the correct size.
+        bool size_changed = (cached_alloc->buffer_size != size);
+        cached_alloc->buffer_size = size;
+        void* buffer_ptr =
+            static_cast<char*>(cached_alloc->alloc_base) + buffer_offset;
+        if (size_changed) {
+          // Evict stale symm_mems_ entries and per-group PAIs so that the next
+          // rendezvous() creates fresh NCCLPeerAllocInfo with the correct size.
+          {
+            std::lock_guard<std::mutex> alloc_lock(cached_alloc->mutex);
+            cached_alloc->peer_alloc_infos_.clear();
+          }
+          std::lock_guard<std::mutex> lock(mutex_);
+          auto keys_it = symm_mem_keys_by_alloc_.find(buffer_ptr);
+          if (keys_it != symm_mem_keys_by_alloc_.end()) {
+            for (const auto& key : keys_it->second) {
+              symm_mems_.erase(key);
+            }
+            symm_mem_keys_by_alloc_.erase(keys_it);
+          }
+          allocations_.emplace(buffer_ptr, std::move(cached_alloc));
+        } else {
+          std::lock_guard<std::mutex> lock(mutex_);
+          allocations_.emplace(buffer_ptr, std::move(cached_alloc));
+        }
+        return buffer_ptr;
+      }
+      bool in_capture =
+          c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+          c10::cuda::CaptureStatus::None;
+      TORCH_CHECK(
+          !in_capture,
+          "NCCLSymmetricMemoryAllocator::alloc called during HIP graph capture "
+          "with no cached free block available for size=",
+          size,
+          " (total_size=",
+          total_size,
+          "). Ensure symm_mem.empty() is called at least once outside of graph "
+          "capture (warmup) before capturing the graph.");
+    }
+#endif // USE_ROCM
+
     void* alloc_base;
     C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
     // ncclMemAlloc does not zero memory. Zero the signal pad (the first
@@ -531,6 +625,49 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
   void free(void* ptr) override {
+#ifdef USE_ROCM
+    // On ROCm, stash the block in the free cache instead of calling
+    // ncclMemFree, so a later alloc() (including one during HIP graph
+    // capture) can reuse the underlying ncclMemAlloc region.
+    //
+    // We intentionally do NOT erase the symm_mems_ / symm_mem_keys_by_alloc_
+    // entries here. Because the reused block has the same alloc_base and
+    // therefore the same buffer_ptr, the rendezvous() call inside graph capture
+    // will find the already-cached NCCLSymmetricMemory handle (keyed by
+    // buffer_ptr + group_name) and return it without calling
+    // ncclCommWindowRegister during capture, which would be illegal on ROCm.
+    // The stale symm_mem handle remains valid because the underlying
+    // ncclMemAlloc region is never freed (it stays alive in free_cache_).
+    std::unique_ptr<NCCLAllocation> nccl_alloc;
+    FreeCacheKey cache_key{0, 0};
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto alloc_it = allocations_.find(ptr);
+      if (alloc_it == allocations_.end()) {
+        return;
+      }
+      nccl_alloc = std::move(alloc_it->second);
+      allocations_.erase(alloc_it);
+      const size_t buffer_offset = nccl_alloc->buffer_offset;
+      const size_t aligned_buffer_size =
+          at::round_up(nccl_alloc->buffer_size, 16UL);
+      const size_t total_size = at::round_up(
+          buffer_offset + aligned_buffer_size,
+          static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+      // Re-zero the signal pad before caching. The reuse path in alloc()
+      // (including under graph capture) deliberately skips zeroing, so the
+      // cached block must already be all-zero. The CAS-based barrier/collective
+      // signal protocol is self-resetting, but the put ops (nccl_put_with_signal
+      // + nccl_wait_for_signal) write an arbitrary value the waiter never clears,
+      // leaving the pad non-zero. A stale non-zero slot deadlocks the next
+      // collective's CAS(0->1). free() runs outside capture (at tensor teardown),
+      // so a synchronous memset on this rank's pad is safe here.
+      c10::cuda::CUDAGuard guard(nccl_alloc->device_idx);
+      C10_CUDA_CHECK(cudaMemset(nccl_alloc->alloc_base, 0, buffer_offset));
+      cache_key = FreeCacheKey{total_size, nccl_alloc->device_idx};
+      free_cache_[cache_key].push_back(std::move(nccl_alloc));
+    }
+#else
     std::lock_guard<std::mutex> lock(mutex_);
     auto alloc_it = allocations_.find(ptr);
     if (alloc_it == allocations_.end()) {
@@ -544,6 +681,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       symm_mem_keys_by_alloc_.erase(cache_keys_it);
     }
     allocations_.erase(alloc_it);
+#endif
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -637,6 +775,27 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+#ifdef USE_ROCM
+  // Cache key for the free-block cache: (ncclMemAlloc total_size, device_idx).
+  // total_size is the combined signal-pad + data region size, NCCL-aligned.
+  struct FreeCacheKey {
+    size_t total_size;
+    int device_idx;
+    bool operator==(const FreeCacheKey& o) const {
+      return total_size == o.total_size && device_idx == o.device_idx;
+    }
+  };
+  struct FreeCacheKeyHash {
+    size_t operator()(const FreeCacheKey& k) const {
+      return std::hash<size_t>{}(k.total_size) ^
+          (std::hash<int>{}(k.device_idx) << 32);
+    }
+  };
+  // Freed ncclMemAlloc blocks, stashed for capture-time reuse.
+  std::unordered_map<FreeCacheKey, std::vector<std::unique_ptr<NCCLAllocation>>,
+                     FreeCacheKeyHash> free_cache_;
+#endif // USE_ROCM
+
   std::mutex mutex_;
   NCCLAllocMap allocations_;
   NCCLSymmMemMap symm_mems_;
