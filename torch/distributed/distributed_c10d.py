@@ -2628,7 +2628,25 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    # nccl2 only supports the explicit split_group path. Its new_group factory
+    # creates a fresh communicator and does not consume split_from, so issuing a
+    # no-color split on nonmembers would mismatch the members' initialization.
+    if split_from.name() in ("nccl2", "nccl-lazy"):
+        return None
+
     return split_from
+
+
+def _get_nccl_env_bool(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    value = value.lower()
+    if value in ("y", "yes", "1", "t", "true"):
+        return True
+    if value in ("n", "no", "0", "f", "false"):
+        return False
+    raise RuntimeError(f"Invalid value for environment variable: {name}")
 
 
 def _new_process_group_helper(
@@ -2923,10 +2941,16 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
 
-    # Backend-agnostic NaN checking, for backends without a native checker
-    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
-    # hook, so there is no handle to keep alive here.
-    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+    # Backend-agnostic NaN checking, for backends without a native checker. The
+    # group owns the hook, so there is no handle to keep alive here.
+    backend_names = set(backend_config.get_device_backend_map().values())
+    uses_nccl2 = "nccl2" in backend_names or (
+        "nccl" in backend_names and os.environ.get("TORCH_DIST_USE_NCCL2") != "0"
+    )
+    enable_nan_check = os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1" or (
+        uses_nccl2 and _get_nccl_env_bool("TORCH_NCCL_NAN_CHECK")
+    )
+    if enable_nan_check:
         NanCheckHook.attach(pg)
 
     if device_id and pg._get_backend(device_id).supports_splitting:

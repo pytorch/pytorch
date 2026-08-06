@@ -10,8 +10,10 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -20,20 +22,62 @@
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::nccl2 {
 
 class ProcessGroupNCCL;
 
+enum class CommState {
+  NORMAL,
+  ERROR,
+  TIMEOUT,
+};
+
+class WorkNCCLState {
+ public:
+  WorkNCCLState(
+      size_t max_event_pool_size,
+      bool timing_enabled,
+      bool event_cache_enabled)
+      : timing_enabled(timing_enabled),
+        max_event_pool_size_(max_event_pool_size),
+        event_cache_enabled_(event_cache_enabled) {}
+
+  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
+      bool timing_enabled);
+  void returnEvent(
+      std::unique_ptr<at::cuda::CUDAEvent> event,
+      bool timing_enabled);
+  void enableCollectivesTiming();
+  void closeEventPool();
+  std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
+  applyEphemeralTimeout(std::chrono::milliseconds timeout);
+  void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
+  void addEphemeralTimeout(std::chrono::milliseconds timeout);
+
+  std::atomic<CommState> comm_state{CommState::NORMAL};
+  std::atomic<bool> timing_enabled{false};
+
+ private:
+  const size_t max_event_pool_size_;
+  const bool event_cache_enabled_;
+  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+  std::mutex event_pool_mutex_;
+  bool event_pool_open_{true};
+  std::mutex ephemeral_timeout_mutex_;
+  std::chrono::milliseconds ephemeral_timeout_active_{0};
+  std::chrono::milliseconds ephemeral_timeout_inflight_{0};
+};
+
 // Work object for the NCCL TorchComms backend. Ported from torchcomms'
 // WorkNCCL, but rebased onto c10d::Work (upstream subclassed
 // torchcomms::TorchWork). Completion is tracked with a pair of CUDA events;
 // the Future/result handling that BackendWrapper::WorkWrapper used to provide
-// is folded in here (see setOutputs/getFuture). The back-pointer to the owning
-// backend is non-owning: the backend drains its work queue in finalize()/dtor,
-// so a work never outlives its backend (upstream held a shared_ptr, which is
-// incompatible with c10d's intrusive_ptr ownership of the backend).
+// is folded in here (see setOutputs/getFuture). State needed after
+// process-group teardown is shared separately so Python may retain a Work
+// without retaining the backend or creating a backend-to-work reference cycle.
 class WorkNCCL : public c10d::Work {
  public:
   enum class WorkStatus {
@@ -45,12 +89,20 @@ class WorkNCCL : public c10d::Work {
   };
 
   WorkNCCL(
-      ProcessGroupNCCL* comm,
+      std::shared_ptr<WorkNCCLState> state,
+      at::Device device,
+      int rank,
+      int size,
+      std::string comm_name,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
       const std::vector<at::Tensor>& inputTensors);
   WorkNCCL(
-      ProcessGroupNCCL* comm,
+      std::shared_ptr<WorkNCCLState> state,
+      at::Device device,
+      int rank,
+      int size,
+      std::string comm_name,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
       at::Tensor inputTensor);
@@ -119,7 +171,15 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> outputs_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
-  ProcessGroupNCCL* comm_; // non-owning; see class comment
+  std::shared_ptr<WorkNCCLState> state_;
+  c10::weak_intrusive_ptr<::c10d::Backend> comm_{
+      c10::intrusive_ptr<::c10d::Backend>()};
+  uint64_t comm_generation_{0};
+  bool blocking_wait_{false};
+  at::Device device_;
+  int rank_;
+  int comm_size_;
+  std::string comm_name_;
   std::unique_ptr<at::cuda::CUDAEvent> start_event_;
   std::unique_ptr<at::cuda::CUDAEvent> end_event_;
   at::cuda::CUDAStream stream_;
