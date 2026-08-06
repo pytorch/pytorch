@@ -14,6 +14,7 @@ import torch.utils.data
 from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
 from torch.profiler import _utils, profile
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
