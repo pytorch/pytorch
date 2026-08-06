@@ -7896,7 +7896,8 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         self.assertEqual(expected, actual)
 
     # https://github.com/pytorch/pytorch/issues/162374
-    def test_pad_packed_sequence_fullgraph_unsupported(self):
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_pad_packed_sequence_fullgraph(self):
         def fn(sequence):
             output, lengths = torch.nn.utils.rnn.pad_packed_sequence(sequence)
             return output + lengths.to(output.dtype).view(1, -1, 1)
@@ -7907,10 +7908,171 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             x, lengths, enforce_sorted=False
         )
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "pad_packed_sequence"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(packed)
+        self.assertEqual(
+            fn(packed), torch.compile(fn, backend="eager", fullgraph=True)(packed)
+        )
+
+    # https://github.com/pytorch/pytorch/issues/155238
+    @parametrize("batch_first", [True, False])
+    @parametrize("total_length", [None, 12])
+    def test_pad_packed_sequence_fake_tensor(self, batch_first, total_length):
+        class Model(torch.nn.Module):
+            def __init__(self, batch_first, total_length):
+                super().__init__()
+                self.batch_first = batch_first
+                self.total_length = total_length
+
+            def forward(self, x, x_lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x,
+                    x_lengths,
+                    batch_first=self.batch_first,
+                    enforce_sorted=False,
+                )
+                unpacked, lengths = torch.nn.utils.rnn.pad_packed_sequence(
+                    packed,
+                    batch_first=self.batch_first,
+                    total_length=self.total_length,
+                )
+                return unpacked, lengths
+
+        x_lengths = torch.tensor([8, 6, 10, 4, 9, 7, 5, 3] * 4)
+        x = torch.randn(32, 10, 64) if batch_first else torch.randn(10, 32, 64)
+        model = Model(batch_first, total_length)
+        backend = EagerAndRecordGraphs()
+
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+            compiled_model = torch.compile(model, backend=backend)
+            self.assertEqual(model(x, x_lengths), compiled_model(x, x_lengths))
+
+        self.assertEqual(len(backend.graphs), 1)
+        pad_packed_sequence_nodes = backend.graphs[0].graph.find_nodes(
+            op="call_function",
+            target=torch._VF._pad_packed_sequence,
+        )
+        self.assertEqual(len(pad_packed_sequence_nodes), 1)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @parametrize("batch_first", [True, False])
+    @parametrize("total_length", [None, 12])
+    def test_pad_packed_sequence_fake_tensor_fullgraph(self, batch_first, total_length):
+        x_lengths = torch.tensor([8, 6, 10, 4, 9, 7, 5, 3] * 4)
+        x = torch.randn(32, 10, 64) if batch_first else torch.randn(10, 32, 64)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(
+            x, x_lengths, batch_first=batch_first, enforce_sorted=False
+        )
+        op_total_length = (
+            packed.batch_sizes.size(0) if total_length is None else total_length
+        )
+
+        def fn(data, batch_sizes):
+            return torch.ops.aten._pad_packed_sequence.default(
+                data,
+                batch_sizes,
+                batch_first,
+                0.0,
+                op_total_length,
+            )
+
+        backend = EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        self.assertEqual(
+            fn(packed.data, packed.batch_sizes),
+            compiled_fn(packed.data, packed.batch_sizes),
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        pad_packed_sequence_nodes = backend.graphs[0].graph.find_nodes(
+            op="call_function",
+            target=torch.ops.aten._pad_packed_sequence.default,
+        )
+        self.assertEqual(len(pad_packed_sequence_nodes), 1)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_pad_packed_sequence_export_dynamic_total_length(self):
+        class Model(torch.nn.Module):
+            def forward(self, data, batch_sizes):
+                return torch.ops.aten._pad_packed_sequence.default(
+                    data,
+                    batch_sizes,
+                    False,
+                    0.0,
+                    batch_sizes.shape[0],
+                )
+
+        def make_inputs(lengths):
+            padded = torch.randn(max(lengths), len(lengths), 2)
+            packed = torch.nn.utils.rnn.pack_padded_sequence(padded, lengths)
+            return packed.data, packed.batch_sizes
+
+        inputs = make_inputs([5, 3, 2])
+        dynamic_shapes = {
+            "data": {0: torch.export.Dim("packed_length", min=1)},
+            "batch_sizes": {0: torch.export.Dim("sequence_length", min=1)},
+        }
+        exported = torch.export.export(
+            Model(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+
+        for args in (inputs, make_inputs([4, 2])):
+            self.assertEqual(exported.module()(*args), Model()(*args))
+
+        pad_packed_sequence_nodes = exported.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.aten._pad_packed_sequence.default,
+        )
+        self.assertEqual(len(pad_packed_sequence_nodes), 1)
+
+    @parametrize(
+        "dtype,shape,device",
+        [
+            (torch.float32, (5,), "cpu"),
+            (torch.int64, (5, 1), "cpu"),
+            (torch.int64, (5,), "cuda"),
+        ],
+    )
+    def test_pad_packed_sequence_fake_tensor_invalid_batch_sizes(
+        self, dtype, shape, device
+    ):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        with FakeTensorMode(shape_env=ShapeEnv()):
+            data = torch.empty(10, 2)
+            batch_sizes = torch.empty(shape, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, "1D CPU int64 tensor"):
+                torch.ops.aten._pad_packed_sequence.default(
+                    data, batch_sizes, False, 0.0, 5
+                )
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_pad_packed_sequence_backward(self, backend):
+        padded = torch.randn(5, 3, 2)
+        lengths = torch.tensor([5, 3, 2])
+        packed = torch.nn.utils.rnn.pack_padded_sequence(
+            padded, lengths, enforce_sorted=True
+        )
+
+        def fn(data, batch_sizes):
+            output, out_lengths = torch.ops.aten._pad_packed_sequence.default(
+                data, batch_sizes, False, 0.0, 7
+            )
+            return output.sin(), out_lengths
+
+        expected_data = packed.data.detach().clone().requires_grad_()
+        actual_data = packed.data.detach().clone().requires_grad_()
+        expected_output, expected_lengths = fn(expected_data, packed.batch_sizes)
+        expected_output.sum().backward()
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        actual_output, actual_lengths = compiled_fn(actual_data, packed.batch_sizes)
+        actual_output.sum().backward()
+
+        self.assertEqual(actual_output, expected_output)
+        self.assertEqual(actual_lengths, expected_lengths)
+        self.assertEqual(actual_data.grad, expected_data.grad)
 
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an

@@ -243,6 +243,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "as_strided_scatter",
     "slice",
     "constant_pad_nd",
+    "_pack_padded_sequence",
+    "_pad_packed_sequence",
     "unbind",
     "unbind_copy",
     "split",

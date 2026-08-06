@@ -3812,6 +3812,7 @@ make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
+make_fallback(aten._pad_packed_sequence.default, warn=False)
 make_fallback(aten._unique2.default, warn=False)
 make_fallback(aten.unique_dim.default, warn=False)
 make_fallback(aten.unique_consecutive.default, warn=False)
