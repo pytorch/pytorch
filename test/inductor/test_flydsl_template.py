@@ -39,6 +39,7 @@ class _CacheParam:
 class TestFlyDSLTemplate(TestCase):
     def setUp(self):
         super().setUp()
+        flydsl_utils._check_runtime_available.cache_clear()
         _get_flydsl_device_arch.cache_clear()
 
     def test_runtime_unavailable_when_package_missing(self):
@@ -63,7 +64,9 @@ class TestFlyDSLTemplate(TestCase):
                 flydsl_utils, "_pathfinder_find_spec", return_value=SimpleNamespace()
             ),
             mock.patch.object(
-                flydsl_utils, "_distribution_version", return_value="0.3.0.dev1"
+                flydsl_utils,
+                "_available_version",
+                return_value=SimpleNamespace(release=(0, 3, 0)),
             ),
         ):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
