@@ -179,7 +179,7 @@ class ComboKernelMemoryContext:
         default_factory=dict
     )
     current_live_before: list[int] = dataclasses.field(default_factory=list)
-    current_step_peak: list[int] = dataclasses.field(default_factory=list)
+    initial_step_peak: dataclasses.InitVar[list[int] | None] = None
     current_peak_tree: SegmentedTree[int] | None = dataclasses.field(
         init=False, repr=False
     )
@@ -187,17 +187,17 @@ class ComboKernelMemoryContext:
         dataclasses.field(default_factory=dict)
     )
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, initial_step_peak: list[int] | None) -> None:
         from .codegen.segmented_tree import SegmentedTree
 
         self.current_peak_tree = (
             SegmentedTree(
-                self.current_step_peak,
+                initial_step_peak,
                 update_op=operator.add,
                 summary_op=max,
                 identity_element=0,
             )
-            if self.current_step_peak
+            if initial_step_peak
             else None
         )
 
@@ -6687,7 +6687,7 @@ class Scheduler:
             current_nodes=list(self.nodes),
             current_node_to_idx={node: idx for idx, node in enumerate(self.nodes)},
             current_live_before=baseline_live_before,
-            current_step_peak=[
+            initial_step_peak=[
                 baseline_live_before[idx]
                 + sum(buf.mpi_buffer.size_alloc for buf in node.get_outputs())
                 for idx, node in enumerate(self.nodes)
@@ -6832,7 +6832,6 @@ class Scheduler:
         for idx, node in enumerate(local_nodes, start=region_start):
             mem_ctx.current_node_to_idx[node] = idx
         mem_ctx.current_live_before[region_start : region_end + 1] = region_live_before
-        mem_ctx.current_step_peak[region_start : region_end + 1] = region_step_peak
         peak_tree.set_range(region_start, region_step_peak)
         for node in group_nodes:
             mem_ctx.accepted_node_to_combo[node] = combo_node
