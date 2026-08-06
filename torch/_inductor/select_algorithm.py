@@ -109,6 +109,14 @@ PRINT_AUTOTUNE = True
 DEBUG = False
 
 
+def zero_benchmark_output(output: torch.Tensor) -> None:
+    """Initialize autotune output through a CUDA-supported storage dtype."""
+    if output.dtype == torch.float4_e2m1fn_x2:
+        output.view(torch.uint8).zero_()
+    else:
+        output.zero_()
+
+
 if TYPE_CHECKING:
     import concurrent
 
@@ -5103,7 +5111,7 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> float:
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
-        output.zero_()
+        zero_benchmark_output(output)
         try:
             result = choice.benchmark(*inputs, out=output)
             device_type = next(
@@ -5198,7 +5206,7 @@ class AlgorithmSelectorCache(PersistentCache):
             cls._is_extern(choice)
         )
         inputs, output = benchmark_tensors.unpack()
-        output.zero_()
+        zero_benchmark_output(output)
 
         timeout = timedelta(seconds=timeout_seconds)
 
