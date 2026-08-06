@@ -255,7 +255,7 @@ class TestGetSetItem(TestCase):
         result2 = tensor2[c, d, e]
         self.assertIsInstance(result2, Tensor)
 
-    def test_device_handling(self):
+    def test_device_handling_cpu(self):
         """Test indexing behavior with CPU tensors."""
         # CPU tensor
         cpu_tensor = torch.randn(3, 4)
