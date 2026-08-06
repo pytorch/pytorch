@@ -215,4 +215,4 @@ void validate_scaled_grouped_mm_v2_inputs(
     ArrayRef<int64_t> contraction_dim,
     std::optional<c10::ScalarType> out_dtype);
 
-} // namespace at::scaled
+} // namespace at::native::scaled
