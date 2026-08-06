@@ -76,7 +76,11 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     xfailIfDistributedNotSupported,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -109,8 +113,6 @@ from torch.utils._pytree import (
     treespec_leaf,
     treespec_loads,
 )
-from torch.utils._triton import has_triton, has_triton_package
-
 
 try:
     import triton
@@ -19073,9 +19075,8 @@ class TestExportRNN(TestCase):
 class TestExportTriton(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.lib.triton)
     def test_export_custom_triton_kernel(self, device):
-        if not has_triton_package() or not has_triton():
-            self.skipTest("requires triton")
         if triton is None or capture_triton is None:
             self.skipTest("triton is not installed")
 
@@ -19137,9 +19138,8 @@ class TestExportTriton(TestCase):
         exp_out = m(*args)
         self.assertEqual(exp_out, ep.module()(*args))
 
+    @requires_capabilities(Capability.lib.triton)
     def test_export_custom_triton_kernel_mutable(self, device):
-        if not has_triton_package() or not has_triton():
-            self.skipTest("requires triton")
         if triton is None or capture_triton is None:
             self.skipTest("triton is not installed")
 
