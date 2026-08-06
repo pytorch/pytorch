@@ -737,23 +737,21 @@ Tensor scaled_dot_product_attention(
     std::optional<double> scale,
     bool enable_gqa) {
   // Give fused CUDA backends a batch dimension for unbatched inputs.
-  if (query_.is_cuda() && !query_.is_nested() && !key.is_nested() &&
-      !value.is_nested() && query_.dim() == 3 && key.dim() == 3 &&
-      value.dim() == 3) {
-    std::optional<Tensor> attn_mask = attn_mask_;
-    while (attn_mask.has_value() && attn_mask->dim() < 4) {
-      attn_mask = attn_mask->unsqueeze(0);
+  if (query_.is_cuda() && query_.dim() == 3) {
+    auto normalized_params = sdp::normalize_unbatched_cuda_input(
+        {query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa});
+    if (normalized_params.query.dim() != query_.dim()) {
+      return scaled_dot_product_attention(
+                 normalized_params.query,
+                 normalized_params.key,
+                 normalized_params.value,
+                 normalized_params.attn_mask,
+                 dropout_p,
+                 is_causal,
+                 scale,
+                 enable_gqa)
+          .squeeze(0);
     }
-    return scaled_dot_product_attention(
-               query_.unsqueeze(0),
-               key.unsqueeze(0),
-               value.unsqueeze(0),
-               attn_mask,
-               dropout_p,
-               is_causal,
-               scale,
-               enable_gqa)
-        .squeeze(0);
   }
 
   using sdp::SDPBackend;

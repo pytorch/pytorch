@@ -1759,6 +1759,9 @@ class TestSDPAFailureModes(NNTestCase):
         )
 
         with sdpa_kernel(backends=[kernel]):
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, attn_mask), kernel.value
+            )
             expected = torch.nn.functional.scaled_dot_product_attention(
                 q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask
             ).squeeze(0)
