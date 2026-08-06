@@ -1,10 +1,9 @@
 import functools
 import logging
 from importlib.machinery import PathFinder
-from importlib.metadata import PackageNotFoundError, version as _distribution_version
 from importlib.util import find_spec
 
-from torch._vendor.packaging.version import InvalidVersion, Version
+from torch._native.common_utils import _available_version
 from torch.backends import cuda as _cuda
 
 
@@ -33,9 +32,8 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
     if mlir_spec is None:
         return "missing optional dependency `flydsl._mlir` (runtime is not built)"
 
-    try:
-        flydsl_version = Version(_distribution_version("flydsl"))
-    except (PackageNotFoundError, InvalidVersion, TypeError):
+    flydsl_version = _available_version("flydsl")
+    if flydsl_version is None:
         return "missing or invalid FlyDSL version metadata"
     if flydsl_version.release[:2] != _FLYDSL_SUPPORTED_RELEASE:
         supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
@@ -47,7 +45,7 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
 
 
 @functools.cache
-def runtime_available() -> bool:
+def _check_runtime_available() -> bool:
     import torch
 
     if not _cuda.is_built():
@@ -62,3 +60,7 @@ def runtime_available() -> bool:
         return False
 
     return True
+
+
+def runtime_available() -> bool:
+    return _check_runtime_available()
