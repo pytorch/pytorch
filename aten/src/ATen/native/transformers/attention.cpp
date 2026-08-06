@@ -741,7 +741,7 @@ Tensor scaled_dot_product_attention(
     auto normalized_params = sdp::normalize_unbatched_cuda_input(
         {query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa});
     if (normalized_params.query.dim() != query_.dim()) {
-      return scaled_dot_product_attention(
+      return at::native::scaled_dot_product_attention(
                  normalized_params.query,
                  normalized_params.key,
                  normalized_params.value,
