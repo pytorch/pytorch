@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -170,6 +171,8 @@ def _sparse_coo_collate(b):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDatasetRandomSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
             random_split([1, 2, 3, 4], [1, 2])
@@ -399,6 +402,8 @@ class CountingIterableDataset(IterableDataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestTensorDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_len(self):
         source = TensorDataset(torch.randn(15, 10, 2, 3, 4, 5), torch.randperm(15))
         self.assertEqual(len(source), 15)
@@ -453,6 +458,8 @@ class TestTensorDataset(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestStackDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_empty(self):
         with self.assertRaisesRegex(
             ValueError, "At least one dataset should be passed"
@@ -593,6 +600,8 @@ class TestStackDataset(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestConcatDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_concat_two_singletons(self):
         result = ConcatDataset([[0], [1]])
         self.assertEqual(2, len(result))
@@ -1225,6 +1234,8 @@ def filter_len(row):
     "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
 )
 class TestDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
@@ -3071,6 +3082,8 @@ except RuntimeError as e:
 
 
 class TestDataLoaderDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
@@ -3162,6 +3175,8 @@ class TestDataLoaderDeviceType(TestCase):
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r"""
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
     """
@@ -3237,6 +3252,8 @@ class StringDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestStringDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = StringDataset()
@@ -3268,6 +3285,8 @@ class DictDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDictDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = DictDataset()
@@ -3370,6 +3389,8 @@ class DummyDataset(torch.utils.data.Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDataLoaderPersistentWorkers(TestDataLoader):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.persistent_workers = True
@@ -3608,6 +3629,8 @@ class NamedTupleDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestNamedTupleDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = NamedTupleDataset()
@@ -3677,6 +3700,8 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestCustomPinFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
@@ -3745,6 +3770,8 @@ class TestWorkerQueueDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestIndividualWorkerQueue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = TestWorkerQueueDataset(list(range(128)))
@@ -3804,6 +3831,8 @@ def _worker_set_affinity_init(worker_id):
     not hasattr(os, "sched_setaffinity"), "os.sched_setaffinity is not available"
 )
 class TestSetAffinity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_affinity_in_worker_init(self):
         # Query the current affinity mask to avoid setting a disallowed one
         old_affinity = os.sched_getaffinity(0)
@@ -3839,6 +3868,8 @@ class ConvDataset(Dataset):
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
 class TestConvAfterFork(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):
         loader = DataLoader(ConvDataset(), num_workers=1)
@@ -3888,6 +3919,8 @@ class TestSlowIterableDataset(IterableDataset):
 
 
 class TestOutOfOrderDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_in_order_index_ds(self):
         dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
