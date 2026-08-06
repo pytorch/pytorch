@@ -809,14 +809,30 @@ if __name__ == "__main__":
             expected,
         )
 
-    def test_periodic_workflow_enables_periodic_tests(self):
+    @parametrize(
+        "workflow_name",
+        [
+            "inductor-periodic.yml",
+            "periodic-rocm-mi200.yml",
+            "periodic-rocm-mi300.yml",
+            "periodic-rocm-mi350.yml",
+            "periodic.yml",
+            "s390x-periodic.yml",
+        ],
+    )
+    def test_periodic_workflow_enables_periodic_tests(self, workflow_name):
         repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        with open(os.path.join(repo_root, ".github/workflows/periodic.yml")) as f:
+        with open(os.path.join(repo_root, ".github/workflows", workflow_name)) as f:
             workflow = yaml.safe_load(f)
         test_jobs = [
             job
             for job in workflow["jobs"].values()
-            if job.get("uses") == "./.github/workflows/_linux-test.yml"
+            if job.get("uses")
+            in {
+                "./.github/workflows/_linux-test.yml",
+                "./.github/workflows/_rocm-test.yml",
+                "./.github/workflows/_s390x-test.yml",
+            }
         ]
         self.assertTrue(test_jobs)
         self.assertTrue(
@@ -826,8 +842,34 @@ if __name__ == "__main__":
             )
         )
 
-        if os.getenv("GITHUB_WORKFLOW") == "periodic":
+        if os.getenv("GITHUB_WORKFLOW") == workflow["name"]:
             self.assertTrue(TEST_WITH_PERIODIC)
+
+    @parametrize(
+        "workflow_name, forwards_to_docker",
+        [
+            subtest(("_linux-test.yml", False), name="linux"),
+            subtest(("_rocm-test.yml", True), name="rocm"),
+            subtest(("_s390x-test.yml", True), name="s390x"),
+        ],
+    )
+    def test_periodic_test_workflow_forwards_periodic_mode(
+        self, workflow_name, forwards_to_docker
+    ):
+        repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        with open(os.path.join(repo_root, ".github/workflows", workflow_name)) as f:
+            workflow = yaml.safe_load(f)
+        test_step = next(
+            step
+            for step in workflow["jobs"]["test"]["steps"]
+            if step.get("name") == "Test"
+        )
+        self.assertEqual(
+            test_step["env"].get("PYTORCH_TEST_WITH_PERIODIC"),
+            "${{ inputs.enable-periodic-tests && '1' || '0' }}",
+        )
+        if forwards_to_docker:
+            self.assertIn("-e PYTORCH_TEST_WITH_PERIODIC", test_step["run"])
 
     @periodic
     def test_periodic_smoke(self):
