@@ -1,18 +1,15 @@
-"""Inline PTX support for the CuteDSL backend.
+"""Lower elementwise inline PTX over CuteDSL fragments.
 
-Inductor's `inline_asm_elementwise` HOP is how callers reach instructions the
-compiler will not emit on its own, such as TorchAO's
-`cvt.rp.satfinite.ue8m0x2.f32` MX scale conversion. Triton lowers the HOP to
-`tl.inline_asm_elementwise`; this module provides the CuteDSL equivalent by
-emitting `llvm.inline_asm` over physical fragment groups and rebuilding the
-fragment.
+Each assembly invocation consumes `pack` adjacent fragment elements. LLVM
+constraints select the physical register type for every operand, so inputs are
+bitcast into those registers rather than numerically converted. Multiple outputs
+are returned as an LLVM struct and extracted before rebuilding the fragment.
+Partial packs are zero-padded, and outputs for padded elements are discarded.
 
-The asm string and constraint list are the caller's contract, exactly as in the
-Triton backend. Inputs are bitcast into the register class each constraint letter
-names, so a Float32 input under an `r` constraint arrives as its bit pattern.
-Wider integer outputs are truncated before being bitcast to the requested type.
-E8M0 bit patterns are decoded exactly to Float32 for fused consumers while the
-HOP's logical dtype still controls eventual storage.
+Integer register results are narrowed to the requested element width. E8M0 codes
+1 through 254 map directly to the matching Float32 exponent bits; codes 0 and 255
+map explicitly to `2^-127` and NaN. This lets fused arithmetic use exact Float32
+values while preserving E8M0 as the stored result type.
 """
 
 import functools
