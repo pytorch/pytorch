@@ -127,6 +127,7 @@ class ImportTimeVisitor(ast.NodeVisitor):
         self.lint_messages: list[LintMessage] = []
         self._function_depth = 0
         self._type_checking_depth = 0
+        self._import_time_call_names = set(_IMPORT_TIME_CALL_DENY_LIST)
 
     @property
     def _is_import_time(self) -> bool:
@@ -196,6 +197,10 @@ class ImportTimeVisitor(ast.NodeVisitor):
     def _check_import(self, node: ast.Import | ast.ImportFrom) -> None:
         if not self._is_import_time:
             return
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in _IMPORT_TIME_CALL_DENY_LIST:
+                    self._import_time_call_names.add(alias.asname or alias.name)
         for module_name in _module_name_from_import(node):
             if module_name in _OPTIONAL_IMPORT_TIME_DENY_LIST:
                 self._add_import_time_message(node, "Disallowed import-time import")
@@ -210,7 +215,7 @@ class ImportTimeVisitor(ast.NodeVisitor):
             name = func.attr
         else:
             return
-        if name in _IMPORT_TIME_CALL_DENY_LIST:
+        if name in self._import_time_call_names:
             self._add_import_time_message(node, "Disallowed import-time call")
 
 
