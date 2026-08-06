@@ -4603,7 +4603,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
-    def test_mm_nvfp4_pack_matches_reference(self):
+    @parametrize("tuned", (False, True))
+    def test_mm_nvfp4_pack_matches_reference(self, tuned):
         m = n = 128
         k = 64
         boundaries = torch.tensor(
@@ -4638,7 +4639,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b),
                 lambda acc: nvfp4_pack(acc.float().view(m, -1, 2)),
-                kernel_options={"backend": "QUACK"},
+                kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
         actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
