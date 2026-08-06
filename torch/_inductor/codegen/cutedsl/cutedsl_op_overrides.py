@@ -172,7 +172,11 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def _ensure_tensor_ssa(
-        arg: CuteDSLArg, template_tensor: CuteDSLArg, *, is_tensor: bool
+        arg: CuteDSLArg,
+        template_tensor: CuteDSLArg,
+        *,
+        is_tensor: bool,
+        dtype: torch.dtype | None = None,
     ) -> str:
         """
         Convert scalar arguments to TensorSSA using cute.full_like if needed.
@@ -188,7 +192,10 @@ class CuteDSLOpOverrides(OpOverrides):
         if is_tensor:
             return arg_expr
         template_expr = CuteDSLOpOverrides._as_expr(template_tensor)
-        return f"cute.full_like({template_expr}, {arg_expr})"
+        if dtype is None:
+            return f"cute.full_like({template_expr}, {arg_expr})"
+        cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE[dtype]
+        return f"cute.full_like({template_expr}, {arg_expr}, {cute_dtype})"
 
     @staticmethod
     def _extract_dtype_and_bounds(
@@ -229,6 +236,8 @@ class CuteDSLOpOverrides(OpOverrides):
         node_flags = CuteDSLOpOverrides._node_tensor_flags()
         if node_flags is not None:
             a_is_tensor, b_is_tensor = node_flags
+            a_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(a)
+            b_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(b)
         else:
             a_is_tensor = CuteDSLOpOverrides._is_tensor_like(a)
             b_is_tensor = CuteDSLOpOverrides._is_tensor_like(b)
@@ -644,7 +653,7 @@ class CuteDSLOpOverrides(OpOverrides):
                 b, tensor_arg, is_tensor=b_is_tensor
             )
             cond_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(
-                condition, tensor_arg, is_tensor=cond_is_tensor
+                condition, tensor_arg, is_tensor=cond_is_tensor, dtype=torch.bool
             )
             result_expr = f"cute.where({cond_ssa}, {a_ssa}, {b_ssa})"
 
