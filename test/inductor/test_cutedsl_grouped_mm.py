@@ -10,18 +10,17 @@ from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import ensure_cute_available
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
 @unittest.skipIf(
     not (ensure_cute_available() and is_datacenter_blackwell_arch()),
     "CuTeDSL library or Blackwell device not available",
 )
-@instantiate_parametrized_tests
 class TestCuTeDSLGroupedGemm(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _get_inputs(
         self,
         group_size: int,
@@ -53,8 +52,9 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
     @parametrize("M_hint", (256, 1024))
     @parametrize("K", (64, 128))
     @parametrize("N", (128, 256))
-    def test_grouped_gemm_basic(self, group_size: int, M_hint: int, K: int, N: int):
-        device = "cuda"
+    def test_grouped_gemm_basic(
+        self, device, group_size: int, M_hint: int, K: int, N: int
+    ):
         dtype = torch.bfloat16
 
         A, B, offsets = self._get_inputs(group_size, M_hint, K, N, device, dtype)
@@ -87,10 +87,10 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
     @parametrize("layout_B", ("contiguous", "broadcasted"))
     def test_grouped_gemm_assorted_layouts(
         self,
+        device,
         layout_A: str,
         layout_B: str,
     ):
-        device = "cuda"
         dtype = torch.bfloat16
 
         G, K, N = 8, 64, 128
@@ -152,6 +152,9 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_eager.dtype, dtype)
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
+
+
+instantiate_device_type_tests(TestCuTeDSLGroupedGemm, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
