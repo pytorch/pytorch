@@ -4949,10 +4949,6 @@ class Scheduler:
                 # they should not extend buffer lifetimes
                 node.add_fake_dep(WeakDep(add_dep, node.get_name(), is_fake=True))
 
-            for add_dep in V.graph.additional_star_deps[node.get_name()]:
-                add_user(add_dep, node, is_weak=False)  # Strong dependency
-                node.add_fake_dep(StarDep(add_dep))
-
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
