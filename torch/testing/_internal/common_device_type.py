@@ -355,6 +355,11 @@ class Capability:
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
 
+    class distributed:
+        backend = "distributed.backend"
+        dtensor = "distributed.dtensor"
+        fsdp = "distributed.fsdp"
+
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
@@ -997,11 +1002,39 @@ class HPUTestBase(DeviceTypeTestBase):
         cls.primary_device = "hpu:0"
 
 
+# Out-of-tree PrivateUse1 backends (e.g. NPU, MTIA) share this single
+# PrivateUse1TestBase class. Rather than have every backend edit the same
+# `_capabilities()` method body (which would force unrelated backends'
+# PRs to conflict with each other), each backend registers its own
+# capability provider here, at module import time, before any test runs:
+#
+#     register_privateuse1_capabilities(lambda: {
+#         Capability.distributed: {
+#             Capability.distributed.backend: lambda: True,
+#         },
+#     })
+#
+# `_capabilities()` merges every registered provider's namespaces.
+_PRIVATEUSE1_CAPABILITY_PROVIDERS: list[Callable[[], dict]] = []
+
+
+def register_privateuse1_capabilities(provider: Callable[[], dict]) -> None:
+    _PRIVATEUSE1_CAPABILITY_PROVIDERS.append(provider)
+
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
     bypass_device_restrictions = False
+
+    @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        for provider in _PRIVATEUSE1_CAPABILITY_PROVIDERS:
+            for namespace, entries in provider().items():
+                capabilities.setdefault(namespace, {}).update(entries)
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
