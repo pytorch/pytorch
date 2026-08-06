@@ -463,15 +463,24 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  auto query_key_set = query_.key_set();
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
+  auto query_key_set = kernel_params.query.key_set();
   bool has_hpu = query_key_set.has(c10::DispatchKey::HPU);
   if (has_hpu) {
     auto choice_int = at::_ops::_fused_sdp_choice::redispatch(
         c10::DispatchKeySet(DispatchKey::HPU),
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -481,7 +490,16 @@ int64_t _fused_sdp_choice_meta(
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kHIP,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
     return choice_int;
   }
 #else
@@ -489,10 +507,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kCUDA,
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -504,10 +522,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_xpu) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kXPU,
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -745,8 +763,7 @@ Tensor scaled_dot_product_attention(
     std::optional<double> scale,
     bool enable_gqa) {
   // Give fused backends a batch dimension for unbatched inputs.
-  if ((query_.is_cpu() || query_.is_cuda() || query_.is_xpu()) &&
-      query_.dim() == 3) {
+  if (query_.dim() == 3) {
     auto normalized_params = sdp::normalize_unbatched_input({
         .query = query_,
         .key = key,

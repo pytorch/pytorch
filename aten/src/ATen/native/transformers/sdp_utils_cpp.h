@@ -44,14 +44,11 @@ struct sdp_params {
   bool enable_gqa;
 };
 
-// Fused CPU, CUDA, and XPU backends require a batch dimension. Give
-// unbatched inputs a singleton batch dimension before selecting or running a
-// fused backend.
+// Fused backends require a batch dimension. Give unbatched inputs a singleton
+// batch dimension before selecting or running a fused backend.
 inline sdp_params normalize_unbatched_input(sdp_params params) {
-  const bool supports_fused_attention = params.query.is_cpu() ||
-      params.query.is_cuda() || params.query.is_xpu();
-  if (supports_fused_attention && !params.query.is_nested() &&
-      !params.key.is_nested() && !params.value.is_nested() &&
+  if (!params.query.is_nested() && !params.key.is_nested() &&
+      !params.value.is_nested() &&
       params.query.layout() == at::kStrided &&
       params.key.layout() == at::kStrided &&
       params.value.layout() == at::kStrided && params.query.dim() == 3 &&
