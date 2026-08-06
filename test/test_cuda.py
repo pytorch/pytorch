@@ -8545,6 +8545,7 @@ class TestMemPool(TestCase):
         finally:
             self._teardown_mempool_limited_memory_test()
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not supported by CUDAMallocAsync")
     @unittest.skipIf(EXPANDABLE_SEGMENTS, "not supported by expandable segments")
     @serialTest()
     def test_mempool_no_split(self):
