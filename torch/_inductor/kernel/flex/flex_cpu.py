@@ -362,8 +362,8 @@ def lower_cpu(
         len_mask_other=len(mask_mod_other_buffers),
         kernel_input_name_to_buffer=kernel_input_name_to_buffer,
         block_vars=(cur_qSplitSize, cur_kvSplitSize),
-        output_logsumexp=write_lse,
-        output_max=write_max,
+        logsumexp_buf=logsumexp if write_lse else None,
+        max_scores_buf=max_scores if write_max else None,
     )
     inputs_for_autotuning = [
         query,

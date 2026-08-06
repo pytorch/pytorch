@@ -2807,7 +2807,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # additive score_mod that makes every post-mod score negative and leaves
         # empty partitions. max_scores must be the true (negative) max, not 0.
         def neg_score(score, b, h, q_idx, kv_idx):
-            return score - 50.0
+            return score * 0.0 - 200.0
 
         def head_mask(b, h, q_idx, kv_idx):
             return kv_idx < (512 + h * 256)
