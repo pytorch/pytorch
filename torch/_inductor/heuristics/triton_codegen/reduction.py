@@ -21,7 +21,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from torch._inductor.runtime.triton_compat import Config
+    from triton import Config
 
 
 # ------------------------------------------------------------------
@@ -593,13 +593,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         for config in configs:
             # If XBLOCK > 1, increase the number of splits to get closer to the target value.
-            xblock: int = config.kwargs["XBLOCK"]  # pyrefly: ignore[missing-attribute]
+            xblock: int = config.kwargs["XBLOCK"]
             xsplit = (real_xnumel + xblock - 1) // xblock
-            config.kwargs["RSPLIT"] = (
-                get_valid_rsplit(  # pyrefly: ignore[missing-attribute]
-                    target // xsplit
-                )
-            )
+            config.kwargs["RSPLIT"] = get_valid_rsplit(target // xsplit)
 
         return configs
 
