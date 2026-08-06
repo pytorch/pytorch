@@ -327,12 +327,12 @@ class TestCapabilityGating(TestCase):
     @requires_capabilities(Capability.dtype.bf16)
     def test_capability_unsupported(self, device):
         type(self).executed_count += 1
-        self.fail("This test should be skipped")
+        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
 
     @requires_capabilities(Capability.attention.flash_attention)
     def test_capability_missing(self, device):
         type(self).executed_count += 1
-        self.fail("This test should raise AssertionError")
+        self.fail("Expected skip: attention.flash_attention is not declared")
 
     @requires_capabilities(
         Capability.lib.triton,
@@ -341,7 +341,9 @@ class TestCapabilityGating(TestCase):
     )
     def test_capability_combined(self, device):
         type(self).executed_count += 1
-        self.fail("Combined caps: missing should raise AssertionError before skip")
+        self.fail(
+            "Expected skip: attention.flash_attention is not declared and dtype.bf16 is not supported"
+        )
 
 
 PrivateUse1TestBase._capabilities = classmethod(
