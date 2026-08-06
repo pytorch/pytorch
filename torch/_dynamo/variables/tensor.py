@@ -73,11 +73,18 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
-    raise_args_mismatch,
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, GetSet, ValueMutationNew, VariableTracker
+from .base import (
+    _check_method_arity,
+    _derive_method_flags,
+    AttributeMutationNew,
+    GetSet,
+    Method,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
@@ -1006,64 +1013,20 @@ class TensorVariable(VariableTracker):
                 tx, func_var, tuple([self] + list(args)), kwargs
             )
 
-        """
-        Dispatch to a method-specific handler defined below.  If the
-        handler returns None (or doesn't exist) we put the method call
-        in the graph.
-        """
-
-        if name == "wait":
-            if args or kwargs:
-                raise torch._dynamo.exc.InternalTorchDynamoError(
-                    "`wait` and `wait_tensor` do not take any arguments"
-                )
-            from torch.distributed._functional_collectives import wait_tensor
-
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", wait_tensor, (self.as_proxy(),), {}
-                ),
-            )
-
-        # For historical reasons, these ops decompose down to syntactically
-        # invalid aten ops because they contain the python keyword `from`, see
-        # discussions in #151432 for more details.
-        # We graph break for now since this use case is uncommon.
-        if name == "random_":
-            unimplemented(
-                gb_type="Tensor.random_ op",
-                context=f"Tensor.{name}({args=}, {kwargs=})",
-                explanation="This is currently not supported.",
-                hints=[
-                    "Use the out-of-place version of this op",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-        elif name == "uniform_" and "from" in kwargs:
-            unimplemented(
-                gb_type="Tensor.uniform_ op called with `from` keyword",
-                context=f"Tensor.{name}({args=}, {kwargs=})",
-                explanation="This is currently not supported.",
-                hints=[
-                    "Avoid using the `from` keyword.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-        try:
-            handler_method = getattr(self, f"method_{name}")
-        except AttributeError:
-            pass
-        else:
+        # Declarative named-method dispatch (tp_methods). Mirrors CPython's
+        # tp_methods table: arity (derived from CPython's ml_flags) is checked
+        # centrally via _check_method_arity, then the handler runs with its
+        # native Python signature. A handler returning None declines and falls
+        # through to the generic proxy path below, matching the old per-handler
+        # fall-through.
+        method = self.tp_methods.get(name)
+        if method is not None:
+            flags = _derive_method_flags(self, name)
+            _check_method_arity(self, tx, name, flags, args, kwargs)
+            # Realize any LazyVariableTracker in kwargs before calling handler.
+            realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
             try:
-                # Realize any LazyVariableTracker in kwargs before calling handler.
-                realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
-                result = handler_method(tx, *args, **realized_kwargs)
-                if result:
-                    return result
+                result = method.handler(self, tx, *args, **realized_kwargs)
             except TypeError as e:
                 unimplemented(
                     gb_type="Unhandled args for method",
@@ -1073,6 +1036,8 @@ class TensorVariable(VariableTracker):
                     hints=[],
                     from_exc=e,
                 )
+            if result is not None:
+                return result
 
         # Guard against unknown methods reaching the generic proxy path.
         # For traceable wrapper subclasses (DTensor, NestedTensor), class_type
@@ -2332,7 +2297,7 @@ class TensorVariable(VariableTracker):
         self.synchronize_attributes(tx)
         return self
 
-    def method_share_memory_(self) -> NoReturn:
+    def method_share_memory_(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.share_memory_() call",
             context=f"call_method {self} share_memory_",
@@ -2392,6 +2357,125 @@ class TensorVariable(VariableTracker):
         return UntypedStorageVariable(
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
+
+    def method_wait(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if args or kwargs:
+            raise torch._dynamo.exc.InternalTorchDynamoError(
+                "`wait` and `wait_tensor` do not take any arguments"
+            )
+        from torch.distributed._functional_collectives import wait_tensor
+
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", wait_tensor, (self.as_proxy(),), {}
+            ),
+        )
+
+    def method_random_(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> NoReturn:
+        # For historical reasons, these ops decompose down to syntactically
+        # invalid aten ops because they contain the python keyword `from`, see
+        # discussions in #151432 for more details.
+        # We graph break for now since this use case is uncommon.
+        unimplemented(
+            gb_type="Tensor.random_ op",
+            context=f"Tensor.random_({args=}, {kwargs=})",
+            explanation="This is currently not supported.",
+            hints=[
+                "Use the out-of-place version of this op",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def method_uniform_(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if "from" in kwargs:
+            unimplemented(
+                gb_type="Tensor.uniform_ op called with `from` keyword",
+                context=f"Tensor.uniform_({args=}, {kwargs=})",
+                explanation="This is currently not supported.",
+                hints=[
+                    "Avoid using the `from` keyword.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        return None
+
+    # Named-method dispatch table (see call_method). Each entry mirrors a
+    # CPython PyMethodDef: the handler keeps its native Python signature and
+    # `flags` (ml_flags) drive centralized arity checking. Tensor methods
+    # without an entry fall through to the generic FX-proxy path in call_method.
+    tp_methods = {
+        "size": Method(method_size),
+        "stride": Method(method_stride),
+        "numel": Method(method_numel),
+        "nelement": Method(method_nelement),
+        "dim": Method(method_dim),
+        "ndimension": Method(method_ndimension),
+        "is_floating_point": Method(method_is_floating_point),
+        "is_inference": Method(method_is_inference),
+        "is_complex": Method(method_is_complex),
+        "is_contiguous": Method(method_is_contiguous),
+        "type": Method(method_type),
+        "as_subclass": Method(method_as_subclass),
+        "get_device": Method(method_get_device),
+        "element_size": Method(method_element_size),
+        "numpy": Method(method_numpy),
+        "tolist": Method(method_tolist),
+        "backward": Method(method_backward),
+        "data_ptr": Method(method_data_ptr),
+        "const_data_ptr": Method(method_const_data_ptr),
+        "record_stream": Method(method_record_stream),
+        "item": Method(method_item),
+        "__int__": Method(method___int__),
+        "__float__": Method(method___float__),
+        "__neg__": Method(method___neg__),
+        "__pos__": Method(method___pos__),
+        "__abs__": Method(method___abs__),
+        "__invert__": Method(method___invert__),
+        "__getitem__": Method(method___getitem__),
+        "__len__": Method(method___len__),
+        "__iter__": Method(method___iter__),
+        "__setitem__": Method(method___setitem__),
+        "__contains__": Method(method___contains__),
+        "addcmul_": Method(method_addcmul_),
+        "addcdiv_": Method(method_addcdiv_),
+        "add_": Method(method_add_),
+        "resize_": Method(method_resize_),
+        "resize_as_": Method(method_resize_as_),
+        "sparse_resize_": Method(method_sparse_resize_),
+        "sparse_resize_and_clear_": Method(method_sparse_resize_and_clear_),
+        "set_": Method(method_set_),
+        "register_hook": Method(method_register_hook),
+        "register_post_accumulate_grad_hook": Method(
+            method_register_post_accumulate_grad_hook
+        ),
+        "requires_grad_": Method(method_requires_grad_),
+        "detach_": Method(method_detach_),
+        "share_memory_": Method(method_share_memory_),
+        "new": Method(method_new),
+        "new_tensor": Method(method_new_tensor),
+        "untyped_storage": Method(method_untyped_storage),
+        "wait": Method(method_wait),
+        "random_": Method(method_random_),
+        "uniform_": Method(method_uniform_),
+    }
 
     def set_name_hint(self, name: str) -> None:
         if not self._is_name_set:
@@ -3461,50 +3545,47 @@ class UntypedStorageVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.UntypedStorage
 
-    def call_method(
+    def method_size(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "size":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            result = self.example_value.size()
-            if not has_free_symbols(result):
-                # avoid creating a node in the graph
-                return VariableTracker.build(tx, int(result))
-            else:
-                from ..external_utils import untyped_storage_size
-                from .builder import wrap_fx_proxy
+        result = self.example_value.size()
+        if not has_free_symbols(result):
+            # avoid creating a node in the graph
+            return VariableTracker.build(tx, int(result))
+        from ..external_utils import untyped_storage_size
+        from .builder import wrap_fx_proxy
 
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        untyped_storage_size,
-                        (self.from_tensor.as_proxy(),),
-                        {},
-                    ),
-                )
-        if name == "resize_" and len(args) == 1:
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+        return wrap_fx_proxy(
+            tx,
             tx.output.create_proxy(
                 "call_function",
-                torch.ops.inductor.resize_storage_bytes_,
-                (self.from_tensor.as_proxy(), args[0].as_proxy()),
+                untyped_storage_size,
+                (self.from_tensor.as_proxy(),),
                 {},
-            )
-            return self
+            ),
+        )
 
-        return super().call_method(tx, name, args, kwargs)
+    def method_resize_(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.inductor.resize_storage_bytes_,
+            (self.from_tensor.as_proxy(), args[0].as_proxy()),
+            {},
+        )
+        return self
+
+    tp_methods = {
+        "size": Method(method_size),
+        "resize_": Method(method_resize_),
+    }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
