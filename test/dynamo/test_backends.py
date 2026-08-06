@@ -387,6 +387,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         name = "init_test_backend_191921"
         torch._dynamo.register_backend(my_backend, name)
         try:
+
             @torch.compile(backend=name)
             def fn(x):
                 return x + 1
