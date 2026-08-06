@@ -30,9 +30,10 @@ static std::atomic<bool> s_mps_allocator_initialized{false};
 // MPS-specific allocator settings, parsed from the shared accelerator config
 // (PYTORCH_ALLOC_CONF, or torch._C._accelerator_setAllocatorSettings), the same
 // way CUDAAllocatorConfig registers a device parser hook. The only MPS key is
-// `mps_large_alloc_threshold_mb`: tensors at or above this size get a dedicated
-// MTLBuffer (the "solo" path) instead of MTLHeap sub-allocation. 0 (the default)
-// disables it.
+// `mps_large_alloc_threshold_mb`: tensors at or above this size get their own
+// right-sized, non-split OVERSIZE heap (see HeapAllocator::getHeapTier) instead
+// of sharing a 1 GiB XLARGE heap. 0 (the default) leaves the XLARGE/OVERSIZE
+// boundary at its built-in kXLargeHeap/2 cutoff.
 class MPSAllocatorConfig {
  public:
   static MPSAllocatorConfig& instance() {
@@ -52,21 +53,21 @@ class MPSAllocatorConfig {
     return keys;
   }
 
-  size_t solo_threshold_bytes() const {
-    return m_solo_threshold_bytes.load();
+  size_t large_alloc_threshold_bytes() const {
+    return m_large_alloc_threshold_bytes.load();
   }
 
   void parseArgs(const std::string& env) {
     // Reset to the default (disabled) if the key is not present, matching the
     // shared AcceleratorAllocatorConfig::parseArgs convention: each settings
     // string is a full spec, so omitting the key reverts to default.
-    m_solo_threshold_bytes.store(0);
+    m_large_alloc_threshold_bytes.store(0);
     c10::CachingAllocator::ConfigTokenizer tokenizer(env);
     for (size_t i = 0; i < tokenizer.size(); i++) {
       const auto& key = tokenizer[i];
       if (key == "mps_large_alloc_threshold_mb") {
         tokenizer.checkToken(++i, ":");
-        m_solo_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
+        m_large_alloc_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
       } else {
         const auto& shared_keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
         TORCH_CHECK(
@@ -81,7 +82,7 @@ class MPSAllocatorConfig {
 
  private:
   MPSAllocatorConfig() = default;
-  std::atomic<size_t> m_solo_threshold_bytes{0};
+  std::atomic<size_t> m_large_alloc_threshold_bytes{0};
 };
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(MPSAllocatorConfig)
@@ -160,8 +161,10 @@ size_t MPSHeapAllocatorImpl::get_allocation_size(size_t size, uint32_t usage) co
   // Keep the request in its original heap-size class (see getHeapTier): never let
   // rounding cross into a larger class, which would reserve a much larger backing
   // heap, nor push it past Metal's per-buffer limit.
+  const size_t oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
   if (bucketed >= m_max_buffer_size ||
-      getHeapTier(bucketed, /*has_memory_pressure=*/false) != getHeapTier(aligned, /*has_memory_pressure=*/false)) {
+      getHeapTier(bucketed, /*has_memory_pressure=*/false, oversize_threshold_bytes) !=
+          getHeapTier(aligned, /*has_memory_pressure=*/false, oversize_threshold_bytes)) {
     return aligned;
   }
   return bucketed;
@@ -475,88 +478,17 @@ size_t MPSHeapAllocatorImpl::release_free_heaps(BufferPool& pool, size_t target_
 BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usage, bool allow_in_flight_reuse) {
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
-  // Solo allocator: bypass the heap for large tensors. Sizes are bucketed the
-  // same way as the heap path (get_allocation_size) so a slowly growing
-  // allocation reuses the previous buffer, and the free list is keyed on that
-  // bucketed size.
-  const size_t solo_threshold = MPSAllocatorConfig::instance().solo_threshold_bytes();
-  if (solo_threshold > 0 && size >= solo_threshold) {
-    const size_t alloc_size = get_allocation_size(size, usage);
-    id<MTLBuffer> buf = nil;
-    {
-      auto it = m_solo_cache.find(alloc_size);
-      if (it != m_solo_cache.end()) {
-        buf = (id<MTLBuffer>)it->second;
-        m_solo_cache.erase(it);
-      }
-    }
-    if (!buf) {
-      // Solo buffers must be hazard-tracked: a freed one is recycled directly to
-      // a new allocation, and without tracking Metal will not order a new use
-      // against a still-in-flight prior use of the same buffer (data corruption).
-      const MTLResourceOptions options = HeapBlock::getOptions(usage | UsageFlags::HAZARD);
-      // Honor the high-watermark limit and, on failure, free cached memory and
-      // retry, mirroring the heap path so solo allocations raise the same OOM
-      // error instead of silently returning a null buffer.
-      auto within_limit = [&]() {
-        return m_max_total_allowed_size == std::numeric_limits<size_t>::max() ||
-            current_allocated_size() + alloc_size <= m_max_total_allowed_size;
-      };
-      if (within_limit()) {
-        buf = [m_device newBufferWithLength:alloc_size options:options];
-      }
-      if (!buf) {
-        // release_cached_buffers() syncs the GPU (COMMIT_AND_WAIT), so draining
-        // the solo free list afterwards is safe.
-        release_cached_buffers();
-        release_cached_solo_buffers();
-        if (within_limit()) {
-          buf = [m_device newBufferWithLength:alloc_size options:options];
-        }
-      }
-      if (!buf) {
-        if (m_high_watermark_ratio > 0.0) {
-          TORCH_CHECK(
-              false,
-              "MPS backend out of memory (MPS allocated: ",
-              format_size(m_total_allocated_memory.current),
-              ", other allocations: ",
-              format_size(current_allocated_size() - m_total_allocated_memory.current),
-              ", max allowed: ",
-              format_size(m_max_total_allowed_size),
-              "). Tried to allocate ",
-              format_size(alloc_size),
-              " as a solo buffer. Use PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 to disable upper limit for memory allocations (may cause system failure).");
-        } else {
-          TORCH_CHECK(false,
-                      "MPS backend out of memory (MPS allocated: ",
-                      format_size(m_total_allocated_memory.current),
-                      ", other allocations: ",
-                      format_size(current_allocated_size() - m_total_allocated_memory.current),
-                      "). Tried to allocate ",
-                      format_size(alloc_size),
-                      " as a solo buffer.");
-        }
-      }
-      m_total_allocated_memory.increase(alloc_size);
-    }
-    BufferBlock* buffer_block = new BufferBlock(alloc_size, /*offset=*/0, /*heap=*/nullptr);
-    buffer_block->buffer = buf;
-    buffer_block->requested_size = size;
-    buffer_block->usage = usage;
-    m_allocated_buffers[buffer_block->buffer] = buffer_block;
-    buffer_block->in_use = true;
-    buffer_block->use_count++;
-    m_current_allocated_memory.increase(alloc_size);
-    return buffer_block;
-  }
-
   size_t alloc_size = get_allocation_size(size, usage);
   auto& pool = get_pool(size, alloc_size, usage);
   AllocParams params(alloc_size, size, &pool, allow_in_flight_reuse);
   // we care about memory pressure if only we're allocating large buffers when the
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
+  // Lowers the OVERSIZE cutoff (see HeapAllocator::getHeapTier) so a large-but-
+  // sub-512MB tensor gets a dedicated, non-split heap instead of sharing a 1 GiB
+  // XLARGE heap with everything else in that size class. 0 (the default) keeps
+  // the built-in kXLargeHeap/2 cutoff.
+  params.oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
@@ -734,15 +666,11 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc_host(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
-// A heap-less "solo" buffer records its usage flags on the block itself; heap-
-// backed buffers carry them on their pool. Both let shared-buffer queries treat
-// a shared solo buffer (unified memory) as shared.
 static bool block_is_shared(const BufferBlock* buffer_block) {
   if (!buffer_block) {
     return false;
   }
-  const uint32_t usage = buffer_block->heap ? buffer_block->heap->pool->usage : buffer_block->usage;
-  return usage & UsageFlags::SHARED;
+  return buffer_block->heap->pool->usage & UsageFlags::SHARED;
 }
 
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
@@ -935,23 +863,6 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
 
     buffer_block = get_allocated_buffer_block(ptr);
     TORCH_INTERNAL_ASSERT(buffer_block);
-    // Solo buffer: return to per-size free list instead of heap pool.
-    if (buffer_block->heap == nullptr) {
-      m_allocated_buffers.erase(ptr);
-      m_current_allocated_memory.decrease(buffer_block->size);
-      // A solo buffer marked by recordEvents and still referenced by an in-flight
-      // command buffer must not be recycled yet: handing it to a new allocation
-      // could let the CPU overwrite it before the GPU is done. Park it;
-      // freeInactiveBuffers() returns it to the free list once its command buffer
-      // completes. Same rule as the heap path below.
-      if (buffer_block->event && buffer_block->retainCount() > 1) {
-        m_solo_pending_free.insert(buffer_block);
-      } else {
-        m_solo_cache.insert({buffer_block->size, (void*)buffer_block->buffer});
-        delete buffer_block;
-      }
-      return;
-    }
     BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
       // A buffer marked by recordEvents (used by the GPU in a context where a
@@ -994,48 +905,11 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
       }
     }
   }
-  // Reclaim parked solo buffers whose command buffer has completed: return them
-  // to the per-size free list for reuse.
-  for (auto it = m_solo_pending_free.begin(), last = m_solo_pending_free.end(); it != last;) {
-    BufferBlock* buffer_block = *it;
-    if (buffer_block->retainCount() <= 1) {
-      m_solo_cache.insert({buffer_block->size, (void*)buffer_block->buffer});
-      it = m_solo_pending_free.erase(it);
-      delete buffer_block;
-    } else {
-      ++it;
-    }
-  }
-}
-
-void MPSHeapAllocatorImpl::release_cached_solo_buffers() {
-  // Callers (emptyCache, the alloc retry) run this after release_cached_buffers()
-  // has done a COMMIT_AND_WAIT, so the GPU is idle and parked buffers are safe to
-  // release too.
-  for (BufferBlock* buffer_block : m_solo_pending_free) {
-    m_total_allocated_memory.decrease(buffer_block->size);
-    id<MTLBuffer> buf = buffer_block->buffer;
-    [buf setPurgeableState:MTLPurgeableStateEmpty];
-    [buf release];
-    delete buffer_block;
-  }
-  m_solo_pending_free.clear();
-  for (auto& [sz, raw] : m_solo_cache) {
-    m_total_allocated_memory.decrease(sz);
-    id<MTLBuffer> buf = (id<MTLBuffer>)raw;
-    [buf setPurgeableState:MTLPurgeableStateEmpty];
-    [buf release];
-  }
-  m_solo_cache.clear();
 }
 
 void MPSHeapAllocatorImpl::emptyCache() {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
-  // Release heap pools first; the solo drain runs after the GPU is idle
-  // (release_cached_buffers does COMMIT_AND_WAIT) so Metal retainCounts have
-  // settled before we call [buf release].
   release_cached_buffers();
-  release_cached_solo_buffers();
 }
 
 ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {

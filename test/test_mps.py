@@ -9695,15 +9695,15 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
-    def _reset_solo_allocator(self):
+    def _reset_large_alloc_threshold(self):
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:0")
         torch.mps.empty_cache()
         self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
         self.addCleanup(torch.mps.empty_cache)
 
     def test_enable_reduces_pool_growth(self):
-        """Solo allocation should not trigger a 1 GB heap block."""
-        self._reset_solo_allocator()
+        """Lowering the OVERSIZE threshold should not trigger a 1 GB heap block."""
+        self._reset_large_alloc_threshold()
         baseline = torch.mps.driver_allocated_memory()
 
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
@@ -9715,8 +9715,8 @@ class TestMPS(TestCaseMPS):
         del t
 
     def test_reuse_on_same_size(self):
-        """Freed solo buffer should be recycled on next same-size request."""
-        self._reset_solo_allocator()
+        """A freed OVERSIZE-tier buffer should be recycled on the next same-size request."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         SIZE = 30 * 1024 * 1024 // 4  # 30 MB
 
@@ -9729,12 +9729,12 @@ class TestMPS(TestCaseMPS):
         pool_after_reuse = torch.mps.driver_allocated_memory()
 
         self.assertLess(abs(pool_after_reuse - pool_after_free), 10 * 1024 * 1024,
-            "Same-size second allocation should reuse cached solo buffer")
+            "Same-size second allocation should reuse the cached OVERSIZE-tier heap")
         del t2
 
-    def test_empty_cache_releases_solo_buffers(self):
-        """empty_cache() should drain the solo free list."""
-        self._reset_solo_allocator()
+    def test_empty_cache_releases_oversize_buffers(self):
+        """empty_cache() should release OVERSIZE-tier heaps like any other tier."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         torch.mps.empty_cache()
         baseline = torch.mps.driver_allocated_memory()
@@ -9749,8 +9749,8 @@ class TestMPS(TestCaseMPS):
             msg="Pool should return to baseline after empty_cache")
 
     def test_tensor_is_functional(self):
-        """Solo-allocated tensor should work with all standard ops."""
-        self._reset_solo_allocator()
+        """An OVERSIZE-tier tensor should work with all standard ops."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         N = 30 * 1024 * 1024 // 4
         t = torch.zeros(N, device='mps')
@@ -9765,23 +9765,23 @@ class TestMPS(TestCaseMPS):
         loss.backward()
         self.assertAlmostEqual(t2.grad.sum().item(), float(N) * 2, delta=1.0)
 
-    def test_solo_respects_memory_limit(self):
-        """Solo allocation honors the high-watermark limit and raises a clean OOM
-        RuntimeError instead of returning a null buffer."""
-        self._reset_solo_allocator()
+    def test_oversize_threshold_respects_memory_limit(self):
+        """Lowering the OVERSIZE threshold still honors the high-watermark limit
+        and raises a clean OOM RuntimeError instead of returning a null buffer."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         self.addCleanup(torch.mps.set_per_process_memory_fraction, 0.0)
         torch.mps.set_per_process_memory_fraction(0.001)
-        # 10x the limit, and well above the 10 MB solo threshold, so the request
+        # 10x the limit, and well above the 10 MB threshold, so the request
         # exceeds the watermark regardless of device memory size.
         n = int(0.01 * torch.mps.recommended_max_memory() / 4)
         with self.assertRaisesRegex(RuntimeError, "out of memory"):
             torch.zeros(n, device='mps')
 
-    def test_solo_buffer_is_shared(self):
-        """Solo large buffers are still unified/shared, so shared-buffer paths
-        (non_blocking host copies) work as on the heap path."""
-        self._reset_solo_allocator()
+    def test_oversize_threshold_buffer_is_shared(self):
+        """OVERSIZE-tier buffers are still unified/shared, so shared-buffer paths
+        (non_blocking host copies) work the same as any other tier."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         n = 30 * 1024 * 1024 // 4  # 30 MB, above the threshold
         src = torch.arange(n, dtype=torch.float32)
@@ -9790,16 +9790,17 @@ class TestMPS(TestCaseMPS):
         torch.mps.synchronize()
         self.assertEqual(back, src)
 
-    def test_solo_no_corruption_on_reuse(self):
-        """A recycled solo buffer must not corrupt data still referenced by an
-        in-flight command buffer: solo buffers are hazard-tracked, and one still
-        used by a pending copy is parked (not recycled) until its GPU work ends."""
-        self._reset_solo_allocator()
+    def test_oversize_threshold_no_corruption_on_reuse(self):
+        """Lowering the OVERSIZE threshold must not weaken the tier's existing
+        safety guarantees: a recycled heap is hazard-tracked like every other
+        tier, and one still referenced by an in-flight command buffer is parked
+        (not recycled) until its GPU work ends."""
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         N = 30 * 1024 * 1024 // 4  # 30 MB, above the threshold
 
         # (a) hazard tracking: queue a device->host copy behind GPU work, free the
-        # source, force a same-size solo reuse; the copied data must stay intact.
+        # source, force a same-size reuse; the copied data must stay intact.
         a = torch.empty(N, device="mps").fill_(1.0)
         junk = torch.randn(4096, 4096, device="mps")
         for _ in range(60):
@@ -9823,12 +9824,37 @@ class TestMPS(TestCaseMPS):
         q = torch.empty(N, pin_memory=True)
         q.fill_(2.0)
         torch.mps.synchronize()
-        self.assertEqual(int((d != 1.0).sum().item()), 0, "recycled in-flight solo buffer was overwritten")
+        self.assertEqual(int((d != 1.0).sum().item()), 0, "recycled in-flight buffer was overwritten")
         del d, q, junk
+
+    def test_oversize_alloc_recovers_reclaimable_memory_without_empty_cache(self):
+        """A heap-tier allocation must succeed by draining freed OVERSIZE-tier
+        heaps through the normal OOM-recovery cascade, without the caller having
+        to call empty_cache() explicitly. (Regression test: the deleted "solo"
+        path had its own free list, invisible to this cascade, so a heap
+        allocation could spuriously OOM while trivially reclaimable memory sat
+        in that separate cache.)"""
+        self._reset_large_alloc_threshold()
+        self.addCleanup(torch.mps.set_per_process_memory_fraction, 0.0)
+        torch.mps.set_per_process_memory_fraction(0.5)
+        rec = torch.mps.recommended_max_memory()
+        n = int(0.3 * rec / 4)
+
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
+        a = torch.empty(n, device="mps")
+        del a
+        gc.collect()
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:0")
+
+        # Same-size heap-tier allocation must succeed without an intervening
+        # empty_cache(): the freed OVERSIZE heap from above must already be
+        # visible to the normal alloc_heap()/release_free_heaps() cascade.
+        b = torch.empty(n, device="mps")
+        del b
 
     def test_heap_mode_restored(self):
         """Setting the threshold to 0 should revert to default 1 GB heap behaviour."""
-        self._reset_solo_allocator()
+        self._reset_large_alloc_threshold()
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:10")
         torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:0")
         torch.mps.empty_cache()

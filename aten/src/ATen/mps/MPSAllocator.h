@@ -30,9 +30,17 @@ static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" all
 
 enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
 
-inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+// oversize_threshold_bytes, when nonzero, lowers the OVERSIZE cutoff below the
+// default kXLargeHeap/2 (see MPSAllocatorConfig::large_alloc_threshold_bytes()):
+// large-but-sub-512MB tensors that would otherwise share a 1 GiB XLARGE heap
+// instead get their own right-sized, non-split heap. Checked right after the
+// SMALL cutoff (not after kMinLargeAlloc) so a threshold below 10 MB still
+// takes effect instead of being silently absorbed into the LARGE tier.
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure, size_t oversize_threshold_bytes = 0) {
   if (size <= kMaxSmallAlloc) {
     return HeapTier::SMALL;
+  } else if (oversize_threshold_bytes > 0 && size >= oversize_threshold_bytes) {
+    return HeapTier::OVERSIZE;
   } else if (size < kMinLargeAlloc) {
     return HeapTier::LARGE;
   } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
@@ -77,10 +85,6 @@ struct BufferBlock {
   std::vector<int64_t> shape;
   bool in_use = false;
   HeapBlock* heap;
-  // For heap-less "solo" buffers, records the usage flags that a heap-backed
-  // buffer would carry on its pool, so shared-buffer queries can treat a shared
-  // solo buffer as shared. Unused (0) for heap-backed buffers.
-  uint32_t usage = 0;
   id_t buf_id = 0;
   uint32_t use_count = 0;
   // counter to assign unique ids to buffer blocks
@@ -134,6 +138,10 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
+  // mirrors MPSAllocatorConfig::large_alloc_threshold_bytes(); threaded through
+  // here so the static HeapBlock::createHeapBlock() (no access to the .mm-local
+  // config singleton) can lower the OVERSIZE cutoff the same way getHeapTier does.
+  size_t oversize_threshold_bytes = 0;
 };
 
 struct HeapBlock {
@@ -182,7 +190,7 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      switch (getHeapTier(size, params.has_memory_pressure)) {
+      switch (getHeapTier(size, params.has_memory_pressure, params.oversize_threshold_bytes)) {
         case HeapTier::SMALL:
           d.size = kSmallHeap;
           break;
@@ -435,16 +443,6 @@ class MPSHeapAllocatorImpl {
   size_t m_low_watermark_limit;
   // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to set debug verbosity
   uint32_t m_debug_verbosity;
-  // Solo allocator: direct per-buffer MTLBuffer for large tensors; bypasses MTLHeap
-  // sub-allocation. Threshold comes from the shared accelerator config
-  // (mps_large_alloc_threshold_mb, read via MPSAllocatorConfig on the alloc path).
-  // All access is under m_mutex (alloc/free/emptyCache paths all hold it).
-  // Per-size free list: size_bytes -> retained id<MTLBuffer> (as void* to avoid ObjC ARC in header)
-  std::unordered_multimap<size_t, void*> m_solo_cache;
-  // Freed solo buffers still referenced by an in-flight command buffer, parked
-  // here until freeInactiveBuffers() reclaims them to m_solo_cache (mirrors the
-  // heap pool's buffers_pending_free).
-  std::unordered_set<BufferBlock*> m_solo_pending_free;
   // default MPS stream
   MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
@@ -464,8 +462,6 @@ class MPSHeapAllocatorImpl {
   // waits for buffers parked in-flight in the pool's pending-free list to finish
   // on the GPU and returns them to the pool; returns true if any were reclaimed
   bool wait_for_pending_free_buffers(BufferPool& pool);
-  // release all cached (freed) solo buffers back to the driver
-  void release_cached_solo_buffers();
   // release fully free heaps to reclaim GPU memory if memory pressure is high
   void garbage_collect_cached_buffers(AllocParams& params);
   // places a buffer on the block's range, or releases the one placed on it
