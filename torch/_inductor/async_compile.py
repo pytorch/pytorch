@@ -676,20 +676,6 @@ class AsyncCompile:
         main_func_name = f"{kernel_name}_{main_suffix}"
         return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
 
-    def _load_flydsl_kernel_wrapper(
-        self, kernel_name, main_suffix, wrapper_cls, key, path
-    ):
-        """Reload a FlyDSL kernel and preserve backend-specific diagnostics."""
-        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-        main_func_name = f"{kernel_name}_{main_suffix}"
-        if not hasattr(mod, main_func_name):
-            available = [name for name in dir(mod) if callable(getattr(mod, name))]
-            raise RuntimeError(
-                f"Could not find FlyDSL main kernel function "
-                f"'{main_func_name}'. Available callables: {available}"
-            )
-        return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
-
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
         """
         Compile CuteDSL (CUTLASS Python DSL) kernels.
@@ -801,7 +787,7 @@ class AsyncCompile:
                     kernel_name,
                     elapsed_us,
                 )
-                return self._load_flydsl_kernel_wrapper(
+                return self._load_kernel_wrapper(
                     kernel_name,
                     MAIN_SUFFIX,
                     FlyDSLKernelWrapper,
@@ -812,7 +798,7 @@ class AsyncCompile:
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            return self._load_flydsl_kernel_wrapper(
+            return self._load_kernel_wrapper(
                 kernel_name,
                 MAIN_SUFFIX,
                 FlyDSLKernelWrapper,
