@@ -3,6 +3,8 @@ import dataclasses
 import importlib
 import inspect
 import math
+import subprocess
+import sys
 import types
 import unittest
 import warnings
@@ -86,6 +88,14 @@ ignored_c_binding_in_graph_function_names = {
     "torch._validate_sparse_bsc_tensor_args",
     "torch._validate_compressed_sparse_indices",
 }
+
+
+def uncached_torch_obj_rule_map() -> dict[Any, Any]:
+    return torch._dynamo.trace_rules._get_torch_obj_rule_map.__wrapped__(  # type: ignore[attr-defined]
+        torch._dynamo.trace_rules._is_dtensor_loaded()
+    )
+
+
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
         "torch._C._te.set_llvm_aot_workflow",
@@ -420,7 +430,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
             unittest.mock.patch(
                 "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
+                uncached_torch_obj_rule_map,
             ),
         ):
             x = torch.rand(3)
@@ -454,7 +464,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
             unittest.mock.patch(
                 "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
+                uncached_torch_obj_rule_map,
             ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
@@ -470,6 +480,101 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             finally:
                 torch._dynamo.trace_rules.SKIP_DIRS = skip_dirs_backup
                 torch._dynamo.trace_rules.SKIP_DIRS_RE = skip_dirs_re_backup
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_rule_map_updates_after_dtensor_import(self):
+        code = """
+import torch
+import torch._dynamo.trace_rules as trace_rules
+from torch._dynamo.variables import PolyfilledFunctionVariable
+
+if trace_rules._is_dtensor_loaded():
+    raise AssertionError("DTensor was loaded before building the initial rule map")
+
+trace_rules.clear_lru_cache()
+before = trace_rules.get_torch_obj_rule_map()
+if trace_rules._is_dtensor_loaded():
+    raise AssertionError("building the initial rule map imported DTensor")
+polyfilled_rules = {
+    obj: rule
+    for obj, rule in before.items()
+    if rule is PolyfilledFunctionVariable
+}
+if not polyfilled_rules:
+    raise AssertionError("initial rule map did not preserve dynamic polyfill rules")
+
+from torch.distributed.tensor import DTensor
+
+after = trace_rules.get_torch_obj_rule_map()
+if DTensor.from_local in before:
+    raise AssertionError("initial rule map unexpectedly included DTensor.from_local")
+if DTensor.from_local not in after:
+    raise AssertionError("rule map did not add DTensor.from_local after DTensor import")
+missing_polyfills = {
+    obj: rule
+    for obj, rule in polyfilled_rules.items()
+    if after.get(obj) is not rule
+}
+if missing_polyfills:
+    raise AssertionError(
+        f"rule map lost {len(missing_polyfills)} polyfill rules after DTensor import"
+    )
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
+    def test_add_module_init_func_runs_for_loaded_module(self):
+        trace_rules = torch._dynamo.trace_rules
+        module_name = f"_dynamo_test_loaded_module_{id(self)}"
+        calls = []
+
+        try:
+            sys.modules[module_name] = types.ModuleType(module_name)
+            trace_rules._lazy_module_init.pop(module_name, None)
+
+            trace_rules.add_module_init_func(module_name, lambda: calls.append(True))
+
+            self.assertEqual(calls, [True])
+            self.assertNotIn(module_name, trace_rules._lazy_module_init)
+        finally:
+            sys.modules.pop(module_name, None)
+            trace_rules._lazy_module_init.pop(module_name, None)
+
+    def test_late_polyfill_invalidates_uninteresting_files(self):
+        from torch._dynamo import guards
+        from torch._dynamo.polyfills import loader
+
+        module_name = f"_dynamo_test_polyfill_{id(self)}"
+        module = types.ModuleType(module_name)
+        module.__file__ = f"/{module_name}.py"
+        original_modules = loader.POLYFILLED_MODULES
+        original_loaded_names = loader._loaded_polyfill_module_names.copy()
+
+        try:
+            loader._loaded_polyfill_module_names.discard("pytree")
+            guards.uninteresting_files.cache_clear()
+            self.assertNotIn(module.__file__, guards.uninteresting_files())
+
+            with unittest.mock.patch.object(
+                loader, "_load_polyfill_module", return_value=module
+            ):
+                loader._load_pytree_polyfill_module()
+
+            self.assertIn(module.__file__, guards.uninteresting_files())
+        finally:
+            loader.POLYFILLED_MODULES = original_modules
+            loader._loaded_polyfill_module_names.clear()
+            loader._loaded_polyfill_module_names.update(original_loaded_names)
+            guards.uninteresting_files.cache_clear()
 
     def test_no_special_handlers_for_torch_non_c_bindings(self):
         handlers = TorchInGraphFunctionVariable._get_handlers()

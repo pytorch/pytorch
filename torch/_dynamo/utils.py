@@ -90,7 +90,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton
 from torch.utils.hooks import RemovableHandle
 
 from .graph_utils import _get_flat_args
@@ -1864,6 +1864,13 @@ def _get_dynamo_config_for_logging() -> str | None:
     return json.dumps(config_dict, sort_keys=True)
 
 
+def _get_triton_version_for_logging() -> str:
+    if not has_triton():
+        return ""
+    triton = sys.modules.get("triton")
+    return getattr(triton, "__version__", "")
+
+
 def _compiler_config_for_logging() -> str | None:
     def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
         blocklist = {
@@ -2002,7 +2009,7 @@ def record_compilation_metrics(
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
+        "triton_version": _get_triton_version_for_logging(),
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -2929,17 +2936,49 @@ common_constant_types: set[type] = {
     torch.utils._pytree.GetAttrKey,
 }
 
-if has_triton_package():
-    import triton
-
-    common_constant_types.add(triton.language.dtype)
-
 """
     Difference between is_safe_constant and common_constant_types.
     * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
                              as ConstantVariable.
     * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
 """
+
+
+_cached_triton_language_dtype: Any = None
+_safe_constant_types: set[type] = common_constant_types | {slice}
+_safe_constant_types_has_triton_dtype = False
+
+
+def _get_triton_language_dtype() -> Any:
+    global _cached_triton_language_dtype
+    if _cached_triton_language_dtype is not None:
+        return _cached_triton_language_dtype
+
+    triton = sys.modules.get("triton")
+    if triton is None:
+        return None
+    triton_language = getattr(triton, "language", None)
+    if triton_language is None:
+        triton_language = sys.modules.get("triton.language")
+    triton_language_dtype = getattr(triton_language, "dtype", None)
+    if triton_language_dtype is not None:
+        _cached_triton_language_dtype = triton_language_dtype
+    return triton_language_dtype
+
+
+def _get_safe_constant_types() -> set[type]:
+    global _safe_constant_types_has_triton_dtype
+    if not _safe_constant_types_has_triton_dtype:
+        triton_language_dtype = _get_triton_language_dtype()
+        if triton_language_dtype is not None:
+            _safe_constant_types.add(triton_language_dtype)
+            _safe_constant_types_has_triton_dtype = True
+    return _safe_constant_types
+
+
+def is_triton_language_dtype(value: object) -> bool:
+    triton_language_dtype = _get_triton_language_dtype()
+    return triton_language_dtype is not None and type(value) is triton_language_dtype
 
 
 def is_safe_constant(v: object) -> bool:
@@ -2954,10 +2993,7 @@ def is_safe_constant(v: object) -> bool:
             typing._GenericAlias,  # type: ignore[attr-defined]
             types.GenericAlias,
         ),
-    ) or istype(
-        v,
-        common_constant_types | {slice},
-    )
+    ) or istype(v, _get_safe_constant_types())
 
 
 @functools.cache

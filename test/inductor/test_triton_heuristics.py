@@ -106,6 +106,20 @@ class TestTritonHeuristics(TestCase):
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
 
+    def test_attrs_descriptor_wrapper_no_triton_fallback_defaults(self):
+        from torch._inductor.runtime import hints
+
+        with patch.object(hints, "has_triton_package", return_value=False):
+            config = hints.AttrsDescriptorWrapper(equal_to_1=())
+            self.assertEqual(config.divisible_by_16, ())
+            self.assertEqual(config.equal_to_1, ())
+            self.assertEqual(config.pointer_range_32, ())
+
+            config = hints.AttrsDescriptorWrapper(divisible_by_16=(0,), equal_to_1=(1,))
+            self.assertEqual(config.divisible_by_16, (0,))
+            self.assertEqual(config.equal_to_1, (1,))
+            self.assertEqual(config.pointer_range_32, ())
+
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
             type="cuda",

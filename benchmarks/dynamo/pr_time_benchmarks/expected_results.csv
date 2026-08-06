@@ -98,11 +98,11 @@ dtensor_dispatch_to_from_local,instruction_count,197800,0.1
 
 
 
-dtensor_dispatch_collectives,instruction_count,32510000,0.1
+dtensor_dispatch_collectives,instruction_count,34630000,0.1
 
 
 
-dtensor_dispatch_add_backward,instruction_count,371900,0.1
+dtensor_dispatch_add_backward,instruction_count,386400,0.1
 
 
 

@@ -4,6 +4,7 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 
 import functools
 import inspect
+import sys
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -963,6 +964,7 @@ def substitute_in_graph(
         from torch._dynamo.trace_rules import (
             _polyfilled_function_ids,
             get_torch_obj_rule_map,
+            register_torch_obj_rule,
         )
         from torch._dynamo.variables import PolyfilledFunctionVariable
         from torch._dynamo.variables.builder import VariableBuilder
@@ -1019,7 +1021,8 @@ def substitute_in_graph(
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         _polyfilled_function_ids.add(id(original_fn))
         _polyfilled_function_ids.add(id(wrapped))
-        rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        register_torch_obj_rule(original_fn, PolyfilledFunctionVariable)
+        register_torch_obj_rule(wrapped, PolyfilledFunctionVariable)
         polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = wrapped  # type: ignore[assignment]
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
@@ -1054,6 +1057,14 @@ def _apply_func_to_inner_tensors_of_same_dim(
                 raise AssertionError(
                     f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                 )
+
+
+def _get_loaded_dtensor_type() -> Any:
+    dtensor_api = sys.modules.get("torch.distributed.tensor._api")
+    if dtensor_api is not None:
+        return getattr(dtensor_api, "DTensor", None)
+    dtensor_mod = sys.modules.get("torch.distributed.tensor")
+    return getattr(dtensor_mod, "DTensor", None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1110,8 +1121,11 @@ def mark_unbacked(
         max (Optional[int], default=None): Maximum value constraint for this dimension.
             If provided, a runtime check will be added to ensure the dimension is <= max.
     """
-    if torch.distributed.is_available() and isinstance(
-        t, torch.distributed.tensor.DTensor
+    dtensor_type = _get_loaded_dtensor_type()
+    if (
+        torch.distributed.is_available()
+        and dtensor_type is not None
+        and isinstance(t, dtensor_type)
     ):
         # apply on inner tensor sizes/strides
         mark_unbacked(t._local_tensor, index, shape_id=shape_id)
@@ -1428,12 +1442,9 @@ def _einops_supports_dynamo_tracing(einops_mod: Any) -> bool:
 
 
 def _allow_lru_cache_trace_without_warning_for_einops() -> None:
-    import importlib
-
     for module_name, attr_names in _EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST:
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
+        module = sys.modules.get(module_name)
+        if module is None:
             continue
 
         for attr_name in attr_names:
@@ -1445,7 +1456,9 @@ def _allow_lru_cache_trace_without_warning_for_einops() -> None:
 # Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
 # Older versions still need the allow_in_graph registration below.
 def _allow_in_graph_einops() -> None:
-    import einops
+    einops = sys.modules.get("einops")
+    if einops is None:
+        return
 
     if _einops_supports_dynamo_tracing(einops):
         if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
@@ -1457,14 +1470,8 @@ def _allow_in_graph_einops() -> None:
         _allow_lru_cache_trace_without_warning_for_einops()
         return
 
-    try:
-        # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
-            _ops_were_registered_in_torchdynamo,
-        )
-
-        # einops > 0.6.1 will call the op registration logic as it is imported.
-    except ImportError:
+    torch_specific = sys.modules.get("einops._torch_specific")
+    if not hasattr(torch_specific, "_ops_were_registered_in_torchdynamo"):
         # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.

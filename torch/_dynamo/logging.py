@@ -9,6 +9,7 @@ The logging system helps track the progress of compilation phases and provides s
 logging output for debugging and monitoring.
 """
 
+import importlib.util
 import itertools
 import logging
 from collections.abc import Callable
@@ -48,12 +49,7 @@ _step_counter = itertools.count(1)
 # _inductor.utils.has_triton() gives a circular import error here
 
 if not disable_progress:
-    try:
-        import triton  # noqa: F401
-
-        num_steps = 3
-    except ImportError:
-        num_steps = 2
+    num_steps = 3 if importlib.util.find_spec("triton") is not None else 2
     pbar = tqdm(total=num_steps, desc="torch.compile()", delay=0)
 
 

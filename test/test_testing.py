@@ -2695,6 +2695,46 @@ class TestImports(TestCase):
         out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
         self.assertEqual(out.strip(), "True")
 
+    def test_dynamo_does_not_import_optional_modules(self) -> None:
+        program = """
+import sys
+import torch
+
+before = set(sys.modules)
+import torch._dynamo
+
+optional_roots = {
+    "_pytest",
+    "diffusers",
+    "einops",
+    "optree",
+    "pandas",
+    "sklearn",
+    "tabulate",
+    "torch_xla",
+    "torchrec",
+    "transformers",
+    "triton",
+    "tvm",
+}
+optional_torch_modules = {
+    "torch.distributed.fsdp._fully_shard._fsdp_param",
+    "torch.distributed.fsdp._fully_shard._fsdp_param_group",
+    "torch.distributed.tensor",
+    "torch.distributed.tensor._api",
+    "torch.testing._internal.distributed.fake_pg",
+}
+new_modules = set(sys.modules) - before
+unexpected = sorted(
+    name
+    for name in new_modules
+    if name.split(".", 1)[0] in optional_roots or name in optional_torch_modules
+)
+print(unexpected)
+"""
+        out = self._check_python_output(program)
+        self.assertEqual(out.strip(), "[]")
+
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global
