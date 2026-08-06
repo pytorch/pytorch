@@ -397,7 +397,7 @@ class ComboKernelTests(TestCase):
         # identical and eligible for uniform dispatch.
         inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             out_eager = fn(*inps)
             out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
 
@@ -490,7 +490,7 @@ class ComboKernelTests(TestCase):
         # shapes/dtypes keep all four structurally identical -> uniform dispatch.
         inps = [torch.rand(8, 65536, device=GPU_TYPE) for _ in range(4)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             out_eager = fn(*inps)
             # Before the fix this raises during Triton compilation; the assertion
             # below (correct results) is only reachable once codegen is fixed.
@@ -533,7 +533,7 @@ class ComboKernelTests(TestCase):
             torch.rand(64, 65536, device=GPU_TYPE),  # large numel -> non-persistent
         )
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             out_eager = fn(*inps)
             out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
 
@@ -576,7 +576,7 @@ class ComboKernelTests(TestCase):
 
         inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             out_eager = fn(*inps)
             compiled = torch.compile(fn)
             # Active CUDA device context: without device="cpu" in the wrapper, the
@@ -611,7 +611,7 @@ class ComboKernelTests(TestCase):
         torch.manual_seed(0)
         inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             ref = [t.clone() for t in fn(*inps)]
             compiled = torch.compile(fn, mode="reduce-overhead")
             got = None
@@ -654,7 +654,7 @@ class ComboKernelTests(TestCase):
         ws = [torch.randn(512, device=GPU_TYPE) for _ in range(narcs)]
         bs = [torch.randn(512, device=GPU_TYPE) for _ in range(narcs)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             ref = fn(xs, ws, bs)
             got = torch.compile(fn)(xs, ws, bs)
 
@@ -695,7 +695,7 @@ class ComboKernelTests(TestCase):
         xs = [torch.randn(64, 64, device=GPU_TYPE) for _ in range(narcs)]
         idx = torch.randperm(64, device=GPU_TYPE)[:32]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             ref = fn(xs, idx)
             got, code = run_and_get_code(torch.compile(fn), xs, idx)
 
@@ -736,7 +736,7 @@ class ComboKernelTests(TestCase):
 
         inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
 
-        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True}):
+        with torch._inductor.config.patch({"combo_kernel_uniform_dispatch": True, "combo_kernel_uniform_dispatch_min_kernels": 2}):
             out_eager = fn(*inps)
             out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
 
@@ -750,6 +750,54 @@ class ComboKernelTests(TestCase):
         self.assertIn("_uniform_ptr_pool", full_code)
         # ...and pin_memory() appears at most once (the helper), never per call.
         self.assertLessEqual(full_code.count(".pin_memory()"), 1)
+
+    @requires_gpu_and_triton
+    def test_uniform_dispatch_min_kernels_gate(self):
+        # Cost gate: uniform dispatch's benefit scales with group size while its
+        # pointer-table build/copy cost is roughly fixed, so groups smaller than
+        # combo_kernel_uniform_dispatch_min_kernels fall back to sequential combo
+        # dispatch. A 4-wide group must NOT take the uniform path when the
+        # threshold is 8, but MUST take it when the threshold is 2 -- and both
+        # are numerically correct.
+        if self.combo_kernel_per_subkernel_blocks:
+            return
+
+        def ln_silu(x):
+            mean = x.mean(dim=-1, keepdim=True)
+            var = x.var(dim=-1, keepdim=True, unbiased=False)
+            ln = (x - mean) * torch.rsqrt(var + 1e-5)
+            return ln * torch.sigmoid(ln)
+
+        def fn(a, b, c, d):
+            return ln_silu(a), ln_silu(b), ln_silu(c), ln_silu(d)
+
+        inps = [torch.rand(64, 512, device=GPU_TYPE) for _ in range(4)]
+        token = "kernel_idx = pid // num_blocks_per_kernel"
+        out_eager = fn(*inps)
+
+        # Group size (4) below the gate (8) -> uniform must NOT engage.
+        torch._dynamo.reset()
+        with torch._inductor.config.patch(
+            {
+                "combo_kernel_uniform_dispatch": True,
+                "combo_kernel_uniform_dispatch_min_kernels": 8,
+            }
+        ):
+            out_hi, code_hi = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_hi)
+        self.assertNotIn(token, "\n".join(code_hi))
+
+        # Group size (4) at/above the gate (2) -> uniform engages.
+        torch._dynamo.reset()
+        with torch._inductor.config.patch(
+            {
+                "combo_kernel_uniform_dispatch": True,
+                "combo_kernel_uniform_dispatch_min_kernels": 2,
+            }
+        ):
+            out_lo, code_lo = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_lo)
+        self.assertIn(token, "\n".join(code_lo))
 
     @requires_gpu_and_triton
     def test_mutated_args(self):

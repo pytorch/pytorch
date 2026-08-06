@@ -893,6 +893,24 @@ class ComboKernel(Kernel):
             log.debug("uniform dispatch: skipped (< 2 sub-kernels)")
             return False
 
+        # Cost gate: uniform dispatch's benefit (one shared body instead of an
+        # N-way body/branch chain) scales with group size N, while its
+        # pointer-table build/copy cost is roughly fixed. Small groups pay the
+        # overhead for little gain (N=2 is ~half of dashboard groups and net
+        # neutral/negative), so require a minimum group size. getattr with a
+        # default keeps this working even where config.py predates the knob (e.g.
+        # a branch that ships only the codegen change).
+        min_kernels = max(
+            2, getattr(config, "combo_kernel_uniform_dispatch_min_kernels", 8)
+        )
+        if len(self.sub_kernels) < min_kernels:
+            log.debug(
+                "uniform dispatch: skipped (group size %d < min_kernels %d)",
+                len(self.sub_kernels),
+                min_kernels,
+            )
+            return False
+
         # cudagraphs is supported: the pointer table is built from a persistent
         # pinned staging buffer (valid, stable source for the captured H2D on
         # replay) into a cudagraph-pool-tracked device table, with the event guard
