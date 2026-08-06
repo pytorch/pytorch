@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import math
 import os
 from typing import Any, TYPE_CHECKING
 
@@ -345,6 +346,20 @@ def validate_runtime_local_reduce(
         expected_shape, plan.group, plan.axis
     )
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
+
+
+def initialize_runtime_local_reduce_output(
+    plan: FlexGemmRuntimeLocalReducePlan | None,
+    physical_output_shape: tuple[int, ...],
+) -> None:
+    """Zero padded local-reduction storage before the fused kernel writes it."""
+    if plan is None or plan.out is None or plan.output_layout is None:
+        return
+    logical_shape = local_reduce_compressed_shape(
+        physical_output_shape, plan.group, plan.axis
+    )
+    if plan.out.numel() != math.prod(logical_shape):
+        plan.out.zero_()
 
 
 def local_reduce_callback_key(callback: Any, fallback_key: str) -> str:
@@ -796,6 +811,7 @@ def gemm_epilogue(
         else contextlib.nullcontext()
     )
     with cache_dir_override(quack_cache_dir), stream_context:
+        initialize_runtime_local_reduce_output(local_reduce, physical_output_shape)
         dispatch_gemm_act(
             a,
             b,

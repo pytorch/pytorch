@@ -203,7 +203,6 @@ class GemmActMixin(ComposableEpiMixin):
         ("local_reduce_feeds_main", cutlass.Constexpr, False),
         ("local_reduce_group", cutlass.Constexpr, 0),
         ("local_reduce_axis", cutlass.Constexpr, 1),
-        ("local_reduce_output_layout", cutlass.Constexpr, None),
     )
 
     @mlir_namedtuple
@@ -264,7 +263,6 @@ class GemmActMixin(ComposableEpiMixin):
         d["local_reduce_feeds_main"] = args.local_reduce_feeds_main
         d["local_reduce_group"] = args.local_reduce_group
         d["local_reduce_axis"] = args.local_reduce_axis
-        d["local_reduce_output_layout"] = args.local_reduce_output_layout
         self.local_reduce_feeds_main = args.local_reduce_feeds_main
         self.local_reduce_group = args.local_reduce_group
         self.local_reduce_axis = args.local_reduce_axis

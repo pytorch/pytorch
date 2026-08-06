@@ -1191,6 +1191,19 @@ class FlexGemmTestCase(TestCase):
             *shape, device=device, dtype=dtype, low=-0.1, high=0.1
         )
 
+    @staticmethod
+    def localReduceOutputConfig(*, swap_ab=False):
+        """Return the validated full-tile config used by local-output tests."""
+        return {
+            "tile_m": 256,
+            "tile_n": 256,
+            "cluster_m": 2,
+            "cluster_n": 1,
+            "pingpong": False,
+            "is_dynamic_persistent": True,
+            "swap_ab": swap_ab,
+        }
+
     def assertFlexGemmGeneratedCode(self, code, *checks):
         file_check = (
             FileCheck()
@@ -2115,6 +2128,42 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertEqual(
             register_runtime_output_layout(layout, transposed=False), ordinary_key
         )
+
+    def test_padded_output_layout_initialization(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceCallbacks,
+            FlexGemmLocalReduceGeometry,
+        )
+        from torch._inductor.kernel.flex_gemm.output_layout import (
+            blocked_128x4_numel,
+            FlexGemmOutputStorageLayout,
+        )
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+            initialize_runtime_local_reduce_output,
+        )
+
+        callbacks = FlexGemmLocalReduceCallbacks(
+            lambda lhs, rhs: lhs, lambda value: value
+        )
+        geometry = FlexGemmLocalReduceGeometry(16, 1)
+        for physical_shape, expected in (
+            ((128, 64), torch.ones),
+            ((129, 80), torch.zeros),
+        ):
+            with self.subTest(physical_shape=physical_shape):
+                logical_shape = (physical_shape[0], physical_shape[1] // geometry.group)
+                out = torch.ones(blocked_128x4_numel(logical_shape))
+                plan = FlexGemmRuntimeLocalReducePlan(
+                    geometry,
+                    out=out,
+                    callbacks=callbacks,
+                    output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4,
+                )
+
+                initialize_runtime_local_reduce_output(plan, physical_shape)
+
+                self.assertEqual(out, expected(out.shape))
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
@@ -3805,11 +3854,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             (),
             (torch.empty(4, 2),),
             local_reduce_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4,
-            zero_init_local_reduce=True,
             swap_ab_alignment=8,
         )
         self.assertIn("layout: blocked_128x4", lowering_plan)
-        self.assertIn("initialization: zero-filled padded carrier", lowering_plan)
+        self.assertIn(
+            "initialization: zero-filled at runtime when padded", lowering_plan
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4334,15 +4384,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_output_contraction_with_local_reduce_output(self):
         m = n = k = 256
         reduce_group = 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             pairs = acc.float().view(m, -1, 2)
@@ -5458,7 +5500,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         FileCheck().check(code_check).check("local_reduce_finalize_fn").run(code)
         self.assertLocalReduceAuxCode(code, group, callbacks=True)
 
-    def test_to_blocked_noncontiguous_matches_contiguous(self):
+    def test_to_blocked_matches_reference(self):
         from torch.testing._internal.common_quantized import (
             to_blocked as reference_to_blocked,
         )
@@ -5467,6 +5509,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertFalse(scale.is_contiguous())
         self.assertEqual(to_blocked(scale), to_blocked(scale.contiguous()))
         self.assertEqual(to_blocked(scale), reference_to_blocked(scale))
+        for shape in ((0, 0), (0, 4), (128, 0)):
+            with self.subTest(shape=shape):
+                empty = torch.empty(shape)
+                self.assertEqual(to_blocked(empty), reference_to_blocked(empty))
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5485,15 +5531,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         m = 256
         n = 256
         k = 256
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             x = acc.float().view(m, -1, group)
@@ -5540,15 +5578,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_output_contraction_with_blocked_local_reduce_output(self):
         m = n = k = 256
         reduce_group = 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             pairs = acc.float().view(m, -1, 2)
@@ -5679,15 +5709,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_blocked_output_zero_fills_padding(self):
         m, n, k, group = 129, 80, 256, 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             grouped = acc.float().view(m, -1, group)
@@ -5715,24 +5737,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(
             blocked_scale.view(torch.uint8), expected_scale.view(torch.uint8)
         )
-        FileCheck().check("triton_poi_fused").check("tl.full").check("cutedsl_").run(
-            code
-        )
+        self.assertIn("FlexGemmOutputStorageLayout.BLOCKED_128X4", code)
+        self.assertNotIn("triton_poi_fused", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_blocked_output_dynamic_n(self):
         m, k, group = 128, 256, 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             grouped = acc.float().view(m, -1, group)
@@ -5769,15 +5782,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_blocked_output_dynamic_m_crosses_row_block(self):
         n, k, group = 80, 256, 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def epilogue_fn(acc):
             grouped = acc.float().view(acc.shape[0], -1, group)
@@ -5837,15 +5842,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn,
                 kernel_options={
                     "backend": "QUACK",
-                    "config": {
-                        "tile_m": 256,
-                        "tile_n": 256,
-                        "cluster_m": 2,
-                        "cluster_n": 1,
-                        "pingpong": False,
-                        "is_dynamic_persistent": True,
-                        "swap_ab": swap_ab,
-                    },
+                    "config": self.localReduceOutputConfig(swap_ab=swap_ab),
                 },
             )
 
@@ -5874,15 +5871,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_mx_quant_blocked_output_feeds_scaled_mm(self):
         m = hidden = output = k = 256
         group = 32
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def quantize(x):
             grouped = x.float().view(x.shape[0], -1, group)
@@ -5955,15 +5944,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_mm_nvfp4_quant_blocked_output_feeds_scaled_mm(self):
         m = hidden = output = k = 256
         group = 16
-        config = {
-            "tile_m": 256,
-            "tile_n": 256,
-            "cluster_m": 2,
-            "cluster_n": 1,
-            "pingpong": False,
-            "is_dynamic_persistent": True,
-            "swap_ab": False,
-        }
+        config = self.localReduceOutputConfig()
 
         def quantize(x):
             grouped = x.float().view(x.shape[0], -1, group)

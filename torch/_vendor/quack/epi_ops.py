@@ -1190,7 +1190,6 @@ class _GroupedLocalReduceParams(NamedTuple):
     combine_fn: object
     finalize_fn: object
     feeds_main: bool
-    logical_m: object
     logical_n: object
 
 
@@ -1264,7 +1263,6 @@ class GroupedLocalReduce(VecReduce):
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
                 args.local_reduce_feeds_main,
-                cute.size(reference_output, mode=[0]),
                 cute.size(reference_output, mode=[1])
                 * gemm.grouped_n_contract_group,
             )
@@ -1373,11 +1371,7 @@ class GroupedLocalReduce(VecReduce):
             tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
             tDcD_flt = cute.filter_zeros(tDcD_cur)
             batch_idx = tile_coord_mnkl[3]
-            logical_m = (
-                varlen_manager.len_m(batch_idx)
-                if const_expr(varlen_manager.varlen_m)
-                else param.logical_m
-            )
+            logical_m = varlen_manager.len_m(batch_idx)
             limit_m = min(logical_m - tile_coord_mnkl[0] * tile_M, tile_M)
             limit_n = min(
                 param.logical_n - tile_coord_mnkl[1] * tile_N,
