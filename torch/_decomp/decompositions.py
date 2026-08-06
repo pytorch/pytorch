@@ -1788,8 +1788,10 @@ def native_group_norm_backward(
             if supports_memory_format
             else torch.contiguous_format
         )
-        d_input = d_input.reshape(input.shape).to(input.dtype).contiguous(
-            memory_format=memory_format
+        d_input = (
+            d_input.reshape(input.shape)
+            .to(input.dtype)
+            .contiguous(memory_format=memory_format)
         )
     if output_mask[1]:
         d_gamma = (
