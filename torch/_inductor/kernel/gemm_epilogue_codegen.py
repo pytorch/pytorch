@@ -110,21 +110,19 @@ class GemmReductionCompileConfig:
             args.feeds_main,
         )
 
-    def _primary_callbacks(self, *, include_consumer: bool = True) -> tuple[Any, ...]:
+    def _primary_callbacks(self) -> tuple[Any, ...]:
         reduction = self.reduction
-        callbacks = (
+        return (
             reduction.reduce_op,
             reduction.init_val,
             reduction.combine,
             reduction.source,
             reduction.finalize,
+            self.consumer,
         )
-        return (*callbacks, self.consumer) if include_consumer else callbacks
 
-    def primary_constexprs(self, *, include_consumer: bool = True) -> tuple[Any, ...]:
-        return self._common_constexprs() + self._primary_callbacks(
-            include_consumer=include_consumer
-        )
+    def primary_constexprs(self) -> tuple[Any, ...]:
+        return self._common_constexprs() + self._primary_callbacks()
 
     def blockscaled_primary_constexprs(self) -> tuple[Any, ...]:
         args = self.args
@@ -135,14 +133,12 @@ class GemmReductionCompileConfig:
             *self._primary_callbacks(),
         )
 
-    def constexprs(self, *, include_consumers: bool = True) -> tuple[Any, ...]:
-        constexprs = (
+    def constexprs(self) -> tuple[Any, ...]:
+        return (
             *self._common_constexprs(),
             self.args.secondary_feed_type,
-            *self._primary_callbacks(include_consumer=include_consumers),
-        )
-        return (
-            (*constexprs, self.secondary_consumer) if include_consumers else constexprs
+            *self._primary_callbacks(),
+            self.secondary_consumer,
         )
 
 
@@ -157,17 +153,22 @@ class GemmEpilogueCuteDSLBody:
 class GemmEpilogueCuteDSLCSE:
     def __init__(self) -> None:
         self.index = 0
+        self.cache: dict[str, CuteDSLCSEVariable] = {}
 
     def generate(self, body, expr, *, bounds=None, dtype=None, shape=None):
+        if expr in self.cache:
+            return self.cache[expr]
         name = f"tmp{self.index}"
         self.index += 1
         body.writeline(f"{name} = {expr}")
-        return CuteDSLCSEVariable(
+        value = CuteDSLCSEVariable(
             name,
             ValueRanges.unknown() if bounds is None else bounds,
             dtype=dtype,
             shape=shape,
         )
+        self.cache[expr] = value
+        return value
 
 
 class GemmEpilogueCuteDSLKernel:

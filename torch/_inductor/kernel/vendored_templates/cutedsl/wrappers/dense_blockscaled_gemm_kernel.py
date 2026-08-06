@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import dataclasses
 import functools
 import itertools
@@ -33,8 +32,8 @@ from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import (
-    gemm_epilogue_op_scope,
     GemmReductionCompileConfig,
+    materialize_epilogue_function,
 )
 
 
@@ -275,14 +274,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         if getattr(args, "epilogue", None) is not None:
             epilogue_op = args.epilogue.epilogue_fn
             if isinstance(epilogue_op, str):
-                fn_name = next(
-                    node.name
-                    for node in ast.parse(epilogue_op).body
-                    if isinstance(node, ast.FunctionDef)
-                )
-                scope = gemm_epilogue_op_scope(cute)
-                exec(epilogue_op, scope)
-                epilogue_op = scope[fn_name]
+                epilogue_op = materialize_epilogue_function(epilogue_op, cute)
         epilogue = _EpilogueABI.from_args(args, "compile_time_tensor")
         epilogue_inputs = epilogue.input_pack
         reduction_args = args.local_reduce
