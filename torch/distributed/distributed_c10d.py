@@ -741,6 +741,12 @@ def _create_nccl2_process_group(
     pg_options.group_name = opts.group_id
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
+    if opts.split_from:
+        if not isinstance(opts.split_from, ProcessGroupNCCL2):
+            raise AssertionError("Expected split_from to be ProcessGroupNCCL2")
+        return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
+            opts.store, opts.global_ranks_in_group, pg_options
+        )
     return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
 
 
@@ -756,6 +762,12 @@ def _create_nccl_lazy_process_group(
     pg_options.group_name = opts.group_id
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
+    if opts.split_from:
+        if not isinstance(opts.split_from, ProcessGroupNCCLLazy):
+            raise AssertionError("Expected split_from to be ProcessGroupNCCLLazy")
+        return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
+            opts.store, opts.global_ranks_in_group, pg_options
+        )
     return ProcessGroupNCCLLazy(
         opts.store, opts.group_rank, opts.group_size, pg_options
     )
@@ -2627,12 +2639,6 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     # group wrappers from our potentially wrapped process group.
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
-
-    # nccl2 only supports the explicit split_group path. Its new_group factory
-    # creates a fresh communicator and does not consume split_from, so issuing a
-    # no-color split on nonmembers would mismatch the members' initialization.
-    if split_from.name() in ("nccl2", "nccl-lazy"):
-        return None
 
     return split_from
 
