@@ -1700,6 +1700,60 @@ def forward(self, x_1, output_1):
         self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
 
     @requires_gpu
+    @common_utils.parametrize("bind", ["slice", "set_"])
+    def test_triton_kernel_mutated_no_base_arg(self, bind):
+        # The other test's views are built inside the graph, so they always have a
+        # _base. A mutated arg reaches _clone_mutated_arg's base=None fallback when
+        # it is a graph input instead: a placeholder is rebuilt from metadata, which
+        # drops whatever _base the caller's tensor had. Tensor.set_() gets there too,
+        # but only from the caller -- inside a compiled region it graph breaks.
+        # base=None is right here, because such an arg lowers to an InputBuffer,
+        # whose storage-relative offset Inductor rebases onto the incoming pointer.
+        @triton.jit
+        def half_fill_kernel(out_ptr, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr):
+            # Skips the upper half, so a clone that read outside the arg shows up as
+            # garbage in elements the kernel never wrote.
+            offs = tl.arange(0, BLOCK)
+            tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols // 2)
+
+        n_cols, gap = 256, 2
+        width = n_cols * gap
+
+        def make_arg():
+            base = torch.arange(
+                2 * width, device=GPU_TYPE, dtype=torch.float32
+            ).reshape(2, width)
+            if bind == "slice":
+                return base[1:2, ::gap]
+            return torch.empty(0, device=GPU_TYPE).set_(
+                base.untyped_storage(), width, (n_cols,), (gap,)
+            )
+
+        def f(x):
+            half_fill_kernel[(1,)](x, n_cols, GAP=gap, BLOCK=n_cols)
+            return x.clone()
+
+        expected = make_arg().clone()
+        expected[..., : n_cols // 2] = 1.0
+        self.assertEqual(f(make_arg()), expected)
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._prims_common import is_non_overlapping_and_dense_or_false
+
+        with mock.patch.object(
+            tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+        ) as clone_mock:
+            self.assertEqual(torch.compile(f, fullgraph=True)(make_arg()), expected)
+        # A dense arg, or one at offset 0, would take a different branch and leave
+        # this test covering nothing, so pin all three at the call site.
+        self.assertTrue(clone_mock.call_args_list)
+        for call in clone_mock.call_args_list:
+            _, val, tensor_bases = call.args
+            self.assertFalse(is_non_overlapping_and_dense_or_false(val))
+            self.assertNotEqual(val.storage_offset(), 0)
+            self.assertFalse(tensor_bases)
+
+    @requires_gpu
     @largeTensorTest("6GB", device=GPU_TYPE)
     def test_triton_kernel_mutated_offset_view_large_tensor(self):
         # Same shape as above, but the base holds more than 2**31 elements, so
