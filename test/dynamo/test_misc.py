@@ -9496,6 +9496,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
 
+    def test_sym_node_str_format_dict_key(self):
+        def fn(x):
+            values = {"domain2": 7, "domain3": 9}
+            return values["domain{}".format(x.shape[0])]
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        self.assertEqual(opt_fn(torch.randn(2, 4)), 7)
+        self.assertEqual(opt_fn(torch.randn(3, 4)), 9)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_node_fstring_compare_incompatible_type(self):
+        def fn(x):
+            formatted = f"{x.item()}"
+            return formatted == 1, 1 == formatted
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.tensor(1)), (False, False))
+
+        def ordering_fn(x):
+            return f"{x.item()}" < 1
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"TypeError.*not supported between instances of 'str' and 'int'",
+        ):
+            torch.compile(ordering_fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
     def test_fstring_dynamic_symint_across_graph_break(self):
         class Arch(torch.nn.Module):
             def __init__(self, n):
