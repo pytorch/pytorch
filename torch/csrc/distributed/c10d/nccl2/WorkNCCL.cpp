@@ -22,8 +22,8 @@ namespace c10d::nccl2 {
 std::unique_ptr<at::cuda::CUDAEvent> WorkNCCLState::getEvent(
     bool event_timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
-  if (event_pool_open_ && event_timing_enabled == timing_enabled.load() &&
-      !event_pool_.empty()) {
+  if (event_pool_open_ && event_cache_enabled_ &&
+      event_timing_enabled == timing_enabled.load() && !event_pool_.empty()) {
     auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
@@ -36,7 +36,8 @@ void WorkNCCLState::returnEvent(
     std::unique_ptr<at::cuda::CUDAEvent> event,
     bool event_timing_enabled) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
-  if (event_pool_open_ && event_timing_enabled == timing_enabled.load() &&
+  if (event_pool_open_ && event_cache_enabled_ &&
+      event_timing_enabled == timing_enabled.load() &&
       event_pool_.size() < max_event_pool_size_) {
     event_pool_.push(std::move(event));
   }
@@ -295,7 +296,7 @@ void WorkNCCL::synchronizeInternal() {
   // clear and both ranks spin forever). Skip while the stream is capturing a
   // CUDA graph: cudaStreamSynchronize is illegal during capture and the
   // captured work is replayed on-device where a host sync is meaningless.
-  if (hostBlocking_ &&
+  if (hostBlocking_ && !blocking_wait_ &&
       !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
   }
@@ -319,9 +320,11 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
     return true;
   }
 
-  if (timeout != kNoTimeout) {
+  const auto wait_timeout =
+      timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout);
+  if (blocking_wait_ || wait_timeout.has_value()) {
     while (true) {
-      WorkStatus current = checkStatus(timeout);
+      WorkStatus current = checkStatus(wait_timeout);
       if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
           current == WorkStatus::ERROR) {
         break;
@@ -330,8 +333,20 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
     }
   }
 
-  WorkStatus current =
-      timeout == kNoTimeout ? checkStatus() : checkStatus(timeout);
+  WorkStatus current = checkStatus(wait_timeout);
+  auto backend = blocking_wait_ ? comm_.lock() : nullptr;
+  auto comm = backend
+      ? c10::static_intrusive_pointer_cast<ProcessGroupNCCL>(std::move(backend))
+      : nullptr;
+  if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
+    if (comm) {
+      comm->handleBlockingWaitFailure(current, comm_generation_);
+    }
+  }
+  if (comm) {
+    // Blocking-wait mode has no watchdog to drain completed work.
+    comm->workq_.garbageCollect();
+  }
   if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
     std::rethrow_exception(exception());
   }

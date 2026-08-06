@@ -265,7 +265,8 @@ void ProcessGroupNCCL::initNcclResources() {
   comm_generation_.fetch_add(1, std::memory_order_release);
   window_registration_counter_.store(0, std::memory_order_relaxed);
 
-  is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
+  is_high_priority_stream_ = options_c10d_->is_high_priority_stream ||
+      getCvarBool(::c10d::TORCH_NCCL_HIGH_PRIORITY, false);
 
   if (!internal_stream_) {
     internal_stream_.emplace(
@@ -593,7 +594,7 @@ void ProcessGroupNCCL::abortNcclComm() {
 }
 
 void ProcessGroupNCCL::startWatchdog() {
-  if (timeout_thread_.joinable()) {
+  if (blocking_wait_ || timeout_thread_.joinable()) {
     return;
   }
   shutdown_ = false;
@@ -620,7 +621,7 @@ void ProcessGroupNCCL::stopWatchdog() {
 void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   // Never terminate the process in reconfigurable mode: callers fall back to
   // revoke + throw so the failure can be handled by reconfiguring.
-  if (!abort_process_on_timeout_or_error_ ||
+  if (!SHOULD_TEAR_DOWN(async_error_handling_) ||
       options_c10d_->enable_reconfigure) {
     return;
   }
@@ -628,6 +629,50 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
                       << reason;
   runAbortHooks();
   ::abort();
+}
+
+void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
+  if (options_c10d_->enable_reconfigure) {
+    revokeNcclComm();
+    return;
+  }
+
+  if (SHOULD_CLEAN_UP(async_error_handling_)) {
+    if (timeout_thread_.joinable() &&
+        std::this_thread::get_id() == timeout_thread_.get_id()) {
+      shutdown_ = true;
+      timeout_cv_.notify_all();
+    } else {
+      stopWatchdog();
+    }
+    try {
+      abortNcclComm();
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to clean up NCCL communicator after "
+                          << reason << ": " << e.what();
+      abortProcess(reason);
+      return;
+    }
+  }
+  abortProcess(reason);
+}
+
+void ProcessGroupNCCL::handleBlockingWaitFailure(
+    WorkNCCL::WorkStatus status,
+    uint64_t comm_generation) {
+  std::unique_lock lifecycleLock(comm_lifecycle_mutex_);
+  if (comm_generation_.load(std::memory_order_acquire) != comm_generation) {
+    return;
+  }
+  work_state_->comm_state = status == WorkNCCL::WorkStatus::TIMEDOUT
+      ? CommState::TIMEOUT
+      : CommState::ERROR;
+  if (options_c10d_->enable_reconfigure) {
+    revokeNcclComm();
+  } else {
+    stopWatchdog();
+    abortNcclComm();
+  }
 }
 
 void ProcessGroupNCCL::revokeNcclComm() {

@@ -18,6 +18,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from c10d_backend_common import (
+    BackendConfig,
     C10D_BACKENDS,
     C10dBackendTest,
     instantiate_backend_tests,
@@ -28,7 +29,11 @@ from torch.testing._internal.common_utils import run_tests
 
 
 # Tests in which the check is expected to fire.
-DETECTING_TESTS = ("test_nan_in_input_detected", "test_env_var_auto_attach")
+DETECTING_TESTS = (
+    "test_nan_in_input_detected",
+    "test_env_var_auto_attach",
+    "test_nccl_env_var_auto_attach",
+)
 
 
 class AbstractNanCheckHookTest(C10dBackendTest):
@@ -36,7 +41,11 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         super().setUp()
         # Set after super().setUp(): MultiProcessTestCase.setUp() resets the
         # dict, and the parent only consults it when joining the children.
-        if self.device_type == "cuda" and self._testMethodName in DETECTING_TESTS:
+        detects_nan = self._testMethodName in DETECTING_TESTS and (
+            self._testMethodName != "test_nccl_env_var_auto_attach"
+            or self.backend_name in ("nccl", "nccl2")
+        )
+        if self.device_type == "cuda" and detects_nan:
             # CUDA and ROCm can report the device trap as a runtime exception.
             # _assert_nan_detected normalizes that path with os._exit(SIGABRT).
             self.special_return_code_checks = {
@@ -145,9 +154,25 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         t[0] = float("nan")
         self._assert_nan_detected(t)
 
+    def test_nccl_env_var_auto_attach(self):
+        if self.backend_name not in ("nccl", "nccl2"):
+            self.skipTest("TORCH_NCCL_NAN_CHECK is only handled by nccl2 here")
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "yes"
+        try:
+            self._init_pg()
+        finally:
+            del os.environ["TORCH_NCCL_NAN_CHECK"]
+
+        t = torch.ones(8, device=self.device)
+        dist.all_reduce(t)
+        t[0] = float("nan")
+        self._assert_nan_detected(t)
+
+
+NAN_CHECK_BACKENDS = C10D_BACKENDS + (BackendConfig("nccl", "cuda"),)
 
 instantiate_backend_tests(
-    globals(), "NanCheckHook", AbstractNanCheckHookTest, C10D_BACKENDS
+    globals(), "NanCheckHook", AbstractNanCheckHookTest, NAN_CHECK_BACKENDS
 )
 
 

@@ -293,12 +293,8 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       if (shutdown_) {
         break;
       }
-      // With abort_process_on_timeout_or_error disabled this is a no-op and
-      // the loop keeps running: the state stays TIMEOUT/ERROR so getError()
-      // reports it, and the next collective throws from
-      // checkAndAbortIfTimedOutOrError().
       if (work_state_->comm_state != CommState::NORMAL) {
-        abortProcess(
+        handleWatchdogFailure(
             work_state_->comm_state == CommState::TIMEOUT
                 ? "timeout - timeout watchdog detected operation timeout"
                 : "error - timeout watchdog detected operation error");
@@ -318,39 +314,15 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
           if (!options_c10d_->enable_reconfigure) {
             TC_LOG(ERROR, this) << "nccl hit async error on rank " << rank_
                                 << ": " << ncclGetErrorString(asyncErr);
-            // abort() only tears the communicator down; abortProcess() runs
-            // the abort hooks and terminates if the mode allows it.
-            abort();
-            abortProcess(
-                std::string("error - nccl hit async error: ") +
-                ncclGetErrorString(asyncErr));
           } else {
-            // Revoked below by the reconfigurable-mode handler.
             TC_LOG(ERROR, this)
                 << "Async error on rank " << rank_ << ": "
                 << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
           }
+          handleWatchdogFailure(
+              std::string("error - nccl hit async error: ") +
+              ncclGetErrorString(asyncErr));
         }
-      }
-
-      // In reconfigurable mode, gracefully revoke the communicator on any
-      // failure
-      // -- timeout or error, whether surfaced by the work queue or an async
-      // comm error -- so in-flight operations are stopped and the comm can
-      // later be reconfigured. This is the only revoke path under CUDA graph
-      // replay, where no synchronous collective reaches
-      // checkAndAbortIfTimedOutOrError(); isAborted() then reports the revoked
-      // state to the caller. revokeNcclComm() is idempotent and the revoked_
-      // check keeps the watchdog from logging every iteration.
-      if (work_state_->comm_state != CommState::NORMAL &&
-          options_c10d_->enable_reconfigure && !revoked_.load()) {
-        TC_LOG(ERROR, this)
-            << "Revoking communicator on rank " << rank_
-            << " - watchdog detected "
-            << (work_state_->comm_state == CommState::TIMEOUT ? "timeout"
-                                                              : "error")
-            << " (reconfigurable mode)";
-        revokeNcclComm();
       }
     }
   } catch (const std::exception& e) {
@@ -391,14 +363,12 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::runtime_error("NCCL operation timed out");
     } else {
-      abortNcclComm();
-      abortProcess("timeout - collective operation timed out");
+      handleWatchdogFailure("timeout - collective operation timed out");
       throw std::runtime_error("NCCL operation timed out");
     }
   } else if (work_state_->comm_state == CommState::ERROR) {
-    // With abort_process_on_timeout_or_error disabled the watchdog aborts the
-    // communicator on an async error and lets the process live, so a later
-    // collective can reach here with no communicator left to query.
+    // CleanUpOnly may have already removed the communicator on the watchdog
+    // thread, so a later collective cannot query the original NCCL error.
     if (!nccl_comm_) {
       throw std::runtime_error(
           "NCCL communicator was aborted after a previous error");
@@ -417,8 +387,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       revokeNcclComm();
       throw std::move(ncclException);
     }
-    abortNcclComm();
-    abortProcess(std::string("error - ") + ncclException.what());
+    handleWatchdogFailure(std::string("error - ") + ncclException.what());
     throw std::move(ncclException);
   }
 }
@@ -443,6 +412,12 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
       stream,
       workTimeout,
       inputTensors);
+  auto self =
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  work->comm_ = c10::weak_intrusive_ptr<::c10d::Backend>(
+      c10::static_intrusive_pointer_cast<::c10d::Backend>(std::move(self)));
+  work->comm_generation_ = comm_generation_.load(std::memory_order_acquire);
+  work->blocking_wait_ = blocking_wait_;
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
@@ -463,6 +438,12 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
       stream,
       workTimeout,
       inputTensor);
+  auto self =
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  work->comm_ = c10::weak_intrusive_ptr<::c10d::Backend>(
+      c10::static_intrusive_pointer_cast<::c10d::Backend>(std::move(self)));
+  work->comm_generation_ = comm_generation_.load(std::memory_order_acquire);
+  work->blocking_wait_ = blocking_wait_;
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;

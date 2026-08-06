@@ -22,6 +22,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::nccl2 {
@@ -36,8 +37,13 @@ enum class CommState {
 
 class WorkNCCLState {
  public:
-  explicit WorkNCCLState(size_t max_event_pool_size)
-      : max_event_pool_size_(max_event_pool_size) {}
+  WorkNCCLState(
+      size_t max_event_pool_size,
+      bool timing_enabled,
+      bool event_cache_enabled)
+      : timing_enabled(timing_enabled),
+        max_event_pool_size_(max_event_pool_size),
+        event_cache_enabled_(event_cache_enabled) {}
 
   [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
       bool timing_enabled);
@@ -56,6 +62,7 @@ class WorkNCCLState {
 
  private:
   const size_t max_event_pool_size_;
+  const bool event_cache_enabled_;
   std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
   std::mutex event_pool_mutex_;
   bool event_pool_open_{true};
@@ -165,6 +172,10 @@ class WorkNCCL : public c10d::Work {
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
 
   std::shared_ptr<WorkNCCLState> state_;
+  c10::weak_intrusive_ptr<::c10d::Backend> comm_{
+      c10::intrusive_ptr<::c10d::Backend>()};
+  uint64_t comm_generation_{0};
+  bool blocking_wait_{false};
   at::Device device_;
   int rank_;
   int comm_size_;
