@@ -134,8 +134,17 @@ def flex_gemm_body_decomposition_table(
     return merged_decompositions
 
 
-def normalize_mx_scale_rounding(rounding: str | None) -> str:
-    """Resolve the MX scale-rounding recipe."""
+def _validate_mx_e8m0_scale_args(max_value: float, rounding: str | None) -> str:
+    """Validate MX scale options and resolve the default rounding mode."""
+    if (
+        not isinstance(max_value, float)
+        or not math.isfinite(max_value)
+        or max_value <= 0
+    ):
+        raise ValueError(
+            "mx_e8m0_scale max_value must be a finite positive float, "
+            f"got {max_value!r}"
+        )
     match rounding:
         case None:
             return "rceil"
@@ -145,18 +154,6 @@ def normalize_mx_scale_rounding(rounding: str | None) -> str:
             raise ValueError(
                 f"mx_e8m0_scale rounding must be 'floor', 'rceil', or None, got {rounding!r}"
             )
-
-
-def validate_scale_max_value(op_name: str, max_value: float) -> None:
-    """Require a finite positive quantized-type maximum."""
-    if (
-        not isinstance(max_value, float)
-        or not math.isfinite(max_value)
-        or max_value <= 0
-    ):
-        raise ValueError(
-            f"{op_name} max_value must be a finite positive float, got {max_value!r}"
-        )
 
 
 @torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
@@ -183,8 +180,7 @@ def mx_e8m0_scale(
     Returns:
         E8M0 scale values with the same shape as ``amax``.
     """
-    validate_scale_max_value("mx_e8m0_scale", max_value)
-    rounding = normalize_mx_scale_rounding(rounding)
+    rounding = _validate_mx_e8m0_scale_args(max_value, rounding)
     mbits_f32 = 23
     f32_exp_bias = 127
     e8m0_exp_bias = 127
@@ -231,8 +227,7 @@ def _(
     max_value: float = 448.0,
     rounding: str | None = None,
 ) -> torch.Tensor:
-    validate_scale_max_value("mx_e8m0_scale", max_value)
-    normalize_mx_scale_rounding(rounding)
+    _validate_mx_e8m0_scale_args(max_value, rounding)
     return torch.empty_like(amax, dtype=torch.float8_e8m0fnu)
 
 
