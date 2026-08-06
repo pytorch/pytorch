@@ -4488,6 +4488,35 @@ Example::
 )
 
 add_docstr(
+    torch.divmod,
+    r"""
+divmod(input, other) -> (Tensor, Tensor)
+
+Computes the element-wise quotient and remainder of :attr:`input` divided by
+:attr:`other`, returning them as a tuple ``(quotient, remainder)``.
+
+The quotient is floored (like :func:`torch.floor_divide`) and the remainder
+takes the sign of the divisor (like :func:`torch.remainder`), so the identity
+``quotient * other + remainder == input`` holds. This matches Python's built-in
+:func:`divmod` and :func:`numpy.divmod`.
+
+Args:
+    input (Tensor or Number): the dividend
+    other (Tensor or Number): the divisor
+
+Example::
+
+    >>> a = torch.tensor([7, -7, 7, -7])
+    >>> b = torch.tensor([3, 3, -3, -3])
+    >>> torch.divmod(a, b)
+    (tensor([ 2, -3, -3,  2]), tensor([ 1,  2, -2, -1]))
+    >>> torch.divmod(a, 3)
+    (tensor([ 2, -3,  2, -3]), tensor([1, 2, 1, 2]))
+
+""",
+)
+
+add_docstr(
     torch.fmod,
     r"""
 fmod(input, other, *, out=None) -> Tensor
