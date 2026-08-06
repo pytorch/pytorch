@@ -9,7 +9,10 @@ import unittest
 
 import torch
 import torch.nn.utils.stateless as stateless
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -847,7 +850,8 @@ class TestStatelessFunctionalAPIDevice(TestCase):
         self.assertEqual(foo, torch.tensor([3.0], device=device))
         self.assertTrue(a['foo'] is foo)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
+    @onlyAccelerator
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multiple accelerator devices not available')
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
@@ -909,7 +913,7 @@ class TestPythonOptimizeMode(TestCase):
 instantiate_parametrized_tests(
     TestStatelessFunctionalAPI,
 )
-instantiate_device_type_tests(TestStatelessFunctionalAPIDevice, globals())
+instantiate_device_type_tests(TestStatelessFunctionalAPIDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
