@@ -348,10 +348,13 @@ class TestLibtorchAgnostic(TestCase):
     def test_my_floor_divide(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
-        a = torch.randint(1, 20, (3, 4), device=device, dtype=torch.int64)
+        a = torch.randint(-19, 20, (3, 4), device=device, dtype=torch.int64)
         b = torch.randint(1, 5, (3, 4), device=device, dtype=torch.int64)
         self.assertEqual(
             libtorch_agnostic.ops.my_floor_divide(a, b), torch.floor_divide(a, b)
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, -b), torch.floor_divide(a, -b)
         )
 
         # Test broadcasting
@@ -359,6 +362,10 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(
             libtorch_agnostic.ops.my_floor_divide(a, b_1d),
             torch.floor_divide(a, b_1d),
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, -b_1d),
+            torch.floor_divide(a, -b_1d),
         )
 
     @onlyCPU
@@ -368,9 +375,6 @@ class TestLibtorchAgnostic(TestCase):
 
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
-
-        if not torch.cuda.is_available():
-            return
 
         pinned = torch.randn(2, 3, device=device).pin_memory()
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))

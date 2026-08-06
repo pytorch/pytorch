@@ -1269,6 +1269,7 @@ inline torch::stable::Tensor permute(
 /// using the entries in index.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
 ///
 /// @param self The input tensor.
 /// @param dim The dimension to index along.
@@ -1293,6 +1294,7 @@ inline torch::stable::Tensor index_select(
 /// Computes the element-wise floor division of self by other.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
 ///
 /// @param self The dividend tensor.
 /// @param other The divisor tensor.
@@ -1313,6 +1315,7 @@ inline torch::stable::Tensor floor_divide(
 /// Returns true if the tensor's storage is allocated in pinned memory.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
 ///
 /// @param self The input tensor.
 /// @return true if the tensor is pinned, false otherwise.
