@@ -263,6 +263,28 @@ struct nextafter_functor {
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
+
+  // Metal has no bfloat nextafter overload, so open-code the musl algorithm
+  // over the sign-magnitude bit pattern.
+  inline bfloat operator()(const bfloat from, const bfloat to) {
+    if (from != from || to != to) {
+      return from + to;
+    }
+    if (from == to) {
+      return to;
+    }
+    ushort ufrom = as_type<ushort>(from);
+    if (from == 0) {
+      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
+      return as_type<bfloat>(r);
+    }
+    if ((from < to) == (from > 0)) {
+      ufrom++;
+    } else {
+      ufrom--;
+    }
+    return as_type<bfloat>(ufrom);
+  }
 };
 
 struct hypot_functor {
@@ -365,7 +387,7 @@ struct div_floor_functor {
       typename T,
       ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
-    return metal::floor(c10::metal::div(a, b));
+    return c10::metal::div_floor(a, b);
   }
   template <
       typename T,
@@ -435,33 +457,15 @@ struct igammac_functor {
 struct gcd_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    // Binary GCD (Stein's algorithm). Uses shifts, subtraction and ctz (the
-    // device analog of C++20 std::countr_zero) instead of integer
-    // division/modulo, which is emulated (and slow) for 64-bit ints on MPS.
-    // ctz is only ever evaluated on values guarded to be non-zero.
-    T u = a < 0 ? -a : a;
-    T v = b < 0 ? -b : b;
-    if (u == 0) {
-      return v;
+    // Euclidean algorithm for GCD
+    T x = a < 0 ? -a : a;
+    T y = b < 0 ? -b : b;
+    while (x != 0) {
+      T c = x;
+      x = y % x;
+      y = c;
     }
-    if (v == 0) {
-      return u;
-    }
-    // Factor out the common powers of two, then make u odd.
-    const int shift = ::metal::ctz(static_cast<ulong>(u | v));
-    u >>= ::metal::ctz(static_cast<ulong>(u));
-    // Invariant: u is odd. Make v odd, then subtract the smaller from the
-    // larger (keeping v >= u so the unsigned subtraction never underflows).
-    do {
-      v >>= ::metal::ctz(static_cast<ulong>(v));
-      if (u > v) {
-        T t = u;
-        u = v;
-        v = t;
-      }
-      v -= u;
-    } while (v != 0);
-    return u << shift;
+    return y;
   }
 };
 
@@ -469,9 +473,14 @@ struct lcm_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     T g = gcd_functor{}(a, b);
-    // Divide before multiplying to avoid overflow; g divides a exactly.
-    T r = g == 0 ? 0 : a / g * b;
-    return r < 0 ? -r : r;
+    if (g == 0) {
+      return 0;
+    }
+    // `auto` keeps the C++ integer-promoted type (sub-int types widen to int),
+    // so the abs matches the CPU/CUDA kernels: abs is taken before narrowing
+    // back to T on return. Divide before multiplying to limit overflow.
+    auto r = a / g * b;
+    return ::metal::abs(r);
   }
 };
 
@@ -508,12 +517,15 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
-#define REGISTER_INTEGER_BINARY_OP(NAME)  \
-  REGISTER_BINARY_OP(NAME, long, long);   \
-  REGISTER_BINARY_OP(NAME, int, int);     \
-  REGISTER_BINARY_OP(NAME, short, short); \
-  REGISTER_BINARY_OP(NAME, uchar, uchar); \
-  REGISTER_BINARY_OP(NAME, char, char);   \
+#define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
+  REGISTER_BINARY_OP(NAME, long, long);          \
+  REGISTER_BINARY_OP(NAME, int, int);            \
+  REGISTER_BINARY_OP(NAME, short, short);        \
+  REGISTER_BINARY_OP(NAME, uchar, uchar);        \
+  REGISTER_BINARY_OP(NAME, char, char)
+
+#define REGISTER_INTEGER_BINARY_OP(NAME)    \
+  REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME); \
   REGISTER_BINARY_OP(NAME, bool, bool)
 
 #define REGISTER_INT2FLOAT_BINARY_OP(NAME) \
@@ -631,8 +643,8 @@ REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
-REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
-REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_left_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_right_shift);
 REGISTER_COMPARISON_OP(eq);
 REGISTER_COMPLEX_EQ_OP(eq);
 REGISTER_COMPARISON_OP(ne);

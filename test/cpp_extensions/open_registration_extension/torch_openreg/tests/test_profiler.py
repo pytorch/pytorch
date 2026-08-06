@@ -1,12 +1,15 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import json
+import os
 import tempfile
+import unittest
 
 import torch
 import torch.nn as nn
+from torch._C._profiler import ProfilerState
 from torch.autograd.profiler import profile as autograd_profile
-from torch.profiler import record_function
+from torch.profiler import ProfilerActivity, record_function
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -550,6 +553,192 @@ class TestProfilerPerformance(TestCase):
         events = prof.function_events
         self.assertGreater(len(events), 0)
         self.assertLess(elapsed, 60.0)  # Should complete within 1 minute
+
+
+@unittest.skipIf(
+    not torch.profiler.kineto_available(), "Kineto is required for these tests"
+)
+class TestKinetoIntegration(TestCase):
+    """End-to-end integration tests for OpenReg Kineto profiler plugin.
+
+    Covers IActivityProfiler plugin registration, session lifecycle, fallback
+    path compatibility, Chrome trace output via ProfilerActivity.PrivateUse1,
+    and fine-grained activity type filter compatibility (PR #176351).
+    """
+
+    def _export_and_load_trace(self, prof):
+        """Export Chrome trace to a temp file, load and return traceEvents."""
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            trace_file = f.name
+        try:
+            prof.export_chrome_trace(trace_file)
+            with open(trace_file) as f:
+                return json.load(f)["traceEvents"]
+        finally:
+            os.remove(trace_file)
+
+    @skipIfTorchDynamo()
+    def test_basic_profiling_cpu_ops(self):
+        """PrivateUse1 profiler session runs without error and CPU ops are recorded."""
+        self.assertIn(
+            ProfilerActivity.PrivateUse1, torch.profiler.supported_activities()
+        )
+
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+            x * y
+            x @ y
+
+        events = prof.events()
+        self.assertGreater(len(events), 0, "No events recorded")
+        cpu_op_names = [e.name for e in events]
+        self.assertTrue(
+            any("aten::" in n for n in cpu_op_names),
+            f"No aten:: CPU ops in {cpu_op_names[:10]}",
+        )
+
+    @skipIfTorchDynamo()
+    def test_multi_session_lifecycle(self):
+        """Two independent sessions run to completion without error."""
+        activities = [ProfilerActivity.CPU, ProfilerActivity.PrivateUse1]
+
+        with torch.profiler.profile(activities=activities) as prof1:
+            x = torch.randn(10, 10, device="openreg")
+            x + x
+        with torch.profiler.profile(activities=activities) as prof2:
+            y = torch.randn(10, 10, device="openreg")
+            torch.abs(y)
+
+        events1 = prof1.events()
+        events2 = prof2.events()
+        self.assertGreater(len(events1), 0, "Session 1 produced no events")
+        self.assertGreater(len(events2), 0, "Session 2 produced no events")
+        self.assertTrue(
+            any("aten::" in e.name for e in events1),
+            "Session 1: no aten:: CPU ops",
+        )
+        self.assertTrue(
+            any("aten::" in e.name for e in events2),
+            "Session 2: no aten:: CPU ops",
+        )
+
+    @skipIfTorchDynamo()
+    def test_fallback_preserved(self):
+        """use_kineto=False still uses ProfilerStubs for device timing."""
+        with autograd_profile(
+            use_device="openreg", use_kineto=False, use_cpu=True
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+
+        events = prof.function_events
+        self.assertGreater(len(events), 0, "No events in fallback mode")
+
+        event_names = [e.name for e in events]
+        self.assertTrue(
+            any("aten::" in n for n in event_names),
+            f"No aten:: ops in fallback mode: {event_names}",
+        )
+        self.assertEqual(
+            prof.profiler_kind,
+            ProfilerState.KINETO_PRIVATEUSE1_FALLBACK,
+        )
+
+    @skipIfTorchDynamo()
+    def test_chrome_trace_cpu_ops(self):
+        """CPU ops appear in the exported Chrome trace JSON."""
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+            x * y
+
+        trace_events = self._export_and_load_trace(prof)
+        self.assertGreater(len(trace_events), 0, "No trace events produced")
+
+        # CPU ops appear in the trace
+        cpu_ops = [e for e in trace_events if e.get("cat") == "cpu_op"]
+        self.assertGreater(len(cpu_ops), 0, "No cpu_op events in trace")
+
+    @skipIfTorchDynamo()
+    def test_activity_filter_compatibility(self):
+        """Fine-grained activity filter API (PR #176351) works with PrivateUse1 backend.
+
+        Four scenarios cover all distinct filter configurations:
+        1. Empty PrivateUse1 only (no CPU): plugin activates with no types, produces no events.
+        2. Specific type filter CONCURRENT_KERNEL only: session runs without error.
+        3. CPU + empty PrivateUse1: CPU events captured and record_function appears.
+        4. CPU-only (no PrivateUse1): OpenReg plugin not activated, only CPU events appear.
+        """
+        # Scenario 1: empty PrivateUse1 only, no CPU -> no events produced.
+        with torch.profiler.profile(
+            activities=[{ProfilerActivity.PrivateUse1: []}],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            x + x
+        self.assertEqual(
+            len(prof.events()),
+            0,
+            "Empty PrivateUse1 filter should produce no events",
+        )
+
+        # Scenario 2: specific type filter CONCURRENT_KERNEL only -> no CPU, stub emits
+        # no kernel records, so zero events expected.
+        with torch.profiler.profile(
+            activities=[{ProfilerActivity.PrivateUse1: ["CONCURRENT_KERNEL"]}],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            x + x
+        self.assertEqual(
+            len(prof.events()),
+            0,
+            "No CPU + stub emits no CONCURRENT_KERNEL records -> 0 events expected",
+        )
+
+        # Scenario 3: CPU + empty PrivateUse1 filter -> CPU events still captured.
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, {ProfilerActivity.PrivateUse1: []}],
+        ) as prof:
+            with record_function("cpu_marker"):
+                x = torch.randn(10, 10, device="openreg")
+                x + x
+        events = prof.events()
+        self.assertGreater(
+            len(events),
+            0,
+            "CPU events should be captured with empty PrivateUse1 filter",
+        )
+        self.assertTrue(
+            any("cpu_marker" in e.name for e in events),
+            "record_function annotation must appear when CPU is included",
+        )
+
+        # Scenario 4: CPU-only activities, no PrivateUse1 -> OpenReg plugin not activated.
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU],
+        ) as prof:
+            with record_function("cpu_only_marker"):
+                x = torch.randn(10, 10, device="openreg")
+                x + x
+        events = prof.events()
+        self.assertGreater(
+            len(events), 0, "CPU-only session should still record CPU events"
+        )
+        self.assertTrue(
+            any("cpu_only_marker" in e.name for e in events),
+            "record_function must appear in CPU-only session",
+        )
+        self.assertTrue(
+            all(e.device_type.value == 0 for e in events if hasattr(e, "device_type")),
+            "CPU-only session must not contain device events",
+        )
 
 
 if __name__ == "__main__":

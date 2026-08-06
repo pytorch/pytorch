@@ -283,7 +283,7 @@ static void run_model(
           torch::jit::mobile::for_each_tensor_in_ivalue(result, consume_tensor);
         }
       }
-      // If get_bundled_inputs_functions_and_info does not exists we default
+      // If get_bundled_inputs_functions_and_info does not exist we default
       // to assuming they bundled before that change was made. If no bundled
       // inputs are found here either an error will be thrown
     } else {

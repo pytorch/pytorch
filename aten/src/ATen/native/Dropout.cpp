@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
 
@@ -131,7 +130,6 @@ Tensor native_dropout_backward(const Tensor& grad, const Tensor& mask, double sc
 
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
-    NoNamesGuard guard;
     // TODO: we can remove this is_nested() code smell in the future
     //       if we find a way to support _dropout for nested tensor
     //       e.g. make it an op (at::_dropout) to use dispatcher?
@@ -140,7 +138,6 @@ Tensor dropout(const Tensor& input, double p, bool train) {
     }
     return _dropout<false>(input, p, train);
   }();
-  namedinference::propagate_names(result, input);
   return result;
 }
 
