@@ -21,11 +21,29 @@
 // Synchronization uses per-CTA LSA barriers (same as nccl_reduce_scatter_columns)
 // so all ranks must launch the same grid shape.
 
+// This op needs a host-created ncclDevComm plus the device-side LSA barrier and
+// peer-pointer helpers. On CUDA that is gated by NCCL_HAS_DEVCOMM. On ROCm the
+// host ncclDevCommCreate/Destroy is exported by librccl and the device symbols
+// live in <nccl_device.h>, but NCCL_HAS_SYMMEM_DEVICE_SUPPORT (hence
+// NCCL_HAS_DEVCOMM) is off, so gate the ROCm path on NCCL_HAS_LSA_PEER_PTR and
+// pull in <nccl_device.h> directly (as NCCLSymmetricMemory.cu does). Only the LSA
+// barrier + ncclGetLsaPointer are used here (no reduce/copy), so the HIP reduce
+// shims that nccl_reduce_scatter_offset.cu needs are not required.
+#if defined(NCCL_HAS_DEVCOMM) || defined(NCCL_HAS_LSA_PEER_PTR)
+#define NCCL_A2A_ENABLED
+#endif
+
+#if defined(NCCL_A2A_ENABLED) && defined(NCCL_HAS_LSA_PEER_PTR)
+#include <mutex>
+#include <unordered_map>
+#include <nccl_device.h>
+#endif
+
 namespace c10d::nccl_extension {
 
 using namespace c10d::symmetric_memory;
 
-#ifdef NCCL_HAS_DEVCOMM
+#ifdef NCCL_A2A_ENABLED
 
 namespace {
 
@@ -130,7 +148,35 @@ __global__ void all_to_all_lsa_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
-#endif // NCCL_HAS_DEVCOMM
+#if defined(NCCL_HAS_LSA_PEER_PTR)
+// File-local ncclDevComm cache for the ROCm path. The shared NCCLDevCommManager
+// stores ncclDevComm only under NCCL_HAS_SYMMEM_DEVICE_SUPPORT (CUDA): its header
+// is included by host-only translation units compiled with the plain host
+// compiler, which cannot parse RCCL's <nccl_device.h>. Caching the devcomm here
+// keeps the ncclDevComm type confined to hipcc-compiled TUs. Keyed by group_name;
+// devcomm lifetime spans the process (not destroyed), same as the CUDA registry.
+static std::mutex g_a2a_devcomm_mutex;
+static std::unordered_map<std::string, ncclDevComm> g_a2a_devcomm_cache;
+
+static ncclDevComm& get_or_create_a2a_devcomm(
+    ncclComm_t comm,
+    const std::string& group_name) {
+  std::lock_guard<std::mutex> lock(g_a2a_devcomm_mutex);
+  auto it = g_a2a_devcomm_cache.find(group_name);
+  if (it == g_a2a_devcomm_cache.end()) {
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.lsaBarrierCount = A2A_MAX_CTA_COUNT;
+    ncclDevComm devcomm;
+    C10D_NCCL_CHECK(
+        ncclDevCommCreate(comm, &reqs, &devcomm),
+        "ncclDevCommCreate failed in nccl_all_to_all_nd");
+    it = g_a2a_devcomm_cache.emplace(group_name, devcomm).first;
+  }
+  return it->second;
+}
+#endif // NCCL_HAS_LSA_PEER_PTR
+
+#endif // NCCL_A2A_ENABLED
 
 // Host entry point.  Validates arguments, builds the devcomm (cached), and
 // launches the kernel.  See file-level comment for semantics.
@@ -140,7 +186,7 @@ void nccl_all_to_all_nd(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name) {
-#ifdef NCCL_HAS_DEVCOMM
+#ifdef NCCL_A2A_ENABLED
   TORCH_CHECK(
       input.stride(-1) == 1,
       "nccl_all_to_all_nd: innermost dimension must be contiguous (stride[-1] == 1)");
@@ -169,6 +215,11 @@ void nccl_all_to_all_nd(
   auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(device);
   ncclComm_t comm = manager.get_comm(group_name);
 
+#if defined(NCCL_HAS_LSA_PEER_PTR)
+  // ROCm: NCCLDevCommManager cannot hold ncclDevComm (see the file-local cache
+  // comment above), so cache it here instead.
+  ncclDevComm& devcomm = get_or_create_a2a_devcomm(comm, group_name);
+#else
   static constexpr char const kDevcommKey[] = "nccl_all_to_all_nd";
   auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
   if (!devcomm_opt) {
@@ -181,6 +232,7 @@ void nccl_all_to_all_nd(
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();
+#endif
 
   const int my_rank = devcomm.rank;
   const int p = devcomm.nRanks;
@@ -371,7 +423,7 @@ void nccl_all_to_all_nd(
   }
 #else
   TORCH_CHECK(false, "nccl_all_to_all_nd requires NCCL >= 2.29 with the symmetric-memory device-communicator API");
-#endif // NCCL_HAS_DEVCOMM
+#endif // NCCL_A2A_ENABLED
 }
 
 } // namespace c10d::nccl_extension
