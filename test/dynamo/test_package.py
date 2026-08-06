@@ -13,8 +13,14 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.precompile_package import (
+    precompile_capture,
+    precompile_load,
+    serving,
+)
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -29,6 +35,38 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
+
+
+def staged_with_graph_breaks(x):
+    x = x * 2
+    torch._dynamo.graph_break()
+    x = x + 3
+    torch._dynamo.graph_break()
+    return x.sum()
+
+
+class PrecompileBlock(torch.nn.Module):
+    def __init__(self, i):
+        super().__init__()
+        self.i = i
+
+    def forward(self, x):
+        x = x * 2 + self.i
+        torch._dynamo.graph_break()
+        return x
+
+
+class PrecompileStack(torch.nn.Module):
+    """All blocks share one forward code object, so variants pile onto it."""
+
+    def __init__(self, n):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList([PrecompileBlock(i) for i in range(n)])
+
+    def forward(self, x):
+        for b in self.blocks:
+            x = b(x)
+        return x.sum()
 
 
 def compute_loss_helper(x):
@@ -927,6 +965,104 @@ def add(x, y):
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
         compiled_fn(x)
+
+
+@instantiate_parametrized_tests
+class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        DynamoCache.clear()
+        PrecompileContext.clear()
+
+    def path(self):
+        path = os.path.join(cache_dir(), f"precompile_{self.id()}")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_graph_breaks_and_recompiles_round_trip(self, backend):
+        shapes = [(4, 8), (5, 8), (6, 8)]
+        inputs = [torch.randn(*s) for s in shapes]
+        expected = [staged_with_graph_breaks(x) for x in inputs]
+
+        session = precompile_capture(
+            staged_with_graph_breaks, backend=backend, dynamic=False
+        )
+        with session as compiled:
+            for x in inputs:
+                compiled(x)
+        summary = session.summary()
+        # entry frame plus one resume frame per graph break, each specialized
+        # once per input shape.
+        self.assertEqual(summary.frames, 3)
+        self.assertEqual(summary.resume_functions, 2)
+        self.assertEqual(summary.guarded_codes, 3 * len(shapes))
+        self.assertTrue(summary.complete)
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        with (
+            precompile_load(
+                staged_with_graph_breaks, self.path(), backend=backend, dynamic=False
+            ) as loaded,
+            serving(),
+        ):
+            for x, want in zip(inputs, expected):
+                self.assertEqual(loaded(x), want)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                loaded(torch.randn(9, 8))
+
+    def test_save_refuses_incomplete_package(self):
+        # 5 blocks x 3 shapes = 15 variants on one shared forward code object,
+        # which overruns a recompile_limit of 8. Before, the truncated package
+        # saved happily and only stopped matching at serving time.
+        n = 5
+        model = PrecompileStack(n)
+        inputs = [torch.randn(*s) for s in [(4, 8), (5, 8), (6, 8)]]
+
+        session = precompile_capture(
+            model, backend="eager", recompile_limit=8, dynamic=False
+        )
+        with session as compiled:
+            for x in inputs:
+                compiled(x)
+
+        summary = session.summary()
+        self.assertFalse(summary.complete)
+        self.assertIn("forward", summary.bypassed)
+        with self.assertRaisesRegex(PackageError, "Precompilation is incomplete"):
+            session.save(self.path())
+
+        # Opting in to a partial artifact is still allowed.
+        session.save(self.path(), require_complete=False)
+
+    def test_raised_recompile_limit_is_complete(self):
+        n = 5
+        model = PrecompileStack(n)
+        inputs = [torch.randn(*s) for s in [(4, 8), (5, 8), (6, 8)]]
+        expected = [model(x) for x in inputs]
+
+        session = precompile_capture(
+            model, backend="eager", recompile_limit=64, dynamic=False
+        )
+        with session as compiled:
+            for x in inputs:
+                compiled(x)
+        summary = session.summary()
+        self.assertTrue(summary.complete)
+        self.assertEqual(summary.guarded_codes, n * len(inputs))
+        session.save(self.path())
+
+        torch._dynamo.reset()
+        with (
+            precompile_load(
+                model, self.path(), backend="eager", recompile_limit=64, dynamic=False
+            ) as loaded,
+            serving(),
+        ):
+            for x, want in zip(inputs, expected):
+                self.assertEqual(loaded(x), want)
 
 
 if __name__ == "__main__":

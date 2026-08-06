@@ -637,6 +637,10 @@ class CompilePackage:
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # Code objects we registered precompile entries on, so uninstall() can
+        # clear all of them. install() covers resume functions and any frame
+        # reached through code_source, not just the entry frame.
+        self._installed_precompile_codes: list[types.CodeType] = []
         # device_type that model compiled with.
         self._device_type = "cpu"
 
@@ -800,6 +804,9 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
+    def has_current_entry(self) -> bool:
+        return self._current_entry is not None
+
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
@@ -873,6 +880,9 @@ class CompilePackage:
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
+        for code in self._installed_precompile_codes:
+            _reset_precompile_entries(code)
+        self._installed_precompile_codes = []
 
     def install(self, backends: dict[_BackendId, Any]) -> None:
         """
@@ -988,6 +998,7 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
+                    self._installed_precompile_codes.append(target_code)
                     _load_precompile_entry(
                         target_code,
                         guard_manager,

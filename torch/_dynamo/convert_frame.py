@@ -33,6 +33,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -2017,6 +2018,27 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+
+            if package is not None and package.has_current_entry():
+                # This frame is about to be pinned to RUN_ONLY, so the variants
+                # past the limit will never be captured. Mark the entry bypassed
+                # rather than letting the package serialize a partial guard set
+                # that silently stops matching at serving time.
+                package.bypass_current_entry()
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_bypass",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(
+                        {
+                            "reason": f"hit {limit_type}",
+                            "function": format_func_info(code),
+                        }
+                    ),
+                    expect_trace_id=False,
+                )
 
             def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
