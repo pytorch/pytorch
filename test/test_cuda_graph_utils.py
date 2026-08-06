@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
+    _get_annotatable_types,
     _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
@@ -112,6 +113,29 @@ class TestMarkKernels(TestCase):
         with mark_kernels("test"):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
+
+    def test_event_nodes_are_annotatable(self):
+        """Event record/wait nodes are annotatable so the profiler can place their
+        spans on the intended stream lane (they are stream-ordered but do not
+        occupy the device)."""
+        from cuda.bindings import driver
+
+        annotatable = _get_annotatable_types()
+        for name in (
+            "CU_GRAPH_NODE_TYPE_EVENT_RECORD",
+            "CU_GRAPH_NODE_TYPE_WAIT_EVENT",
+        ):
+            self.assertIn(getattr(driver.CUgraphNodeType, name), annotatable)
+
+    def test_host_nodes_are_annotatable(self):
+        """Host nodes are annotatable so the profiler can place their spans on the
+        intended stream lane (they are stream-ordered but do not occupy the
+        device)."""
+        from cuda.bindings import driver
+
+        self.assertIn(
+            driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_HOST, _get_annotatable_types()
+        )
 
     def test_memset_nodes_are_annotated(self):
         """Memset graph nodes get annotated, not just kernels and memcpys.
