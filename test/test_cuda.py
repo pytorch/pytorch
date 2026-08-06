@@ -8611,7 +8611,6 @@ class TestMemPool(TestCase):
         # Destroying a no_split MemPool must drop its id from the allocator's
         # no_split_pools set. Otherwise a pool later registered under the same
         # id silently inherits no_split and stops sharing segments.
-        torch.cuda.synchronize()
         gc.collect()
         torch.cuda.empty_cache()
         device = torch.cuda.current_device()
