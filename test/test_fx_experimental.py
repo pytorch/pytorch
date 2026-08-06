@@ -50,14 +50,15 @@ from torch.fx.passes.split_module import split_module, split_module_simple
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfMPS,
     TEST_Z3,
     run_tests,
     TestCase,
@@ -88,6 +89,8 @@ def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule
 
 
 class TestFXExperimental(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -2128,7 +2131,9 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
-    @onlyCPU
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIfMPS
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
@@ -2300,6 +2305,8 @@ if TEST_Z3:
     from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
 
     class TestTranslationValidation(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def _prepare_for_translation_validation(self):
             validator = TranslationValidator()
 
