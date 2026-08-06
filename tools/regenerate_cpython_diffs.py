@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Fetch/reconstruct pristine CPython sources and regenerate test/cpython/v3_13/*.diff.
+"""Reconstruct pristine CPython sources and regenerate test/cpython/v3_13/*.diff.
 
 Diffs are written with `git diff --full-index` so the `index <before>..<after>`
 line carries blob hashes used by the offline sync check (no manifest file).
 
+This tool never downloads over the network. It reconstructs pristine bytes by
+reverse-applying the checked-in .diff. If that fails, pass a locally downloaded
+file via --pristine (see the error hint for curl/wget).
+
 Usage:
   python tools/regenerate_cpython_diffs.py              # all pairs
   python tools/regenerate_cpython_diffs.py --only test_bool.py
-  python tools/regenerate_cpython_diffs.py --check       # verify only (no network)
+  python tools/regenerate_cpython_diffs.py --check       # verify only
   python tools/regenerate_cpython_diffs.py --force       # rewrite every .diff
+  python tools/regenerate_cpython_diffs.py --force --pristine /tmp/pristine.py --only test_bool.py
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -40,19 +46,34 @@ def _load_diff_sync() -> ModuleType:
 diff_sync = _load_diff_sync()
 
 
-def _resolve_pristine(py_path: Path, diff_path: Path, tag: str, upstream: str) -> bytes:
-    """Prefer offline reverse-apply; fall back to network fetch."""
+def _resolve_pristine(
+    py_path: Path,
+    diff_path: Path,
+    tag: str,
+    upstream: str,
+    pristine_path: Path | None,
+) -> bytes:
+    """Prefer offline reverse-apply; optional local --pristine file (no network)."""
+    if pristine_path is not None:
+        return diff_sync.normalize_bytes(pristine_path.read_bytes())
     try:
         return diff_sync.reverse_apply_to_pristine(py_path, diff_path)
-    except Exception:
-        return diff_sync.fetch_pristine(tag, upstream)
+    except Exception as e:
+        raise RuntimeError(diff_sync.pristine_download_hint(tag, upstream)) from e
 
 
-def regenerate(only: str | None, *, force: bool = False) -> int:
+def regenerate(
+    only: str | None,
+    *,
+    force: bool = False,
+    pristine_path: Path | None = None,
+) -> int:
     """Rewrite .diff files when stale (or --force). Writes only if all pairs OK."""
     CPYTHON_DIR = diff_sync.CPYTHON_DIR
     diff_paths = diff_sync.iter_diff_paths()
-    pairs = [(p.with_suffix(".py"), p) for p in diff_paths if p.with_suffix(".py").is_file()]
+    pairs = [
+        (p.with_suffix(".py"), p) for p in diff_paths if p.with_suffix(".py").is_file()
+    ]
     if only:
         pairs = [
             (py, diff)
@@ -62,6 +83,13 @@ def regenerate(only: str | None, *, force: bool = False) -> int:
         if not pairs:
             print(f"no pairs matched --only {only!r}", file=sys.stderr)
             return 1
+
+    if pristine_path is not None and len(pairs) != 1:
+        print(
+            "--pristine requires exactly one pair; pass --only <test_name.py>",
+            file=sys.stderr,
+        )
+        return 1
 
     planned: list[tuple[Path, str]] = []
     failures = 0
@@ -73,7 +101,9 @@ def regenerate(only: str | None, *, force: bool = False) -> int:
         repo_rel = py_path.relative_to(REPO_ROOT).as_posix()
         try:
             tag, upstream = diff_sync.parse_header(py_path)
-            pristine = _resolve_pristine(py_path, diff_path, tag, upstream)
+            pristine = _resolve_pristine(
+                py_path, diff_path, tag, upstream, pristine_path
+            )
             adapted = diff_sync.normalize_bytes(py_path.read_bytes())
 
             needs_rewrite = force
@@ -85,7 +115,7 @@ def regenerate(only: str | None, *, force: bool = False) -> int:
                 new_diff = diff_sync.make_unified_diff(pristine, adapted, repo_rel)
                 with tempfile.TemporaryDirectory() as tmp:
                     tmp_diff = Path(tmp) / "patch.diff"
-                    tmp_diff.write_text(new_diff, encoding="utf-8", newline="\n")
+                    diff_sync.write_utf8(tmp_diff, new_diff)
                     applied = diff_sync.apply_diff_to_adapted(
                         pristine, py_path, tmp_diff
                     )
@@ -118,7 +148,7 @@ def regenerate(only: str | None, *, force: bool = False) -> int:
         return 1
 
     for diff_path, new_diff in planned:
-        diff_path.write_text(new_diff, encoding="utf-8", newline="\n")
+        diff_sync.write_utf8(diff_path, new_diff)
 
     print(f"done: kept={kept} rewritten={rewritten} failures=0")
     return 0
@@ -131,6 +161,12 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Rewrite every .diff even if verify already passes",
+    )
+    ap.add_argument(
+        "--pristine",
+        type=Path,
+        default=None,
+        help="Local pristine upstream file (no network fetch); requires --only",
     )
     ap.add_argument(
         "--check",
@@ -149,7 +185,7 @@ def main() -> int:
         n = len(list(diff_sync.iter_diff_paths()))
         print(f"OK: {n} cpython .py/.diff pairs in sync")
         return 0
-    return regenerate(args.only, force=args.force)
+    return regenerate(args.only, force=args.force, pristine_path=args.pristine)
 
 
 if __name__ == "__main__":

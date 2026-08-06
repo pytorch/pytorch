@@ -16,7 +16,10 @@ pristine upstream file. Diffs are generated with `git diff --full-index` so the
 `index <before>..<after>` line carries git blob hashes for offline sync checks
 (see `tools/cpython_diff_sync.py` and
 `tools/linter/adapters/cpython_diff_sync_linter.py`). After editing an adapted
-test, regenerate with:
+test, regenerate offline with:
 
   python tools/regenerate_cpython_diffs.py
   # or: python tools/regenerate_cpython_diffs.py --only test_foo.py
+
+If reverse-apply cannot reconstruct pristine bytes, download the upstream
+file locally (curl/wget) and pass --pristine; the regen tool never fetches.
