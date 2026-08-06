@@ -952,6 +952,26 @@ class TestProfiler(TestCase):
                 if not is_int:
                     raise AssertionError("Invalid stacks record")
 
+    def test_export_chrome_trace_escapes_names(self):
+        from torch.autograd.profiler_util import EventList, FunctionEvent
+
+        tricky_name = 'aten::mm C:\\src\\"foo".cpp'
+        evt = FunctionEvent(
+            id=0,
+            name=tricky_name,
+            trace_name=tricky_name,
+            thread=0,
+            start_us=0,
+            end_us=10,
+        )
+        event_list = EventList([evt])
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+        self.assertEqual(trace[0]["name"], tricky_name)
+
     def test_experimental_config_pickle(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", BytesWarning)

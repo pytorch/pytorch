@@ -3005,9 +3005,9 @@ the required ``cusolverDnXpolar`` routine); otherwise (and on CPU) it falls back
 to an SVD-based computation.
 
 .. note::
-    This function is not differentiable. Calling it on a tensor that requires
-    grad and backpropagating raises an error; an autograd formula may be added
-    in a future release.
+    Gradients with respect to :attr:`A` are supported. The polar decomposition
+    is differentiable wherever :attr:`A` has full column rank; the gradient is
+    not defined at rank-deficient :attr:`A`.
 """
     + rf"""
 .. warning:: {common_notes["experimental_warning"]}
