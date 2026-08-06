@@ -455,6 +455,17 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     return compile_wrapper.getvalue()
 
 
+def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
+    """Escape src for a '''...''' literal, optionally nested in an r\"\"\"...\"\"\" block."""
+    src = src.replace("\\", "\\\\")
+    if config.cpp_wrapper:
+        # With cpp_wrapper + autotune_at_compile_time=False, the source is
+        # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
+        # So we need to add backslash here.
+        src = src.replace('"""', '\\"\\"\\"')
+    return src.replace("'''", "\\'\\'\\'")
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: sympy.Symbol
@@ -2349,9 +2360,8 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
         if orig_python_kernel_name.startswith("aten.scatter_reduce"):
             line += ", ".join([""] + kwargs)
-        else:
-            if reduce:
-                line += f", reduce={repr(reduce)}"
+        elif reduce:
+            line += f", reduce={repr(reduce)}"
         line += ")"
         self.writeline(line)
 
@@ -3675,13 +3685,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = kernel_src.replace("\\", "\\\\")
-        if config.cpp_wrapper:
-            # With cpp_wrapper + autotune_at_compile_time=False, the source is
-            # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
-            # So we need to add backslash here.
-            kernel_src = kernel_src.replace('"""', '\\"\\"\\"')
-        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
+        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
