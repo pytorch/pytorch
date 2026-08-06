@@ -262,6 +262,8 @@ void ProcessGroupNCCL::init(at::Device device) {
 void ProcessGroupNCCL::initNcclResources() {
   c10::cuda::CUDAGuard gpuGuard(device_);
 
+  window_registration_counter_.store(0, std::memory_order_relaxed);
+
   is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
 
   if (!internal_stream_) {
