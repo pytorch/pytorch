@@ -24,10 +24,11 @@ struct XPUEvent {
       const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle_data)
       : device_index_(device_index) {
     // Events reconstructed from an IPC handle cannot be re-exported via
-    // ipc_handle().
+    // ipc_handle(). So keep `enable_ipc_` false to avoid confusion.
     event_ = std::make_unique<sycl::event>(
         sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
+    reusable_ = true;
   }
 #endif
 
@@ -252,7 +253,6 @@ struct XPUEvent {
   bool enable_timing_ = false;
   bool enable_ipc_ = false;
   bool reusable_ = false;
-
   c10::DeviceIndex device_index_ = -1;
   std::unique_ptr<sycl::event> event_;
 };

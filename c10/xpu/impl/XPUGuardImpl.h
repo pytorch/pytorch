@@ -173,7 +173,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
             new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
       }
     }
-
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
