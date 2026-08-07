@@ -335,20 +335,23 @@ class TestTypeCacheRetention(TestCase):
     must clear."""
 
     def _assert_no_retention(self, use):
-        payload = torch.randn(8)
+        def make():
+            payload = torch.randn(8)
 
-        class Local:
-            def __len__(self):
-                return payload.numel()
+            class Local:
+                def __len__(self):
+                    return payload.numel()
 
-            def __iter__(self):
-                return iter([payload])
+                def __iter__(self):
+                    return iter([payload])
 
+            return Local, weakref.ref(payload)
+
+        Local, payload_ref = make()
         cls_ref = weakref.ref(Local)
-        payload_ref = weakref.ref(payload)
         use(Local)
 
-        del Local, payload
+        del Local
         gc.collect()
 
         self.assertIsNone(cls_ref(), "helper retained the type")
