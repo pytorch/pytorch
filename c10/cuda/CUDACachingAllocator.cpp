@@ -1467,6 +1467,10 @@ class DeviceCachingAllocator {
   // capture tree. Keep conditional body state until the root capture ends.
   struct CaptureState {
     MempoolId_t mempool_id;
+    // CUDA queries use the primary capture stream. Free-list lookup uses the
+    // block-reuse stream.
+    cudaStream_t primary_capture_stream;
+    cudaStream_t block_reuse_stream;
     std::optional<CaptureId_t> parent_capture_id;
     CaptureId_t root_capture_id{0};
     bool is_active{true};
@@ -1725,6 +1729,19 @@ class DeviceCachingAllocator {
     return capture_it;
   }
 
+  // A conditional primary capture stream inherits the block-reuse stream for
+  // its parent dependency stream. The request stream does not change.
+  cudaStream_t block_reuse_stream_for_conditional_primary_capture_stream(
+      cudaStream_t stream) {
+    auto capture_it = active_capture_state_for_stream(stream);
+    if (capture_it == capture_states.end() ||
+        stream != capture_it->second.primary_capture_stream ||
+        !capture_it->second.parent_capture_id.has_value()) {
+      return stream;
+    }
+    return capture_it->second.block_reuse_stream;
+  }
+
   void record_block_allocation_capture_id(
       Block* block,
       cudaStream_t request_stream) {
@@ -1767,7 +1784,7 @@ class DeviceCachingAllocator {
 
   void prepare_for_malloc(
       const std::shared_ptr<GatheredContext>& context,
-      cudaStream_t stream) {
+      cudaStream_t request_stream) {
     if (C10_LIKELY(!is_capture_context())) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
@@ -1785,8 +1802,8 @@ class DeviceCachingAllocator {
       process_events(context);
     } else {
       if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-        // We check if there is some block that is safe to reuse on this stream
-        free_safe_blocks_in_capture(context, stream);
+        // Reclaim blocks that are safe to reuse on the request stream.
+        free_safe_blocks_in_capture(context, request_stream);
       }
     }
   }
@@ -1794,17 +1811,21 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(size_t orig_size, cudaStream_t stream) {
+  Block* malloc(size_t orig_size, cudaStream_t request_stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    prepare_for_malloc(context, stream);
+    prepare_for_malloc(context, request_stream);
+
+    const cudaStream_t block_reuse_stream =
+        block_reuse_stream_for_conditional_primary_capture_stream(
+            request_stream);
 
     size_t size = round_size(orig_size);
-    auto& pool = get_pool(size, stream);
+    auto& pool = get_pool(size, request_stream);
     const size_t alloc_size = get_allocation_size(size);
     bool active_user_pool =
         pool.owner_PrivatePool && pool.owner_PrivatePool->allocator();
@@ -1814,7 +1835,7 @@ class DeviceCachingAllocator {
     AllocParams params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         alloc_size,
         is_expandable_segments_active);
@@ -1854,7 +1875,7 @@ class DeviceCachingAllocator {
             // Try to use memory pools that have opted in as overflow before
             // expensive memory freeing operations.
             try_mempool_fallback(
-                params, size, stream, device_id, alloc_size, stats)
+                params, size, block_reuse_stream, device_id, alloc_size, stats)
             // Free enough available cached blocks to satisfy alloc and retry
             // alloc.
             || (release_available_cached_blocks(params, context) &&
@@ -2034,11 +2055,14 @@ class DeviceCachingAllocator {
         params.block, params.size(), params.is_expandable_segments_active);
     Block* block = alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
-    record_block_allocation_capture_id(block, stream);
+    record_block_allocation_capture_id(block, request_stream);
     return block;
   }
 
-  Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
+  Block* mallocWithAddress(
+      size_t orig_size,
+      cudaStream_t request_stream,
+      void* addr) {
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     TORCH_CHECK(
         requested_addr % kMinBlockSize == 0,
@@ -2051,16 +2075,20 @@ class DeviceCachingAllocator {
     // to have.
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    prepare_for_malloc(context, stream);
+    prepare_for_malloc(context, request_stream);
+
+    const cudaStream_t block_reuse_stream =
+        block_reuse_stream_for_conditional_primary_capture_stream(
+            request_stream);
 
     const size_t size = round_size(orig_size);
 
     // The same block pool is used for both prefix block and requested block.
     // Prefix block may have a significantly larger size than requested block
     // when multiple small blocks coalesced into a large prefix block.
-    auto& pool = get_pool(size, stream);
+    auto& pool = get_pool(size, request_stream);
     Block* containing_block =
-        get_free_block_containing_address(pool, size, stream, addr);
+        get_free_block_containing_address(pool, size, block_reuse_stream, addr);
     if (!containing_block) {
       return nullptr;
     }
@@ -2092,7 +2120,7 @@ class DeviceCachingAllocator {
       AllocParams prefix_params(
           device_id,
           prefix_size,
-          stream,
+          block_reuse_stream,
           &pool,
           get_allocation_size(prefix_size),
           is_expandable_segments_active);
@@ -2103,7 +2131,7 @@ class DeviceCachingAllocator {
           prefix_size,
           context,
           true /* always split for prefix */);
-      record_block_allocation_capture_id(prefix_block, stream);
+      record_block_allocation_capture_id(prefix_block, request_stream);
       requested_source = prefix_block->next;
       // alloc_found_block re-inserts the split remainder into the pool. We have
       // to manually erase the requested_source.
@@ -2113,7 +2141,7 @@ class DeviceCachingAllocator {
     AllocParams requested_params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         get_allocation_size(size),
         is_expandable_segments_active);
@@ -2123,7 +2151,7 @@ class DeviceCachingAllocator {
         should_split(requested_source, size, is_expandable_segments_active);
     Block* requested_block = alloc_found_block(
         requested_params, orig_size, std::move(context), split_remainder);
-    record_block_allocation_capture_id(requested_block, stream);
+    record_block_allocation_capture_id(requested_block, request_stream);
     if (prefix_block) {
       free_locked(prefix_block, nullptr);
     }
@@ -2627,16 +2655,18 @@ class DeviceCachingAllocator {
     return ShareableHandle{.offset = offset, .handle = std::move(ss).str()};
   }
 
-  void recordStream(Block* block, cuda::CUDAStream stream) {
+  void recordStream(Block* block, cuda::CUDAStream recorded_stream) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    if (stream.stream() == block->stream) {
-      // ignore uses on the allocation stream, since those don't require any
-      // special synchronization
+    const cudaStream_t block_reuse_stream =
+        block_reuse_stream_for_conditional_primary_capture_stream(
+            recorded_stream.stream());
+    if (block_reuse_stream == block->stream) {
+      // This use is already ordered on the block-reuse stream.
       return;
     }
-    block->stream_uses.insert(stream);
+    block->stream_uses.insert(recorded_stream);
     if (C10_UNLIKELY(is_capture_context())) {
-      block_to_cudagraph_stream_uses[block].insert(stream);
+      block_to_cudagraph_stream_uses[block].insert(recorded_stream);
     }
   }
 
@@ -3326,10 +3356,15 @@ class DeviceCachingAllocator {
 
     CaptureState capture_state{
         .mempool_id = registration.mempool_id,
+        .primary_capture_stream = registration.primary_capture_stream,
+        .block_reuse_stream = registration.primary_capture_stream,
         .parent_capture_id = registration.parent_capture_id,
         .root_capture_id = registration.capture_id,
     };
     if (registration.parent_capture_id.has_value()) {
+      TORCH_INTERNAL_ASSERT(
+          registration.parent_dependency_stream.has_value(),
+          "Conditional body capture requires a parent dependency stream");
       auto parent_it =
           capture_states.find(registration.parent_capture_id.value());
       TORCH_INTERNAL_ASSERT(
@@ -3338,7 +3373,16 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(
           parent_it->second.mempool_id == registration.mempool_id,
           "Conditional body capture must share its parent's private memory pool");
+      // The conditional body starts after the parent dependency stream.
+      // Inherit its block-reuse stream.
+      capture_state.block_reuse_stream =
+          block_reuse_stream_for_conditional_primary_capture_stream(
+              registration.parent_dependency_stream.value());
       capture_state.root_capture_id = parent_it->second.root_capture_id;
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          !registration.parent_dependency_stream.has_value(),
+          "Root capture must not specify a parent dependency stream");
     }
 
     capture_states.emplace(registration.capture_id, capture_state);
