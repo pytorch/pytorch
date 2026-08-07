@@ -29,7 +29,7 @@ from pathlib import Path
 
 from auditwheel.wheeltools import add_platforms, InWheelCtx
 
-from .build_env_setup import PLATFORM_TAGS
+from build_env_setup import PLATFORM_TAGS
 
 
 PATCHELF = "/usr/local/bin/patchelf"
