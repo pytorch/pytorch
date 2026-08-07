@@ -1186,6 +1186,18 @@ class Tensor(torch._C.TensorBase):
     __neg__ = _C.TensorBase.neg
     __abs__ = _C.TensorBase.abs
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __divmod__(
+        self, other: Union["Tensor", int, float]
+    ) -> tuple["Tensor", "Tensor"]:
+        return torch.divmod(self, other)
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rdivmod__(
+        self, other: Union["Tensor", int, float]
+    ) -> tuple["Tensor", "Tensor"]:
+        return torch.divmod(other, self)
+
     def __len__(self):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__len__, (self,), self)

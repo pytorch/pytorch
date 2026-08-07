@@ -12,12 +12,12 @@ from itertools import chain, product
 from numbers import Number
 
 import numpy as np
-
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    OpDTypes,
     deviceCountAtLeast,
     dtypes,
     dtypesIfCPU,
@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
     onlyOn,
-    OpDTypes,
     ops,
     precisionOverride,
     skipCPUIf,
@@ -59,8 +58,11 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_samples,
 )
 from torch.testing._internal.common_utils import (
-    gradcheck,
+    TEST_SCIPY,
+    TEST_WITH_TORCHDYNAMO,
     HardwareClassification,
+    TestCase,
+    gradcheck,
     instantiate_parametrized_tests,
     iter_indices,
     numpy_to_torch_dtype_dict,
@@ -69,13 +71,9 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipIfTorchDynamo,
     slowTest,
-    TEST_SCIPY,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
-
 
 if TEST_SCIPY:
     import scipy.integrate
@@ -1044,6 +1042,20 @@ class TestBinaryUfuncsDevice(TestCase):
                 f"{broadcasted_shape}, although they are not broadcastable."
             )
             raise AssertionError(msg)
+
+    @dtypes(*all_types_and(torch.half))
+    def test_rdivmod(self, device, dtype):
+        samples = [(2, 3)]
+        if dtype != torch.uint8:
+            samples += [(-2, 3), (2, -3)]
+        for a, b in samples:
+            q, r = divmod(a, b)
+            tq, tr = divmod(a, torch.tensor(b, dtype=dtype, device=device))
+
+            self.assertIsInstance(tq, torch.Tensor)
+            self.assertIsInstance(tr, torch.Tensor)
+            self.assertEqual(tq, torch.tensor(q, dtype=dtype, device=device))
+            self.assertEqual(tr, torch.tensor(r, dtype=dtype, device=device))
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -5049,9 +5061,10 @@ tensor_binary_ops = [
     "__or__",
     "__ror__",
     "__ior__",
+    "__divmod__",
+    "__rdivmod__",
     # Unsupported operators
     # '__imatmul__',
-    # '__divmod__', '__rdivmod__', '__idivmod__',
 ]
 
 
