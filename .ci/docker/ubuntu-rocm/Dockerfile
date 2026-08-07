@@ -51,8 +51,6 @@ ARG USE_MSLK
 ENV ROCM_VERSION=${ROCM_VERSION}
 COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh && rm install_rocm.sh
-COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
-RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
 
 # ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
 # by CI scripts. TheRock installs ROCm under the Python environment, not /opt/rocm.

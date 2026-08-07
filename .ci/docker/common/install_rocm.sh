@@ -6,6 +6,8 @@ install_ubuntu() {
     apt-get update
     # kmod is used by GPU diagnostics; libc++ lets torch._C load at runtime.
     apt-get install -y --no-install-recommends kmod libc++1 libc++abi1
+    # FIXME: Needed for rocSHMEM in ROCm7.14 since it had a dependency on libnuma.so
+    apt-get install -y libnuma-dev
 
     install_rocm
 
