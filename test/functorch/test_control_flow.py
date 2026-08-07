@@ -7385,7 +7385,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    def test_cond_traced_record_stream_reuse(self):
+    def test_conditional_node_with_graph_capture_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
         )
@@ -7399,12 +7399,18 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
 
             g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "graph_capture_record_stream_reuse:True",
+            root_capture_stream = torch.cuda.Stream()
+            with (
+                torch.cuda.stream(root_capture_stream),
+                ControlFlowOpWarmupDispatchMode(),
             ):
-                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
-                    torch.cond(predicate, true_fn, false_fn, [])
+                torch.cond(predicate, true_fn, false_fn, [])
+            with (
+                torch.cuda.graph(g, stream=root_capture_stream),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.cond(predicate, true_fn, false_fn, [])
+            g.replay()
         finally:
             torch.cuda.memory._set_allocator_settings(
                 "graph_capture_record_stream_reuse:False"
