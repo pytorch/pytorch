@@ -129,6 +129,30 @@ bool WorkNCCL::setTerminalStatus(WorkStatus terminal_status) {
   return true;
 }
 
+void WorkNCCL::notifyCompletion() {
+  // Called once per work, by the queue that popped it as COMPLETED, and only
+  // for success -- a timed-out or failed work reports nothing, because a
+  // consumer that read that as "finished" would lose the very fact a
+  // post-mortem needs.
+  if (!comm_->hasCompletionHooks()) {
+    return;
+  }
+  std::optional<float> duration;
+  if (timing_enabled_) {
+    try {
+      // cudaEventElapsedTime on two events that have already been observed to
+      // complete: no synchronization, and no NCCL call, so it is legal on the
+      // watchdog thread. Stock ProcessGroupNCCL's watchdog calls getDuration()
+      // from its own completion hook for the same reason.
+      duration = getDuration();
+    } catch (const std::exception& e) {
+      TC_LOG(WARNING, comm_)
+          << "Cannot measure collective duration: " << e.what();
+    }
+  }
+  comm_->runCompletionHooks(this, duration);
+}
+
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
     std::optional<std::chrono::milliseconds> timeout) {
   WorkStatus current = status();

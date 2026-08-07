@@ -316,8 +316,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
+  bool supportsAbortHooks() const override {
+    return true;
+  }
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
+
+  bool supportsCompletionHooks() const override {
+    return true;
+  }
+  void registerCompletionHook(int64_t hook_id, ::c10d::CompletionHook hook)
+      override;
+  void unregisterCompletionHook(int64_t hook_id) override;
 
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
@@ -559,6 +569,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkTensorDevice(const at::Tensor& tensor) const;
   void checkTensorsDevice(const std::vector<at::Tensor>& tensors) const;
   void runAbortHooks();
+  // Whether anyone is listening, so a work that completes with no hook
+  // registered does not pay for a duration measurement nobody reads.
+  bool hasCompletionHooks();
+  void runCompletionHooks(
+      const ::c10d::Work* work,
+      std::optional<float> duration_ms);
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -649,8 +665,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
-  // base, folded in here).
+  // base, folded in here). Guarded because the watchdog thread fires them while
+  // the owner of a hook may be un/registering on another thread -- a
+  // FlightRecorderHook unregisters from its destructor, i.e. whenever Python
+  // drops the handle.
   std::unordered_map<int64_t, ::c10d::AbortHook> abortHooks_;
+  std::mutex abort_hooks_mutex_;
+
+  // Completion hooks (c10d::Backend API). Same guarding rationale as the abort
+  // hooks: the watchdog fires them from checkStatus() while their owner may be
+  // un/registering on another thread.
+  std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
+  std::mutex completion_hooks_mutex_;
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
