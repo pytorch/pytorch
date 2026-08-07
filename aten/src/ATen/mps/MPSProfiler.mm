@@ -124,6 +124,7 @@ MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullpt
 }
 
 MPSProfiler::~MPSProfiler() {
+  // first make sure completion handlers are completed
   if (hasPendingCompletionHandlers) {
     at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
   }
