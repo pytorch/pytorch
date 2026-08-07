@@ -1243,6 +1243,7 @@ def retry_shell(
     timeout=None,
     retries=1,
     was_rerun=False,
+    label="",
 ) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
     if not (retries >= 0):
@@ -1262,8 +1263,14 @@ def retry_shell(
         )
     except subprocess.TimeoutExpired:
         if retries == 0:
+            # NB: the "Command took >Nmin, returning 124" prefix is load
+            # bearing -- the CI log classifier matches on it, so only ever
+            # append here. The label names what timed out, so that timeouts
+            # group per test file on HUD instead of collapsing into a single
+            # fleet-wide bucket (which makes an uptick in one file invisible).
             print(
-                f"Command took >{timeout // 60}min, returning 124",
+                f"Command took >{timeout // 60}min, returning 124"
+                + (f" ({label})" if label else ""),
                 file=stdout,
                 flush=True,
             )
@@ -1282,6 +1289,7 @@ def retry_shell(
         timeout=timeout,
         retries=retries - 1,
         was_rerun=True,
+        label=label,
     )
 
 
@@ -4009,15 +4017,16 @@ class TestCase(expecttest.TestCase):
 
         # Graph canonicalization is off by default in fbcode (justknob), but the
         # expecttest goldens in this repo assume canonical node names, so force it
-        # on for tests. Only checked when Dynamo is already imported: if it is
-        # not, nothing in this test can compile a graph, and importing it here
-        # would add ~1.4s to every test process.
-        if 'torch._dynamo' in sys.modules:
-            canonicalize = torch._dynamo.config.patch(
-                canonicalize_output_graph_node_order=True
-            )
-            canonicalize.__enter__()
-            self.addCleanup(canonicalize.__exit__, None, None, None)
+        # on for tests. Dynamo is already imported by this point regardless of what
+        # the test module imports, because _run_custom calls
+        # torch.compiler.set_stance() before setUp, so this costs no extra import.
+        # Note this is a ContextVar-backed patch: a test that compiles on another
+        # thread (e.g. MultiThreadedTestCase) sees the unpatched value.
+        canonicalize = torch._dynamo.config.patch(
+            canonicalize_output_graph_node_order=True
+        )
+        canonicalize.__enter__()
+        self.addCleanup(canonicalize.__exit__, None, None, None)
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
