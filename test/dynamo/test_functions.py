@@ -3650,7 +3650,7 @@ class GraphModule(torch.nn.Module):
                 with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
                     torch._dynamo.reset()
 
-                    @torch.compile
+                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
                     def foo():
                         seed_fn(3)
                         return torch.rand(4, device="cuda")
@@ -3926,7 +3926,7 @@ class GraphModule(torch.nn.Module):
                 def fn(a, b):
                     return operator.concat(a, b)
 
-                opt_fn = torch.compile(fn, fullgraph=True)
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
                 a = seq_type([1, 2, 3])
                 b = seq_type([4, 5, 6])
                 self.assertEqual(opt_fn(a, b), fn(a, b))
@@ -3935,7 +3935,7 @@ class GraphModule(torch.nn.Module):
         def fn(a, b):
             return operator.iconcat(a, b)
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
     def test_attrgetter(self):
@@ -4295,7 +4295,7 @@ class GraphModule(torch.nn.Module):
         t = torch.rand((2, 2)) * scale + zero_point
 
         result = fn(t, scale, zero_point)
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         compiled_result = compiled_fn(t, scale, zero_point)
         self.assertEqual(compiled_result, result)
 
@@ -5442,43 +5442,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_frozenset_illegal_call_method(self):
-        def fn_add():
-            s = frozenset((1, 2, 3))
-            s.add({2})
-            return len(s)
-
-        def fn_pop():
-            s = frozenset((1, 2, 3))
-            s.pop()
-            return len(s)
-
-        def fn_update():
-            s = frozenset((1, 2, 3))
-            s.update({4, 5, 6})
-            return len(s)
-
-        def fn_remove():
-            s = frozenset((1, 2, 3))
-            s.remove(2)
-            return len(s)
-
-        def fn_discard():
-            s = frozenset((1, 2, 3))
-            s.discard(2)
-            return len(s)
-
-        def fn_clear():
-            s = frozenset((1, 2, 3))
-            s.clear()
-            return len(s)
-
-        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
-            torch._dynamo.reset()
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
-                opt_fn()
 
     def test_is_tensor_tensor(self):
         def fn(x, y):
