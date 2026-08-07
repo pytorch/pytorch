@@ -1000,10 +1000,10 @@ class TestOperators(TestCase):
         self._test_reduction_equality(device, dtype, op, layout)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(TestOperators, globals(), only_for=only_for, allow_xpu=True)
 
-instantiate_device_type_tests(TestBasics, globals(), only_for=only_for)
+instantiate_device_type_tests(TestBasics, globals(), only_for=only_for, allow_xpu=True)
 instantiate_parametrized_tests(TestUnary)
 instantiate_parametrized_tests(TestBinary)
 instantiate_parametrized_tests(TestReductions)
