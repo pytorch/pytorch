@@ -8,8 +8,8 @@
 #include <cstring>
 #include <limits>
 
+#include <ATen/ops/empty.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/safe_numerics.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
@@ -37,55 +37,45 @@ void WindowNCCL::exchangePeerMetadata(
     size_t local_offset,
     size_t local_size,
     at::ScalarType local_dtype) {
-  const auto registration_id =
-      pg_->window_registration_counter_.fetch_add(1, std::memory_order_relaxed);
-  const auto prefix = c10::str(
-      "nccl2_window/",
-      pg_->name_,
-      "/",
-      pg_->reconfigure_uuid_,
-      "/",
-      registration_id,
-      "/");
-  std::vector<std::string> keys;
-  keys.reserve(static_cast<size_t>(pg_->getSize()));
-  for (int rank = 0; rank < pg_->getSize(); ++rank) {
-    keys.push_back(c10::str(prefix, rank));
-  }
-
-  const std::array<uint64_t, 3> local_metadata = {
+  const std::array<uint64_t, 3> metadata = {
       static_cast<uint64_t>(local_offset),
       static_cast<uint64_t>(local_size),
       static_cast<uint64_t>(local_dtype)};
-  const auto* metadata_begin =
-      reinterpret_cast<const uint8_t*>(local_metadata.data());
-  pg_->store_->set(
-      keys[static_cast<size_t>(pg_->getRank())],
-      std::vector<uint8_t>(
-          metadata_begin, metadata_begin + sizeof(local_metadata)));
-  pg_->store_->wait(keys, pg_->options_c10d_->timeout);
+  auto local_metadata = at::empty({3}, at::TensorOptions().dtype(at::kLong));
+  std::memcpy(local_metadata.data_ptr(), metadata.data(), sizeof(metadata));
+  local_metadata = local_metadata.to(pg_->getDevice());
+  auto gathered_metadata = at::empty(
+      {pg_->getSize(), local_metadata.numel()}, local_metadata.options());
+  ::c10d::AllgatherOptions opts;
+  opts.asyncOp = false;
+  opts.timeout = pg_->options_c10d_->timeout;
+  pg_->_allgather_base(gathered_metadata, local_metadata, opts)
+      ->wait(opts.timeout);
+  const auto gathered_metadata_cpu = gathered_metadata.cpu();
+  const auto* gathered_data = gathered_metadata_cpu.const_data_ptr<int64_t>();
 
   std::vector<size_t> peer_offsets;
   std::vector<size_t> peer_sizes;
   std::vector<at::ScalarType> peer_dtypes;
-  peer_offsets.reserve(keys.size());
-  peer_sizes.reserve(keys.size());
-  peer_dtypes.reserve(keys.size());
-  for (const auto& key : keys) {
-    const auto encoded = pg_->store_->get(key);
+  const auto world_size = static_cast<size_t>(pg_->getSize());
+  peer_offsets.reserve(world_size);
+  peer_sizes.reserve(world_size);
+  peer_dtypes.reserve(world_size);
+  for (const auto rank : c10::irange(world_size)) {
+    std::array<uint64_t, 3> peer_metadata{};
+    std::memcpy(
+        peer_metadata.data(),
+        gathered_data + rank * peer_metadata.size(),
+        sizeof(peer_metadata));
     TORCH_CHECK(
-        encoded.size() == sizeof(local_metadata),
-        "WindowNCCL: invalid peer window metadata size");
-    std::array<uint64_t, 3> metadata{};
-    std::memcpy(metadata.data(), encoded.data(), encoded.size());
-    TORCH_CHECK(
-        metadata[0] <= std::numeric_limits<size_t>::max() &&
-            metadata[1] <= std::numeric_limits<size_t>::max() &&
-            metadata[2] < static_cast<uint64_t>(at::ScalarType::NumOptions),
+        peer_metadata[0] <= std::numeric_limits<size_t>::max() &&
+            peer_metadata[1] <= std::numeric_limits<size_t>::max() &&
+            peer_metadata[2] <
+                static_cast<uint64_t>(at::ScalarType::NumOptions),
         "WindowNCCL: invalid peer window metadata");
-    peer_offsets.push_back(static_cast<size_t>(metadata[0]));
-    peer_sizes.push_back(static_cast<size_t>(metadata[1]));
-    peer_dtypes.push_back(static_cast<at::ScalarType>(metadata[2]));
+    peer_offsets.push_back(static_cast<size_t>(peer_metadata[0]));
+    peer_sizes.push_back(static_cast<size_t>(peer_metadata[1]));
+    peer_dtypes.push_back(static_cast<at::ScalarType>(peer_metadata[2]));
   }
   peer_win_offsets_ = std::move(peer_offsets);
   peer_win_sizes_ = std::move(peer_sizes);
