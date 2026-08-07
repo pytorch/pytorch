@@ -31,7 +31,7 @@ Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
 Make tests robust by making collectives interruptible.
-We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
+We need some synchronization around cleanup to ensure that timed out ranks don't cause spurious failures.
 
 """
 
@@ -83,7 +83,7 @@ _reduce_ops = {
 # actually update any view metadata if you do differentiation.  This
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
-# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# someone tries to touch the grad_fn of a Tensor.  There are a few ways to
 # fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
@@ -545,7 +545,9 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
+dist.Backend.register_backend(
+    "threaded", _create_threaded_pg, devices=["cpu", "cuda", "xpu"]
+)
 
 
 @dataclass
