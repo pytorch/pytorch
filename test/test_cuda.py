@@ -5797,9 +5797,7 @@ exit(2)
                 )
                 conditional_primary_temporary.fill_(1.0)
                 conditional_primary_sink.add_(conditional_primary_temporary[0])
-                conditional_primary_pointer = (
-                    conditional_primary_temporary.data_ptr()
-                )
+                conditional_primary_pointer = conditional_primary_temporary.data_ptr()
                 del conditional_primary_temporary
 
                 with torch.cuda.stream(auxiliary_stream):
