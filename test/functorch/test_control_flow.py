@@ -10350,13 +10350,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
         )
         self.assertEqual(out, exp)
-        # Only generic mode is compile-checked here. Generic never builds a HOP
-        # (it lowers to the pure-Python scan recursion), so vmap composes with
-        # compile cleanly. pointwise + vmap + compile is unsupported: Inductor's
-        # associative_scan pointwise lowering assumes a flat combine graph with
-        # 2 * len(xs) inputs and cannot handle the batched combine subgraph that
-        # vmap produces. See test_associative_scan_in_vmap_pointwise_compile_xfail.
-        # The pointwise vmap tests below skip compile for the same reason.
+        # Only generic mode is compile-checked on CPU. pointwise scan lowers
+        # only on a Triton backend (BackendFeature.SCAN), so pointwise + compile
+        # is CUDA-only and covered by the @requires_cuda tests below (e.g.
+        # test_associative_scan_in_vmap_pointwise_compile). generic never builds
+        # a HOP (it lowers to the pure-Python scan recursion), so it composes
+        # with compile on any device.
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
@@ -10498,8 +10497,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x), x)
 
     @requires_cuda
-    @unittest.expectedFailure
-    def test_associative_scan_in_vmap_pointwise_compile_xfail(self):
+    def test_associative_scan_in_vmap_pointwise_compile(self):
         x = torch.randn(3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
@@ -10513,6 +10511,102 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
 
         exp = torch.stack(
             [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(torch.compile(fn)(x), exp)
+
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_mul(self):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a * b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(torch.compile(fn)(x), exp)
+
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_pytree(self):
+        xs = {
+            "a": torch.randn(3, 5, 2, device="cuda"),
+            "b": torch.randn(3, 5, 2, device="cuda"),
+        }
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["b"]}
+
+        def fn(a, b):
+            def inner_fn(a, b):
+                return associative_scan(
+                    combine_fn, {"a": a, "b": b}, dim=0, combine_mode="pointwise"
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(a, b)
+
+        exp = {
+            k: torch.stack(
+                [
+                    _fake_associative_scan(
+                        combine_fn, {"a": xs["a"][i], "b": xs["b"][i]}, dim=0
+                    )[k]
+                    for i in range(xs["a"].shape[0])
+                ]
+            )
+            for k in ("a", "b")
+        }
+        self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
+
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_nonzero_in_dims(self):
+        x = torch.randn(4, 3, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=1)(x)
+
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[:, i], dim=0)
+                for i in range(x.shape[1])
+            ]
+        )
+        self.assertEqual(torch.compile(fn)(x), exp)
+
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_nested(self):
+        x = torch.randn(2, 3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(torch.vmap(inner_fn, in_dims=0), in_dims=0)(x)
+
+        exp = torch.stack(
+            [
+                torch.stack(
+                    [
+                        _fake_associative_scan(combine_fn, x[i, j], dim=0)
+                        for j in range(x.shape[1])
+                    ]
+                )
+                for i in range(x.shape[0])
+            ]
         )
         self.assertEqual(torch.compile(fn)(x), exp)
 
