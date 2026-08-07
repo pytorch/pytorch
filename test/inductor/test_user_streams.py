@@ -1872,6 +1872,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(32, 32, device="cuda")
         w1 = torch.randn(32, 32, device="cuda")
         w2 = torch.randn(32, 32, device="cuda")
+        # fn reads these on a side stream that is not ordered after the default
+        # stream, so they have to be materialized before it is called.
+        torch.cuda.synchronize()
         expected = fn(x, w1, w2)
         result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
         self.assertEqual(result, expected)
@@ -1921,6 +1924,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(32, 32, device="cuda")
         w1 = torch.randn(32, 32, device="cuda")
         w2 = torch.randn(32, 32, device="cuda")
+        # fn reads these on a side stream that is not ordered after the default
+        # stream, so they have to be materialized before it is called.
+        torch.cuda.synchronize()
         expected = fn(x, w1, w2)
         result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
         self.assertEqual(result, expected)
