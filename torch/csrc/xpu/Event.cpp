@@ -168,7 +168,9 @@ static PyObject* THXPEvent_from_ipc_handle(
       device.type())
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
-  TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
+  if (!ptr) {
+    return nullptr;
+  }
 
   THXPEvent* self = (THXPEvent*)ptr.get();
 
