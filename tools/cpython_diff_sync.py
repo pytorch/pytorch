@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CPYTHON_DIR = REPO_ROOT / "test" / "cpython" / "v3_13"
 
 URL_RE = re.compile(
-    r"https://raw\.githubusercontent\.com/python/cpython/refs/tags/"
+    r"https://raw\.githubusercontent\.com/python/cpython/refs/tags/"  # @lint-ignore
     r"(v[\d.]+)/(Lib/test/\S+\.py)"
 )
 INDEX_RE = re.compile(r"^index ([0-9a-f]+)\.\.([0-9a-f]+)(?:\s+\d+)?$", re.MULTILINE)
@@ -99,10 +99,9 @@ def parse_header(py_path: Path) -> tuple[str, str]:
 
 
 def upstream_raw_url(tag: str, upstream_rel: str) -> str:
-    return (
-        f"https://raw.githubusercontent.com/python/cpython/refs/tags/"
-        f"{tag}/{upstream_rel}"
-    )
+    # Keep {tag} in the same literal so lint_urls does not treat a truncated
+    # https://.../tags/ prefix as a fetchable URL.
+    return f"https://raw.githubusercontent.com/python/cpython/refs/tags/{tag}/{upstream_rel}"
 
 
 def pristine_download_hint(tag: str, upstream_rel: str) -> str:
