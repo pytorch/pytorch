@@ -280,11 +280,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
         pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-    return std::make_tuple(output, hy_, cy_, workspace);
+    return std::make_tuple(
+        std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
     ideep::lstm_forward_inference::compute(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
-    return std::make_tuple(output, hy_, cy_, Tensor());
+    return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
 }
 

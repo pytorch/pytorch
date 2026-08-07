@@ -86,7 +86,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=None,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, param_dtype)
@@ -119,8 +119,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 elif predivide_factor is None:
                     param.grad.div_(self.world_size)
                 output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
-                dist.reduce_scatter_tensor(output, param.grad)
-                dist.all_gather_into_tensor(param.grad, output)
+                dist.reduce_scatter_single(output, param.grad)
+                dist.all_gather_single(param.grad, output)
                 if postdivide_factor is not None and postdivide_factor > 1:
                     param.grad.div_(postdivide_factor)
             for param_fp32, param_bf16 in zip(
@@ -267,8 +267,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 (z, t, r),
                 (v, torch.ones_like(t), torch.zeros_like(r)),
             )
-            self.assertEqual(fsdp_out, ref_out, msg=f"iter {iter_idx}")
-            self.assertEqual(fsdp_tangent, ref_tangent, msg=f"iter {iter_idx}")
+            self.assertEqual(
+                fsdp_out, ref_out, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
+            self.assertEqual(
+                fsdp_tangent, ref_tangent, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
 
             fsdp_target = v - (t - r) * fsdp_tangent
             ref_target = v - (t - r) * ref_tangent
@@ -278,7 +282,9 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             # the JVP tangent output, not only through the primal output.
             fsdp_loss = fsdp_loss + fsdp_tangent.square().mean()
             ref_loss = ref_loss + ref_tangent.square().mean()
-            self.assertEqual(fsdp_loss, ref_loss, msg=f"iter {iter_idx}")
+            self.assertEqual(
+                fsdp_loss, ref_loss, msg=lambda msg: f"{msg}\niter {iter_idx}"
+            )
 
             fsdp_loss.backward()
             optim.step()
@@ -302,7 +308,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=reduce_dtype,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -349,7 +355,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=reduce_dtype,
         )
         group = dist.distributed_c10d._get_default_group()
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -374,10 +380,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 # Use reduce-scatter -> all-gather to implement all-reduce
                 # since for world size >2, bf16 all-reduce and reduce-scatter
                 # have numeric differences
-                sharded_grad = funcol.reduce_scatter_tensor(
+                sharded_grad = funcol.reduce_scatter_single(
                     param_grad, scatter_dim=0, reduceOp="avg", group=group
                 )  # bf16 reduction
-                param.grad = funcol.all_gather_tensor(
+                param.grad = funcol.all_gather_single(
                     sharded_grad, gather_dim=0, group=group
                 ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
@@ -414,7 +420,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             replicate(mlp, mp_policy=mp_policy)
         replicate(model, mp_policy=mp_policy)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -671,7 +677,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         # Check that the reduce-scatter runs in bf16 even after we change the
         # model from bf16 to fp32
         model.to(torch.float32)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, torch.bfloat16)
