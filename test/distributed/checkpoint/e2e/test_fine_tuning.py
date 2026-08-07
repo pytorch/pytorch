@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -192,7 +192,7 @@ class TestFineTuning(DTensorTestBase):
                 storage_writer=dist_cp.FileSystemWriter(finetune_dir),
             )
 
-    @requires_world_size(4)
+    @skip_if_lt_x_gpu(4)
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,

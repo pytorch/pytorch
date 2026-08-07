@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
-    requires_world_size,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -44,7 +44,7 @@ class TestSaveAndLoadAPIAccelerator(DTensorTestBase):
         return 2
 
     @with_comms
-    @requires_world_size(2)
+    @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
         Capability.distributed.dtensor,
