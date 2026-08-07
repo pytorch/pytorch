@@ -138,6 +138,17 @@ void THCPGraph_init(PyObject* module) {
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
       .def(
+          "_begin_capture_to_if_node_with_memory_reuse",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::
+                  begin_capture_to_if_node_with_memory_reuse),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "_end_capture_to_conditional_node_with_memory_reuse",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::
+                  end_capture_to_conditional_node_with_memory_reuse))
+      .def(
           "set_conditional_handle_for_current_node",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::set_conditional_handle_for_current_node),
