@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "use_torchcomms", "pipeline_per_direction_p2p"]
+__all__ = [
+    "compile_on_one_rank",
+    "dtensor_use_symmetric_memory",
+    "pipeline_per_direction_p2p",
+    "use_torchcomms",
+]
 
 # Deprecated alias. The canonical flag now lives in torch.compiler.config -- it is read
 # across the compiler stack (make_fx, inductor) not just by distributed. Kept here for
@@ -26,6 +31,14 @@ compile_on_one_rank: bool = Config(
 use_torchcomms: bool = Config(
     default=False,
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
+)
+
+# When enabled, DTensor construction APIs allocate eligible CUDA local tensors
+# from SymmetricMemory. This is intended for one-sided communication algorithms
+# that need DTensor local shards to be remotely addressable.
+dtensor_use_symmetric_memory: bool = Config(
+    default=False,
+    env_name_default="TORCH_DTENSOR_USE_SYMMETRIC_MEMORY",
 )
 
 # When enabled, pipeline stages carry downstream (r -> r+1, forward activations)
