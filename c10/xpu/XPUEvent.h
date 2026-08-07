@@ -239,8 +239,8 @@ struct XPUEvent {
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
           syclex::properties{
-              syclex::enable_profiling{enable_timing_},
-              syclex::enable_ipc{enable_ipc_}}));
+              syclex::enable_ipc{enable_ipc_},
+              syclex::enable_profiling{enable_timing_}}));
     }
 #else
     TORCH_CHECK(
