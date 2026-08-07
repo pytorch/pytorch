@@ -772,10 +772,7 @@ void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
     // for interval-based signpost tracing, we begin the interval here to be able
     // to measure the time it takes to compile the graphs (if graph newly created),
     // and also the time potentially spent on gather/scatter of graph's input tensors
-    //
-    // No MPSStream is available at this cache-lookup call site, so fall back to
-    // the default stream.
-    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true, nullptr);
+    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true, getCurrentMPSStream());
   }
 }
 
