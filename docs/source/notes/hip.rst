@@ -179,8 +179,9 @@ Enabling kernel asserts
 -----------------------
 
 Kernel asserts are **enabled by default** on ROCm builds. When enabled,
-device-side assert failures are reported through the OCKL device printf path,
-which adds compile-time and runtime overhead even when asserts never fire.
+device-side assert failures are reported through the OCKL device printf path.
+That path increases register pressure (VGPR/SGPR) in kernels that emit assert
+branches, which can reduce occupancy even when asserts never fire.
 
 To disable them when building from source, set the environment variable or
 CMake option::
