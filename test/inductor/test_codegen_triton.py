@@ -413,6 +413,50 @@ def helper(x):
         self.assertIs(expected, actual)
         self.assertFalse(indexing.call_args.kwargs["reduction_invariant_indexing"])
 
+    def test_reduction_invariant_indexing_consumers(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+
+        for device_type, expected_shape in (
+            ("cuda", ("XBLOCK", "1")),
+            ("cpu", ("XBLOCK", "R0_BLOCK")),
+        ):
+            with self.subTest(device_type=device_type):
+                kernel = TritonKernel(
+                    {"x": xnumel, "r0_": rnumel},
+                    features=SIMDKernelFeatures([], xnumel, rnumel),
+                    override_persistent_reduction=False,
+                    override_cooperative_reduction=False,
+                )
+                scalar_mask = TritonCSEVariable(
+                    "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+                )
+
+                with (
+                    V.set_kernel_handler(kernel),
+                    patch.object(kernel, "_load_mask", scalar_mask),
+                    patch.object(
+                        self._graph,
+                        "get_current_device_or_throw",
+                        return_value=torch.device(device_type),
+                    ),
+                ):
+                    x_index = kernel.range_trees[0].full_range().symbol()
+                    value = TritonKernelOverrides.index_expr(x_index, torch.int64)
+                    with patch.object(
+                        kernel,
+                        "indirect_assert",
+                        wraps=kernel.indirect_assert,
+                    ) as indirect_assert:
+                        kernel.check_bounds(x_index, xnumel, lower=True, upper=True)
+
+                self.assertEqual(expected_shape, tuple(map(str, value.shape or ())))
+                checked_index = indirect_assert.call_args.args[0]
+                self.assertIn(
+                    "[" + ", ".join(expected_shape) + "]",
+                    checked_index,
+                )
+
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
         from torch._inductor.utils import (
