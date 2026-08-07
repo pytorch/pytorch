@@ -10,8 +10,8 @@ import inspect
 import logging
 import operator
 import os
-import random
 import re
+import secrets
 import tempfile
 from collections.abc import Callable
 from enum import Enum
@@ -1088,7 +1088,7 @@ class AllocateLine(MemoryPlanningLine):
                 f"{dtype}, "
                 f'torch.device("cuda:{device.index}"), '
                 f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
+                f"alloc_id={secrets.randbits(64)})"
             )
         else:
             raise NotImplementedError(
