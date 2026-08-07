@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import skipIfXpu
@@ -339,6 +340,162 @@ class TestLayoutOptim(TestCase):
 
         ref = model(x, targets)
         self.assertTrue(torch.allclose(ref, loss))
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_decide_layout_opt_backward_graph(self):
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            grad = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
+            inp = torch.empty(1, 64, 32, 32, device=GPU_TYPE)
+            weight = torch.empty(128, 64, 3, 3, device=GPU_TYPE)
+            a = g.placeholder("grad_output")
+            a.meta["val"] = grad
+            b = g.placeholder("input")
+            b.meta["val"] = inp
+            c = g.placeholder("weight")
+            c.meta["val"] = weight
+
+            conv_backward = g.call_function(
+                torch.ops.aten.convolution_backward.default,
+                (
+                    a,
+                    b,
+                    c,
+                    None,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, True],
+                ),
+            )
+            g.output((conv_backward,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertTrue(
+            result,
+            "decide_layout_opt should return True for backward graphs "
+            "with convolution_backward nodes",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_decide_layout_opt_backward_grouped_conv(self):
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            grad = torch.empty(1, 224, 32, 32, device=GPU_TYPE)
+            inp = torch.empty(1, 112, 32, 32, device=GPU_TYPE)
+            weight = torch.empty(224, 112, 3, 3, device=GPU_TYPE)
+            a = g.placeholder("grad_output")
+            a.meta["val"] = grad
+            b = g.placeholder("input")
+            b.meta["val"] = inp
+            c = g.placeholder("weight")
+            c.meta["val"] = weight
+
+            conv_backward = g.call_function(
+                torch.ops.aten.convolution_backward.default,
+                (
+                    a,
+                    b,
+                    c,
+                    None,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    2,
+                    [True, True, True],
+                ),
+            )
+            g.output((conv_backward,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertFalse(
+            result,
+            "decide_layout_opt should return False for grouped backward "
+            "conv with in_channels > 1",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    def test_decide_layout_opt_forward_graph(self):
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            x = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
+            w = torch.empty(256, 128, 3, 3, device=GPU_TYPE)
+            bias = torch.empty(256, device=GPU_TYPE)
+            a = g.placeholder("x")
+            a.meta["val"] = x
+            w_node = g.placeholder("w")
+            w_node.meta["val"] = w
+            b = g.placeholder("bias")
+            b.meta["val"] = bias
+
+            conv = g.call_function(
+                torch.ops.aten.convolution.default,
+                (
+                    a,
+                    w_node,
+                    b,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                ),
+            )
+            g.output((conv,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertTrue(
+            result,
+            "decide_layout_opt should return True for forward graphs "
+            "with convolution.default nodes",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    def test_decide_layout_opt_no_conv_graph(self):
+        g = torch.fx.Graph()
+        a = g.placeholder("x")
+        a.meta["val"] = torch.empty(1, 1, device=GPU_TYPE)
+
+        mm = g.call_function(
+            torch.ops.aten.mm.default,
+            (a, a),
+        )
+        g.output((mm,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertFalse(
+            result,
+            "decide_layout_opt should return False for graphs without conv nodes",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    def test_backward_conv_channels_last_count(self):
+        conv = nn.Conv2d(64, 128, 3, padding=1, device=GPU_TYPE)
+        x = torch.randn(2, 64, 32, 32, device=GPU_TYPE, requires_grad=True)
+
+        ref = conv(x)
+        ref.sum().backward()
+        ref_grad = x.grad.clone()  # type: ignore[union-attr]
+
+        x.grad = None
+        compiled = torch.compile(conv, backend="inductor", fullgraph=True)
+        out = compiled(x)
+        out.sum().backward()
+
+        self.assertEqual(ref, out)
+        self.assertTrue(torch.allclose(ref_grad, x.grad, atol=1e-4, rtol=1e-4))  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
