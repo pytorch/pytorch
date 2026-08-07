@@ -159,10 +159,23 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     // If pool was created by another graph's capture_begin, first should be nonzero.
     // If pool was created by graph_pool_handle, second should be nonzero.
     TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
+  }
+#if !defined(USE_ROCM)
+  if (pool.second != 0 &&
+      c10::cuda::CUDACachingAllocator::name() == "cudaMallocAsync") {
+    TORCH_WARN_ONCE(
+        "CUDA graph capture ignores a user-created memory pool with "
+        "backend:cudaMallocAsync; CUDA manages captured graph memory through "
+        "the default async pool.");
+    pool = {0, 0};
+  }
+#endif
+  if (pool.first != 0 || pool.second != 0) {
     mempool_id_ = pool;
   } else {
-    // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
-    // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
+    // No supported pool was supplied. Create graph pool handle using
+    // is_user_created=false. Sets just the first value, to distinguish it from
+    // MempoolId_ts created by graph_pool_handle().
     mempool_id_ = at::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
