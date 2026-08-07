@@ -139,9 +139,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
                 return super().call_function(target, args, kwargs)
 
             if self.scalar_view_identity and target in _SCALAR_IDENTITY_VIEW_OPS:
-                # Per-lane inputs are 0-d scalars, so a layout-only op is the
-                # identity. vmap batching wraps the elementwise combine core in
-                # permutes that carry no per-lane computation; drop them.
+                # layout-only op on a 0-d scalar lane; see _SCALAR_IDENTITY_VIEW_OPS
                 return args[0]
 
             # These takes precedence over the main lowerings

@@ -10,7 +10,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
