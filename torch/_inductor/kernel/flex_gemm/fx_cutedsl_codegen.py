@@ -63,6 +63,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
 from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionPlan,
     iter_fx_node_inputs,
+    NormalizedDtypeView,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
     NormalizedReduction,
@@ -94,9 +95,10 @@ FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputPlan(_epilogue_analysis.GemmOutputPlan):
-    """Extend the shared GEMM output plan with an output contraction."""
+    """Extend output planning with contraction and terminal storage metadata."""
 
     output_contraction: FlexGemmOutputContraction | None = None
+    output_storage: torch.fx.Node | None = None
 
 
 FlexGemmCuteDSLKernel = GemmEpilogueCuteDSLKernel
@@ -209,6 +211,29 @@ def output_plan(
         feed_main_plan.aux_outputs,
         feed_main_plan.local_reduce,
     )
+
+
+def bind_terminal_output_storage(
+    graph: FlexGemmEpilogueGraph, outputs: FlexGemmOutputPlan
+) -> FlexGemmOutputPlan:
+    """Record the physical value beneath a terminal same-width dtype view."""
+    normalized = graph.normalized_nodes.get(outputs.output)
+    if not isinstance(normalized, NormalizedDtypeView):
+        return outputs
+    source_meta = normalized.source.meta.get("val")
+    output_meta = outputs.output.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or normalized.dtype is not output_meta.dtype
+        or source_meta.dtype.itemsize != output_meta.dtype.itemsize
+        or not statically_known_shape_equal(source_meta.shape, output_meta.shape)
+        or not statically_known_shape_equal(source_meta.stride(), output_meta.stride())
+    ):
+        raise NotImplementedError(
+            "FlexGEMM terminal dtype views must preserve shape, stride, and element size"
+        )
+    return dataclasses.replace(outputs, output_storage=normalized.source)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -473,7 +498,9 @@ class FlexGemmEpilogueAnalysis:
     ) -> "FlexGemmEpilogueAnalysis":
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
-        outputs = output_plan(graph_module, local_reduce)
+        outputs = bind_terminal_output_storage(
+            local_reduce.graph, output_plan(graph_module, local_reduce)
+        )
         contraction_plan = build_output_contraction_plan(
             outputs.output, gemm, local_reduce
         )
@@ -796,6 +823,16 @@ class FlexGemmEpilogueEmitter:
             return
         normalized = self.graph.normalized_nodes.get(node)
         match normalized:
+            case NormalizedDtypeView():
+                if (
+                    node is not self.outputs.output
+                    or normalized.source is not self.outputs.output_storage
+                ):
+                    raise NotImplementedError(
+                        "FlexGEMM supports dtype views only as terminal same-width main outputs"
+                    )
+                self.env[node] = _cute_arg(normalized.source, self.env)
+                return
             case NormalizedSqueeze():
                 lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
                 if lowered is not None:

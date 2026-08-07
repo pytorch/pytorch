@@ -15,7 +15,7 @@ from unittest import mock
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops import flex_gemm
-from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
+from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES, nvfp4_pack
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.exc import InductorError
 from torch._inductor.ops_handler import ReductionType
@@ -24,6 +24,7 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, SM120OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, pack_uint4
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -486,6 +487,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         from torch._inductor.kernel.gemm_epilogue import (
             GemmEpilogueGraph,
+            NormalizedDtypeView,
             NormalizedGetItem,
             NormalizedReduction,
             NormalizedSqueeze,
@@ -498,7 +500,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             grouped = x.view(4, 2, 4)
             reduced = grouped.sum(dim=-1, keepdim=True)
             maximum = torch.max(grouped, dim=-1).values
-            return reduced.squeeze(-1), maximum, grouped.var(dim=-1)
+            return (
+                reduced.squeeze(-1),
+                maximum,
+                grouped.var(dim=-1),
+                x.view(torch.int32),
+            )
 
         graph_module = make_fx(body)(torch.randn(4, 8))
         normalized_nodes = GemmEpilogueGraph.from_nodes(
@@ -522,6 +529,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         squeeze = nodes[torch.ops.aten.squeeze.dim]
         unsupported = nodes[torch.ops.aten.var.correction]
+        dtype_view = nodes[torch.ops.aten.view.dtype]
         self.assertEqual(normalized_nodes[view], NormalizedView(placeholder, (4, 2, 4)))
         self.assertEqual(
             normalized_nodes[reduction],
@@ -529,6 +537,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(normalized_nodes[squeeze], NormalizedSqueeze(reduction))
         self.assertEqual(normalized_nodes[getitem], NormalizedGetItem(maximum, 0))
+        self.assertEqual(
+            normalized_nodes[dtype_view], NormalizedDtypeView(placeholder, torch.int32)
+        )
         self.assertEqual(
             normalized_nodes[unsupported],
             NormalizedUnsupportedReduction(
@@ -4618,6 +4629,50 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "single physical local reduction"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    def test_nvfp4_pack_matches_reference(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        boundaries = torch.tensor(
+            [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0], dtype=torch.float32
+        )
+        lower = torch.nextafter(boundaries, torch.full_like(boundaries, -torch.inf))
+        upper = torch.nextafter(boundaries, torch.full_like(boundaries, torch.inf))
+        smallest = torch.nextafter(torch.tensor(0.0), torch.tensor(1.0))
+        special = torch.tensor(
+            [
+                -torch.finfo(torch.float32).max,
+                -torch.finfo(torch.float32).tiny,
+                -smallest,
+                -0.0,
+                0.0,
+                smallest,
+                torch.finfo(torch.float32).tiny,
+                torch.finfo(torch.float32).max,
+                -torch.inf,
+                torch.inf,
+            ]
+        )
+        random = torch.empty(4096).uniform_(
+            -8.0, 8.0, generator=torch.Generator().manual_seed(0)
+        )
+        values = torch.cat(
+            (-upper, -boundaries, -lower, special, lower, boundaries, upper, random)
+        ).view(-1, 2)
+        inputs = (values, values[:8].view(2, 4, 2).permute(1, 0, 2))
+        for input in inputs:
+            with self.subTest(stride=input.stride()):
+                expected = pack_uint4(_f32_to_floatx_unpacked(input, 2, 1)).squeeze(-1)
+                actual = nvfp4_pack(input)
+                self.assertIs(actual.dtype, torch.float4_e2m1fn_x2)
+                self.assertTrue(actual.is_contiguous())
+                self.assertEqual(actual.view(torch.uint8), expected)
+
+                with FakeTensorMode() as mode:
+                    fake = nvfp4_pack(mode.from_tensor(input))
+                self.assertIs(fake.dtype, torch.float4_e2m1fn_x2)
+                self.assertEqual(fake.shape, actual.shape)
+                self.assertEqual(fake.stride(), actual.stride())
+
     def test_quant_scale_fake_strides_match_eager(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -7763,6 +7818,63 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lambda acc: acc.relu(),
                 kernel_options={"backend": "CUTLASS"},
             )
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmNVFP4Device(FlexGemmTestCase):
+    @unittest.skipIf(SM120OrLater, "output contractions are not supported on SM120")
+    @parametrize("tuned", (False, True))
+    def test_mm_nvfp4_pack_matches_reference(self, device, tuned):
+        m = n = 128
+        k = 64
+        boundaries = torch.tensor(
+            [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0],
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        lower = torch.nextafter(boundaries, torch.full_like(boundaries, float("-inf")))
+        upper = torch.nextafter(boundaries, torch.full_like(boundaries, float("inf")))
+        values = torch.cat(
+            (
+                -upper,
+                -boundaries,
+                -lower,
+                torch.tensor(
+                    [float("-inf"), -0.0, 0.0, float("inf")],
+                    device=device,
+                    dtype=torch.bfloat16,
+                ),
+                lower,
+                boundaries,
+                upper,
+            )
+        ).repeat(4)[:n]
+        a = torch.zeros(m, k, device=device, dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device=device, dtype=torch.bfloat16)
+        a[:, 0] = 1
+        b[0] = values
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: nvfp4_pack(acc.float().view(m, -1, 2)),
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = nvfp4_pack((a @ b).float().view(m, -1, 2))
+        self.assertIs(actual.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+        FileCheck().check("inline_asm_elementwise_intrinsic").check(
+            "torch.uint8"
+        ).check("aten.view.dtype").check("torch.float4_e2m1fn_x2").run(code)
+
+
+instantiate_device_type_tests(TestFlexGemmNVFP4Device, globals(), only_for="cuda")
 
 
 @skipIfNoCuteDSL
