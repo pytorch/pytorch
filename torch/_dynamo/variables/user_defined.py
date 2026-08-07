@@ -860,14 +860,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # A class defined inside the compiled region (LOAD_BUILD_CLASS) has
             # no source, so a fresh VT is built on every read. Each VT tracks
             # its own contents, so for a mutable attribute that drops mutations
-            # made through an earlier read. In CPython `cls.attr` returns the
+            # made through an earlier read. In CPython cls.attr returns the
             # same object every time, so memoize to match.
-            cached = tx.output.side_effects.get_sourceless_cls_attr(cls_attr)
-            if cached is not None:
-                return cached
-            built = VariableTracker.build(tx, cls_attr, source)
-            tx.output.side_effects.track_sourceless_cls_attr(cls_attr, built)
-            return built
+            return tx.output.side_effects.build_sourceless_cls_attr(tx, cls_attr)
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -3636,12 +3631,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # for a mutable class attribute read through an instance. Only a
             # class built inside the compiled region gets here with no source;
             # one defined outside has a cls_source to key on.
-            cached = tx.output.side_effects.get_sourceless_cls_attr(type_attr)
-            if cached is not None:
-                return cached
-            built = VariableTracker.build(tx, type_attr, source)
-            tx.output.side_effects.track_sourceless_cls_attr(type_attr, built)
-            return built
+            return tx.output.side_effects.build_sourceless_cls_attr(tx, type_attr)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
