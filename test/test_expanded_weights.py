@@ -30,6 +30,7 @@ from torch.testing._internal.common_methods_invocations import op_db, SampleInpu
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     make_tensor,
     parametrize,
     run_tests,
@@ -44,6 +45,8 @@ class TestContext:
 
 
 class TestExpandedWeightHelperFunction(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_forward_helper(self, device):
         input = torch.randn(3, 4, device=device)
         weight = torch.randn(5, 4, device=device)
@@ -225,6 +228,8 @@ class TestExpandedWeightHelperFunction(TestCase):
 
 
 class TestExpandedWeightFunctional(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare_ew_and_for_loop_per_sample_grads(self, op, sample_input, reduction):
         input = sample_input.input
         args = sample_input.args
@@ -380,7 +385,7 @@ class TestExpandedWeightFunctional(TestCase):
                     kwargs=sample_input.kwargs,
                 )
                 if (
-                    device != "cpu"
+                    "cuda" in device
                     and "max_norm" in sample_input.kwargs
                     and "padding_idx" in sample_input.kwargs
                 ):
@@ -645,6 +650,8 @@ _BATCHED_INPUT_MIN_DIM = {
 
 
 class TestExpandedWeightModule(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _do_test(
         self,
         module,
@@ -1019,9 +1026,13 @@ def _get_context_manager_module_inputs(module_info, device, dtype, training):
         if module_input.forward_input is None:
             continue
         args = module_input.forward_input.args
-        if not args or not isinstance(args[0], torch.Tensor):
+        kwargs = module_input.forward_input.kwargs
+        if args and isinstance(args[0], torch.Tensor):
+            input = args[0]
+        elif isinstance(kwargs.get("input"), torch.Tensor):
+            input = kwargs["input"]
+        else:
             continue
-        input = args[0]
         if input.dim() == 0 or input.shape[0] == 0:
             continue
         if module_cls == nn.Linear and input.dim() == 1:
@@ -1037,6 +1048,8 @@ def _get_context_manager_module_inputs(module_info, device, dtype, training):
             .to(device=device, dtype=dtype)
             .train(training)
         )
+        # GroupNormPerSampleGrad: bias=False still expands weight, but forward
+        # only sets ctx.bias for ExpandedWeight while backward always reads it.
         if module_cls == nn.GroupNorm and module.bias is None:
             continue
         yield module, input
