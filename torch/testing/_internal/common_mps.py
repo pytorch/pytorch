@@ -663,16 +663,6 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # Random ops: `test_output_match` / `test_output_grad_match` route
-            # these to a metadata + summary-stats comparator
-            # (`_assert_random_op_match`) since MPS and CPU consume independent
-            # Philox streams. The xfail entries that used to live here are
-            # gone with the comparator; if a new test under
-            # `mps_ops_modifier` needs them, add a per-test skip locally.
-            # `randint(to>1, dtype=bool)` errors at the CPU op itself with
-            # "to - 1 is out of bounds for bool" - not a comparator issue.
-            "randint": [torch.bool],
-            "randint_like": [torch.bool],
             # `nn.functional.dropout` keeps a complex64 entry because the
             # MPS dropout kernel doesn't support complex inputs at all (the
             # shape comparison would fail to even run).
