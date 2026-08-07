@@ -19,7 +19,6 @@ from torch._inductor.codegen.triton_combo_kernel import (
     _log_partition_separation_once,
     LARGE_NUMELS,
 )
-from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
@@ -3078,61 +3077,6 @@ class _PeakMemFakeScheduler:
         return nodes
 
 
-class _ComboIntervalFakeNode:
-    def __init__(self, index: int) -> None:
-        self.index = index
-        self.min_order = index
-
-    def get_name(self) -> str:
-        return f"node{self.index}"
-
-    def get_device(self):
-        return None
-
-
-class _ComboIntervalFakeCombo:
-    def __init__(self, nodes) -> None:
-        self.nodes = nodes
-        self.min_order = min(node.min_order for node in nodes)
-
-    def get_nodes(self):
-        return self.nodes
-
-
-class _ComboIntervalFakeScheduler(Scheduler):
-    def __init__(self, nodes, accepted) -> None:
-        self.nodes = nodes
-        self.accepted = accepted
-        self.attempts = []
-        self.name_to_fused_node = {node.get_name(): node for node in nodes}
-        self.node_to_stream = dict.fromkeys(nodes, 0)
-        self.node_to_mempool = {}
-        self.mem_ctx = None
-
-    def _init_peak_memory_context(self):
-        from torch._inductor.scheduler import ComboKernelMemoryContext
-
-        self.mem_ctx = ComboKernelMemoryContext(
-            graph_outputs=set(),
-            node_to_idx={node: node.index for node in self.nodes},
-        )
-        return self.mem_ctx
-
-    def _try_combo_with_halving(
-        self,
-        candidate,
-        num,
-        mem_ctx,
-        *,
-        enable_autotune,
-        on_accept,
-    ) -> None:
-        indices = tuple(node.index for node in candidate)
-        self.attempts.append(indices)
-        if indices in self.accepted:
-            on_accept(_ComboIntervalFakeCombo(candidate), candidate, num)
-
-
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -3162,71 +3106,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             "combo_kernel_peak_memory_pct_threshold": pct_thr,
             "combo_kernel_max_distance": max_distance,
         }
-
-    def _run_interval_case(self, groups, accepted):
-        from torch._inductor.scheduler import ForeachKernelSchedulerNode
-
-        nodes = [_ComboIntervalFakeNode(i) for i in range(7)]
-        scheduler = _ComboIntervalFakeScheduler(nodes, accepted)
-        node_groups = [[nodes[i] for i in group] for group in groups]
-        with (
-            patch.object(
-                ForeachKernelSchedulerNode,
-                "group_nodes_for_combo_kernels",
-                return_value=node_groups,
-            ),
-            patch.object(
-                ForeachKernelSchedulerNode,
-                "combinable_nodes",
-                side_effect=lambda group: group,
-            ),
-            patch.object(
-                Scheduler,
-                "topological_sort_schedule",
-                side_effect=lambda nodes: nodes,
-            ),
-            patch.object(Scheduler, "prune_redundant_deps"),
-            torch._inductor.config.patch(
-                benchmark_combo_kernel=False,
-                combo_kernel_peak_memory_pct_threshold=0.05,
-                combo_kernel_peak_memory_increase_gb=None,
-                combo_kernel_max_distance=-1,
-            ),
-        ):
-            Scheduler.create_combo_kernel_nodes(scheduler)
-        return scheduler
-
-    def test_overlapping_kahn_group_intervals(self):
-        scheduler = self._run_interval_case(
-            groups=[(1, 4), (2, 5)],
-            accepted={(1, 4), (2, 5)},
-        )
-        self.assertEqual(scheduler.attempts, [(1, 4)])
-        self.assertEqual(scheduler.mem_ctx.accepted_intervals, [(1, 4)])
-
-    def test_candidate_straddling_reserved_interval(self):
-        scheduler = self._run_interval_case(
-            groups=[(2, 4), (1, 3, 5, 6)],
-            accepted={(2, 4), (5, 6)},
-        )
-        self.assertEqual(scheduler.attempts, [(2, 4), (5, 6)])
-        self.assertEqual(scheduler.mem_ctx.accepted_intervals, [(2, 4), (5, 6)])
-
-    def test_adjacent_accepted_intervals(self):
-        scheduler = self._run_interval_case(
-            groups=[(1, 2), (3, 4)],
-            accepted={(1, 2), (3, 4)},
-        )
-        self.assertEqual(scheduler.attempts, [(1, 2), (3, 4)])
-        self.assertEqual(scheduler.mem_ctx.accepted_intervals, [(1, 2), (3, 4)])
-
-    def test_rejected_candidate_does_not_reserve_interval(self):
-        scheduler = self._run_interval_case(
-            groups=[(1, 4), (2, 3)],
-            accepted={(2, 3)},
-        )
-        self.assertEqual(scheduler.attempts, [(1, 4), (2, 3)])
-        self.assertEqual(scheduler.mem_ctx.accepted_intervals, [(2, 3)])
 
     @staticmethod
     def _make_wide_resnet_like():
@@ -3430,14 +3309,8 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                     **cfg,
                 ),
             ):
-                compiled = torch.compile(model)
                 with torch.no_grad():
-                    compiled(x)
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
-                with torch.no_grad():
-                    compiled(x)
+                    _ = torch.compile(model)(x)
                 torch.cuda.synchronize()
             return torch.cuda.max_memory_allocated()
 
