@@ -46,7 +46,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
+    isRocmArchAnyOf, MI350_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -4754,6 +4755,40 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
         weight = make_arg(normalized_shape)
         yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
     # weight=None
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
+
+def sample_inputs_rms_norm_flydsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # The FlyDSL override only fires on ROCm for large N with enough rows to
+    # amortize the launch: N in [4096, 8192) needs >= 8192 rows, [8192, 16384)
+    # needs >= 4096, and N >= 16384 needs >= 2048.
+    #
+    # Exactly one dispatching shape is listed. Each band's minimum works out to
+    # the same 2^25 elements -- 128 MiB per fp32 tensor, 64 MiB at fp16/bf16 --
+    # and every TestCommon test pays for it: test_noncontiguous_samples copies
+    # it, test_compare_cpu runs the reference on CPU, test_multiple_devices
+    # repeats it per device. The other two bands, and the kernel's internal
+    # paths, are covered far more cheaply by
+    # test/python_native/test_flydsl_rmsnorm_fwd.py. No memory guard: this
+    # variant is already gated to gfx950, which has hundreds of GB of HBM, and
+    # largeTensorTest's own gc.collect() + empty_cache() per test costs an
+    # order of magnitude more here than the samples it would protect.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        # eps omitted, which is what nn.RMSNorm passes, so this covers both the
+        # kernel and the accumulator-epsilon substitution the override does in
+        # aten's place.
+        ((8192, 4096), (4096,), {}),
+        # Below the row threshold and below the N threshold: both fall through
+        # to aten, which the override must leave numerically untouched.
+        ((64, 4096), (4096,), {'eps': 1e-5}),
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None is declined by the predicate and handled by aten.
     yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
 
 
@@ -23004,6 +23039,50 @@ if "cutedsl" in dsl_ops_by_dsl:
             **_cutedsl_topk_kwargs,
         ),
     ])
+
+if "flydsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["flydsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="flydsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_flydsl,
+            decorators=[
+                onlyCUDA,
+                # The override declines every input on other archs, so without
+                # this the variant would silently compare aten against itself.
+                skipCUDAIf(
+                    not isRocmArchAnyOf(MI350_ARCH),
+                    "flydsl rms_norm override requires gfx950",
+                ),
+                # The predicate declines non-contiguous inputs, so this test
+                # compares the FlyDSL kernel against aten rather than one
+                # kernel against itself. Their reduction orders differ, which
+                # at N=4096 exceeds the default fp32 tolerance.
+                DecorateInfo(
+                    toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                    "TestCommon", "test_noncontiguous_samples",
+                ),
+            ],
+            skips=(
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 
