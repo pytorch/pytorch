@@ -375,6 +375,11 @@ if(PYTORCH_FOUND_HIP)
   # 'REQUIRED' once minimal ROCm version is bumped to 8.0 or later.
   find_package_and_print_version(libhipcxx)
 
+  # amd_smi is linked directly on ROCm >= 7.14; see intra_node_comm.cpp.
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+    find_package_and_print_version(amd_smi REQUIRED)
+  endif()
+
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 
   if(UNIX)
