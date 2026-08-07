@@ -243,6 +243,20 @@ jobs:
   # preview can go up as soon as the docs finish, without waiting for the rest
   # of this workflow to conclude.
 
+  gpu-coverage:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' gpu-coverage ') }}
+    name: gpu-coverage
+    uses: ./.github/workflows/_gpu-coverage.yml
+    needs:
+      - linux-jammy-py3_10-gcc11-build
+      - get-label-type
+      - job-filter
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+    secrets: inherit
+
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-no-ops (build only)                         ║
   # ╠══════════════════════════════════════════════════════════════════════╣
