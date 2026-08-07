@@ -11,21 +11,24 @@ import os
 import shutil
 import sys
 import tempfile
-import unittest
 
 from torch.distributed.elastic.multiprocessing.redirects import (
     redirect,
     redirect_stderr,
     redirect_stdout,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 libc = ctypes.CDLL("libc.so.6")
 c_stderr = ctypes.c_void_p.in_dll(libc, "stderr")
 
 
-class RedirectsTest(unittest.TestCase):
+class RedirectsTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -145,7 +148,4 @@ class RedirectsTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    run_tests()
