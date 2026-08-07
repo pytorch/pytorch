@@ -98,9 +98,11 @@ def _extract_nested_region_config(fn):
         gm_to_compile = fn
     elif isinstance(fn, FunctionalizeCtxWrapper):
         gm_to_compile = fn.subgraph
+    elif isinstance(fn, LazyJointCallable):
+        gm_to_compile = fn  # carries the region's meta, see LazyJointCallable
 
     if (
-        isinstance(gm_to_compile, torch.fx.GraphModule)
+        isinstance(gm_to_compile, (torch.fx.GraphModule, LazyJointCallable))
         and hasattr(gm_to_compile, "meta")
         and "nested_region_config" in gm_to_compile.meta
     ):
@@ -693,14 +695,165 @@ def _get_output_metadata_by_execution(subgraph, *operands):
             return output_metadata
 
 
+def _make_joint_fn(fn, num_primals, aot_config):
+    """Build the joint of ``fn``.
+
+    Input signature - (*primals, *tangents)
+    Output signature - (*grads, *fw_outs)
+    The output signature is deliberately kept grads first and fw_outs second.
+    Having grads first makes the min-cut partitioner HOP graph stitching easier.
+    """
+    from torch._functorch.aot_autograd import create_joint
+
+    def joint_fn(*primals_and_tangents):
+        primals = primals_and_tangents[:num_primals]
+        tangents = primals_and_tangents[num_primals:]
+
+        fw_outs, grads = create_joint(prepare_fw_with_masks(fn), aot_config=aot_config)(
+            primals, tangents
+        )
+
+        maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
+
+        return pytree.tree_map(maybe_clone, tuple(grads + list(fw_outs)))
+
+    return joint_fn
+
+
+class LazyJointCallable:
+    """A region's joint, built when whoever consumes it first traces it.
+
+    invoke_subgraph's ProxyTorchDispatchMode impl re-traces whatever subgraph it
+    is handed, through the functionalize wrapper. Building the joint eagerly in
+    backward() and handing over the resulting graph therefore walks the region
+    body twice: once to build the joint, once to functionalize it. Handing over
+    this callable instead lets the consumer's make_fx drive create_joint
+    directly, so one walk does both, and functionalization still comes from the
+    caller's own context rather than a reconstructed one.
+    """
+
+    def __init__(
+        self,
+        subgraph,
+        num_primals,
+        include_key_set,
+        exclude_key_set,
+        aliased_index_groups=(),
+        primals_requires_grad=(),
+    ):
+        self.primals_requires_grad = primals_requires_grad
+        self.subgraph = subgraph
+        self.num_primals = num_primals
+        self.include_key_set = include_key_set
+        self.exclude_key_set = exclude_key_set
+        # Positions of operands that are the same tensor at the call site.
+        # Identity does not survive the functionalization unwrap, so it has to
+        # be recorded in backward() where the tangents are still the caller's.
+        self.aliased_index_groups = aliased_index_groups
+        self.graph: torch.fx.GraphModule | None = None
+        self.meta: dict[str, Any] = {}
+        if isinstance(subgraph, torch.fx.GraphModule) and hasattr(subgraph, "meta"):
+            if "nested_region_config" in subgraph.meta:
+                self.meta["nested_region_config"] = subgraph.meta[
+                    "nested_region_config"
+                ]
+
+    def _joint_fn(self):
+        subgraph = self.subgraph
+        if isinstance(subgraph, torch.fx.GraphModule):
+
+            def graph_with_interpreter(*args):
+                with torch.fx.traceback.preserve_node_meta():
+                    return torch.fx.Interpreter(subgraph).run(*args)
+
+            fn = graph_with_interpreter
+        else:
+            fn = subgraph
+
+        return _make_joint_fn(fn, self.num_primals, get_dummy_aot_autograd_config())
+
+    @contextlib.contextmanager
+    def _restore_requires_grad(self, args):
+        """Re-mark the primals that autograd differentiated in the eager path.
+
+        Autograd metadata lives on the FunctionalTensorWrapper, so it is gone by
+        the time the HOP's functionalize impl has unwrapped the operands.
+        create_joint differentiates exactly w.r.t. the primals that require
+        grad, so without this it silently produces fewer grads. Set the flag in
+        place rather than passing a detached copy, which would be recorded into
+        the graph being traced.
+        """
+        marked = []
+        for idx, requires_grad in enumerate(self.primals_requires_grad):
+            operand = args[idx]
+            if (
+                requires_grad
+                and isinstance(operand, torch.Tensor)
+                and not operand.requires_grad
+                and operand.is_leaf
+            ):
+                operand.requires_grad_(True)
+                marked.append(operand)
+        try:
+            yield
+        finally:
+            for operand in marked:
+                operand.requires_grad_(False)
+
+    def materialize(self, *primals_and_tangents) -> torch.fx.GraphModule:
+        """Trace the joint the eager way, for consumers that need a graph."""
+        if self.graph is None:
+            self.graph = trace_joint_graph_as_bwd(
+                self.subgraph,
+                self.num_primals,
+                primals_and_tangents,
+                self.include_key_set,
+                self.exclude_key_set,
+                self.aliased_index_groups,
+            )
+            if "nested_region_config" in self.meta:
+                self.graph.meta["nested_region_config"] = self.meta[
+                    "nested_region_config"
+                ]
+        return self.graph
+
+    def __call__(self, *primals_and_tangents):
+        from torch._dynamo.utils import dynamo_timed
+        from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+        with self._restore_requires_grad(primals_and_tangents):
+            if get_proxy_mode() is None:
+                # Nothing is tracing us, e.g. a plain fake propagation. Fall
+                # back to tracing the joint eagerly and running the graph.
+                return self.materialize(*primals_and_tangents)(*primals_and_tangents)
+
+            # Build the joint right here, so it is traced by the caller's
+            # tracer, through the caller's functionalization context.
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch._C._ForceDispatchKeyGuard(
+                        self.include_key_set, self.exclude_key_set
+                    )
+                )
+                stack.enter_context(torch.enable_grad())
+                with dynamo_timed(
+                    "invoke_subgraph_build_joint", log_pt2_compile_event=True
+                ):
+                    return self._joint_fn()(*primals_and_tangents)
+
+
 def trace_joint_graph_as_bwd(
-    subgraph, num_primals, joint_operands, include_key_set, exclude_key_set
+    subgraph,
+    num_primals,
+    joint_operands,
+    include_key_set,
+    exclude_key_set,
+    aliased_index_groups=None,
 ):
     """
     Naively trace out a joint graph. This simplifies the reconstruction of joint
     graph in the min-cut partitioner later on.
     """
-    from torch._functorch.aot_autograd import create_joint
 
     dummy_aot_config = get_dummy_aot_autograd_config()
 
@@ -715,30 +868,18 @@ def trace_joint_graph_as_bwd(
     else:
         fn = subgraph
 
-    # This joint_fn is inserted as the backward graph as is. This simplifies the
-    # min-cut partitioner work later on.
-    #   Input signature - (*primals, *tangents)
-    #   Output signature - (*grads, *fw_outs)
-    # The output signature is deliberately kept grads first and fw_outs second.
-    # Having grads first makes the min-cut partitioner HOP graph stitching
-    # easier.
-    def joint_fn(*primals_and_tangents):
-        primals = primals_and_tangents[:num_primals]
-        tangents = primals_and_tangents[num_primals:]
-
-        fw_outs, grads = create_joint(
-            prepare_fw_with_masks(fn), aot_config=dummy_aot_config
-        )(primals, tangents)
-
-        maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
-
-        # return signature is deliberately kept (*grads, *fw_outs). This
-        # simplifies partitioning work later on.
-        return pytree.tree_map(maybe_clone, tuple(grads + list(fw_outs)))
+    joint_fn = _make_joint_fn(fn, num_primals, dummy_aot_config)
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             joint_operands = [_from_fun(arg) for arg in joint_operands]
+            # Keep aliased operands sharing one copy. The graph is traced
+            # against these, and collapsing aliased tangents into a single
+            # input is what the re-trace against the real operands used to do.
+            for group in aliased_index_groups or ():
+                for idx in group[1:]:
+                    joint_operands[idx] = joint_operands[group[0]]
+
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
@@ -857,8 +998,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
-        from torch._dynamo.utils import dynamo_timed
-
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
@@ -949,36 +1088,56 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 raise AssertionError(
                     f"suffix should be None when bw_graph is None, got {suffix}"
                 )
-            with dynamo_timed(
-                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
-            ):
-                bw_graph = trace_joint_graph_as_bwd(
-                    subgraph,
-                    len(primals),
-                    primals_and_tangents,
-                    ctx._fw_include_key_set,
-                    ctx._fw_exclude_key_set,
-                )
-                if (
-                    hasattr(subgraph, "meta")
-                    and "nested_region_config" in subgraph.meta
-                ):
-                    bw_graph.meta["nested_region_config"] = subgraph.meta[
-                        "nested_region_config"
-                    ]
+            # Hand the proxy tracer a callable so it traces the joint once,
+            # instead of tracing it here and re-tracing it there.
+            bw_graph = LazyJointCallable(
+                subgraph,
+                len(primals),
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                tuple(
+                    tuple(len(primals) + i for i in group) for group in aliasing_groups
+                ),
+                tuple(isinstance(t, torch.Tensor) and t.requires_grad for t in primals),
+            )
 
         if invoke_subgraph_cache and not cache_hit:
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
                 identifier, tangent_metadata, bw_graph
             )
-            warn_and_trace_duplicate_backward(
-                identifier, suffix, bw_graph, len(primals), filtered_grad_outs
-            )
+            if isinstance(bw_graph, torch.fx.GraphModule):
+                warn_and_trace_duplicate_backward(
+                    identifier, suffix, bw_graph, len(primals), filtered_grad_outs
+                )
 
+        bw_identifier = f"bw_{identifier}_{suffix}"
         with _set_invoke_subgraph_call_id(ctx._call_id):
-            grads = invoke_subgraph(
-                bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
-            )[: -output_metadata.num_fw_outs]
+            grads = invoke_subgraph(bw_graph, bw_identifier, *primals_and_tangents)[
+                : -output_metadata.num_fw_outs
+            ]
+
+        if isinstance(bw_graph, LazyJointCallable) and invoke_subgraph_cache:
+            # The joint is a graph only after a consumer traced it, so anything
+            # that needs to look at the graph has to happen after the call. The
+            # proxy dispatch mode records what it traced, keyed by identifier.
+            traced = invoke_subgraph_cache.get_proxy_dispatch_entry(bw_identifier)
+            if traced is None:
+                traced = bw_graph.graph
+            if traced is not None:
+                if not cache_hit:
+                    warn_and_trace_duplicate_backward(
+                        identifier,
+                        suffix,
+                        traced,
+                        len(primals),
+                        filtered_grad_outs,
+                    )
+                # Replace the lazy entry with the traced graph, so a later
+                # backward with the same tangents reuses it directly.
+                invoke_subgraph_cache.lazy_bwd_cache[identifier][tangent_metadata] = (
+                    traced,
+                    suffix,
+                )
         return None, None, None, *grads
 
 
