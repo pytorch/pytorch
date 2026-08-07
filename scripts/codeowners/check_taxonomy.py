@@ -126,9 +126,9 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
 
 
 def tracked_paths(repo: Path) -> list[str]:
-    """List paths tracked by Git, including submodule entries."""
+    """List paths committed in HEAD, including submodule entries."""
     output = subprocess.run(
-        ["git", "-C", repo, "ls-files", "-z"],
+        ["git", "-C", repo, "ls-tree", "-r", "-z", "--name-only", "HEAD"],
         check=True,
         capture_output=True,
     ).stdout.decode()

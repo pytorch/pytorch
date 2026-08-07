@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from check_taxonomy import analyze, parse_patterns, TaxonomyPattern
+from check_taxonomy import analyze, parse_patterns, TaxonomyPattern, tracked_paths
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -43,6 +44,32 @@ class TestCodeownersTaxonomy(TestCase):
             ValueError, "active pattern has no owners|invalid active owners"
         ):
             self.parse_entry(entry)
+
+    def test_tracked_paths_ignore_index_only_files(self):
+        with TemporaryDirectory() as directory:
+            repo = Path(directory)
+            git = ["git", "-C", repo]
+            subprocess.run([*git, "init"], check=True, capture_output=True)
+            (repo / ".gitignore").write_text("generated.pyi\n")
+            (repo / "tracked.py").touch()
+            subprocess.run([*git, "add", ".gitignore", "tracked.py"], check=True)
+            subprocess.run(
+                [
+                    *git,
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "-m",
+                    "initial",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            (repo / "generated.pyi").touch()
+            subprocess.run([*git, "add", "--force", "generated.pyi"], check=True)
+            self.assertEqual(tracked_paths(repo), [".gitignore", "tracked.py"])
 
     def test_source_order_must_preserve_specificity(self):
         path = "torch/_higher_order_ops/flex_attention.py"
