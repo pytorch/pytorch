@@ -279,7 +279,11 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             and "stream" in ev.get("args", {})
             and ev["ts"] < barrier_ts
         ]
-        self.assertGreater(len(mem_events), 0)
+        # ROCm records no memset/memcpy activities for these ops, most likely
+        # because HIP lowers a small fill and the pointer-array uploads to blit
+        # kernels, so there is nothing to check the stream of there.
+        if not TEST_WITH_ROCM:
+            self.assertGreater(len(mem_events), 0)
         for ev in mem_events:
             self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
 
