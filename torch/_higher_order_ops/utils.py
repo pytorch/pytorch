@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, overload, TypeVar
+from typing import Any, Generic, overload, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -119,22 +119,31 @@ def _batch_dims_as_last(in_dims):
     )
 
 
-class _VmapCombineFnWrapper:
+_CombineP = ParamSpec("_CombineP")
+
+
+class _VmapCombineFnWrapper(Generic[_CombineP]):
     # Re-vmaps a scan/associative_scan combine_fn, keeping the batch dim on the
     # last axis so it does not collide with the scan dim (0). After the op runs,
     # out_dims holds the flat per-output markers aligned to the op's flat outputs.
 
-    def __init__(self, combine_fn, in_dims, batch_size, randomness):
+    def __init__(
+        self,
+        combine_fn: Callable[_CombineP, Any],
+        in_dims: tuple[Any, ...],
+        batch_size: int,
+        randomness: str,
+    ) -> None:
         self.combine_fn = combine_fn
         self.in_dims = in_dims
         self.batch_size = batch_size
         self.randomness = randomness
         self.out_dims: tuple[Any, ...] | None = None
 
-    def __call__(self, *args):
+    def __call__(self, *args: _CombineP.args, **kwargs: _CombineP.kwargs) -> Any:
         outputs, per_slice_out_dims = restore_vmap(
             self.combine_fn, self.in_dims, self.batch_size, self.randomness
-        )(*args)
+        )(*args, **kwargs)
         outputs = pytree.tree_map(
             lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
             outputs,
