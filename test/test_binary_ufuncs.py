@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -3878,6 +3879,19 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.full((1,), 2, device=device, dtype=torch.float64), 128
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
+
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    def test_ldexp_off_current_device(self, devices):
+        # verify ldexp targets the operand device, not the current one.
+        mantissas = torch.randn(2048)
+        exponents = torch.randint(0, 5, (2048,), dtype=torch.int32)
+        ref = torch.ldexp(mantissas, exponents)
+        target = torch.device(devices[1])
+        with torch.accelerator.device_index(torch.device(devices[0]).index):
+            out = torch.ldexp(mantissas.to(target), exponents.to(target))
+            self.assertEqual(out.device, target)
+            self.assertEqual(out.cpu(), ref)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):

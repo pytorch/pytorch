@@ -1608,6 +1608,17 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
   return at::mul(self, _pow2(self, other));
 }
 
+Tensor& ldexp_out_default(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  return at::mul_out(result, self, _pow2(self, other));
+}
+
+Tensor ldexp_default(const Tensor& self, const Tensor& other) {
+  return at::mul(self, _pow2(self, other));
+}
+
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
