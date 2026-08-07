@@ -7,6 +7,7 @@ from typing import Any, cast
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
     autograd_not_implemented,
@@ -17,6 +18,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper
+from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -133,29 +135,37 @@ def flex_gemm_body_decomposition_table(
     return merged_decompositions
 
 
-def _validate_nvfp4_pack_input(input: torch.Tensor) -> None:
-    """Require paired Float32 values along the innermost dimension."""
+def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
+    """Pack adjacent Float32 values into E2M1x2 storage for FlexGEMM tests.
+
+    This private helper lets tests spell the intended epilogue with public inline
+    assembly while a blessed user-facing quantization API is still being decided.
+    The last dimension is one low/high pair: the PTX x2 conversion consumes both
+    values and emits one byte, whose same-width dtype view supplies the logical
+    ``torch.float4_e2m1fn_x2`` type without changing storage.
+    """
     if input.dtype is not torch.float32 or input.ndim == 0 or input.shape[-1] != 2:
         raise ValueError(
-            "nvfp4_pack input must be Float32 with innermost dimension 2, "
+            "NVFP4 pack input must be Float32 with innermost dimension 2, "
             f"got dtype={input.dtype}, shape={tuple(input.shape)}"
         )
+    if torch.compiler.is_compiling() or is_fake(input):
+        low = input[..., 0]
+        high = input[..., 1]
+        packed = inline_asm_elementwise(
+            high,
+            low,
+            asm_str=(
+                "{ .reg .b8 packed; "
+                "cvt.rn.satfinite.e2m1x2.f32 packed, $1, $2; "
+                "cvt.u32.u8 $0, packed; }"
+            ),
+            constraints="=r,r,r",
+            dtype=torch.uint8,
+        )
+        return packed.contiguous().view(torch.float4_e2m1fn_x2)
 
-
-@torch.library.custom_op("flex_gemm::nvfp4_pack", mutates_args=())
-def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
-    """Quantize adjacent normalized values into packed E2M1 storage.
-
-    Args:
-        input: Float32 values with an innermost pair dimension. Finite values
-            are rounded to nearest E2M1, and infinities saturate to its finite
-            range. NaN encoding is unspecified, matching the floatx conversion
-            contract used by TorchAO.
-
-    Returns:
-        Contiguous packed E2M1 values with the innermost pair dimension removed.
-    """
-    _validate_nvfp4_pack_input(input)
+    # Eager path is mostly for testing.
     input_bits = input.view(torch.int32)
     sign = input_bits & 0x80000000
     magnitude = (input_bits ^ sign).view(torch.float32)
@@ -174,12 +184,6 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
     codes = codes | (((sign >> 28).to(torch.uint8)) & 8)
     packed = (codes[..., 1] << 4) | codes[..., 0]
     return packed.contiguous().view(torch.float4_e2m1fn_x2)
-
-
-@nvfp4_pack.register_fake
-def _(input: torch.Tensor) -> torch.Tensor:
-    _validate_nvfp4_pack_input(input)
-    return input.new_empty(input.shape[:-1], dtype=torch.float4_e2m1fn_x2)
 
 
 def apply_flex_gemm_body_graph_passes(

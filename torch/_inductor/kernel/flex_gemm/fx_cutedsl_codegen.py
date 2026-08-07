@@ -63,8 +63,8 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
 from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionPlan,
     iter_fx_node_inputs,
+    NormalizedDtypeView,
     NormalizedGetItem,
-    NormalizedNVFP4Pack,
     NormalizedPrepareSoftmax,
     NormalizedReduction,
     NormalizedSelect,
@@ -95,9 +95,10 @@ FlexGemmOutputLocalReducePlan = _epilogue_analysis.GemmOutputLocalReducePlan
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputPlan(_epilogue_analysis.GemmOutputPlan):
-    """Extend the shared GEMM output plan with an output contraction."""
+    """Extend output planning with contraction and terminal storage metadata."""
 
     output_contraction: FlexGemmOutputContraction | None = None
+    output_storage: torch.fx.Node | None = None
 
 
 FlexGemmCuteDSLKernel = GemmEpilogueCuteDSLKernel
@@ -212,6 +213,29 @@ def output_plan(
     )
 
 
+def bind_terminal_output_storage(
+    graph: FlexGemmEpilogueGraph, outputs: FlexGemmOutputPlan
+) -> FlexGemmOutputPlan:
+    """Record the physical value beneath a terminal same-width dtype view."""
+    normalized = graph.normalized_nodes.get(outputs.output)
+    if not isinstance(normalized, NormalizedDtypeView):
+        return outputs
+    source_meta = normalized.source.meta.get("val")
+    output_meta = outputs.output.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or normalized.dtype is not output_meta.dtype
+        or source_meta.dtype.itemsize != output_meta.dtype.itemsize
+        or not statically_known_shape_equal(source_meta.shape, output_meta.shape)
+        or not statically_known_shape_equal(source_meta.stride(), output_meta.stride())
+    ):
+        raise NotImplementedError(
+            "FlexGEMM terminal dtype views must preserve shape, stride, and element size"
+        )
+    return dataclasses.replace(outputs, output_storage=normalized.source)
+
+
 @dataclasses.dataclass(frozen=True)
 class OutputContractionUse:
     """Describe one supported use of grouped GEMM values in the main output."""
@@ -272,12 +296,7 @@ def match_output_contraction_use(
     gemm_shape: tuple[Any, ...] | None,
     local_reduce: FlexGemmLocalReduceAnalysis,
 ) -> OutputContractionUse | None:
-    """Match one supported use of grouped GEMM values in the main output.
-
-    The current spellings are ``split(...)[i]`` for chunked groups,
-    ``view(...).select(..., i)`` for interleaved or chunked groups, and
-    ``nvfp4_pack(view(...))`` for two interleaved group values.
-    """
+    """Match one supported use of grouped GEMM values in the main output."""
     if gemm_shape is None:
         return None
     normalized = local_reduce.graph.normalized_nodes.get(node)
@@ -309,29 +328,6 @@ def match_output_contraction_use(
             chunked=True,
             group_indices=(normalized.index,),
             layout_node=split,
-        )
-
-    if isinstance(normalized, NormalizedNVFP4Pack):
-        grouped = normalized.source
-        view_normalized = local_reduce.graph.normalized_nodes.get(grouped)
-        shape = tensor_meta_shape(grouped)
-        group = 2
-        if (
-            not isinstance(view_normalized, NormalizedView)
-            or shape is None
-            or len(shape) != 3
-            or not statically_known_shape_equal(
-                (shape[0], shape[1] * group), gemm_shape
-            )
-            or not local_reduce.graph.depends_on(view_normalized.source, gemm)
-        ):
-            return None
-        return OutputContractionUse(
-            source=view_normalized.source,
-            group=group,
-            chunked=False,
-            group_indices=tuple(range(group)),
-            layout_node=grouped,
         )
 
     if not isinstance(normalized, NormalizedSelect):
@@ -502,7 +498,9 @@ class FlexGemmEpilogueAnalysis:
     ) -> "FlexGemmEpilogueAnalysis":
         """Analyze grouped values and classify logical output consumers."""
         local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
-        outputs = output_plan(graph_module, local_reduce)
+        outputs = bind_terminal_output_storage(
+            local_reduce.graph, output_plan(graph_module, local_reduce)
+        )
         contraction_plan = build_output_contraction_plan(
             outputs.output, gemm, local_reduce
         )
@@ -835,6 +833,16 @@ class FlexGemmEpilogueEmitter:
             return
         normalized = self.graph.normalized_nodes.get(node)
         match normalized:
+            case NormalizedDtypeView():
+                if (
+                    node is not self.outputs.output
+                    or normalized.source is not self.outputs.output_storage
+                ):
+                    raise NotImplementedError(
+                        "FlexGEMM supports dtype views only as terminal same-width main outputs"
+                    )
+                self.env[node] = _cute_arg(normalized.source, self.env)
+                return
             case NormalizedSqueeze():
                 lowered = lower_squeeze(node, normalized, self.env, self.store_sources)
                 if lowered is not None:
@@ -952,9 +960,6 @@ class FlexGemmEpilogueEmitter:
     def render(self) -> tuple[str, str]:
         """Render the generated epilogue and physical callback source."""
         from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_cache_key
-        from torch._inductor.kernel.flex_gemm.quant_intrinsics import (
-            quant_intrinsics_cache_key,
-        )
 
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
@@ -991,7 +996,6 @@ class FlexGemmEpilogueEmitter:
             )
         )
         key_payload = (
-            f"quant_intrinsics={quant_intrinsics_cache_key()}\n"
             f"inline_asm={inline_asm_cache_key()}\n"
             f"fast_math={self.fast_math}\n{self.graph_module.code}\n"
             f"{body}\nreturn {result}{physical_reduction_payload}"
@@ -1019,9 +1023,6 @@ class FlexGemmEpilogueEmitter:
             "from cutlass._mlir_helpers import math as cutlass_math\n"
             "from torch._inductor.codegen.cutedsl._inline_asm import (\n"
             "    inline_asm_elementwise_intrinsic,\n"
-            ")\n"
-            "from torch._inductor.kernel.flex_gemm.quant_intrinsics import (\n"
-            "    nvfp4_pack_intrinsic,\n"
             ")\n\n"
             f"{local_reduce_source}"
             f"@cute.jit\ndef {name}({epilogue_params}):\n"
