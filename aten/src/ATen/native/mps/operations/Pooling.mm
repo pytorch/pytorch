@@ -483,12 +483,12 @@ static void launch_max_pool_kernel(const Tensor& input,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
+      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
       mtl_setArgs(computeEncoder, input, output, indices_opt, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      getMPSProfiler().endProfileKernel(maxPoolPSO);
+      getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
     }
   });
 }
@@ -591,12 +591,12 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
+      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
       mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      getMPSProfiler().endProfileKernel(maxPoolPSO);
+      getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
     }
   });
 }
@@ -696,12 +696,12 @@ static void max_unpool_out_mps_template(const Tensor& input,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto PSO = lib.getPipelineStateForFunc("max_unpool_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
       mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO);
+      getMPSProfiler().endProfileKernel(PSO, mpsStream);
     }
   });
 }
@@ -875,12 +875,12 @@ static void avg_pool_out_mps_template(const Tensor& output,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto PSO = lib.getPipelineStateForFunc("avg_pool_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
       mtl_setArgs(computeEncoder, input, output, params);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO);
+      getMPSProfiler().endProfileKernel(PSO, mpsStream);
     }
   });
 }
@@ -934,12 +934,12 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto PSO = lib.getPipelineStateForFunc("avg_pool_backward_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output});
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
       mtl_setArgs(computeEncoder, grad_input, grad_output, params);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO);
+      getMPSProfiler().endProfileKernel(PSO, mpsStream);
     }
   });
 }

@@ -47,7 +47,7 @@ aoti_torch_mps_copy_buffer(void* src_buffer, void* dst_buffer, size_t data_size,
     auto dst_mtl_buffer = (id<MTLBuffer>)dst_buffer;
 
     auto* stream = at::mps::getCurrentMPSStream();
-    uint64_t profile_id = at::mps::getMPSProfiler().beginProfileCopy(src_mtl_buffer, dst_mtl_buffer, at::OptionalTensorRef(), at::OptionalTensorRef(), data_size, true);
+    uint64_t profile_id = at::mps::getMPSProfiler().beginProfileCopy(src_mtl_buffer, dst_mtl_buffer, at::OptionalTensorRef(), at::OptionalTensorRef(), data_size, stream, true);
     stream->copy_and_sync(src_mtl_buffer, dst_mtl_buffer, data_size, src_offset, dst_offset, true, profile_id);
   });
 }
