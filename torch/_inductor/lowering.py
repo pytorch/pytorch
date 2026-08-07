@@ -2809,7 +2809,32 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
-        return True
+        from .codegen.triton_utils import (
+            use_uint8_triton_storage_for_cuda_float8_e4m3fn,
+        )
+
+        if not use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+            t.dtype, device=t.device
+        ):
+            return True
+
+        # uint8 storage reinterprets fp8 bytes: allow bitcast, views, memory
+        # movement, and dequant (convert out of fp8)
+        if not node:
+            return True
+        return not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
+            in (
+                aten.view.dtype,
+                aten.cat.default,
+                aten.clone.default,
+                aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
+                prims.convert_element_type.default,
+            )
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
+        )
 
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
@@ -2846,6 +2871,8 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
     if node is not None and node.target in supported_complex_views and t.is_complex():
         return False
     if unsupported_input_tensor(t, node):
+        return True
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -9417,25 +9444,6 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
-    # An effectful op may retain its tensor inputs in state that inductor cannot
-    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
-    # must outlive the op and never be reused for another buffer. We pin the
-    # inputs of every ORDERED op intentionally rather than only those that can
-    # actually retain them: some (aten::_print, aten::_linalg_check_errors) don't,
-    # so this slightly over-pins. There is no reliable "retains inputs" signal to
-    # scope this to: retention happens inside the op's implementation, so it is
-    # not exposed by the schema (even queue_push, which stashes its input, reports
-    # alias_info=None), the EffectType enum only encodes ordering, and a
-    # ScriptObject argument merely triggers the default effect (effects can be
-    # registered manually on any op, so it is neither necessary nor precise).
-    # Under-pinning would silently miscompile by recycling a buffer the op still
-    # holds, so the bounded over-pinning is the intended tradeoff for correctness.
-    if effect_type:
-        for arg in pytree.tree_leaves((args, kwargs)):
-            if isinstance(arg, TensorBox):
-                arg.realize()
-                V.graph.never_reuse_buffers.add(arg.get_name())
-
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9465,9 +9473,7 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = (
-                    new_op.get_operation_name()
-                )  # pyrefly: ignore[missing-attribute]
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
