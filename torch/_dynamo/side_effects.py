@@ -264,7 +264,6 @@ class SideEffects:
         ]
         | None = None,
         contextvar_mutations: list[_ContextVarMutation] | None = None,
-        _contextvar_first_mutation_node_count: int | None = None,
         _contextvar_used_tokens: set[int] | None = None,
     ) -> None:
         super().__init__()
@@ -278,9 +277,6 @@ class SideEffects:
         self.tensor_hooks = tensor_hooks or {}
         self.contextvar_states = contextvar_states or {}
         self.contextvar_mutations = contextvar_mutations or []
-        self._contextvar_first_mutation_node_count = (
-            _contextvar_first_mutation_node_count
-        )
         self._contextvar_used_tokens = _contextvar_used_tokens or set()
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
@@ -409,8 +405,6 @@ class SideEffects:
             and self.tensor_hooks == other.tensor_hooks
             and self.contextvar_states == other.contextvar_states
             and self.contextvar_mutations == other.contextvar_mutations
-            and self._contextvar_first_mutation_node_count
-            == other._contextvar_first_mutation_node_count
             and self._contextvar_used_tokens == other._contextvar_used_tokens
         )
 
@@ -439,11 +433,6 @@ class SideEffects:
             return "contextvar_states"
         elif self.contextvar_mutations != other.contextvar_mutations:
             return "contextvar_mutations"
-        elif (
-            self._contextvar_first_mutation_node_count
-            != other._contextvar_first_mutation_node_count
-        ):
-            return "_contextvar_first_mutation_node_count"
         elif self._contextvar_used_tokens != other._contextvar_used_tokens:
             return "_contextvar_used_tokens"
         else:
@@ -469,7 +458,6 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
             contextvar_states=dict(self.contextvar_states),
             contextvar_mutations=list(self.contextvar_mutations),
-            _contextvar_first_mutation_node_count=self._contextvar_first_mutation_node_count,
             _contextvar_used_tokens=set(self._contextvar_used_tokens),
         )
 
@@ -733,20 +721,12 @@ class SideEffects:
     ) -> tuple[_ContextVarStateKind, VariableTracker | None]:
         return self.contextvar_states.get(var, (_ContextVarStateKind.ORIGINAL, None))
 
-    def _snapshot_first_mutation_node_count(self) -> None:
-        if self._contextvar_first_mutation_node_count is not None:
-            return
-        output_graph = self.output_graph_weakref()
-        if output_graph is not None:
-            self._contextvar_first_mutation_node_count = len(output_graph.graph.nodes)
-
     def record_contextvar_set(
         self,
         var: VariableTracker,
         value: VariableTracker,
         token: VariableTracker,
     ) -> None:
-        self._snapshot_first_mutation_node_count()
         self.mutation(var)
         self.contextvar_states[var] = (_ContextVarStateKind.EXPLICIT, value)
         self.contextvar_mutations.append(
@@ -760,7 +740,6 @@ class SideEffects:
     ) -> None:
         if not isinstance(token, variables.ContextVarTokenVariable):
             raise AssertionError(f"Expected ContextVarTokenVariable, got {type(token)}")
-        self._snapshot_first_mutation_node_count()
         self.mutation(var)
         self.contextvar_states[var] = (token.old_state_kind, token.old_value)
         self.contextvar_mutations.append(_ContextVarMutation("reset", var, token=token))
