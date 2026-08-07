@@ -7385,7 +7385,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    def test_cond_traced_record_stream_reuse(self):
+    def test_conditional_node_with_graph_capture_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
         )
@@ -7399,11 +7399,14 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
 
             g = torch.cuda.CUDAGraph()
-            side_stream = torch.cuda.Stream()
-            with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            root_capture_stream = torch.cuda.Stream()
+            with (
+                torch.cuda.stream(root_capture_stream),
+                ControlFlowOpWarmupDispatchMode(),
+            ):
                 torch.cond(predicate, true_fn, false_fn, [])
             with (
-                torch.cuda.graph(g, stream=side_stream),
+                torch.cuda.graph(g, stream=root_capture_stream),
                 CUDAGraphCaptureControlFlowOpDispatchMode(),
             ):
                 torch.cond(predicate, true_fn, false_fn, [])
@@ -7417,10 +7420,10 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    def test_cond_child_output_can_be_freed_in_parent_capture(self):
+    def test_conditional_body_capture_output_can_be_freed_in_parent_capture(self):
         pred = torch.ones((), device="cuda", dtype=torch.bool)
         operand = torch.full((), 4.0, device="cuda")
-        side_stream = torch.cuda.Stream()
+        root_capture_stream = torch.cuda.Stream()
 
         def run_cond():
             return torch.cond(
@@ -7430,19 +7433,22 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 [operand],
             )
 
-        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+        with (
+            torch.cuda.stream(root_capture_stream),
+            ControlFlowOpWarmupDispatchMode(),
+        ):
             run_cond()
 
         graph = torch.cuda.CUDAGraph()
         with (
-            torch.cuda.graph(graph, stream=side_stream),
+            torch.cuda.graph(graph, stream=root_capture_stream),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
         ):
             intermediate_output = run_cond()
             final_output = 2 * intermediate_output
             del intermediate_output
 
-        torch.cuda.current_stream().wait_stream(side_stream)
+        torch.cuda.current_stream().wait_stream(root_capture_stream)
         for take_true_branch, expected in ((True, 10.0), (False, 6.0)):
             pred.fill_(take_true_branch)
             graph.replay()
