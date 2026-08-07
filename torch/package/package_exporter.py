@@ -737,7 +737,7 @@ class PackageExporter:
         """Save text data to the package.
 
         Args:
-            package (str): The name of module package this resource should go it (e.g. ``"my_package.my_subpackage"``).
+            package (str): The name of module package this resource should go in (e.g. ``"my_package.my_subpackage"``).
             resource (str): A unique name for the resource, used to identify it to load.
             text (str): The contents to save.
         """
@@ -747,7 +747,7 @@ class PackageExporter:
         """Save raw bytes to the package.
 
         Args:
-            package (str): The name of module package this resource should go it (e.g. ``"my_package.my_subpackage"``).
+            package (str): The name of module package this resource should go in (e.g. ``"my_package.my_subpackage"``).
             resource (str): A unique name for the resource, used to identify it to load.
             binary (str): The data to save.
         """
@@ -910,7 +910,7 @@ class PackageExporter:
         )
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
-        """Blocklist modules who names match the given glob patterns from the list of modules the package can import.
+        """Blocklist modules whose names match the given glob patterns from the list of modules the package can import.
         If a dependency on any matching packages is found, a :class:`PackagingError` is raised.
 
         Args:

@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -52,25 +53,26 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
-torch.backends.cuda.matmul.allow_tf32 = False
+
+_PRIOR_FP32_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_PRECISION
+    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
+    # exact original; writing allow_tf32 back can't reproduce the "none" default.
+    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def tearDownModule():
+    global _PRIOR_FP32_PRECISION
+    if _PRIOR_FP32_PRECISION is not None:
+        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _PRIOR_FP32_PRECISION = None
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
-def gpus_for_rank(world_size):
-    """Multigpu tests are designed to simulate the multi nodes with multi
-    GPUs on each node. Nccl backend requires equal #GPUs in each process.
-    On a single node, all visible GPUs are evenly
-    divided to subsets, each process only uses a subset.
-    """
-    visible_devices = list(range(torch.accelerator.device_count()))
-    gpus_per_process = torch.accelerator.device_count() // world_size
-    gpus_for_rank = []
-    for rank in range(world_size):
-        gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
-        )
-    return gpus_for_rank
 
 
 class StoreTestBase:
@@ -391,7 +393,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        err_msg_reg = "^The server socket has failed to listen on any local .*(?i:address already in use)"
         with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
@@ -934,6 +936,40 @@ class RendezvousTCPTest(TestCase):
         store0, _, _ = next(gen0)
         self.assertTrue(store0.libuvBackend)
 
+    def test_agent_store_ignored_for_other_address(self):
+        # torchrun's elastic agent exports TORCHELASTIC_USE_AGENT_STORE into
+        # every worker, meaning "the agent serves a store at
+        # MASTER_ADDR:MASTER_PORT". _create_c10d_store used to honor it for any
+        # address it was handed, so a private store on a caller-chosen port
+        # became client-only on every rank, nobody ever started a server and
+        # every rank blocked in connect-retry until the store timeout.
+        url = self.create_tcp_url()
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(common.find_free_port()),
+        }
+        with mock.patch.dict(os.environ, env):
+            gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
+            store0, _, _ = next(gen0)
+        store0.set("key0", "value0")
+        self.assertEqual(b"value0", store0.get("key0"))
+
+    def test_agent_store_honored_for_master_address(self):
+        # The flip side: at MASTER_ADDR:MASTER_PORT the agent is the server, so
+        # every rank must stay a client. Point at a port nothing listens on and
+        # check we fail to connect rather than silently starting a server.
+        port = common.find_free_port()
+        url = f"tcp://{DEFAULT_HOSTNAME}:{port:d}?world_size=1&rank=0"
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(port),
+        }
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaises(DistNetworkError):
+                next(dist.rendezvous(url, timeout=timedelta(seconds=1)))
+
 
 class DummyStore(dist.Store):
     def __init__(self) -> None:
@@ -1236,7 +1272,7 @@ class TestClientProtocol(TestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        if torch.get_device_module()._initialized:
+        if getattr(torch.get_device_module(device_type), "_initialized", False):
             raise AssertionError(
                 f"test_distributed must not have initialized {device_type} context on main process"
             )
