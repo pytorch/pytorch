@@ -17,16 +17,6 @@
 
 Intel GPUs support (Prototype) is ready from PyTorch\* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL\* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
-:::{note}
-**Using WSL2?** Windows Subsystem for Linux 2 lets you run the native Linux workload on a Windows host with Intel Client GPU acceleration. Follow the same steps as native Linux and read the WSL2 notes as you go:
-
-1. [Additional Setup for WSL2](#additional-setup-for-wsl2) - install the guest distro and the split host/guest driver stack.
-2. [Installation](#installation) - install the Linux wheels inside the distro.
-3. [Check availability for Intel GPU](#check-availability-for-intel-gpu) - verify the GPU is visible from the distro.
-
-WSL2 is validated with Intel Client GPUs only.
-:::
-
 ## Software Prerequisite
 
 To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. For installation guide, visit [Intel GPUs Driver Installation](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html).
