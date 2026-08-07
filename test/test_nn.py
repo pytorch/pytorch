@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMeta, get_all_device_types, onlyOn
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -9158,6 +9158,29 @@ class TestNNDeviceType(NNTestCase):
         t = torch.randn((10,))
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
+
+    @onlyOn(["cpu", "cuda"])
+    @dtypes(*integral_types())
+    def test_unfold_integral(self, device, dtype):
+        info = torch.iinfo(dtype)
+        values = [info.min, info.max, 2, 3, 4, 5, 6, 7, 8]
+        x = torch.tensor(values, device=device, dtype=dtype).reshape(1, 1, 3, 3)
+        expected = torch.tensor(
+            [[
+                [values[0], values[1], values[3], values[4]],
+                [values[1], values[2], values[4], values[5]],
+                [values[3], values[4], values[6], values[7]],
+                [values[4], values[5], values[7], values[8]],
+            ]],
+            device=device,
+            dtype=dtype,
+        )
+
+        self.assertEqual(F.unfold(x, kernel_size=2), expected)
+        self.assertEqual(nn.Unfold(kernel_size=2)(x), expected)
+        self.assertEqual(
+            F.unfold(x.squeeze(0), kernel_size=2), expected.squeeze(0)
+        )
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
