@@ -2750,6 +2750,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # VariableTracker.getattro_impl. Inlined because this override keeps its
         # own object / GetAttrVariable handling below instead of delegating.
         source = self.source and AttrSource(self.source, name)
+        if isinstance(self.fn, type) and name == "__dict__":
+            return VariableTracker.build(tx, self.fn.__dict__, source)
         if self.fn is object:
             # for object, we can just directly read the attribute
             try:

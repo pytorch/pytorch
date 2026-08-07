@@ -736,9 +736,7 @@ class ExceptionVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name == "__class__":
-            return VariableTracker.build(tx, self.exc_type)
-        elif name == "__context__":
+        if name == "__context__":
             return self.__context__
         elif name == "__cause__":
             return self.__cause__
