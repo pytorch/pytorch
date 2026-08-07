@@ -23,10 +23,11 @@ struct XPUEvent {
       DeviceIndex device_index,
       const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle_data)
       : device_index_(device_index) {
+    // Events reconstructed from an IPC handle cannot be re-exported via
+    // ipc_handle().
     event_ = std::make_unique<sycl::event>(
         sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
-    enable_ipc_ = true;
   }
 #endif
 
@@ -160,9 +161,6 @@ struct XPUEvent {
     TORCH_CHECK(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
-    TORCH_CHECK(
-        !enable_ipc_ && !other.enable_ipc_,
-        "Both events must be created with argument 'enable_ipc=False'.");
 
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
@@ -186,11 +184,11 @@ struct XPUEvent {
 
 #if SYCL_COMPILER_VERSION >= 20260200
   sycl::ext::oneapi::experimental::ipc::handle_data_t ipc_handle() {
+    TORCH_CHECK(
+        enable_ipc_,
+        "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     if (!isCreated()) {
       namespace syclex = sycl::ext::oneapi::experimental;
-      TORCH_CHECK(
-          enable_ipc_,
-          "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
       createEvent(c10::xpu::current_device());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
@@ -256,8 +254,6 @@ struct XPUEvent {
   bool reusable_ = false;
 
   c10::DeviceIndex device_index_ = -1;
-  // Only need to track the last event, as events in an in-order queue are
-  // executed sequentially.
   std::unique_ptr<sycl::event> event_;
 };
 
