@@ -13,7 +13,7 @@ import enum
 import sys
 import types
 import typing
-from functools import lru_cache, partial
+from functools import partial
 from typing import NoReturn, TYPE_CHECKING
 
 import torch
@@ -119,12 +119,6 @@ def binop_type_error(
         tx,
         f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
     )
-
-
-@lru_cache(maxsize=256)
-def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
-    """Get all type slots for a type (cached)."""
-    return get_type_slots(obj_type)
 
 
 def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
