@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -16,6 +17,8 @@ from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # "https://github.com/pytorch/pytorch/issues/127112
     @xfailIfTorchDynamo
     def test_module_hierarchy(self, device):
@@ -114,7 +117,9 @@ class TestModuleTracker(TestCase):
             self.assertEqual(tracker.parents, {"Global"})
 
 
-instantiate_device_type_tests(TestModuleTracker, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(
+    TestModuleTracker, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
