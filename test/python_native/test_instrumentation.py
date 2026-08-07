@@ -14,6 +14,7 @@ from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
     CompileEvent,
     instrument_cutedsl_compile,
+    instrument_flydsl_compile,
     instrument_helion_kernel,
     instrument_triton_kernel,
 )
@@ -215,6 +216,19 @@ class TestInstrumentation(_LoggerCaptureTest):
         # them reachable so it's a drop-in replacement.
         self.assertTrue(hasattr(compile_fn, "cache_info"))
         self.assertEqual(compile_fn.cache_info().misses, 0)
+
+    def test_flydsl_cache_attrs_forwarded(self):
+        from torch._native.flydsl.cache import flydsl_jit_cache
+
+        @flydsl_jit_cache
+        def compile_fn(key):
+            return key
+
+        instrumented = instrument_flydsl_compile("aten::_fused_rms_norm")(compile_fn)
+        self.assertEqual(instrumented("key"), "key")
+        self.assertEqual(instrumented.cache_info().currsize, 1)
+        instrumented.cache_clear()
+        self.assertEqual(instrumented.cache_info().currsize, 0)
 
     def test_works_without_cache_info(self):
         # A plain callable (no cache_info) must still be timed and reported,
@@ -588,6 +602,12 @@ _DSL_INSTRUMENTATION_RULES = (
         "instrumented_cutedsl_cache",
     ),
     (
+        "flydsl",
+        "flydsl_jit_cache",
+        "instrument_flydsl_compile",
+        "instrumented_flydsl_cache",
+    ),
+    (
         "helion",
         ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
         "instrument_helion_kernel",
@@ -765,6 +785,11 @@ class TestInstrumentationCoverage(TestCase):
                 "@jit_cache\ndef c(): ...\n",
                 "@instrument_cutedsl_compile('aten::x')\n@jit_cache\ndef c(): ...\n",
                 "@instrumented_cutedsl_cache('aten::x')\ndef c(): ...\n",
+            ),
+            "flydsl": (
+                "@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrument_flydsl_compile('aten::x')\n@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrumented_flydsl_cache('aten::x')\ndef f(): ...\n",
             ),
             "helion": (
                 "@helion.kernel\ndef h(): ...\n",
