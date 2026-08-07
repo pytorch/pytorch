@@ -2533,13 +2533,14 @@ class SymmMemPoolTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
-    hw_classification = HardwareClassification.CUDA
     """CUDA symm_mem rendezvous against a torchcomms-backed PG.
 
     Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
     the NCCL backend on a bare ProcessGroup, and exercises symm_mem on the
     CUDA backend (cuMemMap/IPC).
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def device(self) -> torch.device:
@@ -2588,7 +2589,6 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
 @skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class ExternalNcclCommRegistrationTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
     """Tests for the external NCCL comm registration API
     (``register_external_nccl_comm`` and the ``NcclCommRegistration`` handle
     from ``torch.distributed._symmetric_memory._nccl``), exercised against a
@@ -2599,6 +2599,8 @@ class ExternalNcclCommRegistrationTest(TestCase):
     These run the real C++ registry path: register the real pointer into the
     per-device ``NCCLDevCommManager`` and unregister via the handle.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     def _make_real_comm(self, device_index: int = 0) -> int:
         """Create a real 1-rank ncclComm on ``device_index`` and return its
