@@ -329,7 +329,6 @@ class MPSProfiler {
   uint64_t beginProfileCPUFallback(
       const std::string& opName,
       const TensorList& tensors);
-  // `stream` should be the stream the profiled work was actually dispatched on.
   void beginProfileGPUInterval(const void* handle, MPSStream* stream);
 
   void endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream);
