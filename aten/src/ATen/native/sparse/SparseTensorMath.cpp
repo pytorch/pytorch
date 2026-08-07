@@ -355,23 +355,8 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (!dim.empty()) {
-    // Only full reductions are supported, so check if that is the case
-    int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
-    if (passed_full_reduction_check) {
-      auto dim_ = dim.vec();
-      maybe_wrap_dims(dim_, ndim);
-      std::vector<bool> dims_check(ndim, false);
-      // Need to check for duplicates, and fail if any are found
-      for (auto dim_ind : dim_) {
-        if (dims_check[dim_ind]) {
-          passed_full_reduction_check = false;
-          break;
-        }
-        dims_check[dim_ind] = true;
-      }
-    }
-    TORCH_CHECK(passed_full_reduction_check,
+    const auto ndim = static_cast<size_t>(self.dim());
+    TORCH_CHECK(dim_list_to_bitset(dim, ndim).count() == ndim,
       "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
   }
   TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
