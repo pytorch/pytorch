@@ -72,11 +72,13 @@ class ComputedLazyCache:
         lazy_vars: list[LazyConstantVariable],
         args: list[VariableTracker],
         op: Callable[..., Any],
+        num_nodes: int,
     ) -> None:
         self.value = value
         self.lazy_vars = lazy_vars
         self.args = args
         self.op = op
+        self.num_nodes = num_nodes
         self.name_hint: str | None = None
         self.source_location: SourceLocation | None = None
         self.vt: VariableTracker | None = None
@@ -567,11 +569,18 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         """Compute op(*args) eagerly; returns None to fall back to realization."""
         from .constant import ConstantVariable
 
+        max_nodes = config.computed_lazy_constant_max_nodes
+        if max_nodes <= 0:
+            return None
+
         lazy_vars: list[LazyConstantVariable] = []
+        num_nodes = 1
 
         def get_value(arg: VariableTracker) -> Any:
+            nonlocal num_nodes
             if isinstance(arg, ComputedLazyConstantVariable) and not arg.is_realized():
                 lazy_vars.extend(arg._cache.lazy_vars)
+                num_nodes += arg._cache.num_nodes
                 return arg._cache.value
             if isinstance(arg, LazyConstantVariable) and not arg.is_realized():
                 lazy_vars.append(arg)
@@ -579,6 +588,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
             return arg.as_python_constant()
 
         values = [get_value(arg) for arg in args]
+        # realize/reconstruct recurse through args; unbounded chains overflow the stack
+        if num_nodes > max_nodes:
+            return None
         try:
             value = op(*values)
         except Exception:
@@ -588,7 +600,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         if not lazy_vars:
             return ConstantVariable.create(value)
         return ComputedLazyConstantVariable(
-            ComputedLazyCache(value, lazy_vars, list(args), op)
+            ComputedLazyCache(value, lazy_vars, list(args), op, num_nodes)
         )
 
     def __init__(self, _cache: ComputedLazyCache, **kwargs: Any) -> None:
