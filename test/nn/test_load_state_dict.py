@@ -27,6 +27,7 @@ if TEST_NUMPY:
 
 class TestLoadStateDict(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
+
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
