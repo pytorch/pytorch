@@ -1416,7 +1416,7 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes, *, implicit=False):
+def expand(x, sizes, *, implicit=False, graph_fanout=False):
     # `implicit` is autograd-internal metadata (see aten::expand schema); it
     # does not affect the produced tensor, so the lowering ignores it. Without
     # this kwarg the lowering rejects graphs produced by dynamo autograd where
@@ -1443,12 +1443,16 @@ def expand(x, sizes, *, implicit=False):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # Broadcast loop reuse is not graph fanout; keep the graph-fanout
             # read-count heuristic from materializing cheap expanded producers.
+            # Callers that go on to read the result once per position of the
+            # broadcast dims pass graph_fanout=True, since for them the reuse is
+            # recompute rather than a hoistable load.
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product,
-                graph_reuse=config.deterministic
+                graph_reuse=graph_fanout
+                or config.deterministic
                 or torch.are_deterministic_algorithms_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -4117,7 +4121,9 @@ def select_scatter(x, src, dim: int, index: int):
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
-    src = expand(unsqueeze(src, dim), x.get_size())
+    # src is evaluated at every position of `dim` below even though only
+    # `index` keeps the value, so the broadcast is real fanout.
+    src = expand(unsqueeze(src, dim), x.get_size(), graph_fanout=True)
     src_loader = src.make_loader()
 
     def inner_fn(idx):
@@ -5033,7 +5039,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-    values = expand(values, expected_vals_size)
+    # the Scatter below reads values once per position of expected_vals_size,
+    # so the broadcast is real fanout.
+    values = expand(values, expected_vals_size, graph_fanout=True)
     # all guards are set above during broadcast_tensors and expand
 
     device = self.get_device()
