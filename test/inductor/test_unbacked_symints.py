@@ -1398,6 +1398,9 @@ class TestUnbackedSymints(InductorTestCase):
         # pointwise cat thresholds to force ConcatKernel path instead of
         # pointwise_cat. max_autotune sends the mms through a template buffer
         # instead of the extern kernel, which needs the same dependency.
+        if max_autotune and device == "cpu":
+            raise unittest.SkipTest("no Triton gemm template on CPU")
+
         def fn(x, ends, w):
             outputs = []
             start = 0
@@ -1421,7 +1424,9 @@ class TestUnbackedSymints(InductorTestCase):
         ):
             actual = torch.compile(fn, fullgraph=True, dynamic=dynamic)(*example_inputs)
         expected = fn(*example_inputs)
-        torch.testing.assert_close(actual, expected)
+        # A Triton gemm template accumulates in a different order than eager, so
+        # default float32 tolerances are too tight here.
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
