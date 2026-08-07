@@ -30,6 +30,11 @@ from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch._logging import trace_structured
+from torch.fx.experimental.proxy_tensor import (
+    _coor_check_current_accelerator,
+    _coor_current_accelerator,
+    _coor_enabled,
+)
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
@@ -50,7 +55,12 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
-from ..stream_utils import get_raw_stream_name, get_stream_name
+from ..stream_utils import (
+    COOR_DEVICE_IDX_VAR,
+    coor_device_str,
+    get_raw_stream_name,
+    get_stream_name,
+)
 from ..utils import (
     cache_on_self,
     DeferredLineBase,
@@ -605,6 +615,24 @@ class ExitSubgraphLine(WrapperLine):
         return converter._generate_exit_subgraph
 
 
+# [device-as-parameter] Name of the call()-local variable holding the runtime current
+# device index under compile-on-one-rank, so the wrapper is byte-identical across ranks.
+_COOR_DEVICE_IDX_VAR = COOR_DEVICE_IDX_VAR
+
+
+def _coor_device_idx_ref(device_idx: int) -> int | str:
+    """Device index to emit in the wrapper. Under compile-on-one-rank, the call()-local
+    runtime current-device variable (so the wrapper is byte-identical across ranks);
+    otherwise the literal compile-time index.
+
+    Safe to ignore ``device_idx`` under CooR: make_fx rejects any operand that is not the
+    current accelerator (_coor_check_current_accelerator), so every ``device_idx`` reaching
+    codegen is already the current device's index; redirecting it to the runtime variable
+    just follows each rank's own device.
+    """
+    return _COOR_DEVICE_IDX_VAR if _coor_enabled() else device_idx
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
@@ -636,9 +664,19 @@ class EnterDeviceContextManagerLine(WrapperLine):
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
+            if _coor_enabled():
+                # compile-on-one-rank: resolve the device at runtime so the wrapper is
+                # byte-identical across ranks -- a shared artifact follows each rank's
+                # current device instead of the compile-time index.
+                idx = _COOR_DEVICE_IDX_VAR
+                code.writeline(
+                    f"{idx} = {V.graph.device_ops.current_device_idx_expr()}"
+                )
+            else:
+                idx = self.device_idx
+            code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
             code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            code.writeline(V.graph.device_ops.set_device(idx))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
@@ -1062,12 +1100,18 @@ class AllocateLine(MemoryPlanningLine):
         group_name = layout.group_name
 
         if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
+            # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
+            # the running rank's device, not the compile-time index.
+            if _coor_enabled():
+                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+            else:
+                device_arg = f'torch.device("cuda:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
                 f"{self.wrapper.codegen_shape_tuple(stride)}, "
                 f"{dtype}, "
-                f'torch.device("cuda:{device.index}"), '
+                f"{device_arg}, "
                 f'group_name="{group_name}", '
                 f"alloc_id={random.randint(0, 2**64 - 1)})"
             )
@@ -1435,6 +1479,9 @@ class PythonWrapperCodegen(CodeGen):
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: int | None = None
+        # [device-as-parameter] CooR harness render mode, resolved once and cached:
+        # None = unresolved, False = compile-on-one-rank off, else the current accelerator.
+        self._coor_current_accelerator: torch.device | Literal[False] | None = None
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
@@ -2015,13 +2062,20 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
+            # compile-on-one-rank: resolve at runtime so the autotune block matches the
+            # rank-agnostic call() body (see codegen_device_guard_enter).
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({device_idx})"
+                f"{name} = get_raw_stream({autotune_idx})"
             )
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        self.writeline(f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})")
         return name
 
     def get_codegened_graph(self):
@@ -2079,15 +2133,22 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
+            # compile-on-one-rank: resolve the device at runtime (like the call() body) so
+            # the autotune block is byte-identical across ranks, not baked to this rank's idx.
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device_idx)}:"
+                f"with {V.graph.device_ops.device_guard(autotune_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({device_idx})"
+                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -3114,6 +3175,23 @@ class PythonWrapperCodegen(CodeGen):
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
 
+    def _coor_device_type_str(self, device: torch.device) -> str:
+        """Render a device for the benchmark harness rank-agnostically: the bare device type
+        (no rank-specific index), so it is byte-identical across ranks. cpu/meta have no index
+        and pass through unchanged; a non-current accelerator violates the single-device
+        invariant and is refused. Under compile-on-one-rank the current accelerator is read
+        once per compilation and cached on the wrapper; once cached, the per-input/buffer
+        harness loops repeat neither the enabled check nor the cudaGetDevice.
+        """
+        cur = self._coor_current_accelerator
+        if cur is None:
+            cur = _coor_current_accelerator() if _coor_enabled() else False
+            self._coor_current_accelerator = cur
+        if cur is False:
+            return str(device)
+        _coor_check_current_accelerator(device, cur)
+        return device.type
+
     def benchmark_compiled_module(self, output):
         """Write out codegen for benchmarking the output code"""
 
@@ -3122,7 +3200,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{name} = rand_strided("
                 f"{self.codegen_python_shape_tuple(shape)}, "
                 f"{self.codegen_python_shape_tuple(stride)}, "
-                f"device='{device}', dtype={dtype})"
+                f"device='{self._coor_device_type_str(device)}', dtype={dtype})"
             )
 
         def add_expr_input(name, val):
@@ -3200,7 +3278,7 @@ class PythonWrapperCodegen(CodeGen):
                     continue
                 numel = group.nbytes // torch._utils._element_size(group.dtype)
                 output.writeline(
-                    f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{group.device}', dtype={group.dtype})"
+                    f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{self._coor_device_type_str(group.device)}', dtype={group.dtype})"
                 )
                 for name, (shape, stride) in group.inputs.items():
                     aliased_input_specs[name] = (group.buffer_name, shape, stride)
@@ -3229,9 +3307,16 @@ class PythonWrapperCodegen(CodeGen):
                     # Use False as a fallback for benchmark harness purposes.
                     add_expr_input(name, False)
                 elif isinstance(value, ir.GeneratorState):
+                    # Harness runs outside the runtime device guard, so resolve the index
+                    # with current_device() (the _coor_device_idx var is not in scope here).
+                    gen_idx = (
+                        V.graph.device_ops.current_device_idx_expr()
+                        if _coor_enabled()
+                        else value.device.index
+                    )
                     add_expr_input(
                         name,
-                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
+                        f"torch.cuda.default_generators[{gen_idx}].graphsafe_get_state()",
                     )
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")
@@ -3884,7 +3969,7 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
+            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
@@ -4019,7 +4104,9 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
-            self.writeline(f"{stream_name} = get_raw_stream({device.index})")
+            self.writeline(
+                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
+            )
         else:
             stream_name = PythonWrapperCodegen.write_get_raw_stream(
                 self, device.index, graph_name
@@ -4160,8 +4247,15 @@ class PythonWrapperCodegen(CodeGen):
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
+            # The autotune block inlines the current-device expression rather than using the
+            # call()-local _coor_device_idx variable, which is not in scope here.
+            guard_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device.index
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device.index)}:"
+                f"with {V.graph.device_ops.device_guard(guard_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
@@ -4239,6 +4333,12 @@ class PythonWrapperCodegen(CodeGen):
             for n, t in opaque_types.items():
                 V.graph.opaque_value_type_classes[n] = t
             return obj_repr
+        elif isinstance(s, torch.device) and _coor_enabled() and s.index is not None:
+            # compile-on-one-rank: repr() of an indexed device would bake this rank's
+            # index into the wrapper (e.g. an aten fallback's device= arg renders as
+            # device(type='cuda', index=0)), which the "cuda:N" checks do not catch.
+            # Emit the bare type so the value follows the enclosing runtime device guard.
+            return repr(torch.device(s.type))
         else:
             return repr(s)
 
@@ -5098,7 +5198,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             )
         else:
             name = get_raw_stream_name(device_idx)
-            self.writeline(f"{name} = get_raw_stream({device_idx})")
+            self.writeline(
+                f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})"
+            )
         return name
 
     def codegen_graph_nvtx_range_push(self, post_grad_graph_id: int) -> None:
