@@ -60,6 +60,7 @@ from ..utils import (
 from .mm_common import (
     _is_static_problem,
     _use_small_mm_pointwise,
+    blackwell_persistent_mm_grid,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -127,7 +128,7 @@ scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_device_tma",
-    grid=persistent_mm_grid,
+    grid=blackwell_persistent_mm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
 )
 
