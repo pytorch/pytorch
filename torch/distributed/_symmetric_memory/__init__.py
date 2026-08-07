@@ -556,9 +556,9 @@ lib.define(
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
-    "fused_all_gather_scaled_matmul_v2("
-    "Tensor A, Tensor[] Bs, Tensor A_scale, int[] recipe_a, int[] swizzle_a, "
-    "Tensor[] B_scales, int[] recipe_b, int[] swizzle_b, "
+    "fused_all_gather_block_scaled_matmul("
+    "Tensor A, Tensor[] Bs, Tensor A_scale, int[] recipe_a, "
+    "Tensor[] B_scales, int[] recipe_b, "
     "int gather_dim, str group_name, "
     "Tensor?[] biases, "
     "ScalarType?[] out_dtypes, "
@@ -642,6 +642,21 @@ class _ScaleMode(Enum):
 # up to a tile boundary independently and the gathered buffer no longer matches
 # the layout the kernel expects.
 _BLOCK_SCALE_ROW_TILE = 128
+
+
+def _block_scale_swizzle() -> list[int]:
+    """The scale swizzle the block-scaling kernels require on this platform.
+
+    This is not a tuning knob. `ScaledBlas.cpp` checks it exactly: NVIDIA demands
+    SWIZZLE_32_4_4 and ROCm demands NO_SWIZZLE, and anything else is rejected. So
+    callers do not pass it -- exposing it would only create a way to be wrong,
+    or to silently miss the layout the fast kernels need.
+    """
+    from torch.nn.functional import SwizzleType
+
+    if torch.version.hip is not None:
+        return [int(SwizzleType.NO_SWIZZLE.value)]
+    return [int(SwizzleType.SWIZZLE_32_4_4.value)]
 
 
 def _verify_block_wise_scale(
@@ -1430,16 +1445,14 @@ def _fused_matmul_reduce_scatter(
         )
 
 
-@torch.library.impl(lib, "fused_all_gather_scaled_matmul_v2", "Meta")
-def _fused_all_gather_scaled_matmul_v2_fallback(
+@torch.library.impl(lib, "fused_all_gather_block_scaled_matmul", "Meta")
+def _fused_all_gather_block_scaled_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
     recipe_a: list[int],
-    swizzle_a: list[int],
     B_scales: list[torch.Tensor],
     recipe_b: list[int],
-    swizzle_b: list[int],
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
@@ -1448,6 +1461,7 @@ def _fused_all_gather_scaled_matmul_v2_fallback(
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
     _verify_block_wise_scale(A_shard, A_scale, gather_dim)
+    swizzle = _block_scale_swizzle()
     group_size = c10d._get_group_size_by_name(group_name)
 
     A = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -1472,10 +1486,10 @@ def _fused_all_gather_scaled_matmul_v2_fallback(
             B,
             [A_scale_full],
             recipe_a,
-            swizzle_a,
+            swizzle,
             [B_scale],
             recipe_b,
-            swizzle_b,
+            swizzle,
             bias,
             out_dtype,
             [],
@@ -1489,16 +1503,14 @@ def _fused_all_gather_scaled_matmul_v2_fallback(
     ]
 
 
-@torch.library.impl(lib, "fused_all_gather_scaled_matmul_v2", "CUDA")
-def _fused_all_gather_scaled_matmul_v2(
+@torch.library.impl(lib, "fused_all_gather_block_scaled_matmul", "CUDA")
+def _fused_all_gather_block_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
     recipe_a: list[int],
-    swizzle_a: list[int],
     B_scales: list[torch.Tensor],
     recipe_b: list[int],
-    swizzle_b: list[int],
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
@@ -1512,8 +1524,7 @@ def _fused_all_gather_scaled_matmul_v2(
         A = all_gather_single(A_shard, gather_dim, group_name)
         A_scale_full = all_gather_single(A_scale, 0, group_name)
         res = torch.ops.aten._scaled_mm_v2(
-            A.flatten(0, -2), B, [A_scale_full], recipe_a, swizzle_a,
-            [B_scale], recipe_b, swizzle_b, ...
+            A.flatten(0, -2), B, [A_scale_full], recipe_a, [B_scale], recipe_b, ...
         )
 
     This is the block-scaled counterpart of `fused_all_gather_scaled_matmul`.
@@ -1521,6 +1532,11 @@ def _fused_all_gather_scaled_matmul_v2(
     tensor-wise and row-wise scaling, this one dispatches to
     `aten::_scaled_mm_v2` and can express the block-scaling recipes -- notably
     `ScalingType.BlockWise1x32`, i.e. mxfp8.
+
+    The scale swizzle is not a parameter: the block-scaling kernels accept exactly
+    one layout per platform (SWIZZLE_32_4_4 on NVIDIA, NO_SWIZZLE on ROCm), so it
+    is derived rather than passed, and callers cannot accidentally select a layout
+    the fast kernels reject.
 
     `A_scale` must already be in the kernel's swizzled layout and flat, as
     produced for the *local* shard. Gathering swizzled shards is valid because
@@ -1544,17 +1560,16 @@ def _fused_all_gather_scaled_matmul_v2(
     if len(use_fast_accum) != len(Bs):
         raise ValueError("len(use_fast_accum) must be the same as len(Bs)")
     _verify_block_wise_scale(A_shard, A_scale, gather_dim)
+    swizzle = _block_scale_swizzle()
 
     if _is_test_mode:
-        return _fused_all_gather_scaled_matmul_v2_fallback(
+        return _fused_all_gather_block_scaled_matmul_fallback(
             A_shard,
             Bs,
             A_scale,
             recipe_a,
-            swizzle_a,
             B_scales,
             recipe_b,
-            swizzle_b,
             gather_dim,
             group_name,
             biases,
@@ -1562,7 +1577,7 @@ def _fused_all_gather_scaled_matmul_v2(
             use_fast_accum,
         )
 
-    with torch.profiler.record_function("fused_all_gather_scaled_matmul_v2"):
+    with torch.profiler.record_function("fused_all_gather_block_scaled_matmul"):
         A, res = _fused_all_gather_matmul_impl(
             torch.ops.aten._scaled_mm_v2.out,
             A_shard,
@@ -1571,10 +1586,10 @@ def _fused_all_gather_scaled_matmul_v2(
             [
                 {
                     "recipe_a": recipe_a,
-                    "swizzle_a": swizzle_a,
+                    "swizzle_a": swizzle,
                     "scale_b": [B_scale],
                     "recipe_b": recipe_b,
-                    "swizzle_b": swizzle_b,
+                    "swizzle_b": swizzle,
                     "bias": bias,
                     "out_dtype": out_dtype,
                     "contraction_dim": [],
