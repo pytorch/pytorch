@@ -1865,6 +1865,32 @@ def get_default_kpack(block_k: int = 16) -> int:
     return 2
 
 
+# MFMA K-extent (kdim) for the CDNA "16x16" and "32x32" MMA families, keyed by
+# (element_byte_width, matrix_instr_nonkdim). Values from the gfx942/gfx950
+# V_MFMA_* ISA table.
+_MFMA_KDIM = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """K-extent of the selected MFMA instruction.
+
+    Returns None if the (dtype_size, matrix_instr_nonkdim) pair is unknown, so
+    callers can fall back to a conservative bound. Byte width disambiguates every
+    supported case except tf32/xf32 (both 4-byte); callers that care about tf32
+    must key on the real dtype instead.
+    """
+    return _MFMA_KDIM.get((dtype_size, matrix_instr_nonkdim))
+
+
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
