@@ -1921,10 +1921,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif res.python_type() is bool:  # pybool_check
             return res
         else:
-            raise_type_error(
-                tx,
-                f"__bool__ should return bool, returned {res.python_type_name()}",
-            )
+            if sys.version_info >= (3, 15):
+                err_str = f"{self.python_qualified_name()}.__bool__() must return a bool, not {res.python_qualified_name()}"
+            else:
+                err_str = (
+                    f"__bool__ should return bool, returned {res.python_type_name()}"
+                )
+
+            raise_type_error(tx, err_str)
 
     def repr_impl(
         self,
