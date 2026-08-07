@@ -15,7 +15,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import _get_mesh_info
 from torch.distributed.tensor import init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -81,6 +85,14 @@ class DenseSparseParams(nn.Module):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
+    # These tests check how FSDP propagates spmd_types annotations, which is
+    # bookkeeping the device never participates in: the process group is the
+    # fake backend and every mesh below is built on "cpu". Nothing here reads
+    # or writes accelerator memory, so the class is GENERIC rather than
+    # ACCELERATOR, and it is deliberately not passed to
+    # `instantiate_device_type_tests` -- there is no device to parametrize on.
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
