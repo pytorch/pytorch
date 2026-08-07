@@ -1421,7 +1421,6 @@ class TestPassesRNN(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_move_to_device_pass(self, device):
-        # NPU fp32 GRU fails after move_to_device_pass (DynamicGRUV2); keep cuda/xpu.
         device_type = torch.device(device).type
         device0 = f"{device_type}:0"
 
@@ -1461,7 +1460,7 @@ class TestPassesRNN(TestCase):
 
 
 instantiate_device_type_tests(TestPassesDevice, globals(), except_for="cpu")
-instantiate_device_type_tests(TestPassesRNN, globals(), only_for=("cuda", "xpu"))
+instantiate_device_type_tests(TestPassesRNN, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
