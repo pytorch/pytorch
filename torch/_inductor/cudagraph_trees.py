@@ -768,6 +768,7 @@ class CUDAWarmupNode:
         return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def run(self, new_inputs: Any) -> OutputType:
+        """Run the wrapped function once and record its live output storages."""
         if self.has_run:
             raise AssertionError("Wrapped function should never be run twice")
 
@@ -836,7 +837,12 @@ class CUDAWarmupNode:
             [map_to_ref(o) if add_ref(o) else None for o in out]
         )
         self.tensor_weakrefs.extend(
-            [TensorWeakRef(o) if add_ref(o) else None for o in out]
+            [
+                TensorWeakRef(o, _is_internal_lifetime_observer=True)
+                if add_ref(o)
+                else None
+                for o in out
+            ]
         )
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
@@ -1345,7 +1351,9 @@ class CUDAGraphNode:
                 raise AssertionError("expected w to not be None")
             w.swap_weakref(out.untyped_storage()._weak_ref())
             if user_visible_output_idxs and i in user_visible_output_idxs:
-                self.tensor_weakrefs[i] = TensorWeakRef(out)
+                self.tensor_weakrefs[i] = TensorWeakRef(
+                    out, _is_internal_lifetime_observer=True
+                )
 
         return outputs
 
@@ -1580,7 +1588,9 @@ class CUDAGraphNode:
                 self.tensor_weakrefs.append(None)
             else:
                 self.outputs_weakrefs.append(StorageWeakRefWrapper(out))
-                self.tensor_weakrefs.append(TensorWeakRef(out))
+                self.tensor_weakrefs.append(
+                    TensorWeakRef(out, _is_internal_lifetime_observer=True)
+                )
 
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
         self.checkpointed_caching_state = torch._C._cuda_getCheckpointState(

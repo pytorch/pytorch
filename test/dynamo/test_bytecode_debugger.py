@@ -803,7 +803,7 @@ Stack (TOS at end):
 
             # Verify we can inspect locals at the exception point
             locals_output = yield "locals"
-            self.assertIn("x =", locals_output)  # Input tensor should be in locals
+            self.assertIn("graph_out_0 =", locals_output)
 
             # Verify we can inspect the stack at the exception point
             # Note: On Python 3.11 with settrace, when an exception is raised,
@@ -1013,25 +1013,28 @@ Stack (TOS at end):
             upper_stack = yield "stack"
             self.assertIn("Stack (TOS at end):", upper_stack)
 
-            # Check locals in upper frame — should have 'x'
+            # The parent frame already released dead tensor locals before
+            # calling the resume function, but locals should still be
+            # inspectable.
             locals_output = yield "locals"
-            self.assertIn("x =", locals_output)
+            self.assertIn("Locals:", locals_output)
+            self.assertNotIn("x =", locals_output)
 
-            # Check locals in lower frame — should NOT have 'x', but should have 'y'
-            # (resume function receives Dynamo-renamed parameters)
+            # Check locals in lower frame. Boxed resume functions receive one
+            # internal resume-args list before the prologue unpacks it.
             yield "d"
             lower_locals_output = yield "locals"
             self.assertNotIn("x =", lower_locals_output)
-            self.assertIn("y =", lower_locals_output)
+            self.assertIn("__torch_dynamo_resume_args", lower_locals_output)
 
             # Go back up and check globals
             yield "u"
             globals_output = yield "globals"
             self.assertIn("Globals:", globals_output)
 
-            # 'p' from upper frame should see fn's locals
-            p_output = yield "p x"
-            self.assertIn("x =", p_output)
+            # 'p' from upper frame should see the debugger-provided stack.
+            p_output = yield "p __stack__"
+            self.assertIn("__stack__ =", p_output)
 
             # Set a breakpoint on fn's RETURN_VALUE from the upper frame.
             # When we continue, the resume function will complete first,

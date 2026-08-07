@@ -151,10 +151,18 @@ class _WeakHashRef(weakref.ref):
 
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    def __init__(self, dict=None, ref_type=WeakIdRef) -> None:  # CHANGED
+    def __init__(
+        self,
+        dict=None,
+        ref_type=WeakIdRef,
+        *,
+        _is_internal_lifetime_observer: bool = False,
+    ) -> None:  # CHANGED
         self.data = {}
 
         self.ref_type = ref_type  # CHANGED
+        # Internal bookkeeping may mark callbacks that are not user-observable.
+        self._is_internal_lifetime_observer = _is_internal_lifetime_observer
 
         def remove(k, selfref=ref(self)) -> None:
             self = selfref()
@@ -346,15 +354,27 @@ class WeakIdKeyDictionary(MutableMapping):
 WeakTensorKeyDictionary = WeakIdKeyDictionary
 
 
+class _InternalTensorWeakRef(weakref.ref):
+    """Distinct ref type for non-user-observable compiler bookkeeping."""
+
+    __slots__ = ()
+
+
 class TensorWeakRef:
     """Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
 
     ref: WeakRef[Tensor]
 
-    def __init__(self, tensor: Tensor) -> None:
+    def __init__(
+        self, tensor: Tensor, *, _is_internal_lifetime_observer: bool = False
+    ) -> None:
         if not isinstance(tensor, Tensor):
             raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
-        self.ref = weakref.ref(tensor)
+        self.ref = (
+            _InternalTensorWeakRef(tensor)
+            if _is_internal_lifetime_observer
+            else weakref.ref(tensor)
+        )
 
     def __call__(self):
         out = self.ref()

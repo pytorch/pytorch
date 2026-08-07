@@ -78,7 +78,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2
 
-        self._common(fn, 3, 5)
+        # Consuming tmp1 clears its boxed resume slot, so the false branch no
+        # longer compiles a placeholder-only graph to forward that dead value.
+        self._common(fn, 2, 5)
 
     def test_control_flow5(self):
         def fn(a, b):
@@ -89,7 +91,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2, tmp1, tmp2
 
-        self._common(fn, 6, 13)
+        self._common(fn, 5, 13)
 
     def test_capi_call1(self):
         def fn(a, b):
@@ -188,7 +190,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 6)
+        # Releasing the externally observable unsupported-call result requires
+        # a partition between its first use and the remaining graph work.
+        self._common(fn, 3, 6)
 
     def test_resume2(self):
         def fn(a, b):
@@ -201,7 +205,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 7)
+        self._common(fn, 3, 7)
 
     def test_resume3(self):
         def fn(a, b):
@@ -214,7 +218,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 7)
+        self._common(fn, 3, 7)
 
     def test_resume4(self):
         def fn(a, b):
@@ -227,7 +231,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 7)
+        self._common(fn, 3, 7)
 
     def test_resume5(self):
         def fn(a, b):
@@ -347,24 +351,132 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
-    def test_resume_del_post_break_local_uses_positional_call(self):
+    def test_resume_del_post_break_local_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
         def fn(x):
             torch._dynamo.graph_break()
             y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
             del y
+            check_tensor_dead("after_del")
             return x + 2
 
         self.assertEqual(
             torch.compile(fn, backend="eager")(torch.ones(3)),
             torch.full((3,), 3.0),
         )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
+        )
 
-        from torch._dynamo.resume_execution import ContinueExecutionCache
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_resume_del_post_break_local_releases_tensor(self):
+        refs = []
+        events = []
 
-        resume_codes = list(ContinueExecutionCache.cache[fn.__code__].values())
-        self.assertGreater(len(resume_codes), 0)
-        self.assertFalse(
-            any(ContinueExecutionCache.uses_boxed_call(code) for code in resume_codes)
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            out = inner(x)
+            del y
+            check_tensor_dead("after_del")
+            return out + 3
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 6.0),
+        )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
+        )
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_resume_del_post_break_alias_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            alias = y
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            out = inner(x)
+            del y
+            check_tensor_dead("after_y")
+            del alias
+            check_tensor_dead("after_alias")
+            return out + 3
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 6.0),
+        )
+        self.assertEqual(
+            events,
+            [("after_y", False), "freed_y", ("after_alias", True)],
+        )
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_resume_del_in_try_releases_tensor(self):
+        refs = []
+        events = []
+
+        @torch._dynamo.disable
+        def check_tensor_dead(label):
+            gc.collect()
+            events.append((label, refs[-1]() is None))
+
+        def inner(x):
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            refs.append(weakref.ref(y, lambda _: events.append("freed_y")))
+            try:
+                out = inner(x)
+                del y
+                check_tensor_dead("after_del")
+            except RuntimeError:
+                out = x + 100
+            return out + 3
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 6.0),
+        )
+        self.assertEqual(
+            events,
+            ["freed_y", ("after_del", True)],
         )
 
     def test_start1(self):
@@ -385,7 +497,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 4)
+        self._common(fn, 3, 4)
 
     def test_start3(self):
         def fn(a, b):
@@ -395,7 +507,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 1, 3)
+        self._common(fn, 2, 3)
 
     def test_start4(self):
         def fn(a, b, check):
@@ -452,7 +564,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
+        self._common(fn, ifdynstaticdefault(3, 1), ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -473,7 +585,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 x += tmp.pop(-1)
             return x
 
-        self._common(fn, 2, 6)
+        self._common(fn, 3, 6)
 
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_getitem(self):
@@ -605,6 +717,51 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 7)
         self.assertEqual(cnt.op_count, 10)
 
+    @torch.compiler.config.patch(dynamic_sources="L['xs'][0]")
+    def test_boxed_resume_preserves_nested_dynamic_source(self):
+        def fn(xs):
+            torch._dynamo.graph_break()
+            return xs[0] * xs[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        for size in (2, 3, 4):
+            xs = [torch.randn(size)]
+            self.assertEqual(opt_fn(xs), fn(xs))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    @torch._dynamo.config.patch(specialize_int=True)
+    @torch.compiler.config.patch(unbacked_sources="L['x']")
+    def test_boxed_resume_preserves_unbacked_source(self):
+        def fn(x):
+            torch._dynamo.graph_break()
+            return torch.ones(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        for size in (2, 3, 4):
+            self.assertEqual(opt_fn(size), fn(size))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_boxed_resume_preserves_dynamic_shapes_spec(self):
+        from torch.fx.experimental.dynamic_spec import ShapeVar, TensorSpec
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(
+            fn,
+            backend=cnt,
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch")])},
+        )
+        for size in (2, 3, 4):
+            x = torch.randn(size)
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_resume_with_no_grad1(self):
         def fn(a, b):
             x = a + b
@@ -663,7 +820,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + next(it)
             return x
 
-        self._common(fn, 2, 8)
+        self._common(fn, 3, 8)
 
     def test_tuple_iterator_return(self):
         def fn(x):
@@ -687,7 +844,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v2.tolist(), v3.tolist())
         self.assertEqual(v2.tolist(), v4.tolist())
         self.assertEqual(list(it2), list(it3))
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 5)
         self.assertEqual(cnt.op_count, 6)
 
     def test_tuple_iterator_mutate(self):

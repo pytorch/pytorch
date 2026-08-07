@@ -39,7 +39,13 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, ChainedSource, DictGetItemSource, Source
+from .source import (
+    AttrSource,
+    ChainedSource,
+    DictGetItemSource,
+    Source,
+    TempLocalSource,
+)
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
@@ -103,6 +109,8 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self.direct_source_uses: OrderedSet[Source] = OrderedSet()
+        self._source_reconstruct_depth = 0
         self.pycodes = []
 
     def add_pycode(self, pycode: str, *args):
@@ -220,6 +228,8 @@ class PyCodegen:
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
+            if self._source_reconstruct_depth == 0:
+                self.direct_source_uses.add(source)
             if allow_cache is not True:
                 raise AssertionError("allow_cache must be True for Source")
             if self.top_of_stack is value:
@@ -233,6 +243,7 @@ class PyCodegen:
 
             self.uses[source] += 1
             try:
+                self._source_reconstruct_depth += 1
                 self.call_reconstruct(source)
             except NotImplementedError:
                 unimplemented(
@@ -241,6 +252,8 @@ class PyCodegen:
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
+            finally:
+                self._source_reconstruct_depth -= 1
             if source in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(source)
@@ -683,11 +696,181 @@ class PyCodegen:
         if source not in self.tempvars:
             self.tempvars[source] = None
 
-    def make_call_generated_code(self, fn_name: str) -> None:
+    def make_resume_arg_snapshot(
+        self, name: str, value: VariableTracker | Source
+    ) -> None:
+        self.add_push_null(
+            lambda: self.load_import_from(
+                "torch._dynamo.resume_execution", "_make_resume_arg_snapshot"
+            )
+        )
+        self(value)
+        self.extend_output(create_call_function(1, False))
+        self.append_output(self.create_store(name))
+
+    def replay_fast_local_events(
+        self,
+        events: list[tuple[str | None, VariableTracker | None]] | None,
+        resume_arg_paths_by_event: list[set[tuple[Any, ...]]] | None = None,
+        initial_values: dict[str, VariableTracker] | None = None,
+    ) -> dict[str, Source]:
+        expected_ids_by_owner: dict[str, Source] = {}
+        owner_names = {
+            path[0]
+            for paths in (resume_arg_paths_by_event or ())
+            for path in paths
+            if len(path) >= 2 and isinstance(path[0], str)
+        }
+        for owner_name in sorted(owner_names):
+            if owner_name not in self.code_options["co_varnames"]:
+                continue
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    "torch._dynamo.resume_execution",
+                    "_snapshot_resume_arg_identities",
+                )
+            )
+            self(self.tx._resume_arg_owner_source(owner_name))
+            self.extend_output(create_call_function(1, False))
+            identity_name = self.new_var("resume_arg_ids")
+            self.append_output(self.create_store(identity_name))
+            expected_ids_by_owner[owner_name] = TempLocalSource(identity_name)
+
+        for name, value in (initial_values or {}).items():
+            if name in self.code_options["co_varnames"]:
+                self(value)
+                self.append_output(self.create_store(name))
+        events = events or []
+        resume_arg_paths_by_event = resume_arg_paths_by_event or [set() for _ in events]
+        if len(events) != len(resume_arg_paths_by_event):
+            raise AssertionError("fast-local events and cleanup paths must align")
+        resume_args_varname = self.tx._boxed_resume_arg_name()
+        resume_args = (
+            self.tx.f_locals.get(resume_args_varname)
+            if resume_args_varname is not None
+            else None
+        )
+
+        def refresh_frame_locals_if_needed() -> None:
+            if not isinstance(resume_args, list):
+                return
+            if (
+                resume_args_varname is None
+                or resume_args_varname not in self.code_options["co_varnames"]
+            ):
+                return
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    "torch._dynamo.resume_execution",
+                    "_refresh_frame_locals_if_resume_carrier_mutated",
+                )
+            )
+            self(self.tx._resume_arg_owner_source(resume_args_varname))
+            self.append_output(self.create_load_const(len(resume_args)))
+            self.extend_output(create_call_function(2, False))
+            self.pop_top()
+
+        # Replay only the fast-local opcodes.  In Python 3.12 and earlier, an
+        # already-materialized frame.f_locals dict intentionally remains stale
+        # until CPython refreshes it on the next property access.  Updating the
+        # dict here would release references earlier than eager execution.
+        for (name, value), paths in zip(events, resume_arg_paths_by_event):
+            if name is None:
+                self.clear_resume_arg_paths(
+                    paths, expected_ids_by_owner=expected_ids_by_owner
+                )
+                continue
+            if name not in self.code_options["co_varnames"]:
+                raise AssertionError(f"fast local {name!r} is not in co_varnames")
+            if value is None:
+                self.append_output(self.create_delete(name))
+                self.add_pycode(f"del {name}")
+            else:
+                self(value)
+                self.add_pycode(f"{name} = {{}}", value)
+                self.append_output(self.create_store(name))
+            self.clear_resume_arg_paths(
+                paths, expected_ids_by_owner=expected_ids_by_owner
+            )
+            refresh_frame_locals_if_needed()
+        return expected_ids_by_owner
+
+    def delete_resume_arg_identity_snapshots(
+        self, expected_ids_by_owner: dict[str, Source]
+    ) -> None:
+        for source in expected_ids_by_owner.values():
+            if not isinstance(source, TempLocalSource):
+                raise AssertionError("resume identity snapshot must be a temp local")
+            self.append_output(self.create_delete(source.local_name))
+
+    def clear_resume_arg_paths(
+        self,
+        paths: set[tuple[Any, ...]],
+        *,
+        preserve_observable_lifetime: bool = False,
+        expected_ids_by_owner: dict[str, Source] | None = None,
+    ) -> None:
+        for owner_name, root_index in sorted(paths, key=repr, reverse=True):
+            if owner_name not in self.code_options["co_varnames"]:
+                raise AssertionError(f"resume carrier {owner_name!r} is not a local")
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    "torch._dynamo.resume_execution",
+                    (
+                        "_clear_resume_arg_path_if_unchanged"
+                        if expected_ids_by_owner and owner_name in expected_ids_by_owner
+                        else (
+                            "_maybe_clear_resume_arg_path"
+                            if preserve_observable_lifetime
+                            else "_clear_resume_arg_path"
+                        )
+                    ),
+                )
+            )
+            self(self.tx._resume_arg_owner_source(owner_name))
+            self.append_output(self.create_load_const((root_index,)))
+            if expected_ids_by_owner and owner_name in expected_ids_by_owner:
+                self(expected_ids_by_owner[owner_name])
+                self.append_output(self.create_load_const(preserve_observable_lifetime))
+                self.extend_output(create_call_function(4, False))
+            else:
+                self.extend_output(create_call_function(2, False))
+            self.pop_top()
+
+    def make_call_generated_code(
+        self,
+        fn_name: str,
+        graph_input_names_to_delete: set[str] | None = None,
+        graph_input_names_to_clear: set[str] | None = None,
+        resume_arg_indexes_to_clear: set[int] | None = None,
+        resume_arg_locals_to_materialize: dict[str, VariableTracker | Source]
+        | None = None,
+        resume_arg_paths_to_clear: set[tuple[Any, ...]] | None = None,
+        unconditional_resume_arg_paths_to_clear: set[tuple[Any, ...]] | None = None,
+        fast_local_events: list[tuple[str | None, VariableTracker | None]]
+        | None = None,
+        fast_local_event_paths: list[set[tuple[Any, ...]]] | None = None,
+        fast_local_initial_values: dict[str, VariableTracker] | None = None,
+        fast_local_source_overrides: dict[Source, Source] | None = None,
+        boxed_call: bool = False,
+    ) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
         graphargs = self.tx.output.graphargs
+        graph_input_names_to_delete = {
+            name
+            for name in graph_input_names_to_delete or set()
+            if name in self.code_options["co_varnames"]
+        }
+        graph_input_names_to_clear = {
+            name
+            for name in graph_input_names_to_clear or set()
+            if name in self.code_options["co_varnames"]
+        }
+        resume_args_varname = self.tx._boxed_resume_arg_name()
+        if resume_args_varname is not None:
+            graph_input_names_to_clear.discard(resume_args_varname)
 
         def extract_nested_sources(source: Source) -> list[Source]:
             nested_sources: list[Source] = []
@@ -750,7 +933,6 @@ class PyCodegen:
             else:
                 self.call_reconstruct(arg)
                 self.add_pycode(f"{arg_varname} = {{}}", arg)
-
         if config.record_runtime_overhead:
             # Record the pregraph bytecode end
             self.add_push_null(
@@ -764,10 +946,79 @@ class PyCodegen:
             self.extend_output(create_call_function(1, False))
             self.pop_top()
 
-        self.extend_output(create_call_function(len(graphargs), False))
         self.clear_tempvars()
+
+        for name, value in (resume_arg_locals_to_materialize or {}).items():
+            self.make_resume_arg_snapshot(name, value)
+
+        # STORE_FAST installs its replacement before decrefing the prior value.
+        # Preserve that ordering when carrier cleanup can run user finalizers.
+        prior_overridden_sources = self.overridden_sources
+        if fast_local_source_overrides:
+            self.overridden_sources = {
+                **prior_overridden_sources,
+                **fast_local_source_overrides,
+            }
+        try:
+            expected_ids_by_owner = self.replay_fast_local_events(
+                fast_local_events,
+                fast_local_event_paths,
+                fast_local_initial_values,
+            )
+        finally:
+            self.overridden_sources = prior_overridden_sources
+
+        for name in sorted(graph_input_names_to_clear):
+            self.append_output(self.create_load(name))
+            self.load_method("clear")
+            self.call_method(0)
+            self.pop_top()
+        if resume_arg_paths_to_clear:
+            unconditional_resume_arg_paths_to_clear = (
+                unconditional_resume_arg_paths_to_clear or set()
+            )
+            self.clear_resume_arg_paths(
+                unconditional_resume_arg_paths_to_clear,
+                expected_ids_by_owner=expected_ids_by_owner,
+            )
+            self.clear_resume_arg_paths(
+                resume_arg_paths_to_clear - unconditional_resume_arg_paths_to_clear,
+                preserve_observable_lifetime=True,
+                expected_ids_by_owner=expected_ids_by_owner,
+            )
+        self.delete_resume_arg_identity_snapshots(expected_ids_by_owner)
+        if resume_args_varname is not None and resume_arg_indexes_to_clear:
+            resume_args = self.tx.f_locals.get(resume_args_varname)
+            if isinstance(resume_args, list):
+                for idx in sorted(resume_arg_indexes_to_clear, reverse=True):
+                    self.add_push_null(
+                        lambda: self.load_import_from(
+                            "torch._dynamo.resume_execution",
+                            "_maybe_clear_tensor_resume_arg",
+                        )
+                    )
+                    self.append_output(self.create_load(resume_args_varname))
+                    self.append_output(self.create_load_const(idx))
+                    self.extend_output(create_call_function(2, False))
+                    self.pop_top()
+        graph_input_names_to_delete |= graph_input_names_to_clear
+        for name in sorted(graph_input_names_to_delete):
+            self.append_output(self.create_delete(name))
+        if graph_input_names_to_delete:
+            self.add_pycode("del " + ", ".join(sorted(graph_input_names_to_delete)))
+
+        if boxed_call:
+            self.append_output(create_instruction("BUILD_LIST", arg=len(graphargs)))
+            nargs = 1
+        else:
+            nargs = len(graphargs)
+
+        self.extend_output(create_call_function(nargs, False))
+        graph_call_args = (
+            f"[{', '.join(arg_varnames)}]" if boxed_call else ", ".join(arg_varnames)
+        )
         self.add_pycode(
-            f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
+            f"__graph_out = {fn_name}({graph_call_args})",
         )
 
     def create_import_name(self, module_name: str) -> Instruction:

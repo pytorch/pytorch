@@ -1148,7 +1148,9 @@ class TracingContext:
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
         # See note [Tensor Fakification and Symbol Caching]
-        self.tensor_to_context = WeakTensorKeyDictionary()
+        self.tensor_to_context = WeakTensorKeyDictionary(
+            _is_internal_lifetime_observer=True
+        )
 
         # If this true, Aot Autograd will return output Fake Tensors with appropriate
         # meta on the first invocation

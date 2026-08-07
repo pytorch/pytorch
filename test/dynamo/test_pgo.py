@@ -179,7 +179,9 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f(torch.randn(2, 4), torch.randn(2, 4))
         f(torch.randn(4, 4), torch.randn(6, 8))
 
-        # check PGO code state is overwritten with static value, both before/after graph break
+        # Check PGO code state is overwritten with static value, both
+        # before/after graph break. Boxed resume frames record the same tensors
+        # through the generated resume argument list.
         for code_state in torch._dynamo.pgo.get_code_state().values():
             self.assertEqual(code_state.automatic_dynamic["L['x']"].size, (4, 4))
             self.assertEqual(code_state.automatic_dynamic["L['y']"].size, (6, 8))

@@ -44,7 +44,7 @@ import time
 import traceback
 import types
 import weakref
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import TypeIs
 
@@ -57,7 +57,7 @@ from torch._dynamo.exc import (
     ObservedException,
     TensorifyScalarRestartAnalysis,
 )
-from torch._guards import InlinedCodeCache, tracing, TracingContext
+from torch._guards import ChainedSource, InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -80,7 +80,6 @@ from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
     create_call_function,
-    create_call_function_ex,
     create_copy,
     create_dup_top,
     create_instruction,
@@ -127,19 +126,34 @@ from .polyfills import (
 )
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
+    _boxed_resume_arg_external_lifetime_roots,
+    _boxed_resume_arg_indexes_to_clear,
+    _boxed_resume_arg_name,
+    _boxed_resume_arg_names,
+    _boxed_resume_arg_sources,
+    _is_boxed_resume_code,
+    _resume_arg_has_observable_destruction,
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
 )
 from .source import (
     AttrSource,
+    ClosureSource,
+    ConstDictKeySource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
+    GetItemSource,
     GlobalSource,
+    GlobalStateSource,
     GlobalWeakRefSource,
+    ListGetItemSource,
     LocalCellSource,
     LocalSource,
+    NonSerializableSetGetItemSource,
     SkipGuardSource,
     Source,
+    TempLocalSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -150,6 +164,7 @@ from .utils import (
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
+    istensor,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -220,15 +235,67 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterable
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     from .package import CompilePackage
 
+_OBSERVER_PURE_TENSOR_OPERATORS = {
+    operator.abs,
+    operator.add,
+    operator.and_,
+    operator.eq,
+    operator.floordiv,
+    operator.ge,
+    operator.getitem,
+    operator.gt,
+    operator.iadd,
+    operator.iand,
+    operator.ifloordiv,
+    operator.ilshift,
+    operator.imatmul,
+    operator.imod,
+    operator.imul,
+    operator.invert,
+    operator.ior,
+    operator.ipow,
+    operator.irshift,
+    operator.isub,
+    operator.itruediv,
+    operator.ixor,
+    operator.le,
+    operator.lshift,
+    operator.lt,
+    operator.matmul,
+    operator.mod,
+    operator.mul,
+    operator.ne,
+    operator.neg,
+    operator.or_,
+    operator.pos,
+    operator.pow,
+    operator.rshift,
+    operator.sub,
+    operator.truediv,
+    operator.xor,
+    torch.mul,
+    torch.sqrt,
+}
+_OBSERVER_PURE_TENSOR_METHODS = {"sum"}
+
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResumeArgPathIndex:
+    kind: str
+    token: int
+
+
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
@@ -1166,6 +1233,16 @@ def break_graph_if_unsupported(
                 ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+            stack_pops = int(push) - stack_effect
+
+            cleanup_tx = self.output.root_tx
+            if (
+                stack_pops
+                and cleanup_tx.has_boxed_resume_args
+                and not cleanup_tx.is_tracing_resume_prologue
+            ):
+                for value in self.stack[len(self.stack) - stack_pops :]:
+                    cleanup_tx._mark_resume_arg_path_for_cleanup(value)
 
             # When warnings.warn is called from an inlined frame, replace
             # it on the symbolic stack before compile_subgraph so the codegen
@@ -1175,13 +1252,16 @@ def break_graph_if_unsupported(
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
-                self, reason=reason, stack_pops=int(push) - stack_effect
+                self, reason=reason, stack_pops=stack_pops
             )
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
             _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
+            self.output.add_output_instructions(
+                self.output.root_tx._clear_deleted_resume_args()
+            )
 
             # For inlined frames, use the root frame's current instruction
             # positions so the output code maps to the correct source line.
@@ -1224,7 +1304,7 @@ def break_graph_if_unsupported(
 
             self.output.add_output_instructions(cleanup)
 
-            self.popn(int(push) - stack_effect)
+            self.popn(stack_pops)
             if push:
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
@@ -1604,6 +1684,144 @@ class InstructionTranslatorBase(
         normalized_reads = set()
         for r in reads:
             normalized_reads.add(r.replace(".", "implicit") if r.startswith(".") else r)
+        cleanup_tx = self.output.root_tx
+        if not cleanup_tx.has_boxed_resume_args:
+            self.symbolic_locals = {
+                k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
+            }
+            return
+
+        current_offset = self.current_instruction.offset
+        future_stored_local_names = {
+            inst.argval
+            for inst in self.instructions
+            if inst.opname
+            in ("DELETE_DEREF", "DELETE_FAST", "STORE_DEREF", "STORE_FAST")
+            and inst.offset is not None
+            and current_offset is not None
+            and inst.offset >= current_offset
+        }
+        replayed_live_local_names: set[str] = set()
+        for event_name, event_value in cleanup_tx.entry_fast_local_events:
+            if event_name is None:
+                continue
+            if event_value is None:
+                replayed_live_local_names.discard(event_name)
+            else:
+                replayed_live_local_names.add(event_name)
+        paths_requiring_local_owners = {
+            path[:2] for path in cleanup_tx.resume_arg_paths_to_clear
+        }
+        explicitly_released_roots = set(paths_requiring_local_owners)
+        explicitly_released_local_names = {
+            name for name, _ in cleanup_tx.entry_fast_local_events if name is not None
+        }
+        for name, value in self.symbolic_locals.items():
+            if name in cleanup_tx.resume_arg_carrier_names:
+                continue
+            if type.__instancecheck__(CellVariable, value):
+                continue
+            if name in future_stored_local_names:
+                if (
+                    cleanup_tx.has_boxed_resume_args
+                    and (
+                        self is not cleanup_tx
+                        or name in self.f_locals
+                        or name in replayed_live_local_names
+                    )
+                    and name not in self.cell_and_freevars()
+                ):
+                    normalized_reads.add(name)
+                    self.resume_arg_local_names_to_preserve.add(name)
+                    if self is cleanup_tx and not type.__instancecheck__(
+                        NullVariable, value
+                    ):
+                        self.fast_locals_to_delete_after_transfer.add(name)
+                for path in cleanup_tx._boxed_resume_arg_paths(value):
+                    root_path = path[:2]
+                    paths_requiring_local_owners.add(root_path)
+                    cleanup_tx.resume_arg_paths_to_clear_after_transfer.add(root_path)
+
+        def overlaps_path_requiring_local_owner(path: tuple[Any, ...]) -> bool:
+            return any(
+                path[: len(other)] == other or other[: len(path)] == path
+                for other in paths_requiring_local_owners
+            )
+
+        # Values on the operand stack cross an opaque graph-break boundary.
+        # Record carrier-backed arguments to that instruction as externally
+        # observable so the taint survives through later continuations. A
+        # graph with observer-capable operations conservatively taints every
+        # carrier-backed local it can access.
+        external_lifetime_roots = cleanup_tx.resume_arg_roots_with_external_lifetime
+        for value in self.stack:
+            external_lifetime_roots.update(
+                path[:2] for path in cleanup_tx._boxed_resume_arg_paths(value)
+            )
+
+        # A pending side effect can publish a carrier-backed value even after
+        # its symbolic liveness ends.  Keep the provenance taint after the
+        # side effect is replayed: the escaped owner can install an observer
+        # or drop its reference in any later continuation.
+        def mark_side_effect_escape(value: VariableTracker) -> None:
+            external_lifetime_roots.update(
+                path[:2] for path in cleanup_tx._boxed_resume_source_paths(value.source)
+            )
+
+        cleanup_tx._visit_variable_sources(
+            mark_side_effect_escape, cleanup_tx._resume_arg_side_effect_values()
+        )
+        if (
+            cleanup_tx.output.count_calls() != 0
+            and cleanup_tx._graph_may_install_lifetime_observer()
+        ):
+            for value in self.symbolic_locals.values():
+                external_lifetime_roots.update(
+                    path[:2] for path in cleanup_tx._boxed_resume_arg_paths(value)
+                )
+
+        for name, value in self.symbolic_locals.items():
+            if name in cleanup_tx.resume_arg_carrier_names:
+                continue
+            if type.__instancecheck__(CellVariable, value):
+                continue
+            paths = cleanup_tx._boxed_resume_arg_paths(value)
+            if not value.is_tensor() and any(
+                overlaps_path_requiring_local_owner(path) for path in paths
+            ):
+                # Keep the old fast-local value in the next resume until the
+                # source STORE_FAST/DELETE_FAST actually releases it. Include
+                # aliases of a pending path so clearing the carrier cannot
+                # release an object that another logical local still owns.
+                # Tensor locals are intentionally excluded: graph code owns
+                # them through argument loading, and recreating their dead
+                # frame locals would extend the allocation across the graph.
+                normalized_reads.add(name)
+                self.resume_arg_local_names_to_preserve.add(name)
+            roots = {path[:2] for path in paths}
+            if name not in normalized_reads and roots - explicitly_released_roots:
+                # A dead local still owns its value until frame exit in
+                # CPython. Preserve carrier-backed owners until an explicit
+                # STORE_FAST/DELETE_FAST transfers or releases that ownership;
+                # An escaped alias can add a finalizer or weakref at any time.
+                normalized_reads.add(name)
+                self.resume_arg_local_names_to_preserve.add(name)
+            elif (
+                name not in normalized_reads
+                and roots
+                and name not in explicitly_released_local_names
+            ):
+                if roots & external_lifetime_roots:
+                    # CPython keeps an implicitly dead fast local alive until
+                    # frame exit. Preserve externally observable owners: an
+                    # opaque call or another thread can install a weakref after
+                    # any runtime-only check.
+                    normalized_reads.add(name)
+                    self.resume_arg_local_names_to_preserve.add(name)
+                else:
+                    # Exact graph-internal tensors can still be released before
+                    # the final graph, avoiding an extra allocation at peak.
+                    cleanup_tx.resume_arg_roots_requiring_lifetime_check.update(roots)
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
@@ -1713,6 +1931,42 @@ class InstructionTranslatorBase(
         tc = TracingContext.try_get()
         if tc is not None:
             tc.loc_in_frame_positions = inst.positions
+
+        if self.resume_fast_local_graph_break_pending:
+            if self._can_compile_resume_fast_local_lifetime_boundary():
+                self.current_speculation = self.speculate()
+                if self.current_speculation.failed(self):
+                    self.resume_fast_local_graph_break_pending = False
+                    if self.parent is None:
+                        self._step_root_resume_fast_local_lifetime_boundary(inst)
+                    else:
+                        self._step_nested_resume_fast_local_lifetime_boundary(inst)
+                    return False
+                self.current_speculation.reason = GraphCompileReason(
+                    "resume fast-local lifetime boundary", [self.frame_summary()]
+                )
+                self.current_speculation.fail_and_restart_analysis(
+                    self.error_on_graph_break
+                )
+            elif inst.opname not in (
+                "PUSH_NULL",
+                "LOAD_GLOBAL",
+                "LOAD_NAME",
+                "LOAD_ATTR",
+                "LOAD_METHOD",
+                "COPY",
+                "SWAP",
+                "PRECALL",
+                "CALL",
+                "CALL_FUNCTION",
+                "CALL_METHOD",
+            ):
+                # A source graph break immediately after the release already
+                # provides the required ordering boundary. In a protected
+                # region, allow only its zero-argument call setup to reach the
+                # normal speculation path. If the call succeeds instead of
+                # graph breaking, the following opcode falls back here.
+                self._unsupported_resume_fast_local_lifetime_boundary()
 
         if (
             not self.stack
@@ -1927,7 +2181,6 @@ class InstructionTranslatorBase(
                     create_instruction("BUILD_LIST", arg=1),
                 ]
             )
-            # No need to fix stack, since stack is assumed to be empty here.
             # Do NOT handle_inactive_ctx because we will be skipping this resume code.
             leaf_resume_code, leaf_resume_name = self.create_resume(
                 0, continue_inst, all_stack_locals_metadata[0], [], cg, True, False
@@ -2078,6 +2331,172 @@ class InstructionTranslatorBase(
                 ]
             )
 
+    def _step_nested_resume_fast_local_lifetime_boundary(
+        self, continue_inst: Instruction
+    ) -> None:
+        if self.parent is None:
+            raise AssertionError("nested resume lifetime boundary requires a parent")
+        if self.output.output_instructions:
+            raise AssertionError(
+                "expected not self.output.output_instructions to be true"
+            )
+        if self.current_speculation is None:
+            raise AssertionError(
+                "expected self.current_speculation is not None to be true"
+            )
+
+        log.debug("nested resume lifetime boundary triggered compile")
+        all_stack_locals_metadata = self.output.compile_subgraph(
+            self,
+            reason=GraphCompileReason(
+                "resume fast-local lifetime boundary", [self.frame_summary()]
+            ),
+            allow_nested_resume_lifetime=True,
+        )
+
+        from .eval_frame import skip_code
+
+        cg = PyCodegen(self.output.root_tx)
+        # compile_subgraph omits CPython NULL call sentinels and records their
+        # positions in metadata. Pack only real Python objects here; the leaf
+        # resume prologue reconstructs any omitted NULLs.
+        num_preserved_stack = all_stack_locals_metadata[0].num_stack
+        if num_preserved_stack:
+            cg.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=num_preserved_stack),
+                    *create_copy(2),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    *create_binary_slice(0, 0, True),
+                ]
+            )
+
+        # Codegen cells and frame values only for the leaf frame. The skipped
+        # leaf resume runs the remainder eagerly after carrier cleanup.
+        cg.extend_output(
+            [
+                *create_copy(2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+                *create_copy(2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+            ]
+        )
+        leaf_resume_code, leaf_resume_name = self.create_resume(
+            0,
+            continue_inst,
+            all_stack_locals_metadata[0],
+            [],
+            cg,
+            True,
+            False,
+            True,
+        )
+        skip_code(leaf_resume_code)
+
+        cleanup: list[Instruction] = []
+        _reconstruct_block_stack(self.parent, cg, cleanup)
+        cg.extend_output(self.output.root_tx._clear_transferred_resume_arg_paths())
+        # The skipped leaf carrier now owns these cell/frame values. Remove
+        # the original copies before entering the leaf so a carrier-backed
+        # local can be released at its source STORE_FAST while the leaf runs.
+        cg.extend_output(
+            [
+                *create_copy(3),
+                cg.create_load_const(0),
+                create_instruction("DELETE_SUBSCR"),
+                *create_copy(4),
+                cg.create_load_const(0),
+                create_instruction("DELETE_SUBSCR"),
+            ]
+        )
+        self.codegen_call_resume([leaf_resume_code], [leaf_resume_name], cg)
+        cg.extend_output(cleanup)
+
+        # Add the leaf result to the parent operand stack and remove the
+        # parent's old stack values from its frame-value list.
+        num_parent_stack = all_stack_locals_metadata[1].num_stack
+        cg.extend_output(
+            [
+                *create_copy(2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                *create_binary_slice(0, num_parent_stack),
+                *create_swap(2),
+                *cg.create_list_append(),
+            ]
+        )
+        self.parent.push(UnknownVariable())
+        all_stack_locals_metadata[1].num_stack += 1
+        if num_parent_stack > 0:
+            cg.extend_output(
+                [
+                    *create_copy(2),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    *create_binary_slice(num_parent_stack, None),
+                    *create_copy(3),
+                    cg.create_load_const(0),
+                    create_instruction("STORE_SUBSCR"),
+                ]
+            )
+
+        cg.extend_output(
+            [
+                create_instruction("UNPACK_SEQUENCE", arg=num_parent_stack + 1),
+                create_instruction("BUILD_LIST", arg=num_parent_stack + 1),
+                create_instruction("UNPACK_SEQUENCE", arg=num_parent_stack + 1),
+            ]
+        )
+        self.output.add_output_instructions(
+            cg.get_instructions()
+            + self.parent.create_call_resume_at(
+                self.parent.next_instruction,
+                all_stack_locals_metadata[1:],
+                allow_nested_resume_lifetime=True,
+            )
+        )
+
+    def _step_root_resume_fast_local_lifetime_boundary(
+        self, continue_inst: Instruction
+    ) -> None:
+        if self.parent is not None:
+            raise AssertionError("root resume lifetime boundary cannot have a parent")
+        if self.output.output_instructions:
+            raise AssertionError(
+                "expected not self.output.output_instructions to be true"
+            )
+        if self.current_speculation is None:
+            raise AssertionError(
+                "expected self.current_speculation is not None to be true"
+            )
+
+        all_stack_locals_metadata = self.output.compile_subgraph(
+            self,
+            reason=GraphCompileReason(
+                "resume fast-local lifetime boundary", [self.frame_summary()]
+            ),
+            allow_nested_resume_lifetime=True,
+        )
+        if len(all_stack_locals_metadata) != 1:
+            raise AssertionError("root resume lifetime boundary has nested frame state")
+        self.output.add_output_instructions(self._clear_deleted_resume_args())
+        # Transfer live locals out of the current carrier before entering the
+        # next continuation. The source STORE_FAST/DELETE_FAST event is replayed
+        # after the prefix graph and before this call, so the continuation can
+        # remain compilable without moving the release past its later graph.
+        self.output.add_output_instructions(
+            self.create_call_resume_at(
+                continue_inst,
+                all_stack_locals_metadata,
+                allow_nested_resume_lifetime=True,
+            )
+        )
+
     def run_ctx_mgr(self) -> Any:
         # NB: Don't push the top level frame summary; set_current_loc will
         # take care of it.  However, DO make sure we attach real_stack to
@@ -2192,7 +2611,14 @@ class InstructionTranslatorBase(
             self.push(val)
 
     def pop(self) -> VariableTracker:
-        return self.stack.pop()
+        value = self.stack.pop()
+        cleanup_tx = self.output.root_tx
+        if (
+            cleanup_tx.has_boxed_resume_args
+            and not cleanup_tx.is_tracing_resume_prologue
+        ):
+            cleanup_tx._mark_resume_arg_path_for_cleanup(value)
+        return value
 
     def popn(self, n: int) -> list[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
@@ -2259,9 +2685,53 @@ class InstructionTranslatorBase(
 
     def STORE_FAST(self, inst: Instruction) -> None:
         name = inst.argval
+        old_vt = self.symbolic_locals.get(name)
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
+        if not self.is_tracing_resume_prologue:
+            cleanup_tx = self.output.root_tx
+            paths_to_clear = {
+                path
+                for path in cleanup_tx._boxed_resume_arg_paths(old_vt)
+                if len(path) >= 2 and isinstance(path[1], int) and path[1] >= 2
+            }
+            if old_vt is not None:
+                paths_to_clear.update(
+                    root
+                    for root in cleanup_tx.resume_arg_local_sources.get(name, ())
+                    if root[1] >= 2
+                )
+            roots = {path[:2] for path in paths_to_clear}
+            if old_vt is not None:
+                self._schedule_resume_fast_local_lifetime_boundary(roots)
+            cleanup_tx.resume_arg_paths_to_clear.update(paths_to_clear)
+            cleanup_tx.unconditional_resume_arg_paths_to_clear.update(paths_to_clear)
+            event_roots = roots - cleanup_tx.entry_fast_local_scheduled_roots
+            if (
+                self is cleanup_tx
+                and cleanup_tx.has_boxed_resume_args
+                and old_vt is not None
+            ):
+                if name not in cleanup_tx.entry_fast_local_initial_values:
+                    cleanup_tx.entry_fast_local_initial_values[name] = old_vt
+                cleanup_tx.entry_fast_local_events.append((name, loaded_vt))
+                cleanup_tx.entry_fast_local_event_roots.append(event_roots)
+                cleanup_tx.entry_fast_local_event_semantic_roots.append(roots)
+                cleanup_tx.entry_fast_local_event_graph_barriers.append(
+                    self.output.count_calls() != 0
+                )
+                cleanup_tx.entry_fast_local_scheduled_roots.update(event_roots)
+            elif cleanup_tx.has_boxed_resume_args and old_vt is not None:
+                cleanup_tx.entry_fast_local_events.append((None, None))
+                cleanup_tx.entry_fast_local_event_roots.append(event_roots)
+                cleanup_tx.entry_fast_local_event_semantic_roots.append(roots)
+                cleanup_tx.entry_fast_local_event_graph_barriers.append(
+                    self.output.count_calls() != 0
+                )
+                cleanup_tx.entry_fast_local_scheduled_roots.update(event_roots)
+            self.resume_arg_local_names_to_preserve.discard(name)
         self.symbolic_locals[name] = loaded_vt
+        self.deleted_fast_locals.discard(name)
         if name == IS_TRACING_RESUME_PROLOGUE_VARNAME:
             val = loaded_vt.as_python_constant()
             if type(val) is not bool:
@@ -2269,11 +2739,51 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        name = inst.argval
-        var = self.symbolic_locals.get(name)
-        if isinstance(var, TensorVariable):
+        if inst.argval in self.f_locals:
+            self.deleted_fast_locals.add(inst.argval)
+        var = self.symbolic_locals.get(inst.argval)
+        if not self.is_tracing_resume_prologue:
+            cleanup_tx = self.output.root_tx
+            paths_to_clear = {
+                path
+                for path in cleanup_tx._boxed_resume_arg_paths(var)
+                if len(path) >= 2 and isinstance(path[1], int) and path[1] >= 2
+            }
+            paths_to_clear.update(
+                root
+                for root in cleanup_tx.resume_arg_local_sources.get(inst.argval, ())
+                if root[1] >= 2
+            )
+            roots = {path[:2] for path in paths_to_clear}
+            self._schedule_resume_fast_local_lifetime_boundary(roots)
+            cleanup_tx.resume_arg_paths_to_clear.update(paths_to_clear)
+            cleanup_tx.unconditional_resume_arg_paths_to_clear.update(paths_to_clear)
+            self.resume_arg_local_names_to_preserve.discard(inst.argval)
+            event_roots = roots - cleanup_tx.entry_fast_local_scheduled_roots
+            if self is cleanup_tx and cleanup_tx.has_boxed_resume_args:
+                if (
+                    inst.argval not in cleanup_tx.entry_fast_local_initial_values
+                    and var is not None
+                ):
+                    cleanup_tx.entry_fast_local_initial_values[inst.argval] = var
+                cleanup_tx.entry_fast_local_events.append((inst.argval, None))
+                cleanup_tx.entry_fast_local_event_roots.append(event_roots)
+                cleanup_tx.entry_fast_local_event_semantic_roots.append(roots)
+                cleanup_tx.entry_fast_local_event_graph_barriers.append(
+                    self.output.count_calls() != 0
+                )
+                cleanup_tx.entry_fast_local_scheduled_roots.update(event_roots)
+            elif cleanup_tx.has_boxed_resume_args:
+                cleanup_tx.entry_fast_local_events.append((None, None))
+                cleanup_tx.entry_fast_local_event_roots.append(event_roots)
+                cleanup_tx.entry_fast_local_event_semantic_roots.append(roots)
+                cleanup_tx.entry_fast_local_event_graph_barriers.append(
+                    self.output.count_calls() != 0
+                )
+                cleanup_tx.entry_fast_local_scheduled_roots.update(event_roots)
+        if not self.is_tracing_resume_prologue and isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[name]
+        del self.symbolic_locals[inst.argval]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -2324,13 +2834,34 @@ class InstructionTranslatorBase(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
         cell = self._cellvar(inst.argval)
-        val = self.pop()
-        self.output.side_effects.store_cell(cell, val)
-
         if not isinstance(cell, CellVariable):
             raise AssertionError(
                 "expected isinstance(cell, CellVariable) to be true"
             )  # tame mypy
+        if not self.is_tracing_resume_prologue:
+            side_effects = self.output.side_effects
+            if side_effects.has_pending_mutation_of_attr(cell, "cell_contents"):
+                old_value = side_effects.load_attr(cell, "cell_contents", check=False)
+            else:
+                old_value = cell.pre_existing_contents
+            paths_to_clear = {
+                path
+                for path in self.output.root_tx._boxed_resume_arg_paths(old_value)
+                if len(path) >= 2 and isinstance(path[1], int) and path[1] >= 2
+            }
+            roots = {path[:2] for path in paths_to_clear}
+            if self.output.root_tx._resume_arg_roots_may_run_finalizer(roots):
+                # Cell updates are replayed as suffix side effects, after a
+                # graph call. They cannot release a resume carrier at the
+                # source STORE_DEREF point, so preserve eager lifetime by
+                # falling back before mutating symbolic state. Read the old
+                # value directly above to avoid recording an extra cell read.
+                self._unsupported_resume_fast_local_lifetime_boundary()
+        val = self.pop()
+        if not self.is_tracing_resume_prologue:
+            self.resume_arg_local_names_to_preserve.discard(inst.argval)
+        self.output.side_effects.store_cell(cell, val)
+
         if cell.local_name is not None:
             val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
@@ -3438,6 +3969,7 @@ class InstructionTranslatorBase(
         cg: PyCodegen,
         is_leaf: bool,
         handle_inactive_ctx: bool,
+        force_boxed_resume: bool = False,
     ) -> tuple[types.CodeType, str]:
         """
         Creates the resume function for the frame corresponding to `self`.
@@ -3465,6 +3997,8 @@ class InstructionTranslatorBase(
             - is_leaf: True if `self` corresponds to the leaf frame.
             - handle_inactive_ctx: If True, handles inactive context variables as described above. This is necessary
                 iff the resume function is traced
+            - force_boxed_resume: Transfer arguments through a clearable carrier
+                for a lifetime-boundary continuation.
         """
         # Handle inactive context variables.
         # The resume function assumes that context variables are the class, NOT the object.
@@ -3521,6 +4055,10 @@ class InstructionTranslatorBase(
         # the current instruction there should be a CALL.
         if is_leaf:
             reads = livevars_analysis(self.instructions, resume_inst)
+            nested_resume_arg_names = {
+                "__nested_resume_fns",
+                "__nested_frame_values",
+            }
             # inspect.signature() renames ".N" to "implicitN" for comprehension
             # iterator variables. Build a mapping to emit the bytecode name
             # (.0) in argnames so the resume function's co_varnames matches
@@ -3532,8 +4070,12 @@ class InstructionTranslatorBase(
             all_argnames = tuple(
                 implicit_to_bytecode.get(k, k)
                 for k in self.symbolic_locals
-                if implicit_to_bytecode.get(k, k) in reads
+                if (
+                    implicit_to_bytecode.get(k, k) in reads
+                    or k in self.resume_arg_local_names_to_preserve
+                )
                 and k not in self.cell_and_freevars()
+                and k not in nested_resume_arg_names
             )
             argnames_null_set = {
                 implicit_to_bytecode.get(k, k) for k in meta.locals_null_keys
@@ -3588,6 +4130,100 @@ class InstructionTranslatorBase(
         # compile_subgraph did not codegen any NULLs,
         # so we should not count NullVariables
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
+        base_resume_arg_names = ["__nested_resume_fns", "__nested_frame_values"]
+        base_resume_arg_names += [f"___stack{i}" for i in range(stack_len)]
+        local_resume_arg_names = [v for v in argnames if v not in base_resume_arg_names]
+        resume_arg_names = base_resume_arg_names + local_resume_arg_names
+        resume_arg_indexes = {name: idx for idx, name in enumerate(resume_arg_names)}
+        inherited_boxed_resume_arg_sources = tuple(
+            (
+                name,
+                tuple(sorted(self.resume_arg_carrier_sources[name].items())),
+            )
+            for name in self.resume_arg_carrier_names
+            if name in local_resume_arg_names
+        )
+        external_lifetime_roots = (
+            self.output.root_tx.resume_arg_roots_with_external_lifetime
+        )
+        inherited_boxed_resume_arg_external_lifetime_roots = tuple(
+            (
+                name,
+                tuple(
+                    sorted(
+                        index
+                        for owner_name, index in external_lifetime_roots
+                        if owner_name == name
+                    )
+                ),
+            )
+            for name, _ in inherited_boxed_resume_arg_sources
+            if any(owner_name == name for owner_name, _ in external_lifetime_roots)
+        )
+
+        def resume_arg_has_external_lifetime(name: str) -> bool:
+            symbolic_name = (
+                name.replace(".", "implicit") if name.startswith(".") else name
+            )
+            value = self.symbolic_locals.get(symbolic_name)
+            if value is None:
+                return False
+            if not self.resume_arg_carrier_names:
+                # The first compiled prefix has no carrier provenance yet.  A
+                # custom/opaque graph call can retain or add an observer to
+                # any value it produces, so seed that provenance in the first
+                # resume's metadata.
+                if (
+                    self.output.count_calls() != 0
+                    and self.output.root_tx._graph_may_install_lifetime_observer()
+                ):
+                    return True
+                has_input_source = False
+
+                def find_input_source(item: VariableTracker) -> None:
+                    nonlocal has_input_source
+                    source = item.source
+                    while isinstance(source, ChainedSource):
+                        source = source.base
+                    if isinstance(source, LocalSource) and source.is_input:
+                        has_input_source = True
+
+                self._visit_variable_sources(find_input_source, value)
+                if has_input_source:
+                    return True
+            roots = {
+                path[:2] for path in self.output.root_tx._boxed_resume_arg_paths(value)
+            }
+            return bool(roots & external_lifetime_roots)
+
+        external_lifetime_argnames = tuple(
+            name
+            for name in local_resume_arg_names
+            if resume_arg_has_external_lifetime(name)
+        )
+
+        def is_tensor_resume_arg(value: VariableTracker) -> bool:
+            if isinstance(value, LazyVariableTracker):
+                if value.is_realized():
+                    value = value.unwrap()
+                else:
+                    return istensor(value.original_value())
+            return type.__instancecheck__(TensorVariable, value)
+
+        tensor_resume_arg_indexes: list[int] = []
+        for name in local_resume_arg_names:
+            value = self.symbolic_locals.get(name)
+            if (value is not None and is_tensor_resume_arg(value)) or (
+                name in self.f_locals and istensor(self.f_locals[name])
+            ):
+                tensor_resume_arg_indexes.append(resume_arg_indexes[name])
+        entry_clear_resume_arg_indexes = tuple(
+            sorted(
+                resume_arg_indexes[name]
+                for name in self.resume_arg_local_names_to_clear_on_entry
+                if name in resume_arg_indexes
+            )
+        )
 
         if self.current_instruction.offset is None:
             raise AssertionError(
@@ -3609,6 +4245,12 @@ class InstructionTranslatorBase(
             tuple(meta.locals_ctx_args),
             tuple(meta.stack_null_idxes),
             tuple(resume_codes),
+            inherited_boxed_resume_arg_sources,
+            inherited_boxed_resume_arg_external_lifetime_roots,
+            external_lifetime_argnames,
+            tuple(tensor_resume_arg_indexes),
+            entry_clear_resume_arg_indexes,
+            force_boxed_resume,
             not self.current_instruction_push,
         )
 
@@ -3676,6 +4318,8 @@ class InstructionTranslatorBase(
         self,
         inst: Instruction,
         all_stack_locals_metadata: list[StackLocalsMetadata],
+        *,
+        allow_nested_resume_lifetime: bool = False,
     ) -> list[Instruction]:
         """
         Codegen all resume function(s) from the frame stack starting at `self`, call them,
@@ -3833,14 +4477,826 @@ class InstructionTranslatorBase(
                 cg,
                 cur_tx is self,
                 True,
+                force_boxed_resume=allow_nested_resume_lifetime,
             )
             resume_codes.append(resume_code)
             resume_names.append(resume_name)
 
+        cg.extend_output(self.output.root_tx._clear_transferred_resume_arg_paths())
         self.codegen_call_resume(resume_codes, resume_names, cg)
         cg.append_output(create_instruction("RETURN_VALUE"))
 
         return cg.get_instructions()
+
+    def _clear_deleted_resume_args(self) -> list[Instruction]:
+        resume_args_varname = self._boxed_resume_arg_name()
+        if (
+            resume_args_varname is None
+            or (
+                resume_args_varname not in self.deleted_fast_locals
+                and resume_args_varname not in self.cleared_fast_locals
+            )
+            or resume_args_varname not in self.f_locals
+            or resume_args_varname not in self.code_options["co_varnames"]
+        ):
+            initial_values, events, paths_by_event, _, _, _ = (
+                self._take_entry_fast_local_events(set())
+            )
+            return self._codegen_entry_fast_local_events(
+                initial_values, events, paths_by_event
+            )
+
+        self._mark_resume_args_cleanup_emitted()
+        resume_args = self.f_locals[resume_args_varname]
+        if not isinstance(resume_args, list):
+            initial_values, events, paths_by_event, _, _, _ = (
+                self._take_entry_fast_local_events(set())
+            )
+            return self._codegen_entry_fast_local_events(
+                initial_values, events, paths_by_event
+            )
+
+        retained_source_roots: set[tuple[Any, ...]] = set()
+
+        def retain_source(item: VariableTracker) -> None:
+            retained_source_roots.update(
+                path[:2] for path in self._boxed_resume_source_paths(item.source)
+            )
+
+        for name, value in self.symbolic_locals.items():
+            if name not in self.resume_arg_carrier_names:
+                self._visit_variable_sources(retain_source, value)
+        for value in self.stack:
+            self._visit_variable_sources(retain_source, value)
+        for name in self.resume_arg_local_names_to_preserve:
+            retained_source_roots.update(
+                root[:2] for root in self.resume_arg_local_sources.get(name, ())
+            )
+
+        (
+            resume_arg_locals_to_materialize,
+            resume_arg_source_overrides,
+            resume_arg_temp_names,
+        ) = self._materialize_resume_arg_sources_for_cleanup(
+            value for _, value in self.entry_fast_local_events if value is not None
+        )
+        paths_to_clear = self._take_resume_arg_paths_to_clear(
+            clear_roots_with_live_siblings=True,
+            materialized_sources=set(resume_arg_source_overrides),
+        )
+        unconditional_paths = self._take_unconditional_resume_arg_paths(paths_to_clear)
+        (
+            initial_values,
+            events,
+            paths_by_event,
+            semantic_roots_by_event,
+            _,
+            remaining_paths,
+        ) = self._take_entry_fast_local_events(paths_to_clear)
+        unconditional_remaining_paths = remaining_paths & unconditional_paths
+        indexes_to_clear = set(_boxed_resume_arg_indexes_to_clear(self.f_code))
+        for idx in indexes_to_clear:
+            # Dynamo consumes the original prologue while tracing, so the
+            # optimized resume must replay its carrier-slot clears. Keep these
+            # in the identity-aware event batch: an earlier fast-local
+            # finalizer can inspect the frame and replace a carrier value.
+            root = (resume_args_varname, idx)
+            remaining_paths.add(root)
+            if root not in self.resume_arg_roots_requiring_lifetime_check:
+                unconditional_remaining_paths.add(root)
+        insts = self._codegen_entry_fast_local_events(
+            initial_values,
+            events,
+            paths_by_event,
+            resume_arg_locals_to_materialize,
+            resume_arg_source_overrides,
+            resume_arg_temp_names,
+            retained_source_roots,
+            semantic_roots_by_event,
+            remaining_paths,
+            unconditional_remaining_paths,
+        )
+        for idx in reversed(range(len(resume_args))):
+            if idx in indexes_to_clear:
+                continue
+            helper_cg = PyCodegen(self)
+            helper_cg.add_push_null(
+                functools.partial(
+                    helper_cg.load_import_from,
+                    "torch._dynamo.resume_execution",
+                    "_maybe_clear_tensor_resume_arg",
+                )
+            )
+            insts.extend(
+                [
+                    *helper_cg.get_instructions(),
+                    create_instruction("LOAD_FAST", argval=resume_args_varname),
+                    create_instruction("LOAD_CONST", argval=idx),
+                    *create_call_function(2, False),
+                    create_instruction("POP_TOP"),
+                ]
+            )
+        return insts
+
+    def _take_entry_fast_local_events(
+        self, paths_to_clear: set[tuple[Any, ...]]
+    ) -> tuple[
+        OrderedDict[str, VariableTracker],
+        list[tuple[str | None, VariableTracker | None]],
+        list[set[tuple[Any, ...]]],
+        list[set[tuple[Any, ...]]],
+        list[bool],
+        set[tuple[Any, ...]],
+    ]:
+        initial_values = self.entry_fast_local_initial_values
+        events = self.entry_fast_local_events
+        semantic_roots_by_event = self.entry_fast_local_event_semantic_roots
+        graph_barriers = self.entry_fast_local_event_graph_barriers
+        remaining_paths = set(paths_to_clear)
+        paths_by_event: list[set[tuple[Any, ...]]] = []
+        for roots in self.entry_fast_local_event_roots:
+            event_paths = {path for path in remaining_paths if path[:2] in roots}
+            paths_by_event.append(event_paths)
+            remaining_paths.difference_update(event_paths)
+        # Once a carrier path is cleared, later writes can still keep that
+        # same object alive through aliases. Replay the complete traced event
+        # stream so the eventual decref observes every intervening STORE_FAST
+        # and DELETE_FAST in source order.
+        if paths_to_clear:
+            last_relevant_event = len(events) - 1
+        else:
+            last_relevant_event = -1
+        events = events[: last_relevant_event + 1]
+        paths_by_event = paths_by_event[: last_relevant_event + 1]
+        semantic_roots_by_event = semantic_roots_by_event[: last_relevant_event + 1]
+        graph_barriers = graph_barriers[: last_relevant_event + 1]
+        replayed_names = {name for name, _ in events if name is not None}
+        initial_values = OrderedDict(
+            (name, value)
+            for name, value in initial_values.items()
+            if name in replayed_names
+        )
+        self.entry_fast_local_initial_values = OrderedDict()
+        self.entry_fast_local_events = []
+        self.entry_fast_local_event_roots = []
+        self.entry_fast_local_event_semantic_roots = []
+        self.entry_fast_local_event_graph_barriers = []
+        self.entry_fast_local_scheduled_roots = set()
+        return (
+            initial_values,
+            events,
+            paths_by_event,
+            semantic_roots_by_event,
+            graph_barriers,
+            remaining_paths,
+        )
+
+    def _codegen_entry_fast_local_events(
+        self,
+        initial_values: dict[str, VariableTracker],
+        events: list[tuple[str | None, VariableTracker | None]],
+        paths_by_event: list[set[tuple[Any, ...]]],
+        resume_arg_locals_to_materialize: dict[str, VariableTracker | Source]
+        | None = None,
+        resume_arg_source_overrides: dict[Source, Source] | None = None,
+        resume_arg_temp_names: set[str] | None = None,
+        retained_source_roots: set[tuple[Any, ...]] | None = None,
+        semantic_roots_by_event: list[set[tuple[Any, ...]]] | None = None,
+        suffix_resume_arg_paths_to_clear: set[tuple[Any, ...]] | None = None,
+        suffix_unconditional_resume_arg_paths_to_clear: set[tuple[Any, ...]]
+        | None = None,
+    ) -> list[Instruction]:
+        resume_arg_source_overrides = resume_arg_source_overrides or {}
+        resume_arg_temp_names = set(resume_arg_temp_names or ())
+        retained_source_roots = retained_source_roots or set()
+        semantic_roots_by_event = semantic_roots_by_event or [set() for _ in events]
+        if len(events) != len(semantic_roots_by_event):
+            raise AssertionError("fast-local events and semantic roots must align")
+        suffix_resume_arg_paths_to_clear = suffix_resume_arg_paths_to_clear or set()
+        suffix_unconditional_resume_arg_paths_to_clear = (
+            suffix_unconditional_resume_arg_paths_to_clear or set()
+        )
+
+        def snapshot_temp_name(source: Source | None) -> str | None:
+            if (
+                isinstance(source, AttrSource)
+                and source.member == "value"
+                and isinstance(source.base, TempLocalSource)
+            ):
+                return source.base.local_name
+            return None
+
+        event_temp_last_use: dict[str, int] = {}
+        nested_event_temp_roots: dict[str, tuple[Any, ...]] = {}
+        for event_index, (_, value) in enumerate(events):
+            if value is None:
+                continue
+            event_value_source = value.source
+
+            def record_event_source_use(item: VariableTracker) -> None:
+                if item.source is None:
+                    return
+                name = snapshot_temp_name(resume_arg_source_overrides.get(item.source))
+                path = self._boxed_resume_source_path(item.source)
+                if (
+                    name is not None
+                    and path is not None
+                    and item.source != event_value_source
+                ):
+                    nested_event_temp_roots[name] = path[:2]
+                if (
+                    name is not None
+                    and name in resume_arg_temp_names
+                    and name not in nested_event_temp_roots
+                    and not (path is not None and path[:2] in retained_source_roots)
+                ):
+                    event_temp_last_use[name] = event_index
+
+            self._visit_variable_sources(record_event_source_use, value)
+
+        retained_temp_names: set[str] = set()
+        for source, new_source in resume_arg_source_overrides.items():
+            path = self._boxed_resume_source_path(source)
+            if path is None or path[:2] not in retained_source_roots:
+                continue
+            name = snapshot_temp_name(new_source)
+            if name is not None:
+                retained_temp_names.add(name)
+        for name, root in nested_event_temp_roots.items():
+            if root in retained_source_roots:
+                retained_temp_names.add(name)
+                event_temp_last_use.pop(name, None)
+                continue
+            semantic_release_events = [
+                event_index
+                for event_index, roots in enumerate(semantic_roots_by_event)
+                if root in roots
+            ]
+            if semantic_release_events:
+                event_temp_last_use[name] = semantic_release_events[-1]
+            else:
+                # No individual replay event owns the final semantic release;
+                # keep the snapshot through the complete replay suffix.
+                event_temp_last_use.pop(name, None)
+        temp_deletes_by_event: defaultdict[int, set[str]] = defaultdict(set)
+        for name, event_index in event_temp_last_use.items():
+            temp_deletes_by_event[event_index].add(name)
+        suffix_temp_names = (
+            resume_arg_temp_names - event_temp_last_use.keys() - retained_temp_names
+        )
+        expanded_events: list[tuple[str | None, VariableTracker | None]] = []
+        expanded_paths_by_event: list[set[tuple[Any, ...]]] = []
+        for event_index, (event, event_paths) in enumerate(zip(events, paths_by_event)):
+            expanded_events.append(event)
+            expanded_paths_by_event.append(event_paths)
+            for name in sorted(temp_deletes_by_event[event_index]):
+                expanded_events.extend(((None, None), (name, None)))
+                expanded_paths_by_event.extend(({(name, 0)}, set()))
+
+        cg = PyCodegen(self)
+        for name, value in (resume_arg_locals_to_materialize or {}).items():
+            cg.make_resume_arg_snapshot(name, value)
+        materialized_source_roots = {
+            path
+            for source in resume_arg_source_overrides
+            for path in self._boxed_resume_source_paths(source)
+            if len(path) == 2
+        }
+        # Once direct replay inputs have stable snapshot owners, remove their
+        # compiler-only carrier aliases before any STORE_FAST decref can run
+        # user finalizers. Do not do this for a nested source: snapshotting one
+        # leaf does not preserve the lifetime of its containing root object.
+        cg.clear_resume_arg_paths(materialized_source_roots)
+        prior_overridden_sources = cg.overridden_sources
+        cg.overridden_sources = {
+            **prior_overridden_sources,
+            **resume_arg_source_overrides,
+        }
+        try:
+            expected_ids_by_owner = cg.replay_fast_local_events(
+                expanded_events, expanded_paths_by_event, initial_values
+            )
+        finally:
+            cg.overridden_sources = prior_overridden_sources
+        for name in sorted(suffix_temp_names):
+            cg.clear_resume_arg_paths(
+                {(name, 0)}, expected_ids_by_owner=expected_ids_by_owner
+            )
+            cg.append_output(cg.create_delete(name))
+        cg.clear_resume_arg_paths(
+            suffix_unconditional_resume_arg_paths_to_clear,
+            expected_ids_by_owner=expected_ids_by_owner,
+        )
+        cg.clear_resume_arg_paths(
+            suffix_resume_arg_paths_to_clear
+            - suffix_unconditional_resume_arg_paths_to_clear,
+            preserve_observable_lifetime=True,
+            expected_ids_by_owner=expected_ids_by_owner,
+        )
+        cg.delete_resume_arg_identity_snapshots(expected_ids_by_owner)
+        return cg.get_instructions()
+
+    def _codegen_clear_resume_arg_paths(
+        self,
+        paths: set[tuple[Any, ...]],
+        *,
+        preserve_observable_lifetime: bool = False,
+    ) -> list[Instruction]:
+        insts: list[Instruction] = []
+        for owner_name, root_index in sorted(paths, key=repr, reverse=True):
+            if owner_name not in self.code_options["co_varnames"]:
+                raise AssertionError(
+                    f"resume carrier {owner_name!r} is not a local in {self.f_code.co_name}"
+                )
+            helper_cg = PyCodegen(self)
+            helper_cg.add_push_null(
+                functools.partial(
+                    helper_cg.load_import_from,
+                    "torch._dynamo.resume_execution",
+                    (
+                        "_maybe_clear_resume_arg_path"
+                        if preserve_observable_lifetime
+                        else "_clear_resume_arg_path"
+                    ),
+                )
+            )
+            helper_cg(self._resume_arg_owner_source(owner_name))
+            insts.extend(
+                [
+                    *helper_cg.get_instructions(),
+                    create_instruction("LOAD_CONST", argval=(root_index,)),
+                    *create_call_function(2, False),
+                    create_instruction("POP_TOP"),
+                ]
+            )
+        return insts
+
+    def _resume_arg_owner_source(
+        self, owner_name: str, seen: frozenset[str] = frozenset()
+    ) -> Source:
+        if owner_name in seen:
+            raise AssertionError(
+                f"cycle in resume carrier provenance for {owner_name!r}"
+            )
+        if owner_name in self.f_locals or owner_name == self._boxed_resume_arg_name():
+            return LocalSource(owner_name)
+        roots = self.resume_arg_local_sources.get(owner_name, ())
+        if not roots:
+            return LocalSource(owner_name)
+        parent_name, parent_index = roots[-1]
+        return GetItemSource(
+            self._resume_arg_owner_source(parent_name, seen | {owner_name}),
+            parent_index,
+        )
+
+    def _resume_arg_owner_value(
+        self, owner_name: str, seen: frozenset[str] = frozenset()
+    ) -> list[Any] | None:
+        if owner_name in seen:
+            raise AssertionError(
+                f"cycle in resume carrier provenance for {owner_name!r}"
+            )
+        value = self.f_locals.get(owner_name)
+        if isinstance(value, list):
+            return value
+        roots = self.resume_arg_local_sources.get(owner_name, ())
+        if not roots:
+            return None
+        parent_name, parent_index = roots[-1]
+        parent = self._resume_arg_owner_value(parent_name, seen | {owner_name})
+        if parent is None or not 0 <= parent_index < len(parent):
+            return None
+        nested = parent[parent_index]
+        return nested if isinstance(nested, list) else None
+
+    def _clear_transferred_resume_arg_paths(self) -> list[Instruction]:
+        paths = self.resume_arg_paths_to_clear_after_transfer
+        self.resume_arg_paths_to_clear_after_transfer = set()
+        insts = self._codegen_clear_resume_arg_paths(paths)
+        insts.extend(
+            create_instruction("DELETE_FAST", argval=name)
+            for name in sorted(self.fast_locals_to_delete_after_transfer)
+            if name in self.code_options["co_varnames"]
+        )
+        self.fast_locals_to_delete_after_transfer = set()
+        return insts
+
+    def _boxed_resume_arg_name(self) -> str | None:
+        return _boxed_resume_arg_name(self.f_code)
+
+    def _boxed_resume_arg_path(
+        self, value: VariableTracker | None
+    ) -> tuple[Any, ...] | None:
+        return self._boxed_resume_source_path(None if value is None else value.source)
+
+    def _boxed_resume_source_path(
+        self, source: Source | None
+    ) -> tuple[Any, ...] | None:
+        paths = self._boxed_resume_source_paths(source)
+        return paths[-1] if paths else None
+
+    def _boxed_resume_source_paths(
+        self, source: Source | None
+    ) -> tuple[tuple[Any, ...], ...]:
+        if not self.resume_arg_carrier_names or source is None:
+            return ()
+
+        indexes: list[Any] = []
+        while isinstance(source, ChainedSource):
+            if isinstance(source, AttrSource):
+                indexes.append(source.member)
+                source = source.base
+                continue
+            if isinstance(source, ClosureSource):
+                indexes.append("__closure__")
+                source = source.base
+                continue
+            if isinstance(
+                source,
+                (
+                    DictGetItemSource,
+                    DictSubclassGetItemSource,
+                    GetItemSource,
+                    ListGetItemSource,
+                    NonSerializableSetGetItemSource,
+                ),
+            ):
+                index = source.index
+                if isinstance(index, ConstDictKeySource):
+                    index = _ResumeArgPathIndex("dict_key", index.index)
+                elif type(index) not in (
+                    str,
+                    bytes,
+                    int,
+                    float,
+                    complex,
+                    bool,
+                    type(None),
+                ):
+                    # Path suffixes are used only for symbolic alias/liveness
+                    # comparisons. Avoid invoking user __hash__ and support
+                    # dynamic or unhashable indices with an identity token.
+                    index = _ResumeArgPathIndex("identity", id(index))
+                indexes.append(index)
+                source = source.base
+                continue
+            # Every remaining chained source still reconstructs from its base.
+            # Use a stable, non-user-hashable dependency marker so the carrier
+            # survives until that derived value is materialized.
+            indexes.append(_ResumeArgPathIndex(type(source).__name__, 0))
+            source = source.base
+        if not isinstance(source, LocalSource):
+            return ()
+        if source.local_name in self.resume_arg_carrier_names:
+            if not indexes:
+                return ()
+            return ((source.local_name, *reversed(indexes)),)
+        suffix = tuple(reversed(indexes))
+        return tuple(
+            (*root, *suffix)
+            for root in self.resume_arg_local_sources.get(source.local_name, ())
+        )
+
+    def _mark_resume_arg_path_for_cleanup(self, value: VariableTracker | None) -> None:
+        paths = {
+            path
+            for path in self._boxed_resume_arg_paths(value)
+            if len(path) >= 2 and isinstance(path[1], int) and path[1] >= 2
+        }
+        self.resume_arg_paths_to_clear.update(paths)
+        self.unconditional_resume_arg_paths_to_clear.update(paths)
+
+    def _graph_may_install_lifetime_observer(self) -> bool:
+        get_saved_tensor_hooks = (
+            torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        )
+        if get_saved_tensor_hooks():
+            return True
+        for node in self.output.graph.nodes:
+            if node.op in ("placeholder", "get_attr", "output"):
+                continue
+            target = node.target
+            if node.op == "call_function" and (
+                target is torch._C._set_grad_enabled
+                or (
+                    isinstance(target, torch._ops.OpOverload)
+                    and torch.Tag.core in target.tags
+                )
+                or target in _OBSERVER_PURE_TENSOR_OPERATORS
+            ):
+                continue
+            if node.op == "call_method" and target in _OBSERVER_PURE_TENSOR_METHODS:
+                continue
+            return True
+        return False
+
+    def _resume_arg_roots_may_run_finalizer(
+        self,
+        roots: set[tuple[Any, ...]],
+        *,
+        assume_tensor_observer: bool = False,
+    ) -> bool:
+        for owner_name, root_index in roots:
+            carrier = self._resume_arg_owner_value(owner_name)
+            if carrier is None or not 0 <= root_index < len(carrier):
+                continue
+            value = carrier[root_index]
+            if _resume_arg_has_observable_destruction(value):
+                return True
+            if assume_tensor_observer:
+                worklist = [value]
+                seen: set[int] = set()
+                while worklist:
+                    current = worklist.pop()
+                    current_id = id(current)
+                    if current_id in seen:
+                        continue
+                    seen.add(current_id)
+                    if type(current) in (list, tuple):
+                        worklist.extend(current)
+                    elif type(current) is dict:
+                        worklist.extend(current.keys())
+                        worklist.extend(current.values())
+                    elif type(current) in (set, frozenset):
+                        worklist.extend(current)
+                    elif type(current) in (torch.Tensor, torch.nn.Parameter):
+                        return True
+        return False
+
+    def _schedule_resume_fast_local_lifetime_boundary(
+        self, roots: set[tuple[Any, ...]]
+    ) -> None:
+        cleanup_tx = self.output.root_tx
+        output_has_calls = self.output.count_calls() != 0
+        root_contains_tensor = cleanup_tx._resume_arg_roots_may_run_finalizer(
+            roots, assume_tensor_observer=True
+        )
+        graph_may_install_observer = (
+            output_has_calls and cleanup_tx._graph_may_install_lifetime_observer()
+        )
+        direct_observer = cleanup_tx._resume_arg_roots_may_run_finalizer(roots)
+        externally_observable = bool(
+            roots & cleanup_tx.resume_arg_roots_with_external_lifetime
+        )
+        if (
+            output_has_calls
+            and root_contains_tensor
+            and not graph_may_install_observer
+            and not externally_observable
+        ):
+            # Non-inline hooks normally reuse a Dynamo cache entry. An
+            # explicit fast-local release may need an inter-graph lifetime
+            # boundary when hooks are present, so guard only resumptions that
+            # make this source-ordering decision.
+            install_guard(
+                GlobalStateSource().make_guard(
+                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS_PRESENT
+                )
+            )
+        if output_has_calls and not (
+            externally_observable or direct_observer or graph_may_install_observer
+        ):
+            for owner_name, root_index in roots:
+                # A prior eager/disabled call can add a weakref only on a
+                # later invocation. Recompile that resume so the now-observed
+                # source release gets an inter-graph boundary.
+                install_guard(
+                    GetItemSource(
+                        cleanup_tx._resume_arg_owner_source(owner_name), root_index
+                    ).make_guard(GuardBuilder.RESUME_ARG_LIFETIME_MATCH)
+                )
+        if not roots or not (
+            externally_observable
+            or direct_observer
+            or (graph_may_install_observer and root_contains_tensor)
+        ):
+            return
+        # Root-frame changes before the next graph use ordered replay. An
+        # inlined change after a graph needs a nested continuation so the
+        # caller's carrier can be released before the eager leaf continues.
+        if self is not cleanup_tx:
+            if output_has_calls:
+                self.resume_fast_local_graph_break_pending = True
+            return
+        if output_has_calls:
+            self.resume_fast_local_graph_break_pending = True
+
+    def _can_compile_resume_fast_local_lifetime_boundary(self) -> bool:
+        # Lifetime continuations preserve the current operand stack explicitly.
+        # The compiled prefix runs before the skipped leaf resume, outside the
+        # leaf's original exception table. A runtime exception from that graph
+        # would therefore bypass the source handler even when the checkpoint
+        # itself is otherwise restorable.
+        if self.block_stack or (
+            sys.version_info >= (3, 11)
+            and self.current_instruction.exn_tab_entry is not None
+        ):
+            return False
+        current_tx: InstructionTranslatorBase | None = self
+        while current_tx is not None:
+            if not InstructionTranslatorBase.should_compile_partial_graph(current_tx):
+                return False
+            current_tx = current_tx.parent
+        return True
+
+    def _unsupported_resume_fast_local_lifetime_boundary(self) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported resume fast-local lifetime boundary",
+            context=self.get_line_of_code_header(),
+            explanation=(
+                "Dynamo cannot preserve the eager ordering of a resumed local's "
+                "finalizer or weakref callback at this point in the frame."
+            ),
+            hints=[*graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK],
+            skip_frame=True,
+        )
+
+    def _boxed_resume_arg_paths(
+        self, value: VariableTracker | None
+    ) -> set[tuple[Any, ...]]:
+        paths: set[tuple[Any, ...]] = set()
+        if not self.resume_arg_carrier_names or value is None:
+            return paths
+
+        def add_path(item: VariableTracker) -> None:
+            paths.update(self._boxed_resume_source_paths(item.source))
+
+        self._visit_variable_sources(add_path, value)
+        return paths
+
+    @staticmethod
+    def _visit_variable_sources(
+        visit: Callable[[VariableTracker], None], value: Any
+    ) -> None:
+        """Visit both lazy wrappers and their realized VTs without realizing them."""
+        seen: set[int] = set()
+        worklist = [value]
+        while worklist:
+            current = worklist.pop()
+            current_id = id(current)
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            if isinstance(current, VariableTracker):
+                visit(current)
+                unwrapped = current.unwrap()
+                if unwrapped is not current:
+                    worklist.append(unwrapped)
+                worklist.extend(
+                    child
+                    for key, child in current.__dict__.items()
+                    if key not in current._nonvar_fields
+                )
+            elif istype(current, (list, tuple)):
+                worklist.extend(current)
+            elif istype(current, (dict, OrderedDict)):
+                worklist.extend(current.keys())
+                worklist.extend(current.values())
+
+    def _resume_arg_side_effect_values(self) -> list[Any]:
+        side_effects = self.output.side_effects
+        return [
+            side_effects.store_attr_mutations,
+            side_effects._get_modified_vars(),
+            side_effects.save_for_backward,
+            side_effects.tensor_hooks,
+            side_effects.ca_final_callbacks_var,
+        ]
+
+    def _materialize_resume_arg_sources_for_cleanup(
+        self, values: Iterable[VariableTracker | Source]
+    ) -> tuple[
+        dict[str, VariableTracker | Source],
+        dict[Source, Source],
+        set[str],
+    ]:
+        roots_to_clear = {path[:2] for path in self.resume_arg_paths_to_clear}
+        if not roots_to_clear:
+            return {}, {}, set()
+        cleanup_may_mutate_carriers = bool(
+            roots_to_clear & self.resume_arg_roots_with_external_lifetime
+        ) or self._resume_arg_roots_may_run_finalizer(roots_to_clear)
+
+        materialize: dict[str, VariableTracker | Source] = {}
+        source_overrides: dict[Source, Source] = {}
+        temp_names: set[str] = set()
+
+        for value in values:
+            source_values: list[tuple[Source, VariableTracker | Source]] = []
+            if isinstance(value, Source):
+                source_values.append((value, value))
+            else:
+
+                def add_source(item: VariableTracker) -> None:
+                    if item.source is not None:
+                        source_values.append((item.source, item))
+
+                # Reconstructing a container can load carrier-backed sources
+                # from its nested items even when the container itself has no
+                # source. Snapshot those leaves as well as the outer value.
+                self._visit_variable_sources(add_source, value)
+
+            for source, source_value in source_values:
+                if source in source_overrides:
+                    continue
+                path = self._boxed_resume_source_path(source)
+                if path is None or (
+                    path[:2] not in roots_to_clear and not cleanup_may_mutate_carriers
+                ):
+                    continue
+                # A finalizer or weakref callback can inspect its caller's
+                # frame and mutate any resume carrier, not only the root being
+                # released. Keep each snapshot in a read-only holder. Python
+                # 3.12's cached f_locals can retain the holder after
+                # DELETE_FAST, while Dynamo can still clear its private value
+                # at the source-level last use.
+                name = self.output.new_var("resume_arg")
+                new_source = AttrSource(TempLocalSource(name), "value")
+                temp_names.add(name)
+                source_overrides[source] = new_source
+                materialize[name] = source_value
+        return materialize, source_overrides, temp_names
+
+    def _take_resume_arg_paths_to_clear(
+        self,
+        *,
+        clear_roots_with_live_siblings: bool = False,
+        materialized_sources: set[Source] | None = None,
+    ) -> set[tuple[Any, ...]]:
+        live_paths: set[tuple[Any, ...]] = set()
+        materialized_sources = materialized_sources or set()
+
+        def add_live_path(value: VariableTracker) -> None:
+            if value.source in materialized_sources:
+                return
+            live_paths.update(self._boxed_resume_source_paths(value.source))
+
+        current_tx: InstructionTranslatorBase | None = self.output.current_tx
+        while current_tx is not None:
+            for value in current_tx.stack:
+                self._visit_variable_sources(add_live_path, value)
+            for name, value in current_tx.symbolic_locals.items():
+                if name not in self.resume_arg_carrier_names:
+                    if type.__instancecheck__(CellVariable, value):
+                        value = self.output.side_effects.load_cell(value)
+                    self._visit_variable_sources(add_live_path, value)
+            for value in (current_tx.post_prune_cell_and_freevars or {}).values():
+                self._visit_variable_sources(add_live_path, value)
+            current_tx = current_tx.parent
+        self._visit_variable_sources(
+            add_live_path, self._resume_arg_side_effect_values()
+        )
+
+        def overlaps_live_path(path: tuple[Any, ...]) -> bool:
+            return any(
+                path[: len(live)] == live or live[: len(path)] == path
+                for live in live_paths
+            )
+
+        roots_to_clear = {
+            path[:2]
+            for path in self.resume_arg_paths_to_clear
+            if clear_roots_with_live_siblings
+            or (
+                not overlaps_live_path(path)
+                and not any(live[:2] == path[:2] for live in live_paths)
+            )
+        }
+        self.resume_arg_paths_to_clear = {
+            path
+            for path in self.resume_arg_paths_to_clear
+            if path[:2] not in roots_to_clear
+        }
+        return roots_to_clear
+
+    def _take_unconditional_resume_arg_paths(
+        self, paths: set[tuple[Any, ...]]
+    ) -> set[tuple[Any, ...]]:
+        roots = {path[:2] for path in paths}
+        unconditional_roots = {
+            path[:2]
+            for path in self.unconditional_resume_arg_paths_to_clear
+            if path[:2] in roots
+        }
+        self.unconditional_resume_arg_paths_to_clear = {
+            path
+            for path in self.unconditional_resume_arg_paths_to_clear
+            if path[:2] not in roots
+        }
+        conditional_roots = roots & self.resume_arg_roots_requiring_lifetime_check
+        # Keep external provenance until create_resume() builds the successor's
+        # metadata.  The old carrier slot is cleared at runtime here, but a live
+        # logical local can still source that slot symbolically and is about to
+        # move into a new carrier.  create_resume() uses the retained root to
+        # mark the new carrier index external.  This translator is discarded
+        # after emitting the successor; that successor reconstructs only the
+        # roots that were actually transferred.
+        return unconditional_roots - conditional_roots
+
+    def _mark_resume_args_cleanup_emitted(self) -> None:
+        if resume_args_varname := self._boxed_resume_arg_name():
+            self.deleted_fast_locals.discard(resume_args_varname)
+            self.cleared_fast_locals.discard(resume_args_varname)
 
     @staticmethod
     def codegen_call_resume(
@@ -3943,8 +5399,7 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ],
-        #     [frame 1 stack + locals],
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -3962,29 +5417,37 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
-            cg.extend_output(
-                [
-                    # [remaining resumes, frames, [frame 1 stack + locals]]
-                    create_instruction("BUILD_LIST", arg=3),
-                ]
-            )
+        cg.extend_output(
+            [
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
+                *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
+
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
+        if _is_boxed_resume_code(resume_codes[-1]):
+            cg.extend_output(create_call_function(1, True))
         else:
-            cg.extend_output(
-                [
-                    *create_rot_n(3),
-                    create_instruction("BUILD_LIST", arg=2),
-                    *create_swap(2),
-                    # [remaining resumes, frames], frame 1 stack + locals
-                    create_instruction("LIST_EXTEND", arg=1),
-                ]
-            )
+            resume_args_varname = cg.new_var("resume_args")
+            cg.append_output(cg.create_store(resume_args_varname))
+            for idx in range(resume_codes[-1].co_argcount):
+                cg.extend_output(
+                    [
+                        cg.create_load(resume_args_varname),
+                        cg.create_load_const(idx),
+                        cg.create_binary_subscr(),
+                    ]
+                )
+            cg.append_output(cg.create_delete(resume_args_varname))
+            cg.extend_output(create_call_function(resume_codes[-1].co_argcount, True))
 
-        # TOS: resume 1, resume call args
-        cg.extend_output(create_call_function_ex(False, True))
-
-    def should_compile_partial_graph(self) -> bool:
-        if sys.version_info >= (3, 11):
+    def should_compile_partial_graph(
+        self, *, ignore_current_exception_table: bool = False
+    ) -> bool:
+        if sys.version_info >= (3, 11) and not ignore_current_exception_table:
             # Do not compile if current instruction's block is not the top with block
             entry = self.current_instruction.exn_tab_entry
             if entry and (
@@ -4009,14 +5472,29 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
+        source = getattr(obj, "source", None)
+        if (
+            self.is_tracing_resume_prologue
+            and isinstance(source, LocalSource)
+            and source.local_name == self._boxed_resume_arg_name()
+        ):
+            return
         generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        source = getattr(obj, "source", None)
+        if (
+            self.is_tracing_resume_prologue
+            and isinstance(source, LocalSource)
+            and source.local_name == self._boxed_resume_arg_name()
+        ):
+            return
         # Check for tensor items using side-effect-free internal lookups
         # only. We avoid call_method("__getitem__") because it can execute
         # user code and add unwanted graph nodes.
-        self._maybe_sync_dealloc_subscr(obj, key)
+        if not self.is_tracing_resume_prologue:
+            self._maybe_sync_dealloc_subscr(obj, key)
         generic_delitem(self, obj, key)
 
     def _maybe_sync_dealloc_subscr(
@@ -5442,6 +6920,46 @@ class InstructionTranslatorBase(
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
+        self.deleted_fast_locals: set[str] = set()
+        self.cleared_fast_locals: set[str] = set()
+        self.fast_locals_to_delete_after_transfer: set[str] = set()
+        self.entry_fast_local_initial_values: OrderedDict[str, VariableTracker] = (
+            OrderedDict()
+        )
+        self.entry_fast_local_events: list[
+            tuple[str | None, VariableTracker | None]
+        ] = []
+        self.entry_fast_local_event_roots: list[set[tuple[Any, ...]]] = []
+        self.entry_fast_local_event_semantic_roots: list[set[tuple[Any, ...]]] = []
+        self.entry_fast_local_event_graph_barriers: list[bool] = []
+        self.entry_fast_local_scheduled_roots: set[tuple[Any, ...]] = set()
+        self.resume_fast_local_graph_break_pending = False
+        self.resume_arg_paths_to_clear: set[tuple[Any, ...]] = set()
+        self.unconditional_resume_arg_paths_to_clear: set[tuple[Any, ...]] = set()
+        self.resume_arg_roots_requiring_lifetime_check: set[tuple[Any, ...]] = set()
+        self.resume_arg_roots_with_external_lifetime = (
+            _boxed_resume_arg_external_lifetime_roots(f_code)
+        )
+        self.resume_arg_paths_to_clear_after_transfer: set[tuple[Any, ...]] = set()
+        self.resume_arg_local_names_to_preserve: set[str] = set()
+        self.resume_arg_local_names_to_clear_on_entry: set[str] = set()
+        resume_args_varname = _boxed_resume_arg_name(f_code)
+        self.resume_arg_carrier_names = _boxed_resume_arg_names(f_code)
+        self.resume_arg_carrier_sources = _boxed_resume_arg_sources(f_code)
+        resume_arg_local_sources: defaultdict[str, list[tuple[str, int]]] = defaultdict(
+            list
+        )
+        for owner_name in self.resume_arg_carrier_names:
+            for index, local_name in self.resume_arg_carrier_sources[
+                owner_name
+            ].items():
+                resume_arg_local_sources[local_name].append((owner_name, index))
+        self.resume_arg_local_sources = {
+            name: tuple(sources) for name, sources in resume_arg_local_sources.items()
+        }
+        self.has_boxed_resume_args = bool(self.resume_arg_carrier_names)
+        if resume_args_varname is not None and resume_args_varname in f_locals:
+            self.cleared_fast_locals.add(resume_args_varname)
         self.stack: list[VariableTracker] = []
         self.instruction_pointer = 0
         self.start_point = None
@@ -5669,6 +7187,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             else:
                 function_live_names = livevars_analysis(
                     self.instructions, self.instructions[0]
+                )
+                function_live_names.update(
+                    inst.argval
+                    for inst in self.instructions
+                    if inst.opname in ("DELETE_FAST", "STORE_FAST")
+                    and inst.argval in f_locals
                 )
 
             dynamism = code_context.get_context(f_code).get("dynamism", None)
@@ -6223,6 +7747,63 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
+        # A cleanup-only continuation created after a graph would execute that
+        # graph outside the leaf's original exception handler. Detect protected
+        # regions from normalized instructions: Python 3.10 retains SETUP_*
+        # blocks, while 3.11+ attaches exception-table entries. Enter a skipped
+        # leaf before tracing any protected callee instructions so its prologue
+        # transfers carrier-backed arguments into real locals and the complete
+        # function then runs eagerly under its original handlers.
+        protected_carrier_call = False
+        protected_carrier_local_names: set[str] = set()
+        if not is_generator(code) and any(
+            inst.exn_tab_entry is not None
+            or inst.opname
+            in ("SETUP_ASYNC_WITH", "SETUP_EXCEPT", "SETUP_FINALLY", "SETUP_WITH")
+            for inst in tracer.instructions
+        ):
+            cleanup_tx = parent.output.root_tx
+            replaced_names = {
+                inst.argval
+                for inst in tracer.instructions
+                if inst.opname
+                in ("DELETE_DEREF", "DELETE_FAST", "STORE_DEREF", "STORE_FAST")
+            }
+            roots: set[tuple[Any, ...]] = set()
+            for name, value in sub_locals.items():
+                if name not in replaced_names:
+                    continue
+                value_roots = {
+                    path[:2]
+                    for path in cleanup_tx._boxed_resume_arg_paths(value)
+                    if len(path) >= 2 and isinstance(path[1], int) and path[1] >= 2
+                }
+                if value_roots:
+                    protected_carrier_local_names.add(name)
+                    roots.update(value_roots)
+            output_has_calls = parent.output.count_calls() != 0
+            root_contains_tensor = cleanup_tx._resume_arg_roots_may_run_finalizer(
+                roots, assume_tensor_observer=True
+            )
+            graph_may_install_observer = (
+                output_has_calls and cleanup_tx._graph_may_install_lifetime_observer()
+            )
+            direct_observer = cleanup_tx._resume_arg_roots_may_run_finalizer(roots)
+            externally_observable = bool(
+                roots & cleanup_tx.resume_arg_roots_with_external_lifetime
+            )
+            protected_carrier_call = (
+                externally_observable
+                or direct_observer
+                or (graph_may_install_observer and root_contains_tensor)
+            )
+            if protected_carrier_call:
+                cleanup_tx.resume_arg_paths_to_clear_after_transfer.update(roots)
+        if protected_carrier_call:
+            tracer.resume_fast_local_graph_break_pending = True
+            tracer.resume_arg_local_names_to_clear_on_entry.update(
+                protected_carrier_local_names
+            )
         return tracer
 
     def inline_call_(self) -> VariableTracker:
@@ -6246,7 +7827,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except (Unsupported, UserError) as e:
             # If this graph break has skip_frame set, unset it
             # since it refers to the current frame and not the parent.
-            e.skip_frame = False
+            if not (
+                isinstance(e, Unsupported)
+                and e.gb_type == "Unsupported resume fast-local lifetime boundary"
+            ):
+                e.skip_frame = False
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
@@ -6377,7 +7962,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return False
         return True
 
-    def should_compile_partial_graph(self) -> bool:
+    def should_compile_partial_graph(
+        self, *, ignore_current_exception_table: bool = False
+    ) -> bool:
         if config.nested_graph_breaks:
             if not self._allow_nested_graph_breaks:
                 return False
@@ -6385,16 +7972,24 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 return False
             if not self.parent.should_compile_partial_graph():
                 return False
-            return super().should_compile_partial_graph()
+            return super().should_compile_partial_graph(
+                ignore_current_exception_table=ignore_current_exception_table
+            )
         return False  # inlining functions is all-or-nothing
 
     def create_call_resume_at(
         self,
         inst: Instruction,
         all_stack_locals_metadata: list[StackLocalsMetadata],
+        *,
+        allow_nested_resume_lifetime: bool = False,
     ) -> list[Instruction]:
-        if config.nested_graph_breaks:
-            return super().create_call_resume_at(inst, all_stack_locals_metadata)
+        if config.nested_graph_breaks or allow_nested_resume_lifetime:
+            return super().create_call_resume_at(
+                inst,
+                all_stack_locals_metadata,
+                allow_nested_resume_lifetime=allow_nested_resume_lifetime,
+            )
         unimplemented(
             gb_type="Graph break in inlined function",
             context="",
@@ -6523,7 +8118,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
 
-    def should_compile_partial_graph(self) -> bool:
+    def should_compile_partial_graph(
+        self, *, ignore_current_exception_table: bool = False
+    ) -> bool:
         # resuming on graph break on inlined generator not supported
         return False
 
