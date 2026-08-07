@@ -1,8 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class Model(torch.nn.Module):
@@ -34,6 +37,8 @@ class Model(torch.nn.Module):
 
 
 class TestSymbolicTracing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_symbolic_tracing_outputs(self):
         """
         Tests running ``tracer.trace()`` inside ``patch_tracer()`` by checking
@@ -113,9 +118,5 @@ class TestSymbolicTracing(TestCase):
         self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(
-    TestSymbolicTracing, globals(), only_for=devices, allow_xpu=True
-)
 if __name__ == "__main__":
     run_tests()
