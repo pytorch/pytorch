@@ -132,28 +132,35 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
 
-#if SYCL_COMPILER_VERSION < 20260200
-    // Delete the event previously recorded.
-    if (xpu_event)
-      delete xpu_event;
-
-    if (flag == EventFlag::BACKEND_DEFAULT) {
-      // Use the profiling tag to record the event to enable timing feature.
-      xpu_event =
-          new sycl::event(syclex::submit_profiling_tag(xpu_stream.queue()));
-    } else {
-      xpu_event =
-          new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    bool reusable = false;
+#if SYCL_COMPILER_VERSION >= 20260200
+    reusable = c10::xpu::get_raw_device(device_index)
+                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    if (reusable) {
+      if (!xpu_event) {
+        xpu_event = new sycl::event(syclex::make_event(
+            c10::xpu::get_device_context(),
+            syclex::properties{
+                syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+      }
+      syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
     }
-#else
-    if (!xpu_event) {
-      xpu_event = new sycl::event(syclex::make_event(
-          c10::xpu::get_device_context(),
-          syclex::properties{
-              syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
-    }
-    syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
 #endif
+
+    if (!reusable) {
+      // Delete the event previously recorded.
+      if (xpu_event)
+        delete xpu_event;
+
+      if (flag == EventFlag::BACKEND_DEFAULT) {
+        // Use the profiling tag to record the event to enable timing feature.
+        xpu_event =
+            new sycl::event(syclex::submit_profiling_tag(xpu_stream.queue()));
+      } else {
+        xpu_event =
+            new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+      }
+    }
 
     *event = reinterpret_cast<void*>(xpu_event);
 
@@ -172,13 +179,21 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     const XPUStream xpu_stream(stream);
 
-#if SYCL_COMPILER_VERSION < 20260200
-    std::vector<sycl::event> event_list{*xpu_event};
-    xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
-#else
-    sycl::ext::oneapi::experimental::enqueue_wait_event(
-        xpu_stream.queue(), *xpu_event);
+    bool reusable = false;
+#if SYCL_COMPILER_VERSION >= 20260200
+    reusable = c10::xpu::get_raw_device(device_index)
+                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
+    if (reusable) {
+      sycl::ext::oneapi::experimental::enqueue_wait_event(
+          xpu_stream.queue(), *xpu_event);
+    }
 #endif
+
+    if (!reusable) {
+      std::vector<sycl::event> event_list{*xpu_event};
+      xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+    }
+
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(

@@ -224,8 +224,7 @@ struct XPUEvent {
         "XPUEvent cannot have both IPC and timing enabled.");
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
-    auto device = c10::xpu::get_raw_device(device_index_);
-
+    auto& device = c10::xpu::get_raw_device(device_index_);
     if (enable_ipc_) {
       TORCH_CHECK(
           device.has(sycl::aspect::ext_oneapi_ipc_event),
@@ -233,9 +232,9 @@ struct XPUEvent {
           "which is not supported on this device. ",
           "Please upgrade to a newer driver.");
     }
-    if (enable_timing_) {
-      reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
-    }
+    // Base reusability on per-event profiling support regardless of
+    // enable_timing_, to align with c10::Event behavior.
+    reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
     if (reusable_) {
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
