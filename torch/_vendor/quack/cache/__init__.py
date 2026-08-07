@@ -72,8 +72,9 @@ import contextvars
 import os
 import sys
 import types
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 # ---------------------------------------------------------------------------
 # Runtime flags. Source of truth.
@@ -93,6 +94,24 @@ from typing import List, Optional
 
 CACHE_ENABLED: bool = os.getenv("QUACK_CACHE_ENABLED", "1") == "1"
 CACHE_DIR: Optional[str] = os.getenv("QUACK_CACHE_DIR", None)
+_CACHE_DIR_OVERRIDE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "quack_cache_dir_override", default=None
+)
+
+
+@contextmanager
+def cache_dir_override(cache_dir: Optional[str]) -> Iterator[None]:
+    token = _CACHE_DIR_OVERRIDE.set(cache_dir)
+    try:
+        yield
+    finally:
+        _CACHE_DIR_OVERRIDE.reset(token)
+
+
+def get_cache_dir() -> Optional[str]:
+    override = _CACHE_DIR_OVERRIDE.get()
+    return CACHE_DIR if override is None else override
+
 
 # Stack depth for compile-only mode. ``compile_only_mode()`` pushes
 # (depth += 1) on enter and pops (reset to prior token) on exit, so:
@@ -207,6 +226,8 @@ __all__ = [
     "LOCK_TIMEOUT",
     "FileLock",
     "get_cache_path",
+    "cache_dir_override",
+    "get_cache_dir",
     # Compile-only cache warming.
     "CompileOnlyFakeTensorMode",
     "CompileOnlyStrictError",

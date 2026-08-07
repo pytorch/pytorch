@@ -194,6 +194,29 @@ https://github.com/meta-pytorch/kraken/blob/main/kraken to see additional
 utilities and examples of using symmetric memory to implement common patterns in
 Triton.
 
+## One-sided get
+
+Symmetric memory also exposes a small one-sided `get` API for copying data from
+a peer's symmetric allocation into a local tensor:
+
+```python
+src = symm_mem.empty(1024, device=device)
+hdl = symm_mem.rendezvous(src, group)
+
+if dist.get_rank(group) == 0:
+    dst = torch.empty((512,), device=device)
+    # Copy the last 512 elements of the peer's allocation into dst.
+    symm_mem.get(dst, hdl, peer=1, offset=512)
+```
+
+`hdl` is the symmetric memory handle returned by `rendezvous`; the remote
+source is the peer's allocation backing that handle. The number of elements
+copied is inferred from `dst`, so pass a view (e.g. `dst[:n]`) to fill only
+part of a tensor; `offset` is given in elements of `dst`'s dtype and defaults
+to `0`. `dst` may be a regular CUDA tensor or another symmetric tensor; it must
+be on the same device as `hdl` and backed by contiguous memory. The copy is
+issued on the current CUDA stream.
+
 ## Scale out
 
 Large language models distribute experts onto more than 8 GPUs, hence requiring
@@ -241,7 +264,7 @@ In the example below, tensor `x` will be created from symmetric memory:
     mempool = symm_mem.get_mem_pool(device)
 
     with torch.cuda.use_mem_pool(mempool):
-        x = torch.arange(128, device=device)
+        x = torch.arange(128, device=device, dtype=torch.float32)
 
     torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
 ```
@@ -438,6 +461,10 @@ communicator for the process group if it doesn't already exist.
 ```
 
 ```{eval-rst}
+.. autofunction:: get
+```
+
+```{eval-rst}
 .. autofunction:: is_nvshmem_available
 ```
 
@@ -490,6 +517,14 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     requires hardware support for multimem operations. On NVIDIA GPUs, NVLink
     SHARP is required.
 
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. The kernels synchronize ranks using a shared signal pad
+        indexed by block ID with no per-stream isolation; issuing concurrent
+        launches from different streams on the same group will cause a deadlock.
+        To use symm_mem collectives from multiple streams, serialize them onto
+        one dedicated stream using ``stream.wait_stream()`` / ``current_stream.wait_stream()``.
+
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
     :param str group_name: Name of the group to perform all-reduce on.
@@ -498,6 +533,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: multimem_all_gather_out(input: Tensor, group_name: str, out: Tensor) -> Tensor
 
     Performs a multimem all-gather operation on the input tensor. This operation requires hardware support for multimem operations. On NVIDIA GPUs, NVLink SHARP is required.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-gather on.
     :param str group_name: Name of the group to perform all-gather on.
@@ -508,6 +547,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     Performs a one-shot all-reduce operation on the input tensor.
 
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
+
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
     :param str group_name: Name of the group to perform all-reduce on.
@@ -516,6 +559,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: one_shot_all_reduce_out(input: Tensor, reduce_op: str, group_name: str, out: Tensor) -> Tensor
 
     Performs a one-shot all-reduce operation based on the input tensor and writes the result to the output tensor.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
@@ -526,6 +573,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: two_shot_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
 
     Performs a two-shot all-reduce operation on the input tensor.
+
+    .. warning::
+        All symm_mem collectives for a given group must be issued from a single
+        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
