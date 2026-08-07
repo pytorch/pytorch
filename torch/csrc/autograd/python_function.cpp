@@ -14,6 +14,7 @@
 
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/functorch/DynamicLayer.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -588,6 +589,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   Py_VISIT(self->dirty_tensors);
   Py_VISIT(self->compiled_autograd_backward_state);
   Py_VISIT(self->saved_for_forward);
+  Py_VISIT(self->output_grad_dtypes);
   return traverse_node(self->cdata, visit, arg);
 }
 
@@ -598,6 +600,7 @@ static int THPFunction_clear(THPFunction* self) {
   Py_CLEAR(self->dirty_tensors);
   Py_CLEAR(self->compiled_autograd_backward_state);
   Py_CLEAR(self->saved_for_forward);
+  Py_CLEAR(self->output_grad_dtypes);
   return 0;
 }
 
@@ -641,6 +644,7 @@ static PyObject* THPFunction_new(
   self->materialize_non_diff_grads = true;
   self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
+  self->output_grad_dtypes = nullptr;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
   return obj;
 }
@@ -684,6 +688,60 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     THPFunction* self);
 
+// Parse and consume positional grad-dtype declarations.
+static std::optional<std::vector<std::optional<at::ScalarType>>>
+_parse_output_grad_dtypes(
+    THPFunction* self,
+    Py_ssize_t num_outputs,
+    const std::vector<std::optional<Variable>>& raw_output_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable) {
+  PyObject* dtypes = self->output_grad_dtypes;
+  if (dtypes == nullptr) {
+    return std::nullopt;
+  }
+  THPFunction_assert(
+      PyTuple_Check(dtypes),
+      "set_output_grad_dtype expects the declarations to be a tuple, but got: "
+      "%s",
+      THPUtils_typename(dtypes));
+  THPFunction_assert(
+      PyTuple_GET_SIZE(dtypes) == num_outputs,
+      "set_output_grad_dtype expected the number of declarations to match the "
+      "number of outputs: the Function returned %zd values but %zd "
+      "declarations were provided",
+      num_outputs,
+      PyTuple_GET_SIZE(dtypes));
+  std::vector<std::optional<at::ScalarType>> result;
+  result.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* d = PyTuple_GET_ITEM(dtypes, i);
+    if (d == Py_None) {
+      result.emplace_back(std::nullopt);
+      continue;
+    }
+    THPFunction_assert(
+        THPDtype_Check(d),
+        "set_output_grad_dtype expects each declaration to be a torch.dtype or "
+        "None, but got %s",
+        THPUtils_typename(d));
+    const auto& raw_output_var = raw_output_vars[i];
+    THPFunction_assert(
+        raw_output_var.has_value() &&
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type()),
+        "set_output_grad_dtype: got a concrete dtype for output %zd, but that "
+        "output is not a differentiable tensor (it is a non-tensor, was marked "
+        "non-differentiable, or has a non-differentiable dtype). Pass None for "
+        "output %zd instead.",
+        i,
+        i);
+    result.emplace_back(reinterpret_cast<THPDtype*>(d)->scalar_type);
+  }
+  Py_CLEAR(self->output_grad_dtypes);
+  return result;
+}
+
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
 // these tensors wrapped with variables.  We save the gradient function (self)
@@ -724,6 +782,9 @@ static void _wrap_outputs(
       raw_output_vars.emplace_back();
     }
   }
+
+  auto output_grad_dtypes = _parse_output_grad_dtypes(
+      self, num_outputs, raw_output_vars, non_differentiable);
 
   _jvp_fn_t jvp_user_function = [self](
                                     variable_list inputs,
@@ -833,13 +894,26 @@ static void _wrap_outputs(
         // If one of the grad outputs is undefined, a correctly-shaped zeros
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
+        //
+        // Match differentiability to what mark_non_differentiable recorded,
+        // which is keyed on the raw output's TensorImpl.
+        const auto& raw_output_var = raw_output_vars[i];
+        TORCH_INTERNAL_ASSERT(raw_output_var.has_value());
         bool is_differentiable =
-            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
-                 0 &&
-             isDifferentiableType(wrapped_output->scalar_type()));
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type());
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
+        // Set each differentiable output's grad_dtype, defaulting to its dtype.
+        if (is_differentiable) {
+          const auto grad_dtype = output_grad_dtypes.has_value()
+              ? (*output_grad_dtypes)[i]
+              : std::optional<at::ScalarType>(raw_output_var->scalar_type());
+          cdata_if_executable->mutable_input_metadata(i).set_grad_dtype(
+              grad_dtype);
+        }
       }
       PyTuple_SetItem(
           outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
@@ -2192,6 +2266,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"dirty_tensors",
      &getObject<&THPFunction::dirty_tensors>,
      &setObject<&THPFunction::dirty_tensors>,
+     nullptr,
+     nullptr},
+    {"output_grad_dtypes",
+     &getObject<&THPFunction::output_grad_dtypes>,
+     &setObject<&THPFunction::output_grad_dtypes>,
      nullptr,
      nullptr},
     {"saved_for_forward",
