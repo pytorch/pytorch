@@ -1944,6 +1944,20 @@ def _mutated_constant_arg(name: str, source_name: str) -> Never:
     )
 
 
+def _self_referential_constant_arg(source: Source, name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args self-referential argument",
+        context=f"function {name}, source {source.name}",
+        explanation=f"Argument `{source.name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) is part of a "
+        f"reference cycle, so it cannot be walked to derive value guards.",
+        hints=[
+            "Pass a structure without reference cycles",
+            "Use plain torch._dynamo.assume_constant_result (without specialize_args)",
+        ],
+    )
+
+
 def _unguardable_constant_arg_source(source: Source, name: str) -> Never:
     unimplemented(
         gb_type="assume_constant_result specialize_args unguardable argument source",
@@ -2134,12 +2148,19 @@ def invoke_and_store_as_constant(
                 ],
             )
 
-    def convert_specialized(x: VariableTracker, source: Source | None = None) -> Any:
+    def convert_specialized(
+        x: VariableTracker,
+        source: Source | None = None,
+        ancestors: frozenset[int] = frozenset(),
+    ) -> Any:
         # `source` is threaded when recursing into a container whose leaves are
         # not all python constants; at the top level it is the argument's source.
         top_level = source is None
         if source is None:
             source = x.source
+        if id(x) in ancestors:
+            _self_referential_constant_arg(source, name)
+        ancestors = ancestors | {id(x)}
         if x.is_tensor():
             unimplemented(
                 gb_type="assume_constant_result specialize_args tensor argument",
@@ -2206,7 +2227,7 @@ def invoke_and_store_as_constant(
         if isinstance(x, (variables.ListVariable, variables.TupleVariable)):
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return x.python_type()(
-                convert_specialized(item, GetItemSource(source, i))
+                convert_specialized(item, GetItemSource(source, i), ancestors)
                 for i, item in enumerate(x.items)
             )
         if isinstance(x, variables.ConstDictVariable) and all(
@@ -2220,7 +2241,7 @@ def invoke_and_store_as_constant(
             for key, val in x.items.items():
                 py_key = key.vt.as_python_constant()
                 result[py_key] = convert_specialized(
-                    val, DictGetItemSource(source, py_key)
+                    val, DictGetItemSource(source, py_key), ancestors
                 )
             return result
         unimplemented(

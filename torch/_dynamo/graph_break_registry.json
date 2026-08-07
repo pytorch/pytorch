@@ -5757,6 +5757,17 @@
       "Hints": []
     }
   ],
+  "GB8797": [
+    {
+      "Gb_type": "assume_constant_result specialize_args self-referential argument",
+      "Context": "function {name}, source {source.name}",
+      "Explanation": "Argument `{source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) is part of a reference cycle, so it cannot be walked to derive value guards.",
+      "Hints": [
+        "Pass a structure without reference cycles",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args)"
+      ]
+    }
+  ],
   "GB8887": [
     {
       "Gb_type": "NamedTupleVariable.__setattr__ bad args",

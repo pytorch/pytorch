@@ -2118,7 +2118,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         lst = [1.0]
         lst.append(lst)
-        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+        with self.assertRaisesRegex(Unsupported, "reference cycle"):
             fn(torch.ones(4), lst)
 
     def test_assume_constant_result_specialize_args_tensor_arg(self):
