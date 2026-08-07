@@ -68,21 +68,25 @@ struct TORCH_API MPSGuardImpl final
   }
 
   Stream getStream(Device d) const override {
-    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
+    return getCurrentMPSStream()->unwrap();
   }
 
   Stream getNewStream(Device /* unused */, int /* priority */ = 0)
       const override {
-    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
+    return getStreamFromPool()->unwrap();
   }
 
   Stream getDefaultStream(Device d) const override {
-    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
+    return getDefaultMPSStream()->unwrap();
   }
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const override {
-    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
+    MPSStream* previous = getCurrentMPSStream();
+    auto stream_id = s.id();
+    setCurrentMPSStream(
+        stream_id == 0 ? getDefaultMPSStream() : getStreamFromPool(stream_id));
+    return previous->unwrap();
   }
   DeviceCapability getDeviceCapability(Device /* unused */) const override {
     constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) |
@@ -128,6 +132,9 @@ struct TORCH_API MPSGuardImpl final
       const override;
 
   void synchronizeDevice(const DeviceIndex device_index) const override;
+
+  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
+      const override;
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for MPS.
