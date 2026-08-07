@@ -124,7 +124,7 @@ def _test_export_helper(self, dtype, op):
 
 
 class TestExportOpInfo(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(export_failures | fake_export_failures)

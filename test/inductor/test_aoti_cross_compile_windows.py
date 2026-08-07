@@ -327,7 +327,7 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
 class TestEnsureMingwCudartImportLib(TestCase):
     """Unit tests for _ensure_mingw_cudart_import_lib."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
