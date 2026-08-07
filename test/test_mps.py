@@ -11620,16 +11620,29 @@ class TestNNMPS(NNTestCase):
 
     def test_conv2d_discontiguous_weight(self):
         # Test for https://github.com/pytorch/pytorch/issues/55781
-        x = torch.ones(64, 16, 16, 16)
-        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
+        x = torch.ones(64, 16, 16, 16, device="mps")
+        weight = torch.arange(0, 1.0, 1 / 2.0 ** 10, device="mps").reshape(32, 16, 1, 2)[:, :, :, ::2]
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
-                y_ = torch.nn.functional.conv2d(x, weight, None)
-                self.assertEqual(y, y_)
         self.assertEqual(y.sum(), 4186112.)
+
+        # Non-dense weight view (channel slice of a 5D weight) must match CPU for
+        # forward and backward. MPSGraph conv mishandles such strided weights, so
+        # they need to be gathered before being fed to the graph.
+        xc = torch.randn(2, 8, 16, 16)
+        wc = torch.randn(6, 8, 3, 3, 3)
+
+        def conv(dev):
+            xi = xc.detach().to(dev).requires_grad_(True)
+            wi = wc.detach().to(dev).requires_grad_(True)
+            out = torch.nn.functional.conv2d(xi, wi[:, :, 1])
+            out.sum().backward()
+            return out, xi.grad, wi.grad
+
+        ref = conv("cpu")
+        res = conv("mps")
+        for r, e in zip(res, ref):
+            self.assertEqual(r.cpu(), e)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:

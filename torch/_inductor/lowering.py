@@ -2791,7 +2791,32 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
-        return True
+        from .codegen.triton_utils import (
+            use_uint8_triton_storage_for_cuda_float8_e4m3fn,
+        )
+
+        if not use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+            t.dtype, device=t.device
+        ):
+            return True
+
+        # uint8 storage reinterprets fp8 bytes: allow bitcast, views, memory
+        # movement, and dequant (convert out of fp8)
+        if not node:
+            return True
+        return not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
+            in (
+                aten.view.dtype,
+                aten.cat.default,
+                aten.clone.default,
+                aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
+                prims.convert_element_type.default,
+            )
+            or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
+        )
 
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
@@ -2828,6 +2853,8 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
     if node is not None and node.target in supported_complex_views and t.is_complex():
         return False
     if unsupported_input_tensor(t, node):
+        return True
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
