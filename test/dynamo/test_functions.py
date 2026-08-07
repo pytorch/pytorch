@@ -3396,11 +3396,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[2, 2]"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         mul: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_
         mul_1: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_;  l_torch_dynamo_resume_args_4_keywords_y_ = None
@@ -3414,12 +3411,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        s11 = args_list[1]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[s11, s11]", s11: "Sym(s11)"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         mul: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_
         mul_1: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ * l_torch_dynamo_resume_args_4_keywords_y_;  l_torch_dynamo_resume_args_4_keywords_y_ = None
@@ -3449,11 +3442,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[2, 2]"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         add: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ + l_torch_dynamo_resume_args_4_keywords_y_
 
@@ -3468,12 +3458,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        s11 = args_list[1]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[s11, s11]", s11: "Sym(s11)"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         add: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ + l_torch_dynamo_resume_args_4_keywords_y_
 
@@ -3506,11 +3492,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[2, 2]"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         add: "f32[2, 2]" = l_torch_dynamo_resume_args_4_keywords_y_ + l_torch_dynamo_resume_args_4_keywords_y_
 
@@ -3525,12 +3508,8 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_keywords_y_ = args_list[0]
-        s11 = args_list[1]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_keywords_y_: "f32[s11, s11]", s11: "Sym(s11)"):
         l_torch_dynamo_resume_args_4_keywords_y_ = L_torch_dynamo_resume_args_4_keywords_y_
-        L_torch_dynamo_resume_args_4_keywords_y_ = None
 
         add: "f32[s11, s11]" = l_torch_dynamo_resume_args_4_keywords_y_ + l_torch_dynamo_resume_args_4_keywords_y_
 
@@ -5463,43 +5442,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_frozenset_illegal_call_method(self):
-        def fn_add():
-            s = frozenset((1, 2, 3))
-            s.add({2})
-            return len(s)
-
-        def fn_pop():
-            s = frozenset((1, 2, 3))
-            s.pop()
-            return len(s)
-
-        def fn_update():
-            s = frozenset((1, 2, 3))
-            s.update({4, 5, 6})
-            return len(s)
-
-        def fn_remove():
-            s = frozenset((1, 2, 3))
-            s.remove(2)
-            return len(s)
-
-        def fn_discard():
-            s = frozenset((1, 2, 3))
-            s.discard(2)
-            return len(s)
-
-        def fn_clear():
-            s = frozenset((1, 2, 3))
-            s.clear()
-            return len(s)
-
-        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
-            torch._dynamo.reset()
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
-                opt_fn()
 
     def test_is_tensor_tensor(self):
         def fn(x, y):

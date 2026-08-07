@@ -1161,20 +1161,22 @@ class _BoxedCodeGen(CodeGen):
         a single 'args_list' parameter, extracts placeholder values from it,
         and clears the list.
         """
-        # Generate the function signature with args_list parameter
-        fn_def = f"def {self._func_name}(self, args_list){maybe_return_annotation}:"
+        # This is horribly manual but we don't get the "raw" free vars
+        # without a bigger refactor.
+        placeholder_vars = [
+            v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
+        ]
+        args_list = "args_list"
+        while args_list in placeholder_vars:
+            args_list = f"_{args_list}"
 
-        if free_vars:
-            # This is horribly manual but we don't get the "raw" free vars
-            # without a bigger refactor.
-            placeholder_vars = [
-                v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
-            ]
+        # Generate the function signature with a collision-free carrier name.
+        fn_def = f"def {self._func_name}(self, {args_list}){maybe_return_annotation}:"
 
-            if placeholder_vars:
-                for idx, var in enumerate(placeholder_vars):
-                    fn_def += f"\n    {var} = args_list[{idx}]"
-                fn_def += "\n    args_list.clear()"
+        if placeholder_vars:
+            for idx, var in enumerate(placeholder_vars):
+                fn_def += f"\n    {var} = {args_list}[{idx}]"
+            fn_def += f"\n    {args_list}.clear()"
 
         return fn_def
 

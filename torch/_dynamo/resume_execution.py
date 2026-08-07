@@ -17,10 +17,16 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import inspect
 import sys
-from typing import Any, cast, TYPE_CHECKING
+import types
+import weakref
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 
+import torch
 from torch import Tensor
+from torch.nn import Parameter
+from torch.utils.weak import _InternalTensorWeakRef, WeakIdKeyDictionary
 
 from .bytecode_transformation import (
     add_push_null,
@@ -39,7 +45,6 @@ from .utils import ExactWeakKeyDictionary
 
 
 if TYPE_CHECKING:
-    import types
     from collections.abc import Callable, Iterable
     from contextlib import AbstractContextManager
 
@@ -71,15 +76,64 @@ def _boxed_resume_arg_name(code: types.CodeType) -> str | None:
     return metadata.boxed_resume_arg_name
 
 
+def _boxed_resume_arg_names(code: types.CodeType) -> tuple[str, ...]:
+    metadata = ContinueExecutionCache.generated_code_metadata.get(code)
+    if metadata is None:
+        return ()
+    return metadata.boxed_resume_arg_names
+
+
+def _boxed_resume_arg_sources(code: types.CodeType) -> dict[str, dict[int, str]]:
+    metadata = ContinueExecutionCache.generated_code_metadata.get(code)
+    if metadata is None:
+        return {}
+    return metadata.boxed_resume_arg_sources
+
+
+def _boxed_resume_arg_external_lifetime_roots(
+    code: types.CodeType,
+) -> set[tuple[str, int]]:
+    metadata = ContinueExecutionCache.generated_code_metadata.get(code)
+    if metadata is None:
+        return set()
+    return {
+        (owner_name, index)
+        for owner_name, indexes in metadata.boxed_resume_arg_external_lifetime_roots.items()
+        for index in indexes
+    }
+
+
 def _is_boxed_resume_code(code: types.CodeType) -> bool:
     return _boxed_resume_arg_name(code) is not None
 
 
-def _boxed_resume_local_argname_indexes(code: types.CodeType) -> dict[int, str]:
+def _boxed_resume_local_source_info(
+    code: types.CodeType,
+) -> dict[int, tuple[str, bool, bool, bool]]:
     metadata = ContinueExecutionCache.generated_code_metadata.get(code)
     if metadata is None:
         return {}
-    return metadata.boxed_resume_local_argname_indexes
+    original_code = metadata.code
+    input_end = original_code.co_argcount + original_code.co_kwonlyargcount
+    input_names = set(original_code.co_varnames[:input_end])
+    varargs_name = None
+    varkw_name = None
+    if original_code.co_flags & CO_VARARGS:
+        varargs_name = original_code.co_varnames[input_end]
+        input_names.add(varargs_name)
+        input_end += 1
+    if original_code.co_flags & CO_VARKEYWORDS:
+        varkw_name = original_code.co_varnames[input_end]
+        input_names.add(varkw_name)
+    return {
+        idx: (
+            name,
+            name in input_names,
+            name == varargs_name,
+            name == varkw_name,
+        )
+        for idx, name in metadata.boxed_resume_local_argname_indexes.items()
+    }
 
 
 def _boxed_resume_arg_indexes_to_clear(code: types.CodeType) -> tuple[int, ...]:
@@ -90,8 +144,209 @@ def _boxed_resume_arg_indexes_to_clear(code: types.CodeType) -> tuple[int, ...]:
 
 
 def _maybe_clear_tensor_resume_arg(resume_args: list[Any], idx: int) -> None:
-    if idx < len(resume_args) and isinstance(resume_args[idx], Tensor):
+    if (
+        idx < len(resume_args)
+        and isinstance(resume_args[idx], Tensor)
+        and not torch._C._autograd._top_saved_tensors_default_hooks(True)
+        and not _resume_arg_has_observable_destruction(resume_args[idx])
+    ):
         resume_args[idx] = None
+
+
+class _ResumeArgSnapshot:
+    """Read-only runtime owner for a value needed during event replay."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: Any) -> None:
+        object.__setattr__(self, "_value", value)
+
+    @property
+    def value(self) -> Any:
+        return object.__getattribute__(self, "_value")
+
+    def __setattr__(self, name: str, value: Any) -> NoReturn:
+        raise AttributeError("resume snapshots are read-only")
+
+    def __delattr__(self, name: str) -> NoReturn:
+        raise AttributeError("resume snapshots are read-only")
+
+
+def _make_resume_arg_snapshot(value: Any) -> _ResumeArgSnapshot:
+    return _ResumeArgSnapshot(value)
+
+
+def _resume_arg_owner_value(owner: Any, index: int) -> tuple[bool, Any]:
+    if isinstance(owner, _ResumeArgSnapshot):
+        return (True, owner.value) if index == 0 else (False, None)
+    if isinstance(owner, list) and 0 <= index < len(owner):
+        return True, owner[index]
+    return False, None
+
+
+def _clear_resume_arg_owner_value(owner: Any, index: int) -> None:
+    if isinstance(owner, _ResumeArgSnapshot):
+        if index == 0:
+            object.__setattr__(owner, "_value", None)
+    elif isinstance(owner, list) and 0 <= index < len(owner):
+        owner[index] = None
+
+
+def _clear_resume_arg_path(resume_args: Any, path: tuple[Any, ...]) -> None:
+    """Drop a fully materialized resume-carrier slot."""
+    if len(path) == 1 and isinstance(path[0], int):
+        _clear_resume_arg_owner_value(resume_args, path[0])
+
+
+def _refresh_frame_locals_if_resume_carrier_mutated(
+    resume_args: list[Any], expected_size: int
+) -> None:
+    """Discard stale generated-frame owners after reentrant carrier mutation.
+
+    On Python 3.12 and earlier, reading ``frame.f_locals`` caches strong
+    references that later STORE_FAST/DELETE_FAST instructions do not update.
+    A finalizer can materialize that cache while clearing a Dynamo-only resume
+    carrier, an observation that has no eager source-frame counterpart. Refresh
+    the generated frame after replay so its cache reflects the completed
+    source events rather than extending their values' lifetimes.
+    """
+    if len(resume_args) != expected_size:
+        sys._getframe(1).f_locals
+
+
+def _snapshot_resume_arg_identities(resume_args: Any) -> tuple[int, ...]:
+    """Capture carrier-slot identity without adding another strong owner."""
+    if isinstance(resume_args, _ResumeArgSnapshot):
+        return (id(resume_args.value),)
+    return tuple(map(id, resume_args))
+
+
+def _clear_resume_arg_path_if_unchanged(
+    resume_args: Any,
+    path: tuple[Any, ...],
+    expected_ids: tuple[int, ...],
+    preserve_observable_lifetime: bool,
+) -> None:
+    """Clear only the carrier value observed before reentrant event replay."""
+    if not (len(path) == 1 and isinstance(path[0], int)):
+        return
+    index = path[0]
+    exists, value = _resume_arg_owner_value(resume_args, index)
+    if not exists or index >= len(expected_ids):
+        return
+    if id(value) != expected_ids[index]:
+        # User finalization reentered this generated frame and replaced the
+        # compiler-only carrier slot. Retain the injected value to frame exit;
+        # releasing it at the source value's boundary would create an eager-
+        # impossible callback before the next user-code observation.
+        return
+    if preserve_observable_lifetime:
+        _maybe_clear_resume_arg_path(resume_args, path)
+    else:
+        _clear_resume_arg_path(resume_args, path)
+
+
+_WEAKREF_CALLBACK_DESCRIPTOR = vars(weakref.ReferenceType)["__callback__"]
+
+
+def _is_internal_lifetime_weakref(ref: weakref.ReferenceType[Any]) -> bool:
+    if type(ref) is _InternalTensorWeakRef:
+        return True
+    if type(ref) in weakref.ProxyTypes:
+        return False
+    callback = _WEAKREF_CALLBACK_DESCRIPTOR.__get__(ref, type(ref))
+    if not (
+        type(callback) is types.FunctionType
+        and callback.__module__ == "torch.utils.weak"
+        and callback.__qualname__ == "WeakIdKeyDictionary.__init__.<locals>.remove"
+    ):
+        return False
+    defaults = callback.__defaults__
+    if defaults is None or len(defaults) != 1:
+        return False
+    owner_ref = defaults[0]
+    if type(owner_ref) is not weakref.ReferenceType:
+        return False
+    owner = owner_ref()
+    return (
+        owner is not None
+        and type(owner) is WeakIdKeyDictionary
+        and owner._is_internal_lifetime_observer
+    )
+
+
+def _resume_arg_has_observable_destruction(
+    value: Any,
+) -> bool:
+    """Whether ``value`` currently has an observable destruction hook.
+
+    External strong-owner provenance is tracked while tracing and propagated
+    through resume metadata.  Runtime cleanup only needs to recheck mutable
+    object properties (weakrefs, ``__del__``, and nested contents); walking all
+    GC referrers here would put a heap-wide scan in every compiled invocation.
+    """
+    safe_leaf_types = (
+        type(None),
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+        bytearray,
+        range,
+        object,
+    )
+    worklist = [value]
+    seen: set[int] = set()
+    while worklist:
+        current = worklist.pop()
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        if type(current) in (list, tuple):
+            worklist.extend(current)
+        elif type(current) is dict:
+            worklist.extend(current.keys())
+            worklist.extend(current.values())
+        elif type(current) in (set, frozenset):
+            worklist.extend(current)
+        elif type(current) in (Tensor, Parameter):
+            if inspect.getattr_static(type(current), "__del__", None) is not None:
+                return True
+            user_refs = [
+                ref
+                for ref in weakref.getweakrefs(current)
+                if not _is_internal_lifetime_weakref(ref)
+            ]
+            if user_refs:
+                return True
+            worklist.append(object.__getattribute__(current, "__dict__"))
+        elif type(current) in safe_leaf_types:
+            continue
+        else:
+            return True
+    return False
+
+
+def _maybe_clear_resume_arg_path(resume_args: Any, path: tuple[Any, ...]) -> None:
+    """Clear a carrier slot unless frame-lifetime ownership is observable."""
+    if not (len(path) == 1 and isinstance(path[0], int)):
+        return
+    index = path[0]
+    exists, value = _resume_arg_owner_value(resume_args, index)
+    if not exists:
+        return
+    # Non-inline saved-tensor hooks intentionally do not guard Dynamo's cache:
+    # a graph first compiled without hooks can run later with hooks installed.
+    # A pack hook can add a weakref to a graph input after this pre-graph
+    # cleanup point, so retain the eager frame owner for the duration of the
+    # resume whenever hooks are currently active.
+    if torch._C._autograd._top_saved_tensors_default_hooks(True):
+        return
+    if not _resume_arg_has_observable_destruction(value):
+        _clear_resume_arg_owner_value(resume_args, index)
 
 
 def create_clear_resume_arg(resume_args_varname: str, index: int) -> list[Instruction]:
@@ -303,6 +558,18 @@ class ResumeFunctionMetadata:
     code: types.CodeType
     instructions: list[Instruction] = dataclasses.field(default_factory=list)
     boxed_resume_arg_name: str | None = None
+    # Includes the active boxed argument and older boxed carriers forwarded as
+    # locals through stacked continuation functions.
+    boxed_resume_arg_names: tuple[str, ...] = ()
+    boxed_resume_arg_sources: dict[str, dict[int, str]] = dataclasses.field(
+        default_factory=dict
+    )
+    # Carrier roots that may be observed outside the generated frame. Stack
+    # values cross an opaque graph-break boundary, while source inputs remain
+    # user-owned; both need CPython frame-lifetime semantics in later resumes.
+    boxed_resume_arg_external_lifetime_roots: dict[str, frozenset[int]] = (
+        dataclasses.field(default_factory=dict)
+    )
     boxed_resume_local_argname_indexes: dict[int, str] = dataclasses.field(
         default_factory=dict
     )
@@ -386,7 +653,16 @@ class ContinueExecutionCache:
         # mainly used to ensure distinct code objects per stack trace,
         # which prevents excessive recompilation of inner frames
         nested_code_objs: tuple[types.CodeType],
+        inherited_boxed_resume_arg_sources: tuple[
+            tuple[str, tuple[tuple[int, str], ...]], ...
+        ],
+        inherited_boxed_resume_arg_external_lifetime_roots: tuple[
+            tuple[str, tuple[int, ...]], ...
+        ],
+        external_lifetime_argnames: tuple[str, ...],
         tensor_resume_arg_indexes: tuple[int, ...],
+        entry_clear_resume_arg_indexes: tuple[int, ...],
+        force_boxed_resume: bool,
         # Are we currently graph breaking on an instruction that doesn't push
         # its result to the stack? If so, and we are not the leaf resume, then we need to pop
         # the result of calling the next resume function.
@@ -418,7 +694,12 @@ class ContinueExecutionCache:
                 argnames_ctx_vars,
                 null_idxes,
                 nested_code_objs,
+                inherited_boxed_resume_arg_sources,
+                inherited_boxed_resume_arg_external_lifetime_roots,
+                external_lifetime_argnames,
                 tensor_resume_arg_indexes,
+                entry_clear_resume_arg_indexes,
+                force_boxed_resume,
                 pop_nested_resume_result,
             )
 
@@ -442,8 +723,27 @@ class ContinueExecutionCache:
                 and inst.offset is not None
                 and inst.offset >= resume_offset
             }
+            future_replaced_fast_names = {
+                inst.argval
+                for inst in instructions
+                if inst.opname in ("DELETE_FAST", "STORE_FAST")
+                and inst.offset is not None
+                and inst.offset >= resume_offset
+            }
+            replaced_frame_value_names = future_replaced_fast_names & frame_value_names
+            # Leaf resumes need a boxed carrier when they restore operand-stack
+            # values. Lifetime-boundary continuations also need one so the old
+            # continuation can transfer ownership before the next one runs.
+            # Keep other straight-line, stackless resumes positional unless a
+            # source DELETE_FAST requires early release; boxing those frames
+            # adds provenance and guards on incidental carrier aliases.
             deleted_frame_value_names = future_deleted_fast_names & frame_value_names
-            boxed_resume = not nested_code_objs or bool(deleted_frame_value_names)
+            boxed_resume = (
+                force_boxed_resume
+                or bool(entry_clear_resume_arg_indexes)
+                or bool(deleted_frame_value_names)
+                or (not nested_code_objs and bool(nstack))
+            )
             resume_args_varname = RESUME_ARGS_VARNAME
             if boxed_resume:
                 unavailable_names = (
@@ -463,6 +763,36 @@ class ContinueExecutionCache:
                 if boxed_resume
                 else {}
             )
+            meta.boxed_resume_arg_names = tuple(
+                dict.fromkeys(
+                    (
+                        *(name for name, _ in inherited_boxed_resume_arg_sources),
+                        *([resume_args_varname] if boxed_resume else []),
+                    )
+                )
+            )
+            meta.boxed_resume_arg_sources = {
+                name: dict(sources)
+                for name, sources in inherited_boxed_resume_arg_sources
+            }
+            meta.boxed_resume_arg_external_lifetime_roots = {
+                name: frozenset(indexes)
+                for name, indexes in inherited_boxed_resume_arg_external_lifetime_roots
+            }
+            if boxed_resume:
+                meta.boxed_resume_arg_sources[resume_args_varname] = (
+                    meta.boxed_resume_local_argname_indexes
+                )
+                external_lifetime_indexes = set(range(2, 2 + nstack))
+                external_lifetime_indexes.update(
+                    index
+                    for index, name in meta.boxed_resume_local_argname_indexes.items()
+                    if name in external_lifetime_argnames
+                )
+                if external_lifetime_indexes:
+                    meta.boxed_resume_arg_external_lifetime_roots[
+                        resume_args_varname
+                    ] = frozenset(external_lifetime_indexes)
             args = [resume_args_varname] if boxed_resume else resume_arg_names
             nested_resume_args_varname = None
             if nested_code_objs and not _is_boxed_resume_code(nested_code_objs[-1]):
@@ -527,10 +857,15 @@ class ContinueExecutionCache:
             target = next(i for i in instructions if i.offset == resume_offset)
 
             resume_arg_indexes_to_clear = set(tensor_resume_arg_indexes)
+            resume_arg_indexes_to_clear.update(entry_clear_resume_arg_indexes)
+            # The generated prologue has already copied frame values into real
+            # fast locals.  A boxed slot for a subsequently replaced local is
+            # therefore redundant ownership; retaining it would delay the
+            # old value's finalizer if this resume later falls back to eager.
             resume_arg_indexes_to_clear.update(
                 idx
                 for idx, name in enumerate(resume_arg_names)
-                if name in deleted_frame_value_names
+                if name in replaced_frame_value_names
             )
             if (
                 target.opname == "STORE_FAST"
@@ -654,13 +989,6 @@ class ContinueExecutionCache:
                             create_instruction("STORE_FAST", argval=v),
                         ]
                     )
-
-            if (
-                not nested_code_objs
-                and target.opname == "STORE_FAST"
-                and target.argval in argnames
-            ):
-                prefix.append(create_instruction("DELETE_FAST", argval=target.argval))
 
             # Call nested resume function
             if nested_code_objs:

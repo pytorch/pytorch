@@ -1025,6 +1025,13 @@ def prepare_aot_config(
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
+        precompile_boxed_call=(
+            isinstance(mod, torch._dynamo.utils.GmWrapper)
+            or (
+                isinstance(mod, torch.fx.GraphModule)
+                and mod.meta.get("dynamo_use_boxed_call", False)
+            )
+        ),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
@@ -1257,11 +1264,9 @@ def aot_module_simplified(
             )
     if compiled_fn is None:
         raise AssertionError("compiled_fn must not be None")
-    # See Note [Dynamo boxed graph call contract]
-    dynamo_boxed_call = isinstance(mod, torch.fx.GraphModule) and mod.meta.get(
-        "dynamo_use_boxed_call", False
-    )
-    if isinstance(mod, torch._dynamo.utils.GmWrapper) or dynamo_boxed_call:
+    # See Note [Dynamo boxed graph call contract].  Use the persisted AOTConfig
+    # bit here too, so bundled deserialization reconstructs this exact ABI.
+    if aot_config.precompile_boxed_call:
         # flatten_graph_inputs and selected Dynamo resume graphs box their inputs
         # so references can be released before the end of this scope. For overhead
         # reasons, this is not the default wrapper, see comment:

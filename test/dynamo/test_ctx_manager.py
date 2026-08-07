@@ -644,25 +644,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_3_ = args_list[0]
-        s41 = args_list[1]
-        L_torch_dynamo_resume_args_4_ = args_list[2]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_3_: "bf16[s41, s41]", s41: "Sym(s41)", L_torch_dynamo_resume_args_4_: "f32[s41, s41]"):
         l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
-        L_torch_dynamo_resume_args_3_ = None
         l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
-        L_torch_dynamo_resume_args_4_ = None
 
         matmul: "bf16[s41, s41]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
-
-        autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
-
-        clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
-
-        set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-        set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-        set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (matmul,)
 """,
             )
@@ -671,24 +657,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_3_ = args_list[0]
-        L_torch_dynamo_resume_args_4_ = args_list[1]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_3_: "bf16[3, 3]", L_torch_dynamo_resume_args_4_: "f32[3, 3]"):
         l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
-        L_torch_dynamo_resume_args_3_ = None
         l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
-        L_torch_dynamo_resume_args_4_ = None
 
         matmul: "bf16[3, 3]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
-
-        autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
-
-        clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
-
-        set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-        set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-        set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (matmul,)
 """,
             )
@@ -1323,11 +1296,8 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_4_ = args_list[0]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_4_: "f32[]"):
         l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
-        L_torch_dynamo_resume_args_4_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
@@ -1805,8 +1775,9 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    def test_store_attr_graph_break_key_error(self):
-        # STORE_ATTR on dummy should result in graph break
+    def test_store_attr_on_function(self):
+        # setattr on a function object is traced as a generic attribute
+        # mutation and replayed at runtime -- no graph break.
         def dummy():
             pass
 
@@ -1817,9 +1788,12 @@ class GraphModule(torch.nn.Module):
             return x + 4
 
         inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        self.assertGreater(len(counters["graph_break"]), 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Check the compiled run applied the mutation before the eager run
+        # below overwrites dummy.attr1.
+        compiled_res = opt_fn(inp)
+        self.assertEqual(dummy.attr1, inp + 2)
+        self.assertEqual(fn(inp), compiled_res)
 
     @parametrize("gb", (True, False))
     def test_functorch_low_level(self, gb):
@@ -3891,17 +3865,10 @@ class GraphModule(torch.nn.Module):
             normalize_gm(eager.graphs[1].print_readable(False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, args_list):
-        L_torch_dynamo_resume_args_2_ = args_list[0]
-        L_torch_dynamo_resume_args_3_ = args_list[1]
-        L_torch_dynamo_resume_args_4_ = args_list[2]
-        args_list.clear()
+    def forward(self, L_torch_dynamo_resume_args_2_: "f32[2]", L_torch_dynamo_resume_args_3_: "f32[2]", L_torch_dynamo_resume_args_4_: "f32[2]"):
         l_torch_dynamo_resume_args_2_ = L_torch_dynamo_resume_args_2_
-        L_torch_dynamo_resume_args_2_ = None
         l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
-        L_torch_dynamo_resume_args_3_ = None
         l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
-        L_torch_dynamo_resume_args_4_ = None
 
         add: "f32[2]" = l_torch_dynamo_resume_args_2_ + l_torch_dynamo_resume_args_3_;  l_torch_dynamo_resume_args_2_ = l_torch_dynamo_resume_args_3_ = None
         cos: "f32[2]" = l_torch_dynamo_resume_args_4_.cos();  l_torch_dynamo_resume_args_4_ = None

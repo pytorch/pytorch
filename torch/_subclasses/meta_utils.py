@@ -261,9 +261,9 @@ class MetaTensorDescriber:
         self.next_tensor_id: MetaTensorId = MetaTensorId(0)
         self.next_storage_id: MetaStorageId = MetaStorageId(0)
         # Tensor -> int
-        self.lookup_tensor = WeakIdKeyDictionary()
+        self.lookup_tensor = WeakIdKeyDictionary(_is_internal_lifetime_observer=True)
         # Storage -> int
-        self.lookup_storage = WeakIdKeyDictionary()
+        self.lookup_storage = WeakIdKeyDictionary(_is_internal_lifetime_observer=True)
         self.copy_data = copy_data
         self.traced_tensors: set[int] = set()
         self.traced_storages: set[int] = set()

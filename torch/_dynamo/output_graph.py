@@ -28,6 +28,7 @@ import inspect
 import itertools
 import logging
 import operator
+import pickle
 import re
 import sys
 import time
@@ -147,6 +148,7 @@ from .source import (
     ParamBufferSource,
     ShapeEnvSource,
     SyntheticLocalSource,
+    TempLocalSource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -167,7 +169,6 @@ from .utils import (
     get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
-    is_numpy_ndarray,
     istype,
     lazy_format_graph_code,
     LazyString,
@@ -384,6 +385,40 @@ class FakeRootModule(torch.nn.Module):
 # results instead of silently falling back to positional arguments.
 
 
+_ORIGINAL_MODULE_CALL = torch.nn.Module.__call__
+_ORIGINAL_MODULE_WRAPPED_CALL_IMPL = torch.nn.Module._wrapped_call_impl
+_ORIGINAL_MODULE_CALL_IMPL = torch.nn.Module._call_impl
+_ORIGINAL_FX_WRAPPED_CALL = torch.fx.graph_module._WrappedCall.__call__
+_GRAPH_MODULE_CALL_WRAPPED_CODE = next(
+    code
+    for code in torch.fx.GraphModule.recompile.__code__.co_consts
+    if isinstance(code, types.CodeType) and code.co_name == "call_wrapped"
+)
+
+
+def _standard_module_call_methods() -> bool:
+    def is_standard_method(fn: Any, qualname: str) -> bool:
+        return bool(
+            isinstance(fn, types.FunctionType)
+            and fn.__module__ == torch.nn.modules.module.__name__
+            and fn.__qualname__ == qualname
+            and not hasattr(fn, "__wrapped__")
+        )
+
+    return bool(
+        torch.nn.Module.__call__ is torch.nn.Module._wrapped_call_impl
+        and is_standard_method(
+            torch.nn.Module._wrapped_call_impl, "Module._wrapped_call_impl"
+        )
+        and is_standard_method(torch.nn.Module._call_impl, "Module._call_impl")
+        and is_standard_method(torch.nn.Module._slow_forward, "Module._slow_forward")
+    )
+
+
+class _BoxedCall:
+    _boxed_call = True
+
+
 def _uses_boxed_call(fn: Callable[..., Any]) -> bool:
     is_graph_module = isinstance(fn, fx.GraphModule)
     bound_self = fn if is_graph_module else getattr(fn, "__self__", None)
@@ -400,6 +435,8 @@ def _uses_boxed_call(fn: Callable[..., Any]) -> bool:
         call_contract_fn, "_torchdynamo_wrapper_id", None
     ) == id(call_contract_fn):
         call_contract_fn = cast(Any, call_contract_fn)._torchdynamo_orig_callable
+    if isinstance(call_contract_fn, _BoxedCall):
+        return True
     call_contract_code = getattr(call_contract_fn, "__code__", None)
     return bool(
         getattr(call_contract_fn, "_boxed_call", False)
@@ -407,6 +444,339 @@ def _uses_boxed_call(fn: Callable[..., Any]) -> bool:
         and call_contract_code.co_argcount == 1
         and not (call_contract_code.co_flags & inspect.CO_VARARGS)
     )
+
+
+def _graph_module_codegen_requires_adapter(gm: fx.GraphModule) -> bool:
+    codegen = gm.graph._codegen
+    return bool(
+        type(codegen) is not fx.graph.CodeGen
+        or codegen._body_transformer is not None
+        or codegen._func_name != "forward"
+    )
+
+
+def _graph_module_forward_requires_adapter(gm: fx.GraphModule) -> bool:
+    if _graph_module_codegen_requires_adapter(gm):
+        return True
+    try:
+        python_code = gm.graph.python_code(root_module="self")
+    except Exception:
+        return True
+    forward = gm.forward
+    is_lazy_forward = (
+        isinstance(gm, _LazyGraphModule)
+        and getattr(forward, "__name__", None) == "_lazy_forward"
+    )
+    if not is_lazy_forward:
+        if (
+            getattr(forward, "__self__", None) is not gm
+            or getattr(forward, "__func__", None) is not type(gm).forward
+        ):
+            return True
+        forward_impl = cast(Any, forward).__func__
+        try:
+            if forward_impl.__code__.co_flags & (
+                inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
+            ):
+                return True
+            co_fields = gm.graph._co_fields if hasattr(gm.graph, "_co_fields") else {}
+            regenerated_forward = torch.fx.graph_module._forward_from_src(
+                gm.code, dict(forward_impl.__globals__), co_fields
+            )
+            if forward_impl.__code__.replace(
+                co_filename=""
+            ) != regenerated_forward.__code__.replace(co_filename=""):
+                return True
+            source_globals = forward_impl.__globals__
+            if any(
+                name not in source_globals or source_globals[name] is not value
+                for name, value in python_code.globals.items()
+            ):
+                return True
+        except (AttributeError, TypeError):
+            return True
+    return gm.code != python_code.src
+
+
+def _graph_module_call_requires_adapter(gm: fx.GraphModule) -> bool:
+    module_hooks = torch.nn.modules.module
+    call_impl = gm._call_impl
+    slow_forward = gm._slow_forward
+    module_call = type(gm).__call__
+    is_standard_call = (
+        module_call is _ORIGINAL_MODULE_CALL
+        or getattr(module_call, "__code__", None) is _GRAPH_MODULE_CALL_WRAPPED_CODE
+    )
+    known_bases = {fx.GraphModule, _LazyGraphModule, torch.nn.Module, object}
+    has_custom_base = any(cls not in known_bases for cls in type(gm).__mro__[1:])
+    wrapped_call = getattr(gm, "_wrapped_call", None)
+    is_standard_wrapped_call = bool(
+        "_wrapped_call" not in gm.__dict__
+        and type(wrapped_call) is torch.fx.graph_module._WrappedCall
+        and wrapped_call.cls is type(gm)
+        and wrapped_call.cls_call is None
+        and type(wrapped_call).__call__ is _ORIGINAL_FX_WRAPPED_CALL
+    )
+    return bool(
+        _graph_module_codegen_requires_adapter(gm)
+        or not is_standard_call
+        or has_custom_base
+        or not is_standard_wrapped_call
+        or not _standard_module_call_methods()
+        or torch.nn.Module.__call__ is not _ORIGINAL_MODULE_CALL
+        or torch.nn.Module._wrapped_call_impl is not _ORIGINAL_MODULE_WRAPPED_CALL_IMPL
+        or getattr(gm, "_compiled_call_impl", None) is not None
+        or getattr(call_impl, "__self__", None) is not gm
+        or getattr(call_impl, "__func__", call_impl) is not _ORIGINAL_MODULE_CALL_IMPL
+        or getattr(slow_forward, "__self__", None) is not gm
+        or getattr(slow_forward, "__func__", slow_forward)
+        is not torch.nn.Module._slow_forward
+        or gm._backward_hooks
+        or gm._backward_pre_hooks
+        or gm._forward_hooks
+        or gm._forward_pre_hooks
+        or module_hooks._global_backward_pre_hooks
+        or module_hooks._global_backward_hooks
+        or module_hooks._global_forward_hooks
+        or module_hooks._global_forward_pre_hooks
+    )
+
+
+def _lazy_graph_module_pickle_safe(gm: fx.GraphModule) -> bool:
+    if not isinstance(gm, _LazyGraphModule):
+        return False
+    if not gm._needs_recompile():
+        return not _graph_module_forward_requires_adapter(
+            gm
+        ) and not _graph_module_call_requires_adapter(gm)
+
+    module_hooks = torch.nn.modules.module
+    call_impl = gm._call_impl
+    slow_forward = gm._slow_forward
+    known_bases = {fx.GraphModule, _LazyGraphModule, torch.nn.Module, object}
+    return bool(
+        all(cls in known_bases for cls in type(gm).__mro__[1:])
+        and type(gm).__call__ is _ORIGINAL_MODULE_CALL
+        and getattr(gm.forward, "__func__", None) is _LazyGraphModule._lazy_forward
+        and not _graph_module_codegen_requires_adapter(gm)
+        and _standard_module_call_methods()
+        and torch.nn.Module.__call__ is _ORIGINAL_MODULE_CALL
+        and torch.nn.Module._wrapped_call_impl is _ORIGINAL_MODULE_WRAPPED_CALL_IMPL
+        and getattr(gm, "_compiled_call_impl", None) is None
+        and getattr(call_impl, "__self__", None) is gm
+        and getattr(call_impl, "__func__", call_impl) is _ORIGINAL_MODULE_CALL_IMPL
+        and getattr(slow_forward, "__self__", None) is gm
+        and getattr(slow_forward, "__func__", slow_forward)
+        is torch.nn.Module._slow_forward
+        and not gm._backward_hooks
+        and not gm._backward_pre_hooks
+        and not gm._forward_hooks
+        and not gm._forward_pre_hooks
+        and not module_hooks._global_backward_pre_hooks
+        and not module_hooks._global_backward_hooks
+        and not module_hooks._global_forward_hooks
+        and not module_hooks._global_forward_pre_hooks
+    )
+
+
+def _graph_module_tree_pickle_safe(gm: fx.GraphModule) -> bool:
+    for module in gm.modules():
+        if not isinstance(module, fx.GraphModule):
+            continue
+        if isinstance(module, _LazyGraphModule):
+            if not _lazy_graph_module_pickle_safe(module):
+                return False
+        elif _graph_module_forward_requires_adapter(
+            module
+        ) or _graph_module_call_requires_adapter(module):
+            return False
+    return True
+
+
+class _BoxedCallAdapter(_BoxedCall):
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        self.fn = fn
+        wrapped = fn.forward if isinstance(fn, fx.GraphModule) else fn
+        functools.update_wrapper(self, wrapped, updated=())
+
+    def __call__(self, args: list[Any]) -> Any:
+        runtime_args = tuple(args)
+        args.clear()
+        return self.fn(*runtime_args)
+
+    def __reduce__(self) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        bound_self = getattr(self.fn, "__self__", None)
+        if isinstance(self.fn, _LazyGraphModule) and _graph_module_tree_pickle_safe(
+            self.fn
+        ):
+            return _boxed_graph_module_call, (copy.deepcopy(self.fn),)
+        if (
+            isinstance(bound_self, _LazyGraphModule)
+            and getattr(self.fn, "__name__", None) in ("forward", "_lazy_forward")
+            and _graph_module_tree_pickle_safe(bound_self)
+        ):
+            # A lazy forward invokes the module after it recompiles, so rebuild
+            # the boxed module call rather than a plain forward. Lazy modules
+            # deserialize as ordinary GraphModules, so this also keeps later
+            # deepcopy and serialization operations supported.
+            return _boxed_graph_module_call, (copy.deepcopy(bound_self),)
+        raise pickle.PicklingError(
+            "Cannot pickle a boxed adapter for a customized GraphModule"
+        )
+
+
+def _boxed_call_adapter(fn: Callable[..., Any]) -> _BoxedCallAdapter:
+    return _BoxedCallAdapter(fn)
+
+
+def _boxed_graph_module_forward(
+    gm: fx.GraphModule, source_forward: Callable[..., Any]
+) -> tuple[
+    Callable[[list[Any]], Any],
+    dict[str, tuple[bool, Any]],
+    Callable[..., Any],
+    types.CodeType,
+]:
+    boxed_graph = copy.deepcopy(gm.graph)
+    boxed_graph.set_codegen(torch.fx.graph._BoxedCodeGen())
+    python_code = boxed_graph.python_code(root_module="self")
+    source_impl = cast(Any, source_forward).__func__
+    current_globals = source_impl.__globals__
+    globals_snapshot = {}
+    for name in tuple(python_code.globals):
+        if name in current_globals:
+            value = current_globals[name]
+            python_code.globals[name] = value
+            globals_snapshot[name] = (True, value)
+        else:
+            del python_code.globals[name]
+            globals_snapshot[name] = (False, None)
+    co_fields = gm.graph._co_fields if hasattr(gm.graph, "_co_fields") else {}
+    forward = torch.fx.graph_module._forward_from_src(
+        python_code.src, python_code.globals, co_fields
+    )
+    return (
+        types.MethodType(forward, gm),
+        globals_snapshot,
+        source_impl,
+        source_impl.__code__,
+    )
+
+
+def _boxed_forward_state_changed(
+    source_forward: Callable[..., Any],
+    source_impl: Callable[..., Any],
+    source_code: types.CodeType,
+    globals_snapshot: dict[str, tuple[bool, Any]],
+) -> bool:
+    if getattr(source_forward, "__func__", None) is not source_impl:
+        return True
+    if cast(Any, source_impl).__code__ is not source_code:
+        return True
+    source_globals = cast(Any, source_impl).__globals__
+    return any(
+        (name in source_globals) != present
+        or (present and source_globals[name] is not value)
+        for name, (present, value) in globals_snapshot.items()
+    )
+
+
+class _BoxedGraphModuleCall(_BoxedCall):
+    def __init__(self, gm: fx.GraphModule) -> None:
+        self.gm = gm
+        source_forward = gm.forward
+        (
+            self.boxed_forward,
+            self.globals_snapshot,
+            self.source_impl,
+            self.source_code,
+        ) = _boxed_graph_module_forward(gm, source_forward)
+        functools.update_wrapper(self, source_forward, updated=())
+
+    def _needs_original(self) -> bool:
+        return _boxed_forward_state_changed(
+            self.gm.forward,
+            self.source_impl,
+            self.source_code,
+            self.globals_snapshot,
+        ) or _graph_module_call_requires_adapter(self.gm)
+
+    def _original(self, args: list[Any]) -> Any:
+        runtime_args = tuple(args)
+        args.clear()
+        return self.gm(*runtime_args)
+
+    def __call__(self, args: list[Any]) -> Any:
+        # Keep the hook-state decision and dispatch in one traced line. Calling
+        # a detached Module here would introduce a second module-call boundary
+        # where a hook could become visible after the decision but before the
+        # actual forward starts.
+        original, boxed = self._original, self.boxed_forward
+        return (original if self._needs_original() else boxed)(args)
+
+    def __reduce__(
+        self,
+    ) -> tuple[type[Any], tuple[fx.GraphModule]]:
+        if not _graph_module_tree_pickle_safe(self.gm):
+            raise pickle.PicklingError(
+                "Cannot pickle a boxed GraphModule with customized module semantics"
+            )
+        return type(self), (copy.deepcopy(self.gm),)
+
+
+class _BoxedGraphModuleForward(_BoxedCall):
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        gm = getattr(fn, "__self__", None)
+        if not isinstance(gm, fx.GraphModule):
+            raise AssertionError("boxed forward must be bound to a GraphModule")
+        self.fn = fn
+        (
+            self.boxed_forward,
+            self.globals_snapshot,
+            self.source_impl,
+            self.source_code,
+        ) = _boxed_graph_module_forward(gm, fn)
+        functools.update_wrapper(self, fn, updated=())
+
+    def __call__(self, args: list[Any]) -> Any:
+        if _boxed_forward_state_changed(
+            self.fn,
+            self.source_impl,
+            self.source_code,
+            self.globals_snapshot,
+        ):
+            runtime_args = tuple(args)
+            args.clear()
+            return self.fn(*runtime_args)
+        return self.boxed_forward(args)
+
+    def __reduce__(
+        self,
+    ) -> tuple[Callable[..., Any], tuple[fx.GraphModule]]:
+        gm = getattr(self.fn, "__self__", None)
+        if (
+            not isinstance(gm, fx.GraphModule)
+            or not _graph_module_tree_pickle_safe(gm)
+            or _boxed_forward_state_changed(
+                gm.forward,
+                self.source_impl,
+                self.source_code,
+                self.globals_snapshot,
+            )
+        ):
+            raise pickle.PicklingError(
+                "Cannot pickle a boxed GraphModule after its forward semantics changed"
+            )
+        gm_snapshot = copy.deepcopy(gm)
+        return _boxed_graph_module_bound_forward, (gm_snapshot,)
+
+
+def _boxed_graph_module_call(gm: fx.GraphModule) -> _BoxedGraphModuleCall:
+    return _BoxedGraphModuleCall(gm)
+
+
+def _boxed_graph_module_bound_forward(gm: fx.GraphModule) -> _BoxedGraphModuleForward:
+    return _BoxedGraphModuleForward(gm.forward)
 
 
 def _as_boxed_call(fn: Callable[..., Any]) -> Callable[..., Any] | None:
@@ -419,19 +789,21 @@ def _as_boxed_call(fn: Callable[..., Any]) -> Callable[..., Any] | None:
         isinstance(bound_self, _LazyGraphModule)
         and getattr(fn, "__name__", None) == "_lazy_forward"
     )
+    if isinstance(bound_self, _LazyGraphModule) and bound_self._needs_recompile():
+        return _boxed_call_adapter(fn)
     if isinstance(bound_self, fx.GraphModule) and (
         is_graph_module or getattr(fn, "__name__", None) == "forward" or is_lazy_forward
     ):
-        bound_self.graph.set_codegen(torch.fx.graph._BoxedCodeGen())
-        if isinstance(bound_self, _LazyGraphModule):
-            bound_self.recompile()
-            _LazyGraphModule.force_recompile(bound_self)
-        else:
-            bound_self.recompile()
-        boxed_fn = fn if is_graph_module else bound_self.forward
-        if not _uses_boxed_call(boxed_fn):
-            raise AssertionError("boxed GraphModule must use the boxed call convention")
-        return boxed_fn
+        if _graph_module_forward_requires_adapter(bound_self) or (
+            is_graph_module and _graph_module_call_requires_adapter(bound_self)
+        ):
+            # Replacing a custom GraphModule call/codegen would change backend
+            # semantics. Preserve it behind a boxed adapter; this intentionally
+            # gives up early input release for that incompatible callable.
+            return _boxed_call_adapter(fn)
+        if is_graph_module:
+            return _boxed_graph_module_call(bound_self)
+        return _BoxedGraphModuleForward(fn)
     return None
 
 
@@ -2002,6 +2374,12 @@ class OutputGraph(OutputGraphCommon):
 
         meta.num_stack = len(stack_values)
 
+        # Cells are codegen'd by codegen_cells from the symbolic_cellvars
+        # registry. A symbolic_locals entry whose name is also a cell/free var
+        # is either the cell itself (shared slot) or a colliding fast local
+        # (e.g. an inlined comprehension iteration variable shadowing a
+        # nonlocal); both are skipped here, consistent with resume argname
+        # generation in create_call_resume_at.
         cell_and_freevars = set(tx.cellvars() + tx.freevars())
 
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
@@ -2028,7 +2406,9 @@ class OutputGraph(OutputGraphCommon):
                 and tx is self.root_tx
             ):
                 continue
-            # Do not load cell/free vars
+            # Do not load cell/free vars (real cells are handled by
+            # codegen_cells; a colliding fast local sharing a cell's name is
+            # skipped to match resume argname generation).
             if k in cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
@@ -2062,6 +2442,8 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         reason: GraphCompileReason,
         stack_pops: int = 0,
+        *,
+        allow_nested_resume_lifetime: bool = False,
     ) -> list[StackLocalsMetadata]:
         """
         Compiles the current subgraph, with inputs w.r.t. self.root_tx, and codegens:
@@ -2089,7 +2471,7 @@ class OutputGraph(OutputGraphCommon):
 
             _finalize_spec_wiring(self.shape_env)
 
-        if not config.nested_graph_breaks:
+        if not config.nested_graph_breaks and not allow_nested_resume_lifetime:
             # expect to only compile 1 frame
             if self.root_tx is not tx:
                 raise AssertionError(
@@ -2225,36 +2607,28 @@ class OutputGraph(OutputGraphCommon):
         stored_graph_output_var = False
         graph_output_var = None
 
-        def can_use_tensor_stack_fast_path(v: VariableTracker) -> bool:
-            if isinstance(v, variables.LazyVariableTracker):
-                if v.is_realized():
-                    v = v.unwrap()
-                elif is_numpy_ndarray(v.original_value()):
-                    return False
-                elif v.is_tensor():
-                    v = v.unwrap()
-                else:
-                    return False
-
-            if not v.is_tensor():
-                return False
-
-            return not any(
-                type.__instancecheck__(cls, v)
-                for cls in (
-                    UnspecializedPythonVariable,
-                    NumpyNdarrayVariable,
-                    TensorWithTFOverrideVariable,
-                )
-            ) and not (
-                type.__instancecheck__(SymNodeVariable, v) and v.python_type() is float
-            )
-
         # call compiled fx graph and codegen all values - stack and locals
+        resume_arg_locals_to_materialize: dict[str, VariableTracker | Source] = {}
+        resume_arg_source_overrides: dict[Source, Source] = {}
+        resume_arg_temp_names: set[str] = set()
+        resume_arg_event_temp_names: set[str] = set()
         can_use_fast_path = (
             self.root_tx is tx  # single frame
+            and not self.root_tx.resume_arg_paths_to_clear
             and stack_values_flat
-            and all(can_use_tensor_stack_fast_path(v) for v in stack_values_flat)
+            and all(
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
+                and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
+                for v in stack_values_flat
+            )
+            and all(x.is_tensor() for x in stack_values_flat)
             and len(set(stack_values_flat)) == len(stack_values_flat)
             and self.side_effects.is_empty()
             and not tx.debug_locals
@@ -2301,11 +2675,224 @@ class OutputGraph(OutputGraphCommon):
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass1, False)
+            pass1_temp_names = {
+                name for name in pass1.tempvars.values() if name is not None
+            }
+
+            def uses_pass1_temp(source: Source) -> bool:
+                while isinstance(source, ChainedSource):
+                    source = source.base
+                return (
+                    isinstance(source, TempLocalSource)
+                    and source.local_name in pass1_temp_names
+                )
+
+            if count_calls(self.graph) != 0 or len(pass1.graph_outputs) != 0:
+                pass1_direct_source_uses = set(pass1.direct_source_uses)
+                (
+                    resume_arg_locals_to_materialize,
+                    resume_arg_source_overrides,
+                    resume_arg_temp_names,
+                ) = self.root_tx._materialize_resume_arg_sources_for_cleanup(
+                    itertools.chain(
+                        pass1_direct_source_uses,
+                        (
+                            value
+                            for _, value in self.root_tx.entry_fast_local_events
+                            if value is not None
+                        ),
+                    )
+                )
+
+                def snapshot_temp_name(source: Source | None) -> str | None:
+                    if (
+                        isinstance(source, AttrSource)
+                        and source.member == "value"
+                        and isinstance(source.base, TempLocalSource)
+                    ):
+                        return source.base.local_name
+                    return None
+
+                resume_arg_event_temp_names = {
+                    name
+                    for old_source, new_source in resume_arg_source_overrides.items()
+                    if old_source not in pass1_direct_source_uses
+                    and (name := snapshot_temp_name(new_source)) is not None
+                }
+                # Event-only snapshots model the temporary evaluation-stack
+                # owner of a STORE_FAST RHS. Delete them immediately after
+                # their last replay read instead of extending the value's
+                # lifetime through the whole graph suffix.
+                resume_arg_temp_names.difference_update(resume_arg_event_temp_names)
+                for old_source, new_source in resume_arg_source_overrides.items():
+                    prior_source = overridden_sources.setdefault(old_source, new_source)
+                    if prior_source != new_source:
+                        raise AssertionError(
+                            f"conflicting source overrides for {old_source}"
+                        )
 
             # Close all generators opened while tracing. Needs to be done after
             # pass1, as PyCodegen might try to reconstruct the generator, which
             # sets LocalGeneratorObjectVariable.remaining_items
             self.close_local_generators(tx)
+
+            pre_graph_fast_local_initial_values: dict[str, VariableTracker] = {}
+            post_graph_fast_local_initial_values: dict[str, VariableTracker] = {}
+            pre_graph_fast_local_events: list[
+                tuple[str | None, VariableTracker | None]
+            ] = []
+            post_graph_fast_local_events: list[
+                tuple[str | None, VariableTracker | None]
+            ] = []
+            pre_graph_fast_local_event_paths: list[set[tuple[Any, ...]]] = []
+            post_graph_fast_local_event_paths: list[set[tuple[Any, ...]]] = []
+            pre_graph_resume_arg_paths_to_clear: set[tuple[Any, ...]] = set()
+            pre_graph_unconditional_resume_arg_paths_to_clear: set[tuple[Any, ...]] = (
+                set()
+            )
+            post_graph_resume_arg_paths_to_clear: set[tuple[Any, ...]] = set()
+            if count_calls(self.graph) != 0 or len(pass1.graph_outputs) != 0:
+                # A replacement backed by an FX node does not exist until the
+                # graph returns. Other replacements can be installed before
+                # the call, matching STORE_FAST's replace-before-decref order.
+                paths_to_clear = self.root_tx._take_resume_arg_paths_to_clear(
+                    materialized_sources=set(resume_arg_source_overrides)
+                )
+                unconditional_paths_to_clear = (
+                    self.root_tx._take_unconditional_resume_arg_paths(paths_to_clear)
+                )
+                (
+                    fast_local_initial_values,
+                    events,
+                    paths_by_event,
+                    semantic_roots_by_event,
+                    graph_barriers,
+                    remaining_paths,
+                ) = self.root_tx._take_entry_fast_local_events(paths_to_clear)
+
+                event_temp_last_use: dict[str, int] = {}
+                nested_event_temp_roots: dict[str, tuple[Any, ...]] = {}
+                for event_index, (_, value) in enumerate(events):
+                    if value is None:
+                        continue
+                    event_value_source = value.source
+
+                    def record_event_source_use(item: VariableTracker) -> None:
+                        if item.source is None:
+                            return
+                        name = snapshot_temp_name(
+                            resume_arg_source_overrides.get(item.source)
+                        )
+                        if name is None or name not in resume_arg_event_temp_names:
+                            return
+                        path = self.root_tx._boxed_resume_source_path(item.source)
+                        if path is not None and item.source != event_value_source:
+                            nested_event_temp_roots[name] = path[:2]
+                        else:
+                            event_temp_last_use[name] = event_index
+
+                    self.root_tx._visit_variable_sources(record_event_source_use, value)
+                for name, root_path in nested_event_temp_roots.items():
+                    semantic_release_events = [
+                        event_index
+                        for event_index, roots in enumerate(semantic_roots_by_event)
+                        if root_path in roots
+                    ]
+                    event_temp_last_use[name] = (
+                        semantic_release_events[-1]
+                        if semantic_release_events
+                        else len(events) - 1
+                    )
+                temp_deletes_by_event: collections.defaultdict[int, set[str]] = (
+                    collections.defaultdict(set)
+                )
+                for name, event_index in event_temp_last_use.items():
+                    temp_deletes_by_event[event_index].add(name)
+                # A source from an event removed by event pruning is never
+                # read during replay; retain the ordinary end-of-suffix
+                # cleanup as a defensive fallback.
+                resume_arg_temp_names.update(
+                    resume_arg_event_temp_names - event_temp_last_use.keys()
+                )
+                expanded_events: list[tuple[str | None, VariableTracker | None]] = []
+                expanded_paths_by_event: list[set[tuple[Any, ...]]] = []
+                expanded_graph_barriers: list[bool] = []
+                for event_index, (event, event_paths, graph_barrier) in enumerate(
+                    zip(events, paths_by_event, graph_barriers)
+                ):
+                    expanded_events.append(event)
+                    expanded_paths_by_event.append(event_paths)
+                    expanded_graph_barriers.append(graph_barrier)
+                    for name in sorted(temp_deletes_by_event[event_index]):
+                        # Clear the mutable snapshot before deleting its fast
+                        # local. A previously materialized f_locals dict may
+                        # retain the list object, but no longer retains its
+                        # source value.
+                        expanded_events.append((None, None))
+                        expanded_paths_by_event.append({(name, 0)})
+                        expanded_graph_barriers.append(False)
+                        expanded_events.append((name, None))
+                        expanded_paths_by_event.append(set())
+                        expanded_graph_barriers.append(False)
+                events = expanded_events
+                paths_by_event = expanded_paths_by_event
+                graph_barriers = expanded_graph_barriers
+                graph_output_seen = False
+                initial_values_seen = set(resume_arg_event_temp_names)
+                for event, event_paths, graph_barrier in zip(
+                    events, paths_by_event, graph_barriers
+                ):
+                    name, value = event
+                    if name is not None and name not in initial_values_seen:
+                        initial_values_seen.add(name)
+                        initial_value = fast_local_initial_values[name]
+                        probe = PyCodegen(
+                            self.root_tx,
+                            root,
+                            graph_output_var,
+                            overridden_sources=overridden_sources,
+                        )
+                        probe(initial_value)
+                        initial_value_needs_graph = bool(probe.graph_outputs) or any(
+                            uses_pass1_temp(source)
+                            for source in probe.direct_source_uses
+                        )
+                        if initial_value_needs_graph:
+                            graph_output_seen = True
+                        initial_values = (
+                            post_graph_fast_local_initial_values
+                            if initial_value_needs_graph
+                            else pre_graph_fast_local_initial_values
+                        )
+                        initial_values[name] = initial_value
+                    if graph_barrier:
+                        graph_output_seen = True
+                    if value is not None:
+                        probe = PyCodegen(
+                            self.root_tx,
+                            root,
+                            graph_output_var,
+                            overridden_sources=overridden_sources,
+                        )
+                        probe(value)
+                        if probe.graph_outputs:
+                            graph_output_seen = True
+                    if graph_output_seen:
+                        post_graph_fast_local_events.append(event)
+                        post_graph_fast_local_event_paths.append(event_paths)
+                    else:
+                        pre_graph_fast_local_events.append(event)
+                        pre_graph_fast_local_event_paths.append(event_paths)
+
+                pre_graph_resume_arg_paths_to_clear = remaining_paths
+                pre_graph_unconditional_resume_arg_paths_to_clear = (
+                    remaining_paths & unconditional_paths_to_clear
+                )
+                post_graph_resume_arg_paths_to_clear = {
+                    path
+                    for paths in post_graph_fast_local_event_paths
+                    for path in paths
+                }
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
@@ -2323,7 +2910,16 @@ class OutputGraph(OutputGraphCommon):
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass2, True)
+            # codegen_save_tempvars assigns sources to newly created objects.
+            # It must dominate event replay because pass1 may have already
+            # changed an initial value's source to one of those temporaries.
+            self.side_effects.codegen_save_tempvars(pass2)
+            pass2.replay_fast_local_events(
+                post_graph_fast_local_events,
+                post_graph_fast_local_event_paths,
+                post_graph_fast_local_initial_values,
+            )
+            self.codegen_suffix(tx, stack_values_flat, pass2, True, save_tempvars=False)
 
             if (
                 torch._dynamo.config.log_graph_in_out_metadata
@@ -2402,39 +2998,56 @@ class OutputGraph(OutputGraphCommon):
                 graph_input_names_to_delete = self._dead_tensor_graph_input_names(
                     live_local_names
                 )
-                resume_args_varname = tx._boxed_resume_arg_name()
+                resume_args_varname = self.root_tx._boxed_resume_arg_name()
                 resume_arg_indexes_to_clear: set[int] = set()
                 if (
                     resume_args_varname is not None
-                    and resume_args_varname in tx.cleared_fast_locals
+                    and resume_args_varname in self.root_tx.cleared_fast_locals
                 ):
-                    resume_args = tx.f_locals.get(resume_args_varname)
+                    resume_args = self.root_tx.f_locals.get(resume_args_varname)
                     if isinstance(resume_args, list):
                         live_resume_arg_indexes = self._live_resume_arg_indexes(
                             pass2, resume_args_varname, len(resume_args)
                         )
                         known_indexes_to_clear = set(
-                            _boxed_resume_arg_indexes_to_clear(tx.f_code)
+                            _boxed_resume_arg_indexes_to_clear(self.root_tx.f_code)
                         )
+                        post_graph_indexes_to_keep = {
+                            path[1]
+                            for path in post_graph_resume_arg_paths_to_clear
+                            if path[0] == resume_args_varname
+                        }
                         resume_arg_indexes_to_clear = {
                             idx
                             for idx, value in enumerate(resume_args)
                             if idx not in live_resume_arg_indexes
+                            and idx not in post_graph_indexes_to_keep
                             and (
                                 idx in known_indexes_to_clear
                                 or isinstance(value, Tensor)
                             )
                         }
+                resume_arg_paths_to_clear = pre_graph_resume_arg_paths_to_clear
+                live_local_names.update(
+                    path[0] for path in post_graph_resume_arg_paths_to_clear
+                )
                 if (
                     resume_args_varname is not None
                     and resume_args_varname in live_local_names
                 ):
                     graph_input_names_to_delete.discard(resume_args_varname)
                 graph_input_names_to_clear = tx.cleared_fast_locals - live_local_names
-                use_boxed_graph_call = resume_args_varname is not None and bool(
-                    graph_input_names_to_delete
-                    or graph_input_names_to_clear
-                    or resume_arg_indexes_to_clear
+                use_boxed_graph_call = bool(
+                    (
+                        resume_args_varname is not None
+                        and (
+                            graph_input_names_to_delete
+                            or graph_input_names_to_clear
+                            or resume_arg_indexes_to_clear
+                        )
+                    )
+                    or resume_arg_locals_to_materialize
+                    or resume_arg_paths_to_clear
                 )
                 instructions, subgraph_pycode = self.compile_and_call_fx_graph(
                     tx,
@@ -2443,6 +3056,13 @@ class OutputGraph(OutputGraphCommon):
                     graph_input_names_to_delete,
                     graph_input_names_to_clear,
                     resume_arg_indexes_to_clear,
+                    resume_arg_locals_to_materialize,
+                    resume_arg_paths_to_clear,
+                    pre_graph_unconditional_resume_arg_paths_to_clear,
+                    pre_graph_fast_local_events,
+                    pre_graph_fast_local_event_paths,
+                    pre_graph_fast_local_initial_values,
+                    resume_arg_source_overrides,
                     use_boxed_graph_call,
                 )
                 output.extend(instructions)
@@ -2461,6 +3081,12 @@ class OutputGraph(OutputGraphCommon):
             self.add_output_instructions(
                 pass2.get_instructions(), pycode=pass2.get_pycode()
             )
+            if resume_arg_temp_names:
+                cleanup_cg = PyCodegen(self.root_tx)
+                for name in sorted(resume_arg_temp_names):
+                    cleanup_cg.clear_resume_arg_paths({(name, 0)})
+                    cleanup_cg.append_output(cleanup_cg.create_delete(name))
+                self.add_output_instructions(cleanup_cg.get_instructions())
 
         # store all stack and locals for each frame
         # current state of the stack:
@@ -2626,11 +3252,14 @@ class OutputGraph(OutputGraphCommon):
         stack_values: list[VariableTracker],
         cg: PyCodegen,
         log_side_effects: bool,
+        *,
+        save_tempvars: bool = True,
     ) -> None:
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
         # for variables with `AttributeMutationNew`, as they don't implement
         # `reconstruct` themselves.
-        self.side_effects.codegen_save_tempvars(cg)
+        if save_tempvars:
+            self.side_effects.codegen_save_tempvars(cg)
         if self.backward_state:
             if self.export:
                 raise AssertionError("backward_state is not supported in export mode")
@@ -2986,6 +3615,15 @@ class OutputGraph(OutputGraphCommon):
         graph_input_names_to_delete: set[str] | None = None,
         graph_input_names_to_clear: set[str] | None = None,
         resume_arg_indexes_to_clear: set[int] | None = None,
+        resume_arg_locals_to_materialize: dict[str, VariableTracker | Source]
+        | None = None,
+        resume_arg_paths_to_clear: set[tuple[Any, ...]] | None = None,
+        unconditional_resume_arg_paths_to_clear: set[tuple[Any, ...]] | None = None,
+        fast_local_events: list[tuple[str | None, VariableTracker | None]]
+        | None = None,
+        fast_local_event_paths: list[set[tuple[Any, ...]]] | None = None,
+        fast_local_initial_values: dict[str, VariableTracker] | None = None,
+        fast_local_source_overrides: dict[Source, Source] | None = None,
         use_boxed_graph_call: bool = False,
     ) -> tuple[list[Instruction], list[str] | None]:
         """
@@ -3389,6 +4027,13 @@ class OutputGraph(OutputGraphCommon):
                 graph_input_names_to_delete,
                 graph_input_names_to_clear,
                 resume_arg_indexes_to_clear,
+                resume_arg_locals_to_materialize,
+                resume_arg_paths_to_clear,
+                unconditional_resume_arg_paths_to_clear,
+                fast_local_events,
+                fast_local_event_paths,
+                fast_local_initial_values,
+                fast_local_source_overrides,
                 boxed_call,
             )
 

@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import unittest
@@ -12,11 +14,14 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._dynamo.output_graph import _as_boxed_call, _uses_boxed_call
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
-from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.precompile_context import EagerCacheArtifact, PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -143,6 +148,64 @@ class TestPackage(torch._inductor.test_case.TestCase):
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
+
+    def test_boxed_resume_eager_package_roundtrip(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x, y):
+            dead = x + 1
+            if y.sum() > 0:
+                del dead
+                return y * 2
+            return y + dead
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        args = (torch.randn(3), torch.ones(3))
+        expected = fn(*args)
+        self.assertEqual(compiled_fn(*args), expected)
+        self.assertEqual(len(package.cached_backends), 2)
+        self.assertTrue(
+            any(
+                getattr(backend, "_boxed_call", False)
+                for backend in package.cached_backends.values()
+            )
+        )
+
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        path = self.path()
+        ctx.save_package(package, path)
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, path)
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(*args), expected)
+
+    def test_boxed_lazy_eager_artifact_roundtrip(self):
+        def fn(x, y):
+            return x + y
+
+        for use_forward in (False, True):
+            lazy_gm = _LazyGraphModule.from_graphmodule(torch.fx.symbolic_trace(fn))
+            candidate = lazy_gm.forward if use_forward else lazy_gm
+            boxed = _as_boxed_call(candidate)
+            loaded = pickle.loads(pickle.dumps(boxed))
+            self.assertTrue(_uses_boxed_call(loaded))
+
+            artifact = EagerCacheArtifact(
+                key=f"boxed-lazy-{use_forward}", content=loaded
+            )
+            PrecompileContext.record_artifact(artifact)
+            stored = PrecompileContext.serialize_artifact_by_key(artifact.key)
+            self.assertIsNotNone(stored)
+            stored = pickle.loads(pickle.dumps(stored))
+            x, y = torch.randn(2), torch.randn(2)
+            args = [x, y]
+            self.assertEqual(stored.content(args), fn(x, y))
+            self.assertEqual(args, [])
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
@@ -304,6 +367,84 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled_fn(*args2)
+
+    def test_install_survives_stale_cleanup_hooks(self):
+        # The first compile installs its generated functions -- and, on every
+        # compile, a builtins-dict global (see install_builtins_dict_in_fglobals)
+        # -- into the module globals behind a CleanupHook keyed on the generated
+        # code object. install() rebinds __compiled_fn/__resume_at names to fresh
+        # values, but leaves the builtins-dict binding alone when it's already
+        # correct, since it's the same dict object on every compile in this
+        # module. Either way, a hook firing afterwards must not delete the
+        # binding install() is now responsible for.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x + x.shape[0]
+            if y.sum() > 0:  # data-dependent branch, forces a resume function
+                return y * 2
+            return y
+
+        args = (torch.randn(3, 2),)
+        expected = fn(*args)
+
+        # Other tests in this file compile functions defined in this same
+        # module, so ignore what they left behind in the shared globals, and
+        # hold their code objects alive so ids stay unambiguous below.
+        prefixes = ("__compiled_fn", "__resume_at", "__builtins_dict__")
+        scope = fn.__globals__
+        preexisting = {name for name in scope if name.startswith(prefixes)}
+        # Plain loops with an explicit del, rather than a walrus in a list
+        # comprehension: a walrus target leaks into this method's own frame,
+        # which would pin the last code object seen and defeat the gc.collect()
+        # below.
+        others = []
+        code = None
+        for ref in list(CleanupManager.instance.refs.values()):
+            code = ref()
+            if code is not None:
+                others.append(code)
+        del code
+        other_ids = {id(o) for o in others}
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(*args)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        # Whether the hooks fire before or after install() is left to the
+        # garbage collector, so pin the code objects they are keyed on to pick
+        # the losing order deterministically.
+        pinned = []
+        code = None
+        for idx, ref in list(CleanupManager.instance.refs.items()):
+            if idx in other_ids:
+                continue
+            code = ref()
+            if code is not None:
+                pinned.append(code)
+        del code
+        pinned_ids = {id(p) for p in pinned}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+
+        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
+        self.assertTrue(installed)
+
+        del pinned
+        gc.collect()
+
+        # Without this the assert below can pass without any hook ever running.
+        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
+        self.assertEqual(installed - set(scope), set())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(expected, compiled_fn(*args))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()

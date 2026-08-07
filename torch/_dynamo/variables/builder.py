@@ -18,6 +18,7 @@ VariableTracker instances based on their type and usage context.
 """
 
 import abc
+import builtins
 import collections
 import contextlib
 import contextvars
@@ -222,7 +223,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, OrderedItemsDictVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -282,6 +283,11 @@ from .misc import (
     TypingVariable,
     WeakRefVariable,
 )
+
+
+if sys.version_info >= (3, 15):
+    from .misc import SentinelVariable
+
 from .nn_module import (
     FSDPManagedNNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
@@ -325,7 +331,6 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    OrderedDictVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -706,7 +711,9 @@ class GraphArg:
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
-            self._example = TensorWeakRef(self._example)
+            self._example = TensorWeakRef(
+                self._example, _is_internal_lifetime_observer=True
+            )
             if not is_fake(self.fake_tensor):
                 raise AssertionError("fake_tensor must be a FakeTensor")
 
@@ -1234,13 +1241,10 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = OrderedItemsDictVariable(
+                result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
-                    mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -2003,7 +2007,7 @@ class VariableBuilder:
             # and source chains through C-level descriptors break guard
             # evaluation.
             mod = getattr(value, "__module__", None) or ""
-            if not mod.startswith(("torch.", "torch_")):
+            if mod != "torch" and not mod.startswith(("torch.", "torch_")):
                 if value not in self.tx.output.side_effects:
                     return self.tx.output.side_effects.track_object_existing(
                         value, result
@@ -2166,9 +2170,10 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            is_ordered_dict = isinstance(value, collections.OrderedDict)
             dict_vt_cls = (
-                OrderedItemsDictVariable if is_ordered_dict else ConstDictVariable
+                OrderedDictVariable
+                if isinstance(value, collections.OrderedDict)
+                else ConstDictVariable
             )
             dict_vt = dict_vt_cls(
                 result,
@@ -2179,12 +2184,7 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            if is_ordered_dict:
-                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
-            else:
-                result = UserDefinedDictVariable(
-                    value, dict_vt=dict_vt, source=self.source
-                )
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2344,11 +2344,18 @@ class VariableBuilder:
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return SentinelVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
-        from .user_defined import _CONSTANT_BASE_TYPES
+        from .ctx_manager import GenericContextWrappingVariable
+        from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
@@ -2363,6 +2370,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
             result = UserDefinedConstantVariable(value, source=self.source)
+        elif is_generic_ctx_manager_cls(type(value)):
+            # A generic context manager built inside the compiled region (via
+            # SideEffects.get_variable_cls) must wrap the same way when it is
+            # reconstructed from a source across a graph break, so a `with` on
+            # the reconstructed object can still be entered.
+            result = GenericContextWrappingVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -2445,7 +2458,8 @@ class VariableBuilder:
                     value[i]
                 )
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                    GuardBuilder.TENSOR_MATCH,
+                    value=TensorWeakRef(value[i], _is_internal_lifetime_observer=True),
                 )
                 guards.append(source_i.make_guard(guard))
 
@@ -2548,11 +2562,14 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defined]
-            var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defined]
-                value._dynamo_static_input_type
-            )
+            # A tensor-subclass parameter (e.g. under torch.nn.utils.parametrize)
+            # can be tracked as a UserDefinedObjectVariable, which has no graph
+            # proxy node to annotate. mark_static_address above still marks it,
+            # so only stamp the metadata when there is a real tensor proxy node.
+            if isinstance(var, TensorVariable):
+                var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
+                    value._dynamo_static_input_type  # type: ignore[attr-defined]
+                )
 
     def wrap_module(self, value: torch.nn.Module) -> VariableTracker:
         from ..eval_frame import OptimizedModule
@@ -2729,10 +2746,11 @@ class VariableBuilder:
         # because ConstantVariable.is_literal() rejects non-exact types.
         # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
+            logical_source = _logical_source_for_resume(self.tx, self.source)
             # Check for user-provided spec from shapes_spec.
             if config._dynamic_shapes_spec is not None:
                 int_spec = lookup_spec_from_dynamo_source(
-                    self.source, config._dynamic_shapes_spec
+                    logical_source, config._dynamic_shapes_spec
                 )
                 if int_spec is None:
                     # shapes_spec is set but this int has no spec → force static
@@ -2758,9 +2776,7 @@ class VariableBuilder:
                         f"{int_spec!r} (expected int, IntVar, or None)"
                     )
 
-            dynamic_source_name = _dynamic_source_name_for_resume(
-                self.tx, self.source, self.source.name
-            )
+            dynamic_source_name = logical_source.name
             if is_dynamic_source(dynamic_source_name):
                 log.debug(
                     "%s marked dynamic via dynamic-sources list",
@@ -2776,9 +2792,9 @@ class VariableBuilder:
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
-            if is_unbacked_source(self.source.name):
+            if is_unbacked_source(dynamic_source_name):
                 log.debug(
-                    "%s marked unbacked via unbacked-sources list", self.source.name
+                    "%s marked unbacked via unbacked-sources list", dynamic_source_name
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
@@ -2902,7 +2918,10 @@ class VariableBuilder:
         # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
         _tensor_spec = cast(
             TensorSpec | None,
-            lookup_spec_from_dynamo_source(source, config._dynamic_shapes_spec),
+            lookup_spec_from_dynamo_source(
+                _logical_source_for_resume(self.tx, source),
+                config._dynamic_shapes_spec,
+            ),
         )
         _has_spec = _tensor_spec is not None
 
@@ -3135,7 +3154,7 @@ class VariableBuilder:
                     value=(
                         value
                         if isinstance(source, NumpyTensorSource)
-                        else TensorWeakRef(value)
+                        else TensorWeakRef(value, _is_internal_lifetime_observer=True)
                     ),
                 )
             )
@@ -4428,31 +4447,43 @@ def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     return False
 
 
-def _dynamic_source_name_for_resume(
-    tx: "InstructionTranslatorBase", source: Source | None, name: str
-) -> str:
-    if source is None:
-        return name
-
+def _logical_source_for_resume(
+    tx: "InstructionTranslatorBase", source: Source
+) -> Source:
     from ..resume_execution import (
         _boxed_resume_arg_name,
-        _boxed_resume_local_argname_indexes,
+        _boxed_resume_local_source_info,
     )
 
     resume_args_varname = _boxed_resume_arg_name(tx.f_code)
-    if (
-        resume_args_varname is None
-        or not isinstance(source, (GetItemSource, ListGetItemSource))
-        or not isinstance(source.base, LocalSource)
-        or source.base.local_name != resume_args_varname
-        or not isinstance(source.index, int)
-    ):
-        return name
+    if resume_args_varname is None:
+        return source
 
-    local_name = _boxed_resume_local_argname_indexes(tx.f_code).get(source.index)
-    if local_name is None:
-        return name
-    return LocalSource(local_name).name
+    local_source_info = _boxed_resume_local_source_info(tx.f_code)
+
+    def remap_resume_carrier(current: Source) -> Source:
+        if (
+            isinstance(current, (GetItemSource, ListGetItemSource))
+            and isinstance(current.base, LocalSource)
+            and current.base.local_name == resume_args_varname
+            and isinstance(current.index, int)
+        ):
+            info = local_source_info.get(current.index)
+            if info is not None:
+                local_name, is_input, is_varargs, is_varkw = info
+                return LocalSource(
+                    local_name,
+                    is_input=is_input,
+                    is_varargs=is_varargs,
+                    is_varkw=is_varkw,
+                )
+        if isinstance(current, ChainedSource):
+            remapped_base = remap_resume_carrier(current.base)
+            if remapped_base is not current.base:
+                return dataclasses.replace(current, base=remapped_base)
+        return current
+
+    return remap_resume_carrier(source)
 
 
 def record_automatic_dynamic(
@@ -4587,7 +4618,8 @@ def _automatic_dynamic(
             hints=[],
         )
 
-    name = _dynamic_source_name_for_resume(tx, source, source.name)
+    logical_source = _logical_source_for_resume(tx, source)
+    name = logical_source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}
@@ -5258,6 +5290,11 @@ class SourcelessBuilder:
             return UnspecializedNNModuleVariable(value)
         elif istype(value, object):
             return ObjectVariable(value)
+        elif (
+            sys.version_info >= (3, 15)
+            and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
+        ):
+            return SentinelVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
@@ -5300,7 +5337,7 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = lambda tx, value: OrderedItemsDictVariable(
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
             mutation_type=ValueMutationNew(),
         )
