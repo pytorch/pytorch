@@ -205,8 +205,6 @@ struct XPUEvent {
   bool enable_timing_ = false;
   bool reusable_ = false;
   c10::DeviceIndex device_index_ = -1;
-  // Only need to track the last event, as events in an in-order queue are
-  // executed sequentially.
   std::unique_ptr<sycl::event> event_;
 };
 
