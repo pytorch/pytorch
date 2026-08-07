@@ -21,6 +21,10 @@ project-includes = [
     "test/test_utils.py",
 ]
 project-excludes = [
+  # Intentionally monkeypatches torch internals (probes, module-level test flags) to
+  # simulate platforms; type-checking those dynamic assignments adds no value, same as
+  # torch/testing/_internal below.
+  "tools/testing/introspection/**",
   "torch/_inductor/runtime/triton_heuristics.py",
   "torch/_inductor/runtime/triton_helpers.py",
   "torch/_inductor/runtime/halide_helpers.py",
