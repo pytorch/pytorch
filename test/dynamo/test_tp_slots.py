@@ -10,7 +10,10 @@ import collections
 import collections.abc
 import dataclasses
 import enum
+import gc
+import weakref
 
+import torch
 from torch._C._dynamo import (
     get_type_slots,
     has_slot,
@@ -321,6 +324,50 @@ class TestTypeSlots(TestCase):
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
                 lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
+
+
+class TestTypeCacheRetention(TestCase):
+    """A type-keyed helper must not memoize on the type object: a strong-ref
+    cache keeps every locally-defined class it sees -- and everything that
+    class's methods close over (tensors, modules, parameters) -- alive for the
+    process lifetime. Each helper below is exercised with a throwaway local
+    class whose method closes over a tensor; after dropping the class a weakref
+    must clear."""
+
+    def _assert_no_retention(self, use):
+        payload = torch.randn(8)
+
+        class Local:
+            def __len__(self):
+                return payload.numel()
+
+            def __iter__(self):
+                return iter([payload])
+
+        cls_ref = weakref.ref(Local)
+        payload_ref = weakref.ref(payload)
+        use(Local)
+
+        del Local, payload
+        gc.collect()
+
+        self.assertIsNone(cls_ref(), "helper retained the type")
+        self.assertIsNone(payload_ref(), "helper retained the type's closure")
+
+    def test_tp_type_no_retention(self):
+        from torch._dynamo.variables.base import _tp_type
+
+        self._assert_no_retention(_tp_type)
+
+    def test_flags_from_ml_flags_no_retention(self):
+        from torch._dynamo.variables.base import _flags_from_ml_flags
+
+        self._assert_no_retention(lambda t: _flags_from_ml_flags(t, "__len__"))
+
+    def test_type_implements_slot_no_retention(self):
+        from torch._dynamo.variables.object_protocol import type_implements_tp_iter
+
+        self._assert_no_retention(type_implements_tp_iter)
 
 
 if __name__ == "__main__":
