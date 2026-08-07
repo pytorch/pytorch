@@ -2110,6 +2110,8 @@ def is_gfx1250_arch(arch: str) -> bool:
     return arch.split(":", 1)[0] == "gfx1250"
 
 
+# `torch.version.hip` is process-constant, so the parse only has to happen once.
+@functools.cache
 def _rocm_version_at_least(major: int, minor: int) -> bool:
     version = torch.version.hip
     if not version:
@@ -2121,7 +2123,11 @@ def _rocm_version_at_least(major: int, minor: int) -> bool:
 
 
 def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
-    """Check the runtime and compiler prerequisites shared by TDM paths."""
+    """Check the runtime and compiler prerequisites shared by TDM paths.
+
+    Not memoized: the device-property probe can fail transiently during
+    initialization, and caching that failure would disable TDM process-wide.
+    """
     from torch.utils._triton import has_triton_amd_tdm_device
 
     if not _rocm_version_at_least(7, 14):
@@ -2137,7 +2143,25 @@ def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
 
 
 def _gfx1250_tdm_enabled(device: torch.device | None) -> bool:
-    return config.enable_tdm and _gfx1250_device_prereqs(device)
+    return config.triton.enable_tdm and _gfx1250_device_prereqs(device)
+
+
+def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool | None:
+    """Classify an already-resolved 2D stride pair by its unit-stride dimension.
+
+    Split out of ``tdm_descriptor_row_major`` so callers that already resolved
+    the strides do not resolve (or re-specialize) them twice.
+    """
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, stride in enumerate(strides_i)
+        if V.graph.sizevars.statically_known_equals(stride, 1)
+    ]
+    if len(inner) != 1:
+        return None
+    return inner[0] == 1
 
 
 def tdm_descriptor_row_major(mat: IRNode, add_guards: bool = False) -> bool | None:
@@ -2153,14 +2177,7 @@ def tdm_descriptor_row_major(mat: IRNode, add_guards: bool = False) -> bool | No
         strides_i = [
             V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
         ]
-    inner = [
-        i
-        for i, stride in enumerate(strides_i)
-        if V.graph.sizevars.statically_known_equals(stride, 1)
-    ]
-    if len(inner) != 1:
-        return None
-    return inner[0] == 1
+    return _tdm_row_major_from_strides(strides_i)
 
 
 def _tdm_operand_compatible(
@@ -2168,7 +2185,11 @@ def _tdm_operand_compatible(
     accepted_dtypes: OrderedSet[torch.dtype],
     add_guards: bool,
 ) -> bool:
-    """Check descriptor semantics and the preferred TDM request layout."""
+    """Check descriptor semantics and the preferred TDM request layout.
+
+    ``add_guards`` specializes this operand, so only ``_tdm_operands_compatible``
+    passes it, and only once the whole list is admitted.
+    """
     from .virtualized import V
 
     dtype = mat.get_dtype()
@@ -2195,7 +2216,9 @@ def _tdm_operand_compatible(
             mat.get_layout().offset
         )
 
-    row_major = tdm_descriptor_row_major(mat, add_guards=add_guards)
+    # Reuse the strides resolved above; tdm_descriptor_row_major would resolve
+    # them again, and under add_guards re-specialize them.
+    row_major = _tdm_row_major_from_strides(strides_i)
     if row_major is None:
         return False
     inner_idx = 1 if row_major else 0
@@ -2221,6 +2244,45 @@ def _tdm_operand_compatible(
     )
 
 
+def _tdm_operands_compatible(
+    matrices: Sequence[IRNode],
+    accepted_dtypes: OrderedSet[torch.dtype],
+    add_guards: bool,
+) -> bool:
+    """Admit a full operand list for TDM, specializing only once it is admitted.
+
+    Rejecting an operand must not leave the graph specialized on its shape, so
+    the decision is made guard-free before any ``guard_int`` pins a hint.
+    """
+    if not all(
+        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=False)
+        for mat in matrices
+    ):
+        return False
+
+    # Bounds only; unlike specialization, this does not pin a dynamic dim.
+    if not all(
+        _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
+        for mat in matrices
+    ):
+        return False
+
+    if not add_guards:
+        return True
+
+    # Admitted: pin the values the descriptor is built from. Same predicates,
+    # same hints, so this cannot change the answer -- assert in case it ever does.
+    if not all(
+        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=True)
+        for mat in matrices
+    ):
+        raise AssertionError(
+            "TDM operand admission changed under specialization; the guard-free "
+            "and guarded checks must agree"
+        )
+    return True
+
+
 def use_triton_tdm_template(
     *matrices: IRNode,
     add_guards: bool = False,
@@ -2228,17 +2290,7 @@ def use_triton_tdm_template(
     """Return whether dense MM operands may use the gfx1250 TDM template."""
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
-    # Dense add_guards callers already specialize sizes and strides in
-    # _tdm_operand_compatible below, so checking bounds first is intentional.
-    if not all(
-        _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
-        for mat in matrices
-    ):
-        return False
-    return all(
-        _tdm_operand_compatible(mat, _TDM_SUPPORTED_DTYPES, add_guards)
-        for mat in matrices
-    )
+    return _tdm_operands_compatible(matrices, _TDM_SUPPORTED_DTYPES, add_guards)
 
 
 def use_triton_tdm_scaled_template(
@@ -2248,22 +2300,13 @@ def use_triton_tdm_scaled_template(
     """Return whether scaled FP8 MM operands may use gfx1250 TDM descriptors."""
     if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
         return False
-    # See use_triton_tdm_template for why bounds are checked first.
-    if not all(
-        _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
-        for mat in matrices
-    ):
-        return False
-    return all(
-        _tdm_operand_compatible(mat, _TDM_SCALED_SUPPORTED_DTYPES, add_guards)
-        for mat in matrices
-    )
+    return _tdm_operands_compatible(matrices, _TDM_SCALED_SUPPORTED_DTYPES, add_guards)
 
 
 def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
     """Return whether generic tensor descriptor codegen may target AMD TDM."""
     return (
-        config.enable_tdm
+        config.triton.enable_tdm
         and config.triton.use_tensor_descriptor
         and config.assume_aligned_inputs
         and _gfx1250_device_prereqs(device)

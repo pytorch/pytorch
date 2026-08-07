@@ -3265,10 +3265,17 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
     ROCmConfigHeuristic,  # type: ignore[misc]
 ):
-    """Persistent descriptor MM heuristic for gfx1250 TDM."""
+    """Persistent descriptor MM heuristic for gfx1250 TDM.
+
+    No `TMAWorkspaceMixin`: stable descriptors need no workspace. Its
+    `num_warps != 2` filter is NVIDIA-TMA policy and does not apply here.
+    """
 
     def __init__(self) -> None:
         super().__init__()
+        # Persistent pool, as for every other persistent heuristic. ROCm
+        # finalization backfills the AMD kernargs for plain GemmConfig.
+        self.mm_configs = self.persistent_mm_configs
         self.uses_tdm_configs = True
 
     def _get_template_configs_impl(
@@ -3317,7 +3324,13 @@ class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
 
 
 class ROCmScaledTDMConfigMixin(BaseScaledMMConfigMixin):
-    """Shared stable-descriptor options for gfx1250 scaled TDM templates."""
+    """Shared stable-descriptor options for gfx1250 scaled TDM templates.
+
+    No `TMAWorkspaceMixin`: stable descriptors need no workspace. Neither half
+    of its `num_warps != 2 and block_k >= 32` filter applies here -- the warp
+    restriction is NVIDIA-TMA policy, and `check_supported_striding` pins A
+    row-major, so the 128-byte rule already forces `block_k >= 128` for FP8.
+    """
 
     scaled_persistent_mm_configs: list[BaseConfig]
 

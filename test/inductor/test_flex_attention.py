@@ -727,7 +727,7 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
 )
 class TestFlexAttentionTDMEndToEnd(InductorTestCase):
     def _compile_and_get_code(self, fn, *args):
-        with config.patch({"enable_tdm": True}):
+        with config.patch({"triton.enable_tdm": True}):
             return run_and_get_code(torch.compile(fn), *args)
 
     def test_tdm_flex_forward_correctness_and_selection(self):

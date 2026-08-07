@@ -881,10 +881,6 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
-# Enable AMD Tensor Data Mover descriptor paths on supported ROCm targets.
-# Device, compiler, dtype, layout, and template-specific checks still apply.
-enable_tdm = os.environ.get("TORCHINDUCTOR_ENABLE_TDM", "0") == "1"
-
 # Cache SDPA constraint results keyed by (tensor identity, stride_order) to avoid
 # creating duplicate buffers when the same tensor feeds multiple SDPA positions
 # (e.g., key=value in simplified PMA attention).
@@ -2239,6 +2235,12 @@ class triton:
     # descriptor flavor only; requires use_tensor_descriptor and
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
+    # Enable AMD Tensor Data Mover descriptor paths (gfx1250 MM templates,
+    # generic descriptor codegen, and flex) via Triton's stable
+    # tl.make_tensor_descriptor API. Device, dtype, and layout checks in
+    # torch/_inductor/utils.py still apply.
+    enable_tdm = os.environ.get("TORCHINDUCTOR_ENABLE_TDM", "0") == "1"
 
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
     # (no-op on archs/Triton builds without meta-WS).

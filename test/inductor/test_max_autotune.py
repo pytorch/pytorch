@@ -5740,12 +5740,19 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
     def test_tdm_device_gate_uses_runtime_floor_and_backend_probe(self):
-        from torch._inductor.utils import _gfx1250_tdm_enabled
+        from torch._inductor.utils import _gfx1250_tdm_enabled, _rocm_version_at_least
 
         props = mock.Mock(gcnArchName="gfx1250:sramecc+:xnack-")
         device = torch.device("cuda")
+
+        # _rocm_version_at_least memoizes a value that is fixed for a real
+        # process; this test patches torch.version.hip, so drop the cache
+        # between scenarios.
+        self.addCleanup(_rocm_version_at_least.cache_clear)
+
+        _rocm_version_at_least.cache_clear()
         with (
-            config.patch({"enable_tdm": True}),
+            config.patch({"triton.enable_tdm": True}),
             mock.patch("torch.version.hip", "7.14"),
             mock.patch("torch.cuda.get_device_properties", return_value=props),
             mock.patch(
@@ -5756,8 +5763,9 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             self.assertFalse(_gfx1250_tdm_enabled(device))
             supports_tdm.assert_called_once_with("gfx1250:sramecc+:xnack-")
 
+        _rocm_version_at_least.cache_clear()
         with (
-            config.patch({"enable_tdm": True}),
+            config.patch({"triton.enable_tdm": True}),
             mock.patch("torch.version.hip", "7.14"),
             mock.patch("torch.cuda.get_device_properties", return_value=props),
             mock.patch(
@@ -5767,8 +5775,9 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         ):
             self.assertTrue(_gfx1250_tdm_enabled(device))
 
+        _rocm_version_at_least.cache_clear()
         with (
-            config.patch({"enable_tdm": True}),
+            config.patch({"triton.enable_tdm": True}),
             mock.patch("torch.version.hip", "7.13"),
             mock.patch("torch.cuda.get_device_properties", return_value=props),
         ):
@@ -5861,6 +5870,69 @@ class TestTDMConfigDenseAndGeneric(TestCase):
                 )
             )
 
+    def test_tdm_rejected_operands_do_not_specialize_dynamic_shapes(self):
+        # Admission is list-wide: no operand may be specialized until every
+        # operand has been admitted. Order the accepted operand first, so the
+        # test fails unless the guard-free pass covers the whole list -- a
+        # per-operand implementation would already have specialized the
+        # accepted one by the time the second is rejected.
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import use_triton_tdm_template
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        def make_mat(name, size, stride, offset=0):
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size,
+                    stride,
+                    offset,
+                ),
+            )
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            accepted_dim = graph.sizevars.shape_env.create_symbol(
+                128,
+                source=ConstantSource("accepted_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            rejected_dim = graph.sizevars.shape_env.create_symbol(
+                65,
+                source=ConstantSource("rejected_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            accepted = make_mat(
+                "accepted",
+                size=(128, accepted_dim),
+                stride=(accepted_dim, 1),
+            )
+            rejected = make_mat(
+                "rejected",
+                size=(128, rejected_dim),
+                stride=(rejected_dim, 1),
+            )
+
+            guards_before = len(graph.sizevars.shape_env.guards)
+            self.assertFalse(
+                use_triton_tdm_template(accepted, rejected, add_guards=True)
+            )
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+
+            # The reverse order must hold too: rejecting the first operand
+            # cannot specialize it either.
+            self.assertFalse(
+                use_triton_tdm_template(rejected, accepted, add_guards=True)
+            )
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+
     def test_tdm_descriptor_orientation_uses_unit_stride_dimension(self):
         from torch._inductor.utils import tdm_descriptor_row_major
 
@@ -5939,11 +6011,18 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             ):
                 heuristic = heuristic_cls()
             self.assertTrue(heuristic.uses_tdm_configs)
-            self.assertTrue(
-                all(config.num_stages == 2 for config in heuristic.mm_configs)
-            )
-            filtered_configs = heuristic._filter_configs(heuristic.exhaustive_configs)
-            self.assertTrue(all(config.num_stages == 2 for config in filtered_configs))
+            # The dense TDM heuristic tunes over the persistent pool, matching
+            # every other persistent heuristic including its own scaled sibling.
+            self.assertIs(heuristic.mm_configs, heuristic.persistent_mm_configs)
+            # That pool is authored with the CUDA stage counts; ROCm's
+            # _filter_configs is what normalizes them to the backend policy, so
+            # that is where the stage invariant has to hold.
+            for configs in (heuristic.mm_configs, heuristic.exhaustive_configs):
+                filtered_configs = heuristic._filter_configs(configs)
+                self.assertTrue(filtered_configs)
+                self.assertTrue(
+                    all(config.num_stages == 2 for config in filtered_configs)
+                )
         finally:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
 
@@ -5962,7 +6041,7 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         device = torch.device("cuda")
         base = {
-            "enable_tdm": True,
+            "triton.enable_tdm": True,
             "triton.use_tensor_descriptor": True,
             "assume_aligned_inputs": True,
         }
@@ -6306,7 +6385,7 @@ class TestTDMEndToEnd(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "enable_tdm": True,
+                "triton.enable_tdm": True,
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tdm",
             }
         ):
@@ -6315,7 +6394,7 @@ class TestTDMEndToEnd(TestCase):
     def _compile_generic_and_get_code(self, fn, *args):
         with config.patch(
             {
-                "enable_tdm": True,
+                "triton.enable_tdm": True,
                 "triton.use_tensor_descriptor": True,
                 "assume_aligned_inputs": True,
             }

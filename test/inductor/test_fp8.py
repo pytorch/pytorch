@@ -2291,7 +2291,7 @@ class TestTDMScaled(TestCase):
         try:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
             with (
-                config.patch({"enable_tdm": True}),
+                config.patch({"triton.enable_tdm": True}),
                 mock.patch(
                     "torch._inductor.heuristics.template.triton.get_backend_num_stages",
                     return_value=2,
@@ -2323,7 +2323,7 @@ class TestTDMScaled(TestCase):
         try:
             BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
             with (
-                config.patch({"enable_tdm": True}),
+                config.patch({"triton.enable_tdm": True}),
                 mock.patch(
                     "torch._inductor.heuristics.template.triton.get_backend_num_stages",
                     return_value=2,
@@ -2418,7 +2418,7 @@ class TestTDMScaledEndToEnd(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "enable_tdm": True,
+                "triton.enable_tdm": True,
                 "test_configs.autotune_choice_name_regex": "scaled_mm_device_tma",
             }
         ):
