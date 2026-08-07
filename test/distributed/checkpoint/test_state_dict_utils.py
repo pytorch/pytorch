@@ -40,7 +40,7 @@ def _build_state_dict_for_cpu_copy(self, buffer):
     """Builds the mixed state dict used by the ``_create_cpu_state_dict`` tests.
 
     Shared by the generic combinations in ``TestStateDictUtils`` and the
-    CUDA-only share+pin combination in ``TestStateDictUtilsCUDA``, which are
+    CUDA-only share+pin combination in ``TestStateDictUtilsOnCUDA``, which are
     separate classes so that each can carry an honest ``hw_classification``.
     """
     device = torch.device(self.device_type)
@@ -267,7 +267,7 @@ class TestStateDictUtils(DTensorTestBase):
         # directly. Either flag on its own goes through
         # `torch.Tensor.pin_memory()` / `share_memory_()`, which are backend
         # agnostic, so these three combinations do not belong behind a CUDA
-        # gate. The share+pin one lives in `TestStateDictUtilsCUDA`.
+        # gate. The share+pin one lives in `TestStateDictUtilsOnCUDA`.
         for kwargs in ({}, {"pin_memory": True}, {"share_memory": True}):
             cpu_state_dict = _create_cpu_state_dict(state_dict, **kwargs)
             _verify_cpu_state_dict(self, state_dict, cpu_state_dict, buffer)
@@ -340,7 +340,7 @@ class TestStateDictUtils(DTensorTestBase):
         self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
 
 
-class TestStateDictUtilsCUDA(DTensorTestBase):
+class TestStateDictUtilsOnCUDA(DTensorTestBase):
     """The ``share_memory`` + ``pin_memory`` combination of
     ``_create_cpu_state_dict``, which is the only one that is CUDA-specific.
 
@@ -350,6 +350,12 @@ class TestStateDictUtilsCUDA(DTensorTestBase):
     ``ACCELERATOR`` and whose other combinations run anywhere -- would either
     mislabel that class or, as before, hide three working combinations behind a
     CUDA gate they do not need.
+
+    The name must not be ``TestStateDictUtilsCUDA``:
+    ``instantiate_device_type_tests`` names what it generates
+    ``<generic class> + <device>.upper()`` and writes it straight into module
+    globals, so on a CUDA host it would produce that exact name and silently
+    replace this class.
     """
 
     hw_classification = HardwareClassification.CUDA
