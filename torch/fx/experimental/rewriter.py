@@ -127,7 +127,7 @@ def _rewrite(
 ) -> torch.nn.Module | Callable[..., Any]:
     if isinstance(fn, torch.nn.Module):
         # Rewrite this module's `forward` as well as the `forward`s of
-        # all of this module's recursive descendents. Return the new,
+        # all of this module's recursive descendants. Return the new,
         # rewritten module hierarchy.
         def rewrite_module(m: torch.nn.Module) -> torch.nn.Module:
             class RewrittenModule(torch.nn.Module):
