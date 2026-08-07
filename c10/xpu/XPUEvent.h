@@ -90,15 +90,14 @@ struct XPUEvent {
   }
 
   void record(const XPUStream& stream) {
+    namespace syclex = sycl::ext::oneapi::experimental;
     if (!isCreated()) {
       device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
       TORCH_CHECK(!enable_ipc_ || !enable_timing_, "XPUEvent cannot have both IPC and timing enabled.");
-      namespace syclex = sycl::ext::oneapi::experimental;
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
-          {syclex::enable_profiling{enable_timing_},
-           syclex::enable_ipc{enable_ipc_}}));
+          syclex::properties{syclex::enable_profiling{enable_timing_}, syclex::enable_ipc{enable_ipc_}}));
 #else
       assignEvent(stream.queue());
 #endif
@@ -120,8 +119,7 @@ struct XPUEvent {
 #endif
     }
 #if SYCL_COMPILER_VERSION >= 20260200
-    sycl::ext::oneapi::experimental::enqueue_signal_event(
-        stream.queue(), *event_);
+    syclex::enqueue_signal_event(queue, *event_);
 #endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {

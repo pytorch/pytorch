@@ -264,7 +264,7 @@ In the example below, tensor `x` will be created from symmetric memory:
     mempool = symm_mem.get_mem_pool(device)
 
     with torch.cuda.use_mem_pool(mempool):
-        x = torch.arange(128, device=device)
+        x = torch.arange(128, device=device, dtype=torch.float32)
 
     torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
 ```
