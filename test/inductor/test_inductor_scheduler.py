@@ -30,6 +30,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     skipCUDAIf,
 )
@@ -37,6 +38,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
     run_tests,
+    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -146,7 +148,7 @@ class TestScheduler(TestCase):
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         node1 = self._mock_base_snode("node1", device)
         node2 = self._mock_base_snode("node2", device)
         node3 = self._mock_base_snode("node3", device)
@@ -197,7 +199,7 @@ class TestScheduler(TestCase):
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
         scheduler = Mock()
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         pool_node1 = self._mock_base_snode("pool_node1", device)
         pool_node2 = self._mock_base_snode("pool_node2", device)
         default_node = self._mock_base_snode("default_node", device)
@@ -675,6 +677,7 @@ class TestScheduler(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
@@ -861,7 +864,7 @@ class TestScheduler(TestCase):
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -882,7 +885,7 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = "cuda"
+        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -902,7 +905,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -913,7 +916,7 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = "cuda"
+        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -933,7 +936,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_does_not_realize_before_reduction(self):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -959,7 +962,7 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = "cuda"
+        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -1004,7 +1007,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -1021,7 +1024,7 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = "cuda"
+        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)

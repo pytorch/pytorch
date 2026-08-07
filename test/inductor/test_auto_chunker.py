@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
@@ -72,7 +72,7 @@ class AutoChunkerTest(TestCase):
         weight.grad = None
         bias.grad = None
 
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         opt_f = torch.compile(f, dynamic=dynamic_shape)
         actual = (
             opt_f(_input, weight, bias),
@@ -80,7 +80,7 @@ class AutoChunkerTest(TestCase):
             weight.grad,
             bias.grad if use_bias else None,
         )
-        peak_memory = torch.cuda.max_memory_allocated()
+        peak_memory = torch.accelerator.max_memory_allocated()
 
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
@@ -133,7 +133,7 @@ class AutoChunkerTest(TestCase):
 
         dtype = torch.bfloat16
 
-        mod = LinearAndCEL(C, V).cuda().to(dtype)
+        mod = LinearAndCEL(C, V).to(GPU_TYPE).to(dtype)
 
         def f(x, y):
             x.grad = None
@@ -147,13 +147,13 @@ class AutoChunkerTest(TestCase):
 
         opt_f = torch.compile(f)
 
-        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
-        y = torch.randint(0, V, (B, T)).cuda()
+        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device=GPU_TYPE)
+        y = torch.randint(0, V, (B, T)).to(GPU_TYPE)
 
         expect = (f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         actual = (opt_f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
-        peak_memory = torch.cuda.max_memory_allocated()
+        peak_memory = torch.accelerator.max_memory_allocated()
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
         self.assertTrue(
@@ -195,7 +195,7 @@ class AutoChunkerTest(TestCase):
 
         dtype = torch.bfloat16
 
-        mod = LinearAndCEL(C, V).cuda().to(dtype)
+        mod = LinearAndCEL(C, V).to(GPU_TYPE).to(dtype)
 
         def f(x, y):
             x.grad = None
@@ -218,11 +218,11 @@ class AutoChunkerTest(TestCase):
         opt_f = torch.compile(f)
 
         xs = [
-            torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
+            torch.randn(B, T, C, dtype=dtype, requires_grad=True, device=GPU_TYPE)
             for _ in range(gradient_accumulation_steps)
         ]
         ys = [
-            torch.randint(0, V, (B, T)).cuda()
+            torch.randint(0, V, (B, T)).to(GPU_TYPE)
             for _ in range(gradient_accumulation_steps)
         ]
 
@@ -232,14 +232,14 @@ class AutoChunkerTest(TestCase):
             mod.linear.weight.grad,
             mod.linear.bias.grad,
         )
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         actual = (
             step(opt_f, xs, ys),
             *[x.grad for x in xs],
             mod.linear.weight.grad,
             mod.linear.bias.grad,
         )
-        peak_memory = torch.cuda.max_memory_allocated()
+        peak_memory = torch.accelerator.max_memory_allocated()
         print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
         self.assertTrue(
@@ -394,9 +394,9 @@ class AutoChunkerTest(TestCase):
             "auto_chunker.num_chunk": 16,
             "auto_chunker.amplify_ratio_threshold": 10,
         }
-        mod = torch.compile(LinearAndCEL(C, V).cuda().to(dtype), options=options)
-        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
-        y = torch.randint(0, V, (B, T)).cuda()
+        mod = torch.compile(LinearAndCEL(C, V).to(GPU_TYPE).to(dtype), options=options)
+        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device=GPU_TYPE)
+        y = torch.randint(0, V, (B, T)).to(GPU_TYPE)
         mod(x, y).backward()
         self.assertEqual(metrics.num_auto_chunking, 1)
 
@@ -404,5 +404,5 @@ class AutoChunkerTest(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()
