@@ -143,6 +143,23 @@ struct TORCH_API DispatchKeyExtractor final {
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
+  C10_ALWAYS_INLINE DispatchKeySet getDispatchKeySetFromRawDispatchKeySet(
+      DispatchKeySet ks,
+      DispatchKeySet key_mask = DispatchKeySet(DispatchKeySet::FULL)) const {
+    // Callers that already collected the raw tensor keyset still need the
+    // operator-specific fallthrough and TLS logic below.
+    c10::impl::LocalDispatchKeySet tls =
+        c10::impl::tls_local_dispatch_key_set();
+    auto dispatch_keys = (ks | tls.included_) - tls.excluded_;
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = dispatch_keys.getBackendIndex();
+      return dispatch_keys & nonFallthroughKeysPerBackend_[backend_idx] &
+          key_mask;
+    } else {
+      return dispatch_keys & nonFallthroughKeys_ & key_mask;
+    }
+  }
+
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&](size_t
@@ -169,33 +186,17 @@ struct TORCH_API DispatchKeyExtractor final {
         }
       }
     });
-    // Keys that are fallthrough should be skipped
-    if (requiresBitsetPerBackend_) {
-      c10::impl::LocalDispatchKeySet tls =
-          c10::impl::tls_local_dispatch_key_set();
-      auto backend_idx =
-          ((ks | tls.included_) - tls.excluded_).getBackendIndex();
-      return impl::computeDispatchKeySet(
-          ks, nonFallthroughKeysPerBackend_[backend_idx]);
-    } else {
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
-    }
+    return getDispatchKeySetFromRawDispatchKeySet(ks);
   }
 
   template <class... Args>
   DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
-    // Keys that are fallthrough should be skipped
-    if (requiresBitsetPerBackend_) {
-      c10::impl::LocalDispatchKeySet tls =
-          c10::impl::tls_local_dispatch_key_set();
-      auto backend_idx =
-          ((ks | tls.included_) - tls.excluded_).getBackendIndex();
-      return impl::computeDispatchKeySet(
-          ks, nonFallthroughKeysPerBackend_[backend_idx]);
-    } else {
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
-    }
+    return getDispatchKeySetFromRawDispatchKeySet(ks);
+  }
+
+  const c10::utils::bitset& dispatchArgIndicesReverse() const {
+    return dispatch_arg_indices_reverse_;
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);

@@ -12,7 +12,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
@@ -1132,11 +1132,11 @@ def _sync_module_params_and_buffers(
                     match getattr(detached_buffer, attr):
                         case torch.Tensor() as v:
                             module_states.append(v)
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
             else:
                 module_states.append(detached_buffer)
@@ -1149,11 +1149,11 @@ def _sync_module_params_and_buffers(
                 match getattr(detached_param, attr):
                     case torch.Tensor() as v:
                         module_states.append(v)
-                    case OpaqueBase():
+                    case CustomClassBase():
                         pass
                     case unexpected:
                         raise AssertionError(
-                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                         )
         else:
             module_states.append(detached_param)
