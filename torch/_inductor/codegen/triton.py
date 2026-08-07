@@ -2955,13 +2955,15 @@ class TMACompatibilityChecker:
             )
             return False
 
-        # `no_x_dim` => XBLOCK=1, and for reductions this means only one element
-        # is to be stored . However the TMA API requires that
-        # the store will be 16 byte aligned, which is not attainable with a single
-        # element
-        if self.for_store and self.kernel.no_x_dim:
+        # Strict multirow reductions are forced persistent and can settle on
+        # XBLOCK=1 after the initial TMA probe. Their output store must therefore
+        # use the scalar fallback rather than a 16-byte tensor descriptor.
+        if self.for_store and (
+            self.kernel.no_x_dim
+            or self.kernel.features.has_strict_sum_multirow_reduction()
+        ):
             log.debug(
-                "%s stores with `no_x_dim` cannot load 16 bytes.",
+                "%s stores with XBLOCK=1 cannot transfer 16 bytes.",
                 self.failed_debug_prefix,
             )
             return False
@@ -3089,6 +3091,16 @@ class TMACompatibilityChecker:
                 f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
             )
 
+        if (
+            self.kernel.features.strict_sum_rblock() == 1
+            and innermost_block_symt in TritonSymbols.reduction_types
+        ):
+            log.debug(
+                "%s strict sum linear accumulation requires a reduction block size of 1",
+                self.failed_debug_prefix,
+            )
+            return False
+
         # For persistent reductions, the reduction block sizes are fixed at compile time.
         # Only apply this logic when the innermost block is a reduction block;
         # persistent reductions can still have pointwise-style loads where the innermost block is X/Y/Z,
@@ -3120,7 +3132,7 @@ class TMACompatibilityChecker:
                     block_params.block_shape,
                 )
                 return False
-            persistent_rblock = self.kernel._get_persistent_RBLOCK(tree_numel)
+            persistent_rblock = self.kernel._get_persistent_reduction_block(tree_numel)
             innermost_block_bytes = (
                 innermost_block_shape.subs({innermost_block_type: persistent_rblock})
                 * element_size
@@ -3630,6 +3642,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
+        if self._use_strict_sum():
+            return False
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
             V.graph.get_current_device_or_throw(),
             self.features.numel,
@@ -3743,6 +3757,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         features = self.features.with_tiling_scores(self.tiling_scores)
         return V.choices.should_use_persistent_reduction(
             features, self.cooperative_reduction
+        )
+
+    @cache_on_self
+    def _use_strict_sum(self) -> bool:
+        return self.num_reduction_dims == 1 and (
+            self.features.strict_sum_rblock() is not None
         )
 
     def want_no_x_dim(self):
@@ -5240,6 +5260,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
+        # Eager tree-reduces each tile before accumulating tiles linearly.
+        strict_sum = self._use_strict_sum() and reduction_type == "sum"
+        strict_sum_loop = strict_sum and not self.persistent_reduction
+
         # When we do native matmtul codegen,
         # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
@@ -5325,8 +5349,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result = f"{value}[:,:,None]"  # (Y,X) to (Y,X,R=1)
                     shape = [*value.shape, 1]
             else:
+                reduction_ordering = (
+                    ", reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
+                    if strict_sum
+                    else ""
+                )
                 result, shape = self.reduction_resize_and_shape(  # type: ignore[assignment]
-                    f"{triton_reduction_fn}({value}, {dim})", value.shape
+                    f"{triton_reduction_fn}({value}, {dim}{reduction_ordering})",
+                    value.shape,
                 )
 
             if result_type is not None:
@@ -5563,6 +5593,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 _result, _dtype, _shape = final_reduction(
                     self.compute, masked_value, masked_value.dtype
                 )
+                if strict_sum and not self.features.has_strict_sum_multirow_reduction():
+                    zero = constant_repr(cast(Any, default))
+                    _result = f"{zero} + ({_result})"
                 result_var = self.cse.generate(
                     self.compute, _result, dtype=_dtype, shape=_shape
                 )
@@ -5593,6 +5626,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dense_size_str = f"[{', '.join(xy_sizes_only)}]"
                     self.body.writeline(
                         f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
+                    )
+                elif strict_sum_loop:
+                    accumulator.shape = tuple(result_shape)
+                    result_size_str = f"[{', '.join(result_shape)}]"
+                    self.body.writeline(
+                        f"{accumulator} = tl.full({result_size_str}, {default}, {acc_type})"
                     )
                 else:
                     self.body.writeline(
@@ -5693,6 +5732,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
+            elif strict_sum_loop:
+                zero = cast(str, default)
+                masked = self.cse.generate(
+                    self.compute,
+                    where_cond(value, zero),
+                    dtype=value.dtype,
+                    shape=value.shape,
+                )
+                chunk_expr, chunk_dtype, chunk_shape = final_reduction(
+                    self.compute, masked, None
+                )
+                chunk = self.cse.generate(
+                    self.compute,
+                    chunk_expr,
+                    dtype=chunk_dtype,
+                    shape=chunk_shape,
+                )
+                self.compute.writeline(f"{accumulator} = {accumulator} + {chunk}")
+                self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -6970,6 +7028,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
+        if self._use_strict_sum():
+            rblock = self.features.strict_sum_rblock()
+            if rblock is None:
+                raise AssertionError("strict sum reduction requires a reduction block")
+            out["strict_sum_rblock"] = rblock
         if (
             config.benchmark_kernel
             or config.profile_bandwidth
@@ -6994,7 +7057,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         block_name = f"{rt.prefix.upper()}BLOCK"
                         if block_name not in sig_arg_names:
                             try:
-                                val = self._get_persistent_RBLOCK(rt.numel)
+                                val = self._get_persistent_reduction_block(rt.numel)
                                 if self.is_native_matmul:
                                     val = max(val, 16)
                                 fixed_blocks[block_name] = val
@@ -7369,6 +7432,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ]
         return math.prod(rblocks) if rblocks else None
 
+    def _get_persistent_reduction_block(self, rnumel) -> int:
+        if self._use_strict_sum():
+            rblock = self.features.strict_sum_rblock()
+            if rblock is None:
+                raise AssertionError("strict sum requires a reduction block")
+            if V.graph.sizevars.statically_known_geq(rblock, rnumel):
+                return rblock
+            raise AssertionError(
+                "persistent strict sum requires its planned reduction block "
+                "to cover the reduction"
+            )
+        return self._get_persistent_RBLOCK(rnumel)
+
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
         try:
@@ -7383,7 +7459,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         # ops.sort only works with persistent reduction, and is not bandwidth
         # bound anyway so taking the hit of non-coalesced loads is okay.
-        if kernel_features.contains_op("sort"):
+        if (
+            kernel_features.contains_op("sort")
+            or kernel_features.has_strict_sum_multirow_reduction()
+        ):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False
         # Cannot use persistent reduction with unknown dynamic rnumel.
@@ -7426,7 +7505,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     numel = self.kexpr(self.rename_indexing(tree.numel))
                     val = f"triton_helpers.constexpr_next_power_of_2(({numel} + RSPLIT - 1) // RSPLIT)"
                 else:
-                    val = self._get_persistent_RBLOCK(tree.numel)
+                    val = self._get_persistent_reduction_block(tree.numel)
                     if self.is_native_matmul:
                         # tl.dot only supports shapes >= 16
                         val = max(val, 16)
@@ -7617,7 +7696,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
         if tree.is_reduction and self.persistent_reduction:
-            max_block = self._get_persistent_RBLOCK(tree.numel)
+            max_block = self._get_persistent_reduction_block(tree.numel)
             # Triton's auto-tuner can map a full hardware warp along the
             # reduction axis.  When RBLOCK < warp_size the excess lanes
             # would execute out-of-bounds global loads.  This results in

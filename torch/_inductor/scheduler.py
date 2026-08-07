@@ -367,6 +367,8 @@ class MixOrderReduction:
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
+        if node1.has_strict_sum() or node2.has_strict_sum():
+            return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
             node2.ancestors & node1.get_operation_names()
@@ -551,6 +553,8 @@ class NestedReduction:
             config.triton.nested_reduction
             and not V.graph.cpp_wrapper
             and _is_gpu_triton_backend(outer_node, grouped_node)
+            and not outer_node.has_strict_sum()
+            and not grouped_node.has_strict_sum()
         )
 
     @classmethod
@@ -1462,6 +1466,16 @@ class BaseSchedulerNode:
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
+
+    @cache_on_self
+    def has_strict_sum(self) -> bool:
+        return any(
+            isinstance(node, SchedulerNode)
+            and isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_sum_rblock is not None
+            for node in self.get_nodes()
+        )
 
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
@@ -3016,6 +3030,8 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
+        if self.has_strict_sum() or other.has_strict_sum():
+            return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
         max_reads = config.triton.mix_order_reduction_max_reads
@@ -3533,6 +3549,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Keep strict sums standalone so their planned R0_BLOCK cannot change.
+        filtered_nodes = [node for node in filtered_nodes if not node.has_strict_sum()]
 
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
         if config.combo_kernels_pointwise_only:
@@ -7969,6 +7988,18 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+
+        if node1.is_template() and node2.has_strict_sum():
+            why("template fusion does not preserve strict sum ordering")
+            return False
+
+        if (
+            (node1.has_strict_sum() or node2.has_strict_sum())
+            and node1.is_reduction()
+            and node2.is_reduction()
+        ):
+            why("reduction fusion does not preserve strict sum ordering")
+            return False
 
         if node1.is_template() and self.get_backend(
             node1.get_device()
