@@ -16,6 +16,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/SparseTensorUtils.h>
 
@@ -357,13 +358,17 @@ Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, Int
   if (!dim.empty()) {
     const auto ndim = static_cast<size_t>(self.dim());
     TORCH_CHECK(dim_list_to_bitset(dim, ndim).count() == ndim,
-      "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
+      "norm on sparse tensors only supports full reductions: 'dim' must either be empty or contain all dimensions of the input");
   }
-  TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
-  TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
+  // Sparse dispatches around the linalg_vector_norm meta, and torch.norm only
+  // reroutes strided CPU/CUDA/XPU inputs to linalg.vector_norm (not MPS), so
+  // apply the linalg dtype policy here to keep every entry point consistent.
+  at::detail::check_linalg_norm_dtype(dtype, self.scalar_type(), "linalg.vector_norm");
   constexpr auto TWO = 2.0;
   auto p_ = p.value_or(TWO);
-  return self.coalesce()._values().norm(p_);
+  auto values = self.coalesce()._values().to(dtype.value_or(self.scalar_type()));
+  auto result = values.norm(p_);
+  return keepdim ? result.view(DimVector(self.dim(), 1)) : result;
 }
 
 // --------------------------------------------------------------------
