@@ -3813,7 +3813,6 @@ class TestSDPACudaOnly(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
             self.assertNotEqual(out1, out2)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
@@ -4158,6 +4157,81 @@ class TestSDPACudaOnly(NNTestCase):
 
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_single_query_tail_mask(self, device):
+        seq_len, num_heads, head_dim = 289, 16, 512
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, seq_len, num_heads, head_dim).transpose(1, 2)
+        key = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        mask = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool).tril()[None, None]
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+
+        self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
+    @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
+    def test_mem_eff_attention_single_query_tail(self, device, kv_len, num_heads, is_causal):
+        # head_dim > 128 gives 32 queries per block, so 289 queries leave a single-query
+        # tail block, which iterates over heads instead of queries: 40 heads reach a
+        # second head block, and the causal case must still bound keys at the tail
+        # row's own diagonal.
+        q_len, head_dim = 289, 512
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, q_len, num_heads, head_dim).transpose(1, 2)
+        key = make_tensor(kv_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(kv_len, head_dim).expand(1, num_heads, -1, -1)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, is_causal=is_causal, scale=1.0)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, is_causal=is_causal, scale=1.0)
+
+        self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
+    def test_mem_eff_attention_dropout_rng_offset_no_wraparound(self, device):
+        # num_queries * num_keys == 2^32, which wraps a 32-bit offset so that head 1
+        # replays head 0's mask. Inputs are identical per head, so a shared mask shows
+        # up as identical outputs.
+        seq_len, num_heads, head_dim = 1 << 16, 2, 64
+        base = torch.randn(1, 1, seq_len, head_dim, device=device, dtype=torch.bfloat16)
+        query, key, value = (base.expand(1, num_heads, -1, -1).contiguous().requires_grad_() for _ in range(3))
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=0.5, scale=1.0)
+
+        self.assertFalse(torch.equal(out[0, 0], out[0, 1]))
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
+    def test_mem_eff_attention_dropout_single_query_tail(self, device):
+        # The tail remap makes rows heads while the RNG offset still treats them as
+        # queries, so head h's tail row would replay head 1's row h - 1. kv_len == 1
+        # makes each output element either zero or v/(1 - p), exposing the mask.
+        q_len, kv_len, num_heads, head_dim = 65, 1, 32, 64
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, num_heads, q_len, head_dim)
+        key = make_tensor(kv_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(kv_len, head_dim).expand(1, num_heads, -1, -1)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=0.5, scale=1.0)
+
+        tail_row = out[0, 1:, q_len - 1, 0]
+        head_one_rows = out[0, 1, : num_heads - 1, 0]
+        self.assertFalse(torch.equal(tail_row, head_one_rows))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_save_on_cpu_unaligned_bias_stride(self, device):

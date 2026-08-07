@@ -42,6 +42,7 @@ from label_utils import (
     gh_remove_label,
     has_required_labels,
     LABEL_ERR_MSG,
+    NOT_USER_FACING_LABEL,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
@@ -692,16 +693,108 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> bool:
+def _unedited_comment_author(
+    pr: GitHubPR, comment_id: int | None
+) -> tuple[str, str | None] | None:
+    """(author_login, author_url) of the triggering comment.
+
+    None when there is no comment or it has been edited, so a caller can never
+    act on an identity someone may have rewritten.
+    """
     if comment_id is None:
-        return False
+        return None
     comment = pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
+        return None
+    return comment.author_login, comment.author_url
+
+
+def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> bool:
+    author = _unedited_comment_author(pr, comment_id)
+    if author is None:
         return False
-    if comment.author_login == "facebook-github-bot":
+    author_login, author_url = author
+    if author_login == "facebook-github-bot":
         return True
     # facebook-github-tools is a GitHub App; identify by its app URL.
-    return comment.author_url == "https://github.com/apps/facebook-github-tools"
+    return author_url == "https://github.com/apps/facebook-github-tools"
+
+
+# Bot identities that auto-merge a co-dev PR once its internal Phabricator diff
+# has landed. `meta-codesync` took this over from `facebook-github-tools`, so
+# both are listed: the older one still appears on long-lived PRs.
+#
+# Matched on login rather than on the App URL that can_skip_internal_checks
+# uses. Only `comments(last: 5)` selects `author { url }` — GH_GET_PR_PREV_COMMENTS
+# and the reviews fragment select `login` alone, so author_url is silently None
+# for any comment older than the prefetched window (see _comment_from_node's
+# `.get("url", None)`). `login` is selected everywhere, and a `[bot]` suffix is
+# unforgeable because GitHub usernames cannot contain brackets.
+#
+# Deliberately NOT reusing can_skip_internal_checks' allowlist. That predicate
+# also waives the "must be landed via Phabricator" guard, so adding an identity
+# to it is a trust decision; this list only decides whether a missing
+# release-notes label is auto-filled.
+CODEV_MERGE_BOT_LOGINS = frozenset(
+    {
+        "facebook-github-bot",
+        "facebook-github-tools[bot]",
+        "meta-codesync[bot]",
+    }
+)
+# Same identities by App URL, for the queries that do select it.
+CODEV_MERGE_BOT_APP_URLS = frozenset(
+    {
+        "https://github.com/apps/facebook-github-tools",
+        "https://github.com/apps/meta-codesync",
+    }
+)
+
+
+def is_bot_initiated_codev_merge(pr: GitHubPR, comment_id: int | None) -> bool:
+    # A co-dev merge is initiated by one of the Meta export bots once the
+    # internal Phabricator diff has landed. Such a PR always carries a
+    # "Differential Revision:" line (get_diff_revision); the local check runs
+    # first so a human merge does not pay a comment fetch just to be rejected.
+    if pr.get_diff_revision() is None:
+        return False
+    author = _unedited_comment_author(pr, comment_id)
+    if author is None:
+        return False
+    author_login, author_url = author
+    return (
+        author_login in CODEV_MERGE_BOT_LOGINS or author_url in CODEV_MERGE_BOT_APP_URLS
+    )
+
+
+def ensure_mergeable_labels(
+    pr: GitHubPR, comment_id: int | None, dry_run: bool
+) -> None:
+    if has_required_labels(pr):
+        return
+    # A co-dev merge runs after the internal diff already landed, so the author
+    # can no longer act on a missing release-notes label. Auto-apply
+    # "topic: not user facing" to unblock (as maintainers do manually today) and
+    # leave a comment so the choice is auditable and can be corrected if the
+    # change is in fact user facing. Human-initiated merges still fail.
+    if is_bot_initiated_codev_merge(pr, comment_id):
+        # Comment BEFORE labeling. If the label went on first and the comment
+        # then failed, the merge would abort with the PR already satisfying
+        # has_required_labels — so the retry would take the early return above
+        # and the promised audit trail would never be written.
+        gh_post_pr_comment(
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            f"Adding the `{NOT_USER_FACING_LABEL}` label automatically: this co-dev "
+            "PR is being merged after its internal diff landed, without a "
+            "release-notes label. If this change is user facing, please replace "
+            "the label with the appropriate `release notes: ...` one.",
+            dry_run,
+        )
+        gh_add_labels(pr.org, pr.project, pr.pr_num, [NOT_USER_FACING_LABEL], dry_run)
+    else:
+        raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
 
 
 def _revlist_to_prs(
@@ -2603,8 +2696,7 @@ def merge(
     # Check for approvals
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
-    if not has_required_labels(pr):
-        raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
+    ensure_mergeable_labels(pr, comment_id, dry_run)
 
     if ignore_current:
         checks = pr.get_checkrun_conclusions()

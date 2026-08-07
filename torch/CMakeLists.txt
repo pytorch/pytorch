@@ -490,9 +490,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
-    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL)
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
-    # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
+    # NCCL communicator registry, getNcclDataType, CUDA stream, embedded NCCL;
     # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
@@ -546,6 +546,14 @@ add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
 install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+
+# _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
+# torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# scikit-build-core won't include it via Python package collection. Install it
+# explicitly via cmake instead.
+if(USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
+endif()
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930

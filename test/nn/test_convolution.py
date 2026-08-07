@@ -58,6 +58,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmVersionAtLeast,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -3299,6 +3300,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()

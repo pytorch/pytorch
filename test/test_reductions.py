@@ -20,14 +20,15 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    parametrize,
+    parametrize, serialTest,
     gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
+    precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -3608,7 +3609,9 @@ class TestReductions(TestCase):
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
     @onlyAccelerator
-    @largeTensorTest("8GB")
+    @serialTest()
+    @largeMPSBufferTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
+    @largeTensorTest(lambda self, device, dtype: 2**31 * dtype.itemsize)
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
     # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
     @dtypesIfXPU(torch.bfloat16)

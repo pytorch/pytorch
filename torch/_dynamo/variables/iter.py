@@ -34,7 +34,7 @@ from ..exc import (
     unimplemented,
 )
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
-from .base import ValueMutationNew, VariableTracker
+from .base import GetSet, Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, pyiter_next
@@ -98,12 +98,18 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if self.value is itertools.chain and name == "from_iterable":
+    def _get_from_iterable(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        # Only itertools.chain has from_iterable; declining (None) falls
+        # through to the generic protocol for other itertools callables.
+        if self.value is itertools.chain:
             return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-        return super().getattro_impl(tx, name)
+        return None
+
+    tp_getset = {
+        "from_iterable": GetSet(_get_from_iterable),
+    }
 
     def call_function(
         self,
@@ -354,6 +360,13 @@ class ChainVariable(IteratorVariable):
     def python_type(self) -> type:
         return itertools.chain
 
+    def _get_from_iterable(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
+
+    tp_getset = {
+        "from_iterable": GetSet(_get_from_iterable),
+    }
+
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         if not self.is_mutable():
             raise AssertionError("ChainVariable must be mutable for next()")
@@ -442,20 +455,22 @@ class RepeatIteratorVariable(IteratorVariable):
         self.remaining -= 1
         return self.item
 
-    def call_method(
+    def repeat_length_hint(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: repeat_len in itertoolsmodule.c (exposed as __length_hint__);
         # raises TypeError for the unbounded form ("len() of unsized object").
-        if name == "__length_hint__":
-            if self.times is None:
-                raise_type_error(tx, "len() of unsized object")
-            return ConstantVariable.create(self.remaining)
-        return super().call_method(tx, name, args, kwargs)
+        # Not a C-level slot, so it lives in tp_methods rather than call_method.
+        if self.times is None:
+            raise_type_error(tx, "len() of unsized object")
+        return ConstantVariable.create(self.remaining)
+
+    tp_methods = {
+        "__length_hint__": Method(repeat_length_hint),
+    }
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         item_repr = tracked_repr(tx, self.item)
@@ -903,20 +918,22 @@ class DictViewIterator(IteratorVariable):
                 args=[VariableTracker.build(tx, a) for a in e.args],
             )
 
-    def call_method(
+    def dict_view_iter_length_hint(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # dictiter_len/setiter_len: __length_hint__ returns the number of
         # not-yet-consumed elements. self._iter is a live Python iterator over
         # the captured items, so its own length hint already reflects any
         # next() calls made during tracing.
-        if name == "__length_hint__":
-            return ConstantVariable.create(operator.length_hint(self._iter))
-        return super().call_method(tx, name, args, kwargs)
+        # Not a C-level slot, so it lives in tp_methods rather than call_method.
+        return ConstantVariable.create(operator.length_hint(self._iter))
+
+    tp_methods = {
+        "__length_hint__": Method(dict_view_iter_length_hint),
+    }
 
     def python_type(self) -> type:
         if self.view_type == "keys":
