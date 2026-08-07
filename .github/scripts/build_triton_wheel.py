@@ -20,7 +20,7 @@ from urllib.request import urlopen
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
-_PTXAS_13_4_46_TRITON_PIN = "ef4ab63bf41fc21e63bf3d77d11d9365837d0254"
+_PTXAS_13_4_46_TRITON_PIN = "bc5ea9bc7494776302f49cf318bdab87de2ef181"
 _PTXAS_13_4_46_PACKAGES = {
     "x86_64": (
         "amd64",

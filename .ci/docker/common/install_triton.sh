@@ -33,7 +33,7 @@ TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 # ptxas 13.4.46 is currently available only from NVIDIA's preview package
 # repository, not the redistributable archive URL used by Triton. Seed the
 # expected cache entry so this draft pin can exercise the preview compiler.
-if [[ "${TRITON_PINNED_COMMIT}" == "ef4ab63bf41fc21e63bf3d77d11d9365837d0254" ]]; then
+if [[ "${TRITON_PINNED_COMMIT}" == "bc5ea9bc7494776302f49cf318bdab87de2ef181" ]]; then
   case "$(uname -m)" in
     x86_64)
       package_arch="amd64"
