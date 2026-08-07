@@ -105,23 +105,27 @@ endif()
 
 if(KINETO_BACKEND STREQUAL "cuda")
 # CuptiActivityProfilerTest
-add_executable(CuptiActivityProfilerTest
-    CuptiActivityProfilerTest.cpp
-    MockActivitySubProfiler.cpp
-    MockCpuActivityBuffer.cpp
-    TestUtils.cpp)
-target_link_libraries(CuptiActivityProfilerTest PRIVATE
-    gtest_main
-    gmock
-    kineto_base kineto_api
-    nlohmann_json::nlohmann_json)
-target_include_directories(CuptiActivityProfilerTest PRIVATE
-    "${LIBKINETO_DIR}"
-    "${LIBKINETO_DIR}/include"
-    "${LIBKINETO_DIR}/src"
-    "${CUDA_SOURCE_DIR}/include"
-    "${CUPTI_INCLUDE_DIR}")
-gtest_discover_tests(CuptiActivityProfilerTest)
+# Not supported on Windows: it writes traces through TestUtils, which uses
+# unix "unistd.h" for temporary files.
+if(NOT WIN32)
+    add_executable(CuptiActivityProfilerTest
+        CuptiActivityProfilerTest.cpp
+        MockActivitySubProfiler.cpp
+        MockCpuActivityBuffer.cpp
+        TestUtils.cpp)
+    target_link_libraries(CuptiActivityProfilerTest PRIVATE
+        gtest_main
+        gmock
+        kineto_base kineto_api
+        nlohmann_json::nlohmann_json)
+    target_include_directories(CuptiActivityProfilerTest PRIVATE
+        "${LIBKINETO_DIR}"
+        "${LIBKINETO_DIR}/include"
+        "${LIBKINETO_DIR}/src"
+        "${CUDA_SOURCE_DIR}/include"
+        "${CUPTI_INCLUDE_DIR}")
+    gtest_discover_tests(CuptiActivityProfilerTest)
+endif()
 # CuptiCallbackApiTest
 add_executable(CuptiCallbackApiTest CuptiCallbackApiTest.cpp)
 target_link_libraries(CuptiCallbackApiTest PRIVATE
