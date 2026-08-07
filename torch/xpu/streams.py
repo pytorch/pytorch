@@ -181,6 +181,8 @@ class Event(torch._C._XpuEventBase):
         The event must have been constructed with ``enable_ipc=True``.
         If not yet recorded, the event is eagerly initialized on the current device.
 
+        .. note:: The event reconstructed with :meth:`from_ipc_handle` cannot be re-exported via :meth:`ipc_handle`.
+
         Returns:
             bytes: an opaque byte string that can be passed to :meth:`from_ipc_handle`
                 in another process to reconstruct this event.

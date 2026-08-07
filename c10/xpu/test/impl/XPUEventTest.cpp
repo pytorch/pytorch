@@ -30,10 +30,15 @@ TEST(XPUEventTest, IPCSupport) {
 
   auto current_device = c10::xpu::current_device();
   c10::xpu::XPUEvent event2(current_device, handle);
-  EXPECT_EQ(event2.event().ext_oneapi_ipc_enabled(), true);
+  EXPECT_EQ(event2.event().ext_oneapi_ipc_enabled(), false);
 
   event1.synchronize();
   event2.synchronize();
+
+  c10::xpu::XPUEvent event3(true);
+  event3.record();
+  EXPECT_THROW(event3.ipc_handle(), c10::Error);
+  EXPECT_THROW(event3.elapsed_time(event2), c10::Error);
 #else
   c10::xpu::XPUEvent event1(false, true);
   EXPECT_THROW(event1.record(), c10::Error);

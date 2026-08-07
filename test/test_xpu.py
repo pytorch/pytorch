@@ -751,16 +751,31 @@ print(torch.xpu.is_initialized())
             e3 = torch.xpu.Event(enable_timing=False, interprocess=False)
             e3.ipc_handle()
 
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e4 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e4.record()
+            e4.ipc_handle()
+
         # Roundtrip: serialize an in-flight event to a handle and reconstruct it.
-        e4 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        e5 = torch.xpu.Event(enable_timing=False, interprocess=True)
         stream = torch.xpu.Stream()
         with stream:
             torch.xpu._sleep(500_000_000)  # spin for about 500 ms at 1 GHz
-        e4.record(stream)
-        handle = e4.ipc_handle()
-        e5 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
-        e4.synchronize()
-        self.assertTrue(e5.query())
+        e5.record(stream)
+        handle = e5.ipc_handle()
+        e6 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        e5.synchronize()
+        self.assertTrue(e6.query())
+
+        # ipc_handle() cannot be called on the reconstructed event;
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            handle = e6.ipc_handle()
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
