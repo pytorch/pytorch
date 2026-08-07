@@ -492,8 +492,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         from torch._inductor.kernel.gemm_epilogue import (
             GemmEpilogueGraph,
+            NormalizedDtypeView,
             NormalizedGetItem,
-            NormalizedNVFP4Pack,
             NormalizedReduction,
             NormalizedSelect,
             NormalizedSplit,
@@ -514,7 +514,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 grouped.var(dim=-1),
                 x.split(4, dim=-1)[0],
                 grouped.select(-1, 0),
-                nvfp4_pack(grouped),
+                x.view(torch.int32),
                 torch.ops.flex_gemm.to_blocked.default(reduced.squeeze(-1)),
             )
 
@@ -561,7 +561,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         expected = {
             torch.ops.aten.split.Tensor: NormalizedSplit,
             torch.ops.aten.select.int: NormalizedSelect,
-            torch.ops.flex_gemm.nvfp4_pack.default: NormalizedNVFP4Pack,
+            torch.ops.aten.view.dtype: NormalizedDtypeView,
             torch.ops.flex_gemm.to_blocked.default: NormalizedToBlocked,
         }
         for target, normalized_type in expected.items():
@@ -3836,29 +3836,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("output_contraction_select_indices:", details)
         self.assertNotIn("output_contraction_select_indices:\n  (none)", details)
 
-    def test_nvfp4_pack_debug_report(self):
-        from torch._inductor.kernel.flex_gemm.debug import (
-            format_flex_gemm_analysis_details,
-        )
-        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
-            analyze_flex_gemm_epilogue,
-            gemm_node,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def body(a, b):
-            return nvfp4_pack(torch.mm(a, b).float().view(4, 8, 2))
-
-        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 16))
-        analysis = analyze_flex_gemm_epilogue(
-            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
-        )
-
-        self.assertIn(
-            "NormalizedNVFP4Pack",
-            format_flex_gemm_analysis_details(analysis),
-        )
-
     def test_to_blocked_debug_report(self):
         from torch._inductor.kernel.flex_gemm.debug import (
             format_flex_gemm_analysis,
@@ -5185,20 +5162,33 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_nvfp4_pack_matches_reference(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        values = torch.tensor(
-            [
-                [-6.0, -5.0],
-                [-3.5, -2.5],
-                [-1.75, -1.25],
-                [-0.75, -0.25],
-                [0.25, 0.75],
-                [1.25, 1.75],
-                [2.5, 3.5],
-                [5.0, 6.0],
-            ],
-            dtype=torch.float32,
+        boundaries = torch.tensor(
+            [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0], dtype=torch.float32
         )
-        inputs = (values, values.view(2, 4, 2).permute(1, 0, 2))
+        lower = torch.nextafter(boundaries, torch.full_like(boundaries, -torch.inf))
+        upper = torch.nextafter(boundaries, torch.full_like(boundaries, torch.inf))
+        smallest = torch.nextafter(torch.tensor(0.0), torch.tensor(1.0))
+        special = torch.tensor(
+            [
+                -torch.finfo(torch.float32).max,
+                -torch.finfo(torch.float32).tiny,
+                -smallest,
+                -0.0,
+                0.0,
+                smallest,
+                torch.finfo(torch.float32).tiny,
+                torch.finfo(torch.float32).max,
+                -torch.inf,
+                torch.inf,
+            ]
+        )
+        random = torch.empty(4096).uniform_(
+            -8.0, 8.0, generator=torch.Generator().manual_seed(0)
+        )
+        values = torch.cat(
+            (-upper, -boundaries, -lower, special, lower, boundaries, upper, random)
+        ).view(-1, 2)
+        inputs = (values, values[:8].view(2, 4, 2).permute(1, 0, 2))
         for input in inputs:
             with self.subTest(stride=input.stride()):
                 expected = pack_uint4(_f32_to_floatx_unpacked(input, 2, 1)).squeeze(-1)
@@ -6078,7 +6068,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         self.assertNotIn("triton_poi_fused", code)
-        FileCheck().check("nvfp4_pack_intrinsic").check(
+        FileCheck().check("inline_asm_elementwise_intrinsic").check(
             "output_layout=FlexGemmOutputStorageLayout.BLOCKED_128X4"
         ).check("FlexGemmOutputContraction(group=2").check("_scaled_mm_v2").run(code)
 
@@ -8915,10 +8905,15 @@ class TestFlexGemmNVFP4Device(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK", "tuned": tuned},
             )
 
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
         expected = nvfp4_pack((a @ b).float().view(m, -1, 2))
         self.assertIs(actual.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+        FileCheck().check("inline_asm_elementwise_intrinsic").check(
+            "torch.uint8"
+        ).check("aten.view.dtype").check("torch.float4_e2m1fn_x2").run(code)
 
 
 instantiate_device_type_tests(TestFlexGemmNVFP4Device, globals(), only_for="cuda")
