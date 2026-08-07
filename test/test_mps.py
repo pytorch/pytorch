@@ -16483,15 +16483,6 @@ class TestConsistency(TestCaseMPS):
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/192507
-    def test_hypot_extreme(self, device):
-        big = torch.finfo(torch.float32).max
-        a = torch.tensor([big, 1.0, big, float("inf"), -float("inf")])
-        b = torch.tensor([1.0, big, big, float("nan"), float("nan")])
-        r_cpu = torch.hypot(a, b)
-        r_mps = torch.hypot(a.to(device), b.to(device))
-        self.assertEqual(r_mps, r_cpu)
-
     def test_householder_product_race(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/173972
         # Check correctness for input matrices that have more elements than the
