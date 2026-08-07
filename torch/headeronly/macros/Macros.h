@@ -554,7 +554,7 @@ __host__ __device__
     abort();                     \
   }
 #else
-#if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
+#if defined(USE_ROCM) && defined(__HIPCC__)
 namespace torch::headeronly::detail {
 // Merge prefix + __func__ + suffix at the macro call site (not via helper
 // params).
@@ -608,9 +608,9 @@ __host__ __device__ inline void rocm_kernel_assert(
 #endif
 }
 } // namespace torch::headeronly::detail
-#endif // defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
+#endif // defined(USE_ROCM) && defined(__HIPCC__)
 
-#if defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
+#if defined(USE_ROCM) && defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT(cond)                             \
   if C10_UNLIKELY (!(cond)) {                                \
     ::torch::headeronly::detail::rocm_kernel_assert(         \
@@ -629,7 +629,7 @@ __host__ __device__ inline void rocm_kernel_assert(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif // defined(USE_ROCM) && (defined(__HIPCC__) || defined(__CUDACC__))
+#endif // defined(USE_ROCM) && defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
