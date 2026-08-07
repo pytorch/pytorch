@@ -15882,7 +15882,11 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               # OneDNN deterministic issue, https://github.com/intel/torch-xpu-ops/issues/3650
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-05, rtol=3e-06), }),
+                   'TestCompositeCompliance', 'test_backward', device_type='xpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16374,8 +16378,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/147057
-               DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float64,)),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -18525,9 +18527,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # TODO: FIXME tolerance is too high
-                        # https://github.com/pytorch/pytorch/issues/165296
-                        DecorateInfo(skipIfRocm, "TestInductorOpInfo", "test_comprehensive", dtypes=(torch.float32,)),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
@@ -19429,6 +19428,9 @@ op_db: list[OpInfo] = [
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
+                 # Exception: Backward is not reentrant, #2359
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='xpu'),
+                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_gradgrad', device_type='xpu'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
@@ -21002,7 +21004,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_inner,
-           ),
+           skips=(
+               # "dot_xpu_mkl" not implemented for 'Long', torch-xpu-ops: #3247
+               DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive",
+                            device_type="xpu", dtypes=(torch.int64,)),
+           )),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -26608,8 +26614,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.float16,)
-            ),
+                device_type='mps', dtypes=(torch.float16,)),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.float16,)

@@ -450,7 +450,7 @@ optimize_ddp_lazy_compile = False
 
 # lambda guarding on object aliasing to improve opportunity for dict tag
 # optimization
-use_lamba_guard_for_object_aliasing = True
+use_lamba_guard_for_object_aliasing = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
@@ -948,9 +948,13 @@ invalidate_compile_context_weakrefs: bool | None = None
 # `config.patch` user override outranks the justknob) so the feature is
 # exercised on both - see `torch/_dynamo/test_case.py` and
 # `torch.testing._internal.common_utils.TestCase.setUp`.
+# The justknob only gates fbcode; the env var is the OSS off-switch, so a user
+# who hits a node-name or fusion-ordering assumption can disable this without
+# patching or pinning.
 canonicalize_output_graph_node_order: bool = Config(
     default=True,
     justknob="pytorch/compiler:canonicalize_output_graph_node_order",
+    env_name_default="TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER",
 )
 
 if TYPE_CHECKING:
