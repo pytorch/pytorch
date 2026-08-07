@@ -2467,7 +2467,12 @@ class TritonKernelOverrides(TritonOverrides):
     def index_expr(cls, expr, dtype):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
-            expr, block_ptr=False, tma_compatibility_checker=None
+            expr,
+            block_ptr=False,
+            tma_compatibility_checker=None,
+            reduction_invariant_indexing=(
+                V.graph.get_current_device_or_throw().type == "cuda"
+            ),
         )
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
@@ -4477,7 +4482,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if not isinstance(expr, sympy.Expr):
             raise AssertionError(f"expected sympy.Expr, got {type(expr)}")
-        indexing = self.indexing(expr, block_ptr=False, tma_compatibility_checker=None)
+        indexing = self.indexing(
+            expr,
+            block_ptr=False,
+            tma_compatibility_checker=None,
+            reduction_invariant_indexing=(
+                V.graph.get_current_device_or_throw().type == "cuda"
+            ),
+        )
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
 
