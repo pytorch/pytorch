@@ -120,6 +120,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
+    namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
         device_index == -1 || device_index == stream.device_index(),
         "Event device index ",
@@ -139,21 +140,19 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (flag == EventFlag::BACKEND_DEFAULT) {
       // Use the profiling tag to record the event to enable timing feature.
       xpu_event =
-          new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
-              xpu_stream.queue()));
+          new sycl::event(syclex::submit_profiling_tag(xpu_stream.queue()));
     } else {
       xpu_event =
           new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
     }
 #else
     if (!xpu_event) {
-      xpu_event = new sycl::event(sycl::ext::oneapi::experimental::make_event(
+      xpu_event = new sycl::event(syclex::make_event(
           c10::xpu::get_device_context(),
-          sycl::ext::oneapi::experimental::enable_profiling{
-              flag == EventFlag::BACKEND_DEFAULT}));
+          syclex::properties{
+              syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
     }
-    sycl::ext::oneapi::experimental::enqueue_signal_event(
-        xpu_stream.queue(), *xpu_event);
+    syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
 #endif
 
     *event = reinterpret_cast<void*>(xpu_event);
