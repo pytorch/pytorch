@@ -1,9 +1,11 @@
 # Owner(s): ["module: c10d"]
 
 import itertools
+import json
 import os
 import random
 import re
+import tempfile
 from contextlib import contextmanager, nullcontext
 from unittest import skip, skipIf, skipUnless
 
@@ -223,6 +225,67 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_alloc_rendezvous_on_current_stream(self) -> None:
+        # Regression test for https://github.com/pytorch/pytorch/issues/181086:
+        # the memset issued by empty() and the memcpys issued by the first
+        # rendezvous() must follow the caller's current stream instead of
+        # implicitly using the default stream.
+        self._init_process()
+
+        # Only the CUDA backend is fixed; NCCL/NVSHMEM still issue these ops
+        # synchronously on the default stream.
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        stream = torch.cuda.Stream()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            with torch.cuda.stream(stream):
+                t = symm_mem.empty(1024, device="cuda")
+                symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+                symm_mem_hdl.barrier()
+            torch.cuda.synchronize()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = os.path.join(tmpdir, "trace.json")
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                events = json.load(f)["traceEvents"]
+
+        # Only GPU-track events carry args.stream. The barrier kernel launched
+        # on the current stream even before the fix, so its trace stream id
+        # identifies the user stream.
+        barrier_events = [
+            ev
+            for ev in events
+            if "barrier" in ev.get("name", "") and "stream" in ev.get("args", {})
+        ]
+        self.assertGreater(len(barrier_events), 0)
+        user_stream = barrier_events[0]["args"]["stream"]
+        # Restrict to the alloc/rendezvous window (everything before the
+        # barrier) so unrelated copies elsewhere in the profile cannot affect
+        # the result.
+        barrier_ts = min(ev["ts"] for ev in barrier_events)
+        mem_events = [
+            ev
+            for ev in events
+            if ev.get("name", "").startswith(("Memset", "Memcpy"))
+            and "stream" in ev.get("args", {})
+            and ev["ts"] < barrier_ts
+        ]
+        # ROCm records no memset/memcpy activities for these ops, most likely
+        # because HIP lowers a small fill and the pointer-array uploads to blit
+        # kernels, so there is nothing to check the stream of there.
+        if not TEST_WITH_ROCM:
+            self.assertGreater(len(mem_events), 0)
+        for ev in mem_events:
+            self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
