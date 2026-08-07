@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import sys
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
@@ -77,8 +76,7 @@ def main() -> None:
             original=None,
             replacement=None,
             description=(
-                f"{err}\n"
-                "Regenerate with: python tools/regenerate_cpython_diffs.py"
+                f"{err}\nRegenerate with: python tools/regenerate_cpython_diffs.py"
             ),
         )
         print(json.dumps(msg._asdict()), flush=True)
