@@ -18,16 +18,18 @@ static PyObject* THXPEvent_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   unsigned char enable_timing = 0;
+  unsigned char interprocess = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr const char* kwlist[] = {"enable_timing", nullptr};
+  constexpr const char* kwlist[] = {"enable_timing", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|b",
+          "|bb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
-          &enable_timing)) {
+          &enable_timing,
+          &interprocess)) {
     return nullptr;
   }
 
@@ -38,7 +40,7 @@ static PyObject* THXPEvent_pynew(
 
   THXPEvent* self = (THXPEvent*)ptr.get();
 
-  new (&self->xpu_event) at::xpu::XPUEvent(enable_timing);
+  new (&self->xpu_event) at::xpu::XPUEvent(enable_timing, interprocess);
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -127,6 +129,63 @@ static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THXPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if SYCL_COMPILER_VERSION >= 20260200
+  auto self = (THXPEvent*)_self;
+  sycl::ext::oneapi::experimental::ipc::handle_data_t handle =
+      self->xpu_event.ipc_handle();
+  return PyBytes_FromStringAndSize(
+      reinterpret_cast<const char*>(handle.data()),
+      static_cast<Py_ssize_t>(handle.size()));
+#else
+  TORCH_CHECK(false, "XPU IPC events require SYCL compiler 2026.2 or later.");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THXPEvent_from_ipc_handle(
+    PyObject* _type,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+#if SYCL_COMPILER_VERSION >= 20260200
+  auto type = (PyTypeObject*)_type;
+
+  static torch::PythonArgParser parser({
+      "from_ipc_handle(Device device, std::string ipc_handle)",
+  });
+  torch::ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  at::Device device = r.device(0);
+  std::string handle_string = r.string(1);
+
+  TORCH_CHECK(
+      device.type() == at::kXPU,
+      "Event can only be created on "
+      "XPU devices, but got device type ",
+      device.type())
+
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    return nullptr;
+  }
+
+  THXPEvent* self = (THXPEvent*)ptr.get();
+
+  const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
+  sycl::ext::oneapi::experimental::ipc::handle_data_t handle(
+      data, data + handle_string.size());
+  new (&self->xpu_event) at::xpu::XPUEvent(device.index(), handle);
+
+  return (PyObject*)ptr.release();
+#else
+  TORCH_CHECK(false, "XPU IPC events require SYCL compiler 2026.2 or later.");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static struct PyGetSetDef THXPEvent_properties[] = {
     {"device", (getter)THXPEvent_get_device, nullptr, nullptr, nullptr},
@@ -141,6 +200,11 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"query", THXPEvent_query, METH_NOARGS, nullptr},
     {(char*)"elapsed_time", THXPEvent_elapsed_time, METH_O, nullptr},
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
+    {(char*)"ipc_handle", THXPEvent_ipc_handle, METH_NOARGS, nullptr},
+    {(char*)"from_ipc_handle",
+     castPyCFunctionWithKeywords(THXPEvent_from_ipc_handle),
+     METH_CLASS | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {nullptr}};
 
 static PyTypeObject THXPEventType = {
