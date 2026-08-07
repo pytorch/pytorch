@@ -7,6 +7,13 @@ on:
         required: true
         type: string
         description: The runner to use.
+      flash_attention_large_memory_build:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Allow a larger FlashAttention compile pool. Only enable this for a
+          reviewed high-memory build runner.
       docker_image:
         required: true
         type: string
@@ -44,7 +51,7 @@ jobs:
         SCCACHE_REGION: us-east-1
         TORCH_CUDA_ARCH_LIST: ${{ inputs.torch_cuda_arch_list }}
         BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
-        RUNNER: ${{ inputs.runner }}
+        FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash_attention_large_memory_build }}
     steps:
       - name: Install system dependencies
         run: |
