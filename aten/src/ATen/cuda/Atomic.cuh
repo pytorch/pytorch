@@ -258,22 +258,6 @@ inline __device__ double atomicAdd(double* address, double val)
         return __double_as_longlong(val + __longlong_as_double(assumed));
       });
 }
-#elif defined(USE_ROCM) || !(defined(__CUDA_ARCH__))
-
-/* Note [hip-clang differences to hcc]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * The upcoming hip-clang compiler for ROCm differs from hcc in a few details.
- * It exports the __HIP__ macro, we can hence differentiate between hcc and
- * hip-clang. In the below, hcc only received support for atomicAdd with double
- * typing after work week 18312. hip-clang had support from the first version.
- * In general, the code-visible differences between hip-clang and hcc will be
- * minimal.
- */
-
-#if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
-// This needs to be defined for the host side pass
-inline __device__ double atomicAdd(double* address, double val) {}
-#endif
 #endif
 
 inline __device__ double gpuAtomicAdd(double* address, double val) {
