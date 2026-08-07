@@ -22,8 +22,9 @@ import warnings
 from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -32,6 +33,15 @@ from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
+
+
+CppStdlib = Literal["libstdc++", "libc++"]
+
+
+@dataclass(frozen=True)
+class _AotiLibcxxPaths:
+    archive_dir: str
+    include_dir: str
 
 
 if config.is_fbcode():
@@ -1308,6 +1318,7 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_relative_path: bool,
+    cpp_stdlib: CppStdlib,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     cflags: list[str] = []
     include_dirs: list[str] = []
@@ -1317,17 +1328,38 @@ def _setup_standard_sys_libs(
         return cflags, include_dirs, passthrough_args, ldflags
 
     if config.is_fbcode():
-        # TODO(T203137008) Can we unify these flags with triton_cc_command?
-        cflags.append("nostdinc")
-        # Note that the order of include paths do matter, as a result
-        # we need to have several branches interleaved here
+        if aot_mode and cpp_stdlib == "libc++":
+            libcxx_paths = _require_aoti_libcxx_paths()
+            cv1 = os.path.join(libcxx_paths.include_dir, "c++", "v1")
+            stdlib_isystem = cv1 if os.path.isdir(cv1) else libcxx_paths.include_dir
+            # Use -nostdinc++ to strip the default C++ stdlib path, then add
+            # our AOTI libc++ headers via -I.  We avoid -stdlib++-isystem
+            # because it creates an isolated include realm that breaks
+            # libc++'s C header wrappers (ctype.h, stddef.h, etc.).
+            passthrough_args.append(" -nostdinc++")
+            for flag in build_paths.aoti_libcxx_config_flags:
+                passthrough_args.append(f" {flag}")
+            cflags.append("fvisibility=hidden")
+            cflags.append("fvisibility-inlines-hidden")
+
+            # Note that the order of include paths do matter.
+            # libc++ headers must come first so C wrappers are found before
+            # the compiler's or glibc's versions.
+            include_dirs.append(stdlib_isystem)
+        else:
+            # Non-AOT fbcode CPU kernels still rely on the existing libstdc++
+            # toolchain path and may link split translation units that call
+            # generated inline helpers across object boundaries.
+            cflags.append("nostdinc")
+
         include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
         include_dirs.append(build_paths.cc_include)
-        include_dirs.append(build_paths.libgcc_include)
-        include_dirs.append(build_paths.libgcc_arch_include)
-        include_dirs.append(build_paths.libgcc_backward_include)
+        if not aot_mode or cpp_stdlib == "libstdc++":
+            include_dirs.append(build_paths.libgcc_include)
+            include_dirs.append(build_paths.libgcc_arch_include)
+            include_dirs.append(build_paths.libgcc_backward_include)
         include_dirs.append(build_paths.glibc_include)
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
@@ -1640,17 +1672,174 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
-def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+def _get_aoti_libcxx_target_arch() -> str:
+    arch = platform.machine().lower()
+    if arch in {"amd64", "x86_64"}:
+        return "x86_64"
+    if arch in {"aarch64", "arm64"}:
+        return "aarch64"
+    return arch
+
+
+def _has_aoti_libcxx_archives(directory: str) -> bool:
+    return os.path.isfile(os.path.join(directory, "libaoti_c++.a")) and os.path.isfile(
+        os.path.join(directory, "libaoti_c++abi.a")
+    )
+
+
+def _has_aoti_libcxx_headers(directory: str) -> bool:
+    header_dir = os.path.join(directory, "c++", "v1")
+    return any(
+        os.path.isfile(os.path.join(candidate, "array"))
+        and os.path.isfile(os.path.join(candidate, "__config"))
+        for candidate in (directory, header_dir)
+    )
+
+
+def _get_aoti_libcxx_candidate_dirs(root: str) -> list[str]:
+    target_arch = _get_aoti_libcxx_target_arch()
+    return [
+        os.path.join(root, target_arch),
+        os.path.join(root, "lib", target_arch),
+        root,
+        os.path.join(root, "lib"),
+    ]
+
+
+def _get_aoti_libcxx_archive_dir() -> str | None:
+    """Find the AOTI private libc++ fat archives.
+
+    In the packaged lowering toolchain: archives are at <pkg_root>/lib/<arch>/
+    Override: set AOTI_LIBCXX_LIB env var to the directory containing
+    libaoti_c++.a and libaoti_c++abi.a, or to the parent lib directory.
     """
-    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    aoti_libcxx = os.environ.get("AOTI_LIBCXX_LIB")
+    if aoti_libcxx and os.path.isdir(aoti_libcxx):
+        for candidate in _get_aoti_libcxx_candidate_dirs(aoti_libcxx):
+            if _has_aoti_libcxx_archives(candidate):
+                return candidate
+
+    # Fall back to the packaged lowering toolchain layout
+    pkg_path = os.environ.get("LOWER_PKG_PATH")
+    if pkg_path:
+        pkg_root = os.path.dirname(pkg_path)
+        for candidate in _get_aoti_libcxx_candidate_dirs(pkg_root):
+            if _has_aoti_libcxx_archives(candidate):
+                return candidate
+
+    return None
+
+
+def _get_aoti_libcxx_include_dir(archive_dir: str | None = None) -> str | None:
+    """Find AOTI private libc++ headers directory.
+
+    Override: AOTI_LIBCXX_INCLUDE env var.
+    Convention: <archive_dir>/../include/ alongside archives.
+    """
+    d = os.environ.get("AOTI_LIBCXX_INCLUDE")
+    if d and os.path.isdir(d):
+        for candidate in (d, os.path.join(d, "include")):
+            if _has_aoti_libcxx_headers(candidate):
+                return candidate
+    archive_dir = archive_dir or _get_aoti_libcxx_archive_dir()
+    if archive_dir:
+        parent = os.path.dirname(archive_dir)
+        for candidate in (
+            os.path.join(parent, "include"),
+            os.path.join(os.path.dirname(parent), "include"),
+        ):
+            if _has_aoti_libcxx_headers(candidate):
+                return candidate
+    return None
+
+
+def _require_aoti_libcxx_paths() -> _AotiLibcxxPaths:
+    archive_dir = _get_aoti_libcxx_archive_dir()
+    if not archive_dir:
+        raise RuntimeError(
+            "AOTI private libc++ archives not found. Set AOTI_LIBCXX_LIB "
+            "to the directory containing libaoti_c++.a and "
+            "libaoti_c++abi.a, or run with the packaged lowering toolchain."
+        )
+
+    include_dir = _get_aoti_libcxx_include_dir(archive_dir)
+    if not include_dir:
+        raise RuntimeError(
+            f"AOTI libc++ archives found at {archive_dir} but headers "
+            "are missing. The packaged toolchain may be incomplete."
+        )
+    return _AotiLibcxxPaths(archive_dir, include_dir)
+
+
+def _rewrite_uploaded_libcxx_include_arg(
+    arg: str, old_include_dir: str, new_include_dir: str
+) -> str:
+    for prefix in ("-I", "-isystem"):
+        old_arg = f"{prefix}{old_include_dir}"
+        if arg == old_arg:
+            return f"{prefix}{new_include_dir}"
+        old_arg_prefix = old_arg + os.sep
+        if arg.startswith(old_arg_prefix):
+            return f"{prefix}{new_include_dir}{arg[len(old_arg) :]}"
+    return arg
+
+
+def _stage_aoti_libcxx_files(command: list[str], tmp_dir: str) -> list[str]:
+    # Staged paths must be relative to tmp_dir: the build runs with tmp_dir as
+    # its working directory, and remote execution uploads only tmp_dir's
+    # contents, so absolute host paths do not resolve on the worker.
+    archive_dir = _get_aoti_libcxx_archive_dir()
+    if archive_dir:
+        old_library_arg = f"-L{archive_dir}"
+        if old_library_arg in command:
+            for archive in ("libaoti_c++.a", "libaoti_c++abi.a"):
+                shutil.copy(os.path.join(archive_dir, archive), tmp_dir)
+            command = ["-L." if arg == old_library_arg else arg for arg in command]
+
+    include_dir = _get_aoti_libcxx_include_dir(archive_dir)
+    if not include_dir:
+        return command
+
+    staged_include_name = "aoti_libcxx_include"
+    rewritten = [
+        _rewrite_uploaded_libcxx_include_arg(arg, include_dir, staged_include_name)
+        for arg in command
+    ]
+    if rewritten != command:
+        shutil.copytree(
+            include_dir,
+            os.path.join(tmp_dir, staged_include_name),
+            dirs_exist_ok=True,
+        )
+    return rewritten
+
+
+def _get_cpp_stdlib_args(
+    aot_mode: bool, cpp_stdlib: CppStdlib
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    For fbcode AOTI, select either the legacy dynamic libstdc++ dependency or
+    the statically linked private __aoti-namespace libc++.
     """
     lib_dir_paths: list[str] = []
     libs: list[str] = []
-    if config.is_fbcode():
+    passthrough_args: list[str] = []
+    if config.is_fbcode() and aot_mode and cpp_stdlib == "libc++":
+        libcxx_paths = _require_aoti_libcxx_paths()
+        lib_dir_paths = [libcxx_paths.archive_dir]
+        passthrough_args = [
+            " -nostdlib++",
+            " -Wl,-Bstatic",
+            " -laoti_c++",
+            " -laoti_c++abi",
+            " -Wl,-Bdynamic",
+            " -Wl,--exclude-libs,ALL",
+        ]
+    elif config.is_fbcode():
         lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
-    return lib_dir_paths, libs
+    return lib_dir_paths, libs, passthrough_args
 
 
 def get_mmap_self_macro(
@@ -1686,6 +1875,7 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
     use_mmap_weights_external: bool,
+    cpp_stdlib: CppStdlib,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of torch related build options.
@@ -1712,7 +1902,7 @@ def get_cpp_torch_options(
         sys_libs_include_dirs,
         sys_libs_passthrough_args,
         sys_libs_ldflags,
-    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
+    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path, cpp_stdlib)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
@@ -1799,6 +1989,7 @@ class CppTorchOptions(CppOptions):
         min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
+        cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1829,6 +2020,7 @@ class CppTorchOptions(CppOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             use_mmap_weights_external=use_mmap_weights_external,
+            cpp_stdlib=cpp_stdlib,
         )
 
         _append_list(self._definitions, torch_definitions)
@@ -2086,6 +2278,7 @@ def get_cpp_torch_device_options(
     device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
+    cpp_stdlib: CppStdlib = "libstdc++",
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of device related build options.
@@ -2183,11 +2376,15 @@ def get_cpp_torch_device_options(
 
         if device_type == "cpu":
             (
-                stdcxx_lib_dir_paths,
-                stdcxx_libs,
-            ) = _get_libstdcxx_args()
-            libraries_dirs += stdcxx_lib_dir_paths
-            libraries += stdcxx_libs
+                libcxx_lib_dir_paths,
+                libcxx_libs,
+                libcxx_passthrough,
+            ) = _get_cpp_stdlib_args(aot_mode, cpp_stdlib)
+            libraries_dirs += libcxx_lib_dir_paths
+            libraries += libcxx_libs
+            if not compile_only:
+                # Only add link args, when compile_only is false.
+                passthrough_args += libcxx_passthrough
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
@@ -2226,7 +2423,18 @@ class CppTorchDeviceOptions(CppTorchOptions):
         precompiling: bool = False,
         preprocessing: bool = False,
         compiler: str = "",
+        cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
+        # The private libc++ is only wired up for CPU: the archives are linked
+        # in get_cpp_torch_device_options under device_type == "cpu". Reject the
+        # combination outright rather than let the inherited header setup strip
+        # the default stdlib for one that never gets linked.
+        if cpp_stdlib == "libc++" and device_type != "cpu":
+            raise RuntimeError(
+                "cpp_stdlib='libc++' is only supported with device_type='cpu', "
+                f"got device_type='{device_type}'"
+            )
+
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
@@ -2240,6 +2448,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             precompiling=precompiling,
             preprocessing=preprocessing,
             compiler=compiler,
+            cpp_stdlib=cpp_stdlib,
         )
 
         device_definitions: list[str] = []
@@ -2262,6 +2471,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             device_type=device_type,
             aot_mode=aot_mode,
             compile_only=compile_only,
+            cpp_stdlib=cpp_stdlib,
         )
         _append_list(self._definitions, device_definitions)
         _append_list(self._include_dirs, device_include_dirs)
@@ -2616,6 +2826,8 @@ class CppBuilder:
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
 
+                    command = _stage_aoti_libcxx_files(command, tmp_dir)
+
                     # Copy precompiled header (.h and .gch/.pch) into the
                     # build directory and rewrite the -include flag so the
                     # compiler can find it.
@@ -2643,7 +2855,6 @@ class CppBuilder:
                         pch_header and os.path.isfile(pch_header)
                     ):
                         command[1:1] = ["-isysroot", "."]
-
                     # Run the build, raising RuntimeError on failure instead of
                     # SkipFrame so compilation errors propagate rather than
                     # silently falling back to eager execution.
