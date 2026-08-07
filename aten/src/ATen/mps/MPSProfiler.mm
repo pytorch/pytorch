@@ -42,7 +42,7 @@ std::string BaseInfo::buildTensorString(const Tensor& tensor, bool includeBuffer
       tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ':' << buffer.retainCount << ')';
     }
     tensorStr << ':' << tensor.scalar_type() << tensor.sizes();
-    return tensorStr.str();
+    return std::move(tensorStr).str();
   } else {
     return "undefined";
   }
@@ -812,10 +812,28 @@ void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
 }
 
 void MPSProfiler::stopCapture(MPSStream* stream) {
-  if (stream) {
-    stream->synchronize(SyncType::COMMIT);
+  // Metal only requires command buffers to be committed (not completed)
+  // before stopCapture, but stopping while work is still in flight
+  // intermittently segfaults in capture teardown on some macOS versions
+  // (suspected Metal capture race, see #191362). Defensively drain first.
+  // A null stream means the capture was started on the whole device (see
+  // startCapture), so drain every stream created so far.
+  // The drain can surface a device-side error from captured kernels
+  // (checkLastError); always close the capture before propagating it.
+  std::exception_ptr drain_error;
+  try {
+    if (stream) {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    } else {
+      synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
+    }
+  } catch (...) {
+    drain_error = std::current_exception();
   }
   [captureManager stopCapture];
+  if (drain_error) {
+    std::rethrow_exception(drain_error);
+  }
 }
 
 } // namespace Profiler
