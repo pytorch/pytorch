@@ -101,6 +101,19 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
+  void createEvent(sycl::event** xpu_event, const EventFlag flag) const {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    *xpu_event = new sycl::event(syclex::make_event(
+        c10::xpu::get_device_context(),
+        syclex::properties{
+            syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(*xpu_event));
+    }
+  }
+
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {
     if (!event)
@@ -138,10 +151,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
                    .has(sycl::aspect::ext_oneapi_per_event_profiling);
     if (reusable) {
       if (!xpu_event) {
-        xpu_event = new sycl::event(syclex::make_event(
-            c10::xpu::get_device_context(),
-            syclex::properties{
-                syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+        createEvent(&xpu_event, flag);
       }
       syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
     }
