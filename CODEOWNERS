@@ -273,8 +273,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # Candidate patterns start commented so this taxonomy cannot change ownership or
 # notification behavior. The checker treats commented patterns and active patterns
-# with owners identically, allowing review surfaces to be activated incrementally.
-# Active rules must still be ordered broad-to-specific for GitHub's last-match semantics.
+# with valid owners identically, allowing review surfaces to be activated incrementally.
+# Sections are ordered so active child rules override broader active defaults.
 #
 # Quick methodology:
 # - start from every tracked file in the repository
@@ -288,16 +288,17 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # Consumer contract:
 # - GitHub evaluates active CODEOWNERS in file order and uses the last match
-# - this grouped taxonomy is source data, not active CODEOWNERS rule order
+# - taxonomy sections keep each subject collocated while preserving broad-to-specific order
+# - the hierarchy below is a semantic index, not the required section order
 # - auto-request-review and merge_rules.yaml remain separate routing and merge systems
 #
 # Validation:
 # - run `python scripts/codeowners/check_taxonomy.py`
 # - every tracked path must resolve to exactly one effective review surface
 # - commented and active patterns count equally toward taxonomy coverage;
-#   active patterns without owners fail validation
-# - intentional parent/child overrides are allowed; duplicate, stale, and
-#   ineffective patterns fail validation
+#   active patterns require syntactically valid owners
+# - intentional parent/child overrides are allowed; source-order conflicts,
+#   duplicate, stale, and ineffective patterns fail validation
 #
 # Known manual review points:
 # - compiler_dynamo and compiler_autograd include large expectation/skip datasets.
@@ -324,52 +325,19 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # - Repository-wide material: ai_agent_tooling, docs_general
 #
 # Draft grouped review-surface definitions:
-# Patterns are collated by subject for review. Within this taxonomy, a
-# more-specific path overrides a broader parent path. Before activation,
-# generated CODEOWNERS rules must place broader defaults before overrides.
+# Patterns are collated by subject for review. Sections are ordered so broad
+# defaults precede narrower overrides under GitHub's last-match semantics.
 #
-# [compiler_dynamo]
-# /test/distributed/test_dynamo_distributed.py
-# /test/dynamo/
-# /test/dynamo_expected_failures/
-# /test/dynamo_skips/
-# /test/export/test_dynamic_shapes.py
-# /test/onnx/exporter/test_dynamic_shapes.py
-# /torch/_dynamo/
-# /torch/csrc/dynamo/
+# [core_aten_native_ops]
+# /aten/
 #
-# [compiler_inductor]
-# /test/distributed/test_inductor_collectives.py
-# /test/distributed/test_inductor_compile_collectives.py
-# /test/inductor/
-# /test/inductor_expected_failures/
-# /test/inductor_skips/
-# /test/test_precompile.py
-# /test/test_triton_utils.py
-# /torch/_higher_order_ops/flex_attention.py
-# /torch/_inductor/
-# /torch/_precompile.py
-# /torch/_precompile_driver.py
-# /torch/csrc/inductor/
-# /torch/utils/_indented_buffer.py
-#
-# [compiler_export_fx]
-# /test/export/
-# /test/fx/
-# /test/higher_order_ops/
-# /test/onnx/exporter/test_exportable_module.py
-# /test/onnx/test_fx_type_promotion.py
-# /test/package/package_bc/test_fx_module.pt
-# /test/test_dynamic_spec_make_fx.py
-# /test/test_fx.py
-# /test/test_fx_experimental.py
-# /test/test_fx_graph_print.py
-# /test/test_fx_passes.py
-# /test/test_fx_reinplace_pass.py
-# /torch/_export/
-# /torch/_higher_order_ops/
-# /torch/export/
-# /torch/fx/
+# [functorch]
+# /aten/src/ATen/functorch/
+# /functorch/
+# /test/functorch/
+# /torch/_functorch/
+# /torch/csrc/functorch/
+# /torch/func/
 #
 # [compiler_autograd]
 # /test/compiled_autograd_skips/
@@ -393,17 +361,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_functorch/compile_utils.py
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
-#
-# [functorch]
-# /aten/src/ATen/functorch/
-# /functorch/
-# /test/functorch/
-# /torch/_functorch/
-# /torch/csrc/functorch/
-# /torch/func/
-#
-# [core_aten_native_ops]
-# /aten/
 #
 # [core_aten_linalg]
 # /aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -1091,6 +1048,34 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/typing/
 # /test/xpu/test_transformers.py
 #
+# [cpp_runtime_tests]
+# /test/cpp/
+# /test/cpp_api_parity/
+# /test/test_cpp_api_parity.py
+#
+# [jit_torchscript]
+# /test/cpp/jit/test_jit_logging_levels.cpp
+# /test/cpp/jit/test_jit_type.cpp
+# /test/cpp/jit/test_save_load.cpp
+# /test/jit/
+# /test/jit_hooks/
+# /test/test_jit.py
+# /test/test_jit_autocast.py
+# /test/test_jit_disabled.py
+# /test/test_jit_fuser.py
+# /test/test_jit_fuser_legacy.py
+# /test/test_jit_fuser_te.py
+# /test/test_jit_legacy.py
+# /test/test_jit_llga_fuser.py
+# /test/test_jit_profiling.py
+# /test/test_jit_simple.py
+# /test/test_jit_string.py
+# /test/test_jiterator.py
+# /test/test_tensorexpr.py
+# /test/test_tensorexpr_pybind.py
+# /torch/csrc/jit/
+# /torch/jit/
+#
 # [cpp_api_custom_ops]
 # /aten/src/ATen/native/native_functions.yaml
 # /aten/src/ATen/native/prim_native_functions.cpp
@@ -1126,58 +1111,9 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/utils/_cpp_extension_versioner.py
 # /torch/utils/cpp_extension.py
 #
-# [cpp_runtime_tests]
-# /test/cpp/
-# /test/cpp_api_parity/
-# /test/test_cpp_api_parity.py
-#
-# [nativert]
-# /test/cpp/nativert/
-# /test/export/test_nativert.py
-# /torch/csrc/api/include/torch/nativert/
-# /torch/nativert/
-#
-# [distributed]
-# /benchmarks/distributed/
-# /test/distributed/
-# /torch/csrc/distributed/
-# /torch/distributed/
-#
-# [jit_torchscript]
-# /test/cpp/jit/test_jit_logging_levels.cpp
-# /test/cpp/jit/test_jit_type.cpp
-# /test/cpp/jit/test_save_load.cpp
-# /test/jit/
-# /test/jit_hooks/
-# /test/test_jit.py
-# /test/test_jit_autocast.py
-# /test/test_jit_disabled.py
-# /test/test_jit_fuser.py
-# /test/test_jit_fuser_legacy.py
-# /test/test_jit_fuser_te.py
-# /test/test_jit_legacy.py
-# /test/test_jit_llga_fuser.py
-# /test/test_jit_profiling.py
-# /test/test_jit_simple.py
-# /test/test_jit_string.py
-# /test/test_jiterator.py
-# /test/test_tensorexpr.py
-# /test/test_tensorexpr_pybind.py
-# /torch/csrc/jit/
-# /torch/jit/
-#
 # [onnx_export]
 # /test/onnx/
 # /torch/onnx/
-#
-# [serialization_package]
-# /benchmarks/serialization/
-# /caffe2/serialize/
-# /test/package/
-# /test/test_package.py
-# /test/test_serialization.py
-# /torch/package/
-# /torch/serialization.py
 #
 # [quantization]
 # /aten/src/ATen/native/quantized/
@@ -1263,6 +1199,58 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /ufunc_defs.bzl
 # /version.txt
 #
+# [third_party_core_build_deps]
+# /.gitmodules
+# /requirements-build.txt
+# /requirements.txt
+# /third_party/
+#
+# [third_party_backend_deps]
+# /third_party/NNPACK
+# /third_party/VulkanMemoryAllocator
+# /third_party/XNNPACK
+# /third_party/aiter
+# /third_party/composable_kernel
+# /third_party/cpuinfo
+# /third_party/cudnn_frontend
+# /third_party/cutlass
+# /third_party/fbgemm
+# /third_party/flash-attention
+# /third_party/gemmlowp/
+# /third_party/ideep
+# /third_party/kleidiai
+# /third_party/pthreadpool
+# /third_party/xnnpack.buck.bzl
+# /third_party/xnnpack_buck_shim.bzl
+# /third_party/xnnpack_src_defs.bzl
+# /third_party/xnnpack_wrapper_defs.bzl
+# /third_party/xpu.txt
+#
+# [third_party_serialization_schema]
+# /third_party/flatbuffers
+# /third_party/miniz-3.0.2/
+# /third_party/onnx
+# /third_party/protobuf
+#
+# [benchmark_compiler]
+# /benchmarks/
+#
+# [distributed]
+# /benchmarks/distributed/
+# /test/distributed/
+# /torch/csrc/distributed/
+# /torch/distributed/
+#
+# [infra_developer_tools]
+# /.devcontainer/
+# /.vscode/
+# /benchmarks/README.md
+# /benchmarks/compare.sh
+# /benchmarks/upload_scribe.py
+# /binaries/
+# /scripts/
+# /tools/
+#
 # [infra_linting]
 # /.bc-linter.yml
 # /.clang-format
@@ -1291,16 +1279,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /tools/autograd/
 # /torchgen/
 #
-# [infra_developer_tools]
-# /.devcontainer/
-# /.vscode/
-# /benchmarks/README.md
-# /benchmarks/compare.sh
-# /benchmarks/upload_scribe.py
-# /binaries/
-# /scripts/
-# /tools/
-#
 # [infra_test]
 # /test/benchmark_utils/
 # /test/scripts/
@@ -1316,42 +1294,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_logging/
 # /torch/testing/
 # /torch/utils/benchmark/
-#
-# [third_party_backend_deps]
-# /third_party/NNPACK
-# /third_party/VulkanMemoryAllocator
-# /third_party/XNNPACK
-# /third_party/aiter
-# /third_party/composable_kernel
-# /third_party/cpuinfo
-# /third_party/cudnn_frontend
-# /third_party/cutlass
-# /third_party/fbgemm
-# /third_party/flash-attention
-# /third_party/gemmlowp/
-# /third_party/ideep
-# /third_party/kleidiai
-# /third_party/pthreadpool
-# /third_party/xnnpack.buck.bzl
-# /third_party/xnnpack_buck_shim.bzl
-# /third_party/xnnpack_src_defs.bzl
-# /third_party/xnnpack_wrapper_defs.bzl
-# /third_party/xpu.txt
-#
-# [third_party_core_build_deps]
-# /.gitmodules
-# /requirements-build.txt
-# /requirements.txt
-# /third_party/
-#
-# [third_party_serialization_schema]
-# /third_party/flatbuffers
-# /third_party/miniz-3.0.2/
-# /third_party/onnx
-# /third_party/protobuf
-#
-# [benchmark_compiler]
-# /benchmarks/
 #
 # [benchmark_operator_runtime]
 # /benchmarks/framework_overhead_benchmark/
@@ -1377,6 +1319,64 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [caffe2]
 # /caffe2/
+#
+# [serialization_package]
+# /benchmarks/serialization/
+# /caffe2/serialize/
+# /test/package/
+# /test/test_package.py
+# /test/test_serialization.py
+# /torch/package/
+# /torch/serialization.py
+#
+# [compiler_export_fx]
+# /test/export/
+# /test/fx/
+# /test/higher_order_ops/
+# /test/onnx/exporter/test_exportable_module.py
+# /test/onnx/test_fx_type_promotion.py
+# /test/package/package_bc/test_fx_module.pt
+# /test/test_dynamic_spec_make_fx.py
+# /test/test_fx.py
+# /test/test_fx_experimental.py
+# /test/test_fx_graph_print.py
+# /test/test_fx_passes.py
+# /test/test_fx_reinplace_pass.py
+# /torch/_export/
+# /torch/_higher_order_ops/
+# /torch/export/
+# /torch/fx/
+#
+# [compiler_dynamo]
+# /test/distributed/test_dynamo_distributed.py
+# /test/dynamo/
+# /test/dynamo_expected_failures/
+# /test/dynamo_skips/
+# /test/export/test_dynamic_shapes.py
+# /test/onnx/exporter/test_dynamic_shapes.py
+# /torch/_dynamo/
+# /torch/csrc/dynamo/
+#
+# [compiler_inductor]
+# /test/distributed/test_inductor_collectives.py
+# /test/distributed/test_inductor_compile_collectives.py
+# /test/inductor/
+# /test/inductor_expected_failures/
+# /test/inductor_skips/
+# /test/test_precompile.py
+# /test/test_triton_utils.py
+# /torch/_higher_order_ops/flex_attention.py
+# /torch/_inductor/
+# /torch/_precompile.py
+# /torch/_precompile_driver.py
+# /torch/csrc/inductor/
+# /torch/utils/_indented_buffer.py
+#
+# [nativert]
+# /test/cpp/nativert/
+# /test/export/test_nativert.py
+# /torch/csrc/api/include/torch/nativert/
+# /torch/nativert/
 #
 # [ai_agent_tooling]
 # /.claude/
