@@ -178,9 +178,9 @@ For any sections not listed here, please refer to the CUDA semantics doc: :ref:`
 Enabling kernel asserts
 -----------------------
 
-Kernel asserts are **enabled by default** on ROCm builds. Device-side failures
-use HIP ``__assert_fail`` (OCKL printf), which adds compile-time and runtime
-overhead even when asserts never fire.
+Kernel asserts are **enabled by default** on ROCm builds. When enabled,
+device-side assert failures are reported through the OCKL device printf path,
+which adds compile-time and runtime overhead even when asserts never fire.
 
 To disable them when building from source, set the environment variable or
 CMake option::
