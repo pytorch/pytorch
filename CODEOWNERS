@@ -269,44 +269,16 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /torch/_vendor/quack/ @slayton58 @drisspg
 
 # -----------------------------------------------------------------------------
-# Draft CODEOWNERS taxonomy: k100 disjoint review-surface cut
+# Draft CODEOWNERS taxonomy
 #
-# Candidate patterns start commented so this taxonomy cannot change ownership or
-# notification behavior. The checker treats commented patterns and active patterns
-# with valid owners identically, allowing review surfaces to be activated incrementally.
-# Sections are ordered so active child rules override broader active defaults.
+# Each tracked path resolves to one review surface. Rules stay commented until
+# owners are assigned; active rules must name valid CODEOWNERS owners.
 #
-# Quick methodology:
-# - start from every tracked file in the repository
-# - build a first-pass leaf taxonomy from path structure, co-change history,
-#   authors, Approved-by trailers, existing CODEOWNERS, and merge_rules.yaml
-# - require every file to have exactly one primary leaf region
-# - retain the detailed leaf taxonomy as generation evidence, then fuse it into
-#   review surfaces based on contributor, reviewer, and module locality
-# - collate each subject into one section and model narrower paths as child
-#   overrides; flat documentation remains one surface until finer ownership is needed
 #
-# Consumer contract:
-# - GitHub evaluates active CODEOWNERS in file order and uses the last match
-# - taxonomy sections keep each subject collocated while preserving broad-to-specific order
-# - the hierarchy below is a semantic index, not the required section order
-# - auto-request-review and merge_rules.yaml remain separate routing and merge systems
+# Run `python scripts/codeowners/check_taxonomy.py` to enforce full coverage,
+# declared sections, valid owners, source order, and no duplicate, stale, or
+# ineffective patterns. This was also added to the fast lintrunner set.
 #
-# Validation:
-# - run `python scripts/codeowners/check_taxonomy.py`
-# - every tracked path must resolve to exactly one effective review surface
-# - commented and active patterns count equally toward taxonomy coverage;
-#   active patterns require syntactically valid owners
-# - intentional parent/child overrides are allowed; source-order conflicts,
-#   duplicate, stale, and ineffective patterns fail validation
-#
-# Known manual review points:
-# - compiler_dynamo and compiler_autograd include large expectation/skip datasets.
-# - core_aten_native_ops remains broad after linalg and optimizer subcuts.
-# - backend_vulkan remains because USE_VULKAN build support and tests exist.
-# - python_core_api is a facade surface and may need implementation routing.
-# - infra_developer_tools may need another split before assigning owners.
-# - docs_general intentionally starts at /docs/ rather than enumerating topics.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
@@ -325,8 +297,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # - Repository-wide material: ai_agent_tooling, docs_general
 #
 # Draft grouped review-surface definitions:
-# Patterns are collated by subject for review. Sections are ordered so broad
-# defaults precede narrower overrides under GitHub's last-match semantics.
 #
 # [core_aten_native_ops]
 # /aten/
