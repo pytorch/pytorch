@@ -677,6 +677,28 @@ inline torch::stable::Tensor view(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+/// Stable version of the view.dtype op.
+///
+/// Returns a view of the input tensor with the same data reinterpreted as the
+/// given dtype. This is a different overload than the shape-based view op.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @param dtype The dtype to reinterpret the data as.
+/// @return A view of the input tensor with the specified dtype.
+inline torch::stable::Tensor view(
+    const torch::stable::Tensor& self,
+    torch::headeronly::ScalarType dtype) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dtype)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::view", "dtype", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 /// Creates a tensor from an existing data blob.
 ///
 /// Creates a tensor that uses the provided data pointer as its storage.
@@ -1133,6 +1155,112 @@ inline torch::stable::Tensor full(
       &ret0));
 
   return torch::stable::Tensor(ret0);
+}
+
+/// Stable version of the bitwise_and.Tensor op.
+///
+/// Computes the element-wise bitwise AND of self and other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The first input tensor.
+/// @param other The second input tensor.
+/// @return The result of the bitwise AND.
+inline torch::stable::Tensor bitwise_and(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_and", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_or.Tensor op.
+///
+/// Computes the element-wise bitwise OR of self and other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The first input tensor.
+/// @param other The second input tensor.
+/// @return The result of the bitwise OR.
+inline torch::stable::Tensor bitwise_or(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_or", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_left_shift.Tensor op.
+///
+/// Computes the element-wise left bitwise shift of self by other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor to shift.
+/// @param other The tensor of shift amounts.
+/// @return The result of the left bitwise shift.
+inline torch::stable::Tensor bitwise_left_shift(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_left_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_right_shift.Tensor op.
+///
+/// Computes the element-wise right bitwise shift of self by other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor to shift.
+/// @param other The tensor of shift amounts.
+/// @return The result of the right bitwise shift.
+inline torch::stable::Tensor bitwise_right_shift(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_right_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the permute op.
+///
+/// Returns a view of the input tensor with its dimensions rearranged according
+/// to dims. The returned tensor shares the same underlying data with the input.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @param dims The desired ordering of dimensions.
+/// @return A permuted view of the input tensor.
+inline torch::stable::Tensor permute(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::permute", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0

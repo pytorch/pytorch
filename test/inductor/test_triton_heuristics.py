@@ -1658,6 +1658,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
+            device_props=types.SimpleNamespace(type="cuda"),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,
