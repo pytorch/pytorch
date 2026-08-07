@@ -4618,7 +4618,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "single physical local reduction"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
-
     def test_quant_scale_fake_strides_match_eager(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
