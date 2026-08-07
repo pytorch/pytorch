@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <fmt/format.h>
+#include <string_view>
 
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
@@ -52,9 +53,11 @@ static AdaptiveAvgPool2DParams adaptive_avg_pool2d_params(const Tensor& input, c
 }
 
 static void adaptive_avg_pool2d_metal(const Tensor& input, Tensor& output, bool backward) {
+  using namespace std::string_view_literals;
+
   auto stream = getCurrentMPSStream();
-  const auto kernel =
-      fmt::format("adaptive_avg_pool2d_{}_{}", backward ? "backward" : "forward", scalarToMetalTypeString(input));
+  const auto direction = backward ? "backward"sv : "forward"sv;
+  const auto kernel = fmt::format("adaptive_avg_pool2d_{}_{}", direction, scalarToMetalTypeString(input));
   const auto params = backward ? adaptive_avg_pool2d_params(output, input) : adaptive_avg_pool2d_params(input, output);
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc(kernel);
@@ -128,9 +131,10 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  const bool regular_downsample = isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
-  const bool regular_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
-  if (!regular_downsample && !regular_upsample) {
+  const bool divisible_downsample =
+      isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
+  const bool divisible_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
+  if (!divisible_downsample && !divisible_upsample) {
     mps::adaptive_avg_pool2d_metal(input, output, false);
     return output;
   }
