@@ -606,6 +606,9 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     def backend_str(cls) -> str:
         return "nccl-lazy"
 
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        self.skipTest("nccl-lazy does not support communicator shrink")
+
 
 def _live_env(name: str) -> str | None:
     # os.environ is a snapshot taken at interpreter startup and does NOT observe
