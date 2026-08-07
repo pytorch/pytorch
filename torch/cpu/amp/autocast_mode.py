@@ -15,9 +15,11 @@ __all__ = ["autocast"]
     category=FutureWarning,
 )
 class autocast(torch.amp.autocast_mode.autocast):
-    r"""
-    See :class:`torch.autocast`.
-    ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cpu", args...)`` instead.
+    r"""See :class:`torch.autocast`.
+
+    .. deprecated:: 2.10
+        ``torch.cpu.amp.autocast(args...)`` is deprecated. Use
+        :class:`torch.amp.autocast` with ``"cpu"`` as the device type instead.
     """
 
     # TODO: remove this conditional once we stop supporting Python < 3.13

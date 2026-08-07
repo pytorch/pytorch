@@ -10,9 +10,11 @@ __all__ = ["GradScaler"]
 
 
 class GradScaler(torch.amp.GradScaler):
-    r"""
-    See :class:`torch.amp.GradScaler`.
-    ``torch.cuda.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cuda", args...)`` instead.
+    r"""See :class:`torch.amp.GradScaler`.
+
+    .. deprecated:: 2.4
+        ``torch.cuda.amp.GradScaler(args...)`` is deprecated. Use
+        :class:`torch.amp.GradScaler` with ``"cuda"`` as the device type instead.
     """
 
     @deprecated(
