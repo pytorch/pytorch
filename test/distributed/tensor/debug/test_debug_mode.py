@@ -1313,7 +1313,7 @@ class TestDebugModeUtils(TestCase):
 
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
     hw_classification = HardwareClassification.CUDA
-    hw_available_devices = 2
+    hw_required_devices = 2
 
     @property
     def world_size(self):

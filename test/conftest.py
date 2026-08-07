@@ -104,10 +104,10 @@ def pytest_addoption(parser: Parser) -> None:
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
     parser.addoption(
-        "--hw-available-devices",
+        "--hw-required-devices",
         type=int,
         default=None,
-        dest="hw_available_devices",
+        dest="hw_required_devices",
         help="only run tests needing at most N devices",
     )
     shard_addoptions(parser)
@@ -133,7 +133,7 @@ class HardwareClassificationPytestPlugin:
             return
         import torch.testing._internal.common_utils as _cu
 
-        requirement = self.hw_classification if self.hw_classification is not None else set(_cu.HardwareClassification)
+        requirement = self.hw_classification or set(_cu.HardwareClassification)
         filtered = []
         _cu.filter_by_hw_classification(
             items,
@@ -171,7 +171,7 @@ def pytest_configure(config: Config) -> None:
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
     hw_cls = config.getoption("hw_classification")
-    hw_dev = config.getoption("hw_available_devices")
+    hw_dev = config.getoption("hw_required_devices")
     if hw_cls or hw_dev is not None:
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(hw_cls, hw_dev),
