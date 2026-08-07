@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -172,6 +173,10 @@ class TestStaticTritonLauncher(TestCase):
 
         if HAS_XPU_AND_TRITON:
             JITFunction.__getitem__ = _orig_getitem
+
+    def test_gpucov_probe_ungated(self):
+        """GPU coverage probe. DO NOT LAND."""
+        self.assertTrue(True)
 
     def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
         """
