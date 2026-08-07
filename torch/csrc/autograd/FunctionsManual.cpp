@@ -600,7 +600,7 @@ Tensor norm_jvp(
     const Tensor& self_t,
     const std::optional<Scalar>& p_,
     Tensor norm) {
-  return norm_jvp(self_p, self_t, p_, std::move(norm), {}, true);
+  return norm_jvp(self_p, self_t, p_, std::move(norm), {}, false);
 }
 
 Tensor _nested_from_padded_backward(
