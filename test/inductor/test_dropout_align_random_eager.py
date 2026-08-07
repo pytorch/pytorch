@@ -9,10 +9,10 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     requires_gpu,
 )
 
@@ -81,8 +81,7 @@ def _set_seed(base: int = BASE_SEED):
 
 
 def _sync(x: torch.Tensor):
-    if x.is_cuda:
-        torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
 
 def _timed_run(model, x, backward: bool = False):
@@ -97,7 +96,11 @@ def _timed_run(model, x, backward: bool = False):
 
 def _cuda_rng_u64_seed_off():
     """Return (seed, offset) extracted from torch.cuda.get_rng_state()."""
-    st = torch.cuda.get_rng_state()
+    st = (
+        torch.xpu.get_rng_state()
+        if torch.xpu.is_available()
+        else torch.cuda.get_rng_state()
+    )
     seed = struct.unpack("<Q", st[0:8].cpu().numpy().tobytes())[0]
     off = struct.unpack("<Q", st[8:24].cpu().numpy().tobytes())[0]
     return seed, off
@@ -105,12 +108,13 @@ def _cuda_rng_u64_seed_off():
 
 def set_seed(seed):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
 
 
 def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
     """Returns (masks_equal, eager_out, compiled_out)."""
-    DEVICE = torch.device("cuda")
+    DEVICE = torch.device(GPU_TYPE)
     torch._dynamo.reset()
     x = torch.ones(shape, device=DEVICE, dtype=dtype)
     drop_e = torch.nn.Dropout(p).to(DEVICE).train()
@@ -129,7 +133,7 @@ def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
 @unittest.skipIf(
-    not (IS_LINUX and HAS_CUDA_AND_TRITON),
+    not (IS_LINUX and HAS_GPU_AND_TRITON),
     "Inductor CUDA dropout alignment tests require Linux and CUDA",
 )
 @config.patch(align_random_eager=True)
@@ -223,13 +227,16 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
     @requires_gpu()
+    @skipIfXpu(msg="torch-xpu-ops/issues/4851")
     def test_dropout_mask_parity_and_rng_offset_cuda(self):
         device = torch.device(GPU_TYPE)
         H, W = BATCH * SEQ_LEN, FFN_DIM
 
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
         for dtype in dtypes:
-            if dtype is torch.bfloat16 and not torch.cuda.is_bf16_supported():
+            if dtype is torch.bfloat16 and (
+                torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
+            ):
                 continue
 
             x = torch.ones((H, W), device=device, dtype=dtype)
@@ -270,6 +277,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @skipIfXpu(msg="torch-xpu-ops/issues/4851")
     def test_multi_dropout_multi_iterations_parity(self):
         device = torch.device(GPU_TYPE)
 
@@ -468,6 +476,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # nn.Dropout as primitive RNG consumer (should PASS)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @skipIfXpu(msg="torch-xpu-ops/issues/4851")
     def test_primitive_nn_dropout_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
@@ -493,6 +502,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Seeds > 2^32 overflow.
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @skipIfXpu(msg="torch-xpu-ops/issues/4851")
     def test_large_seed(self):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
@@ -503,5 +513,5 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")
