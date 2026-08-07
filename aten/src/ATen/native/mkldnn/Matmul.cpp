@@ -659,19 +659,19 @@ static void _mkldnn_matmul_i8i8_dtype_with_primitive(
            ? ideep::tensor::data_type::u8
            : ideep::tensor::data_type::s8,
        mat1.strides().vec()},
-      mat1.data_ptr());
+    const_cast<void*>(mat1.const_data_ptr()));
 
   ideep::tensor wei(
       {mat2.sizes().vec(),
        ideep::tensor::data_type::s8,
        mat2.strides().vec()},
-      mat2.data_ptr());
+      const_cast<void*>(mat2.const_data_ptr()));
 
   ideep::tensor dst(
       {result.sizes().vec(),
        dst_dtype,
        result.strides().vec()},
-      result.data_ptr());
+      result.mutable_data_ptr());
 
   ideep::attr_t op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
