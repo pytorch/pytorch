@@ -101,6 +101,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
+#if SYCL_COMPILER_VERSION >= 20260200
   void createEvent(sycl::event** xpu_event, const EventFlag flag) const {
     namespace syclex = sycl::ext::oneapi::experimental;
     *xpu_event = new sycl::event(syclex::make_event(
@@ -113,6 +114,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
           c10::kXPU, reinterpret_cast<uintptr_t>(*xpu_event));
     }
   }
+#endif
 
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {
