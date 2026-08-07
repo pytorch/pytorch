@@ -19122,8 +19122,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('polar',
-                    dtypes=floating_types(),
-                    dtypesIfMPS=floating_types_and(torch.float16),
+                    dtypes=floating_types_and(torch.half),
                     # this function is undefined if 'abs' values are <0
                     supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),
