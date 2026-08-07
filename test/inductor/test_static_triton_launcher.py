@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -28,6 +29,7 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -172,6 +174,11 @@ class TestStaticTritonLauncher(TestCase):
 
         if HAS_XPU_AND_TRITON:
             JITFunction.__getitem__ = _orig_getitem
+
+    @unittest.skipUnless(SM90OrLater, "probe gate")
+    def test_gpucov_probe_sm90(self):
+        """GPU coverage probe. DO NOT LAND."""
+        self.assertTrue(True)
 
     def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
         """
