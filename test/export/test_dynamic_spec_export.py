@@ -107,9 +107,9 @@ class _ModBranch(torch.nn.Module):
 
 
 class _TestExportDynamicSpecBase(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
