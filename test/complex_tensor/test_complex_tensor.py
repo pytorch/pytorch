@@ -179,6 +179,16 @@ class TestComplexTensor(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    def test_promote_tensors_preserves_scalar_device(self):
+        from torch._subclasses.complex_tensor._ops.common import promote_tensors
+
+        device = torch.device("meta")
+        tensor = torch.empty(2, device=device)
+
+        _, promoted = promote_tensors(tensor, 2.0)
+
+        self.assertEqual([value.device for value in promoted], [device, device])
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
