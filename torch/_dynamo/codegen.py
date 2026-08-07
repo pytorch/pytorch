@@ -732,7 +732,7 @@ class PyCodegen:
             self.store(cm_var)
 
         arg_varnames = []
-        for i, arg in enumerate(graphargs):
+        for arg in graphargs:
             arg_varname = self.tx.new_pycode_varname("arg")
             arg_varnames.append(arg_varname)
             if arg.pass_arg_as_tensor:

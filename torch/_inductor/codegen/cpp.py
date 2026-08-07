@@ -5568,7 +5568,7 @@ class CppScheduling(BaseScheduling):
             raise AssertionError("expected matched_index_size is not None")
         matched_num_dims = len(matched_index_size)
 
-        for node, ((index_size, _), original_body, _) in node_bodies:
+        for _, ((index_size, _), original_body, _) in node_bodies:
             if split_var not in original_body.iter_vars:
                 return nodes
             if len(index_size) != matched_num_dims:

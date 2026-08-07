@@ -149,7 +149,7 @@ class ChunkingApplier:
                 aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
             )
 
-            name = "tangent_overriden_as_one_{idx}"
+            name = f"tangent_overriden_as_one_{idx}"
             one._rename(name)
             one.meta = copy.copy(node.meta)
             node.replace_all_uses_with(one)
@@ -161,7 +161,7 @@ class ChunkingApplier:
         input needs to be chunked.
         E.g. the weight for matmul does not need to be chunked.
         """
-        for node_idx, subgraph_input in enumerate(self.subgraph_input):
+        for subgraph_input in self.subgraph_input:
             meta = get_chunking_meta(subgraph_input)
             if meta is None:
                 raise AssertionError("expected chunking meta for subgraph input")
@@ -232,7 +232,7 @@ class ChunkingApplier:
             new_node.meta = {"val": fake_tensor}
             return new_node
 
-        for node_idx, input_node in enumerate(self.subgraph_input):
+        for input_node in self.subgraph_input:
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():
