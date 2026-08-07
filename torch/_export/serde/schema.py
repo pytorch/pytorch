@@ -186,7 +186,7 @@ class SymFloatArgument(_Union):
 # SymBools.
 # The "as_bool" field is used in the case where we have a list containing a mix
 # of SymBool and bools (ex. [True, i0, ...]). We will serialize this type of list to
-# be List[SymboolArgument] and map the SymBools to the "as_name" field, and bools
+# be List[SymBoolArgument] and map the SymBools to the "as_name" field, and bools
 # to the "as_bool" field.
 @_union_dataclass
 class SymBoolArgument(_Union):

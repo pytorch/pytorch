@@ -669,6 +669,69 @@ kernel void upsample_2d_aa(
   }
 }
 
+template <typename T, typename F>
+kernel void upsample_2d_aa_backward(
+    device AtomicType_t<T>* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant UpsampleParams<4>& params [[buffer(2)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
+  const float2 scales = float2(params.scales[0], params.scales[1]);
+  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  auto output_y = thread_index / static_cast<uint>(output_sizes.w);
+  F f;
+  auto x_center = area_pixel_compute_source_index(
+      scales.x,
+      output_x,
+      /*align_corners=*/false,
+      /*cubic=*/F::area_factor == 2.0);
+  auto y_center = area_pixel_compute_source_index(
+      scales.y,
+      output_y,
+      /*align_corners=*/false,
+      /*cubic=*/F::area_factor == 2.0);
+  auto clamped_scales = max(1.0, scales);
+  auto x_min =
+      max(0L, long(floor(x_center - f.area_factor * clamped_scales.x + 1)));
+  auto x_max = min(
+      input_sizes.w, long(ceil(x_center + f.area_factor * clamped_scales.x)));
+  auto y_min =
+      max(0L, long(floor(y_center - f.area_factor * clamped_scales.y + 1)));
+  auto y_max = min(
+      input_sizes.z, long(ceil(y_center + f.area_factor * clamped_scales.y)));
+  float ws = 0.0;
+  auto clamped_scales_recip = 1 / clamped_scales;
+  for (auto y = y_min; y < y_max; ++y) {
+    auto dy = f((y - y_center) * clamped_scales_recip.y);
+    for (auto x = x_min; x < x_max; ++x) {
+      ws += f((x - x_center) * clamped_scales_recip.x) * dy;
+    }
+  }
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.y; c++) {
+      auto grad_out_value = static_cast<float>(
+          gradOutputData
+              [n * output_strides.x + c * output_strides.y +
+               output_y * output_strides.z + output_x * output_strides.w]);
+      for (auto y = y_min; y < y_max; ++y) {
+        auto dy = f((y - y_center) * clamped_scales_recip.y);
+        for (auto x = x_min; x < x_max; ++x) {
+          auto dx = f((x - x_center) * clamped_scales_recip.x);
+          upsample_increment_value_bounded<T>(
+              gradInputData,
+              input_sizes,
+              input_strides,
+              long4(n, c, y, x),
+              static_cast<T>(grad_out_value * dx * dy / ws));
+        }
+      }
+    }
+  }
+}
+
 template <typename T>
 kernel void upsample_bicubic2d(
     constant T* inputData [[buffer(0)]],
@@ -796,6 +859,14 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<4> & params [[buffer(2)]],           \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)           \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+  upsample_2d_aa_backward<DTYPE, FUNCTOR>(                                  \
+      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],             \
+      constant DTYPE * gradOutputData [[buffer(1)]],                        \
+      constant UpsampleParams<4> & params [[buffer(2)]],                    \
+      uint thread_index [[thread_position_in_grid]])
+
 #define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
       upsample_##NAME##_backward<DTYPE>(                                    \
@@ -875,14 +946,16 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<5> & params [[buffer(2)]],                      \
       uint thread_index [[thread_position_in_grid]]);
 
-#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                              \
-  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                         \
-  INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);   \
-  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                \
-  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                        \
-  INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
-  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                \
-  INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE);                           \
+#define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                                       \
+  INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                                  \
+  INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);            \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bicubic2d_aa, BicubicFunctor, DTYPE);   \
+  INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                         \
+  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                                 \
+  INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE);          \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bilinear2d_aa, BilinearFunctor, DTYPE); \
+  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                         \
+  INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE);                                    \
   INSTANTIATE_UPSAMPLE_3D(DTYPE)
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
