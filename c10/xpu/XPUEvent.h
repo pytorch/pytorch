@@ -94,14 +94,7 @@ struct XPUEvent {
     if (!isCreated()) {
       device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
-      TORCH_CHECK(
-          !enable_ipc_ || !enable_timing_,
-          "XPUEvent cannot have both IPC and timing enabled.");
-      event_ = std::make_unique<sycl::event>(syclex::make_event(
-          c10::xpu::get_device_context(),
-          syclex::properties{
-              syclex::enable_profiling{enable_timing_},
-              syclex::enable_ipc{enable_ipc_}}));
+      createEvent();
 #else
       assignEvent(stream.queue());
 #endif
@@ -195,13 +188,7 @@ struct XPUEvent {
       TORCH_CHECK(
           enable_ipc_,
           "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
-      TORCH_CHECK(
-          !enable_timing_, "XPUEvent cannot have both IPC and timing enabled.");
-      event_ = std::make_unique<sycl::event>(syclex::make_event(
-          c10::xpu::get_device_context(),
-          syclex::properties{
-              {syclex::enable_profiling{enable_timing_},
-               syclex::enable_ipc{enable_ipc_}}}));
+      createEvent();
       device_index_ = c10::xpu::current_device();
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
@@ -214,6 +201,7 @@ struct XPUEvent {
 #endif
 
  private:
+#if SYCL_COMPILER_VERSION < 20260200
   void assignEvent(sycl::queue& queue) {
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
@@ -229,6 +217,19 @@ struct XPUEvent {
     event_.reset();
     assignEvent(queue);
   }
+#else
+  void createEvent() {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    TORCH_CHECK(
+        !enable_ipc_ || !enable_timing_,
+        "XPUEvent cannot have both IPC and timing enabled.");
+    event_ = std::make_unique<sycl::event>(syclex::make_event(
+        c10::xpu::get_device_context(),
+        syclex::properties{
+            syclex::enable_profiling{enable_timing_},
+            syclex::enable_ipc{enable_ipc_}}));
+  }
+#endif
 
   bool enable_timing_ = false;
   bool enable_ipc_ = false;
