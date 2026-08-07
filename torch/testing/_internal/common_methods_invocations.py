@@ -2666,15 +2666,17 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **
 def sample_inputs_hypot(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
 
-    if dtype.is_floating_point:
+    if dtype.is_floating_point and not requires_grad:
         # Regression case for https://github.com/pytorch/pytorch/issues/192507
+        # Extreme and infinite values make the gradient ill-defined, so this
+        # sample is only used for forward-mode testing.
         big = torch.finfo(dtype).max
         lhs = torch.tensor(
             [big, 1.0, big, -big, 1.0, float('inf'), -float('inf')],
-            device=device, dtype=dtype, requires_grad=requires_grad)
+            device=device, dtype=dtype)
         rhs = torch.tensor(
             [1.0, big, big, 1.0, -big, float('nan'), float('nan')],
-            device=device, dtype=dtype, requires_grad=requires_grad)
+            device=device, dtype=dtype)
         yield SampleInput(lhs, args=(rhs,))
 
 def error_inputs_hstack_dstack_vstack(op, device):
