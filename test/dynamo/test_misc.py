@@ -16174,6 +16174,47 @@ fn
         obj = fn(t)
         self.assertEqual(obj.compute(), t.sin())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation(self):
+        # A class defined in the compiled region has no source, so each read of
+        # a mutable class attribute used to build a fresh VariableTracker and
+        # silently drop mutations made through an earlier read.
+        def fn(t):
+            class Holder:
+                items = []
+                lookup = {}
+
+            Holder.items.append(1)
+            Holder.lookup["k"] = 2
+            # read the same attributes back through an instance as well
+            obj = Holder()
+            obj.items.append(3)
+            return t + len(Holder.items) + len(Holder.lookup) + len(obj.items)
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation_with_hop_in_frame(self):
+        # register_hook triggers restore_side_effects=True on the HOP path,
+        # which walks SideEffects.keepalive and indexes id_to_variable for
+        # each entry unguarded. A sourceless class attr's VT must not be
+        # pinned via keepalive without a matching id_to_variable entry, or
+        # this raises KeyError instead of just losing the mutation.
+        def fn(t):
+            class Holder:
+                items = []
+
+            Holder.items.append(1)
+            y = t * 2
+            y.register_hook(lambda g: g)
+            return y.sum() + len(Holder.items)
+
+        t = torch.randn(3, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(t), fn(t))
+
     @torch._dynamo.config.patch(enable_trace_load_build_class=False)
     def test___build_class___disabled(self):
         @torch.compile(backend="eager", fullgraph=True)
