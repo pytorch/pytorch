@@ -88,14 +88,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import (
-    config,
-    exc,
-    graph_break_hints,
-    logging as torchdynamo_logging,
-    trace_rules,
-    variables,
-)
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
@@ -2125,7 +2118,6 @@ class OutputGraph(OutputGraphCommon):
         )
         self.add_output_instructions(alias_insts)
 
-        self._check_contextvar_runtime_observers()
         self.cleanup_graph()
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
@@ -2678,43 +2670,6 @@ class OutputGraph(OutputGraphCommon):
                     grad_enabled = node2.args[0]
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
-
-    def _check_contextvar_runtime_observers(self) -> None:
-        # Runs late (during compile_subgraph) because we need the full graph to
-        # know if opaque runtime calls exist after cv mutations. On failure,
-        # Unsupported triggers an analysis restart that graph-breaks before the
-        # mutation on the second pass via the speculation log.
-        if not self.side_effects.contextvar_mutations:
-            return
-
-        skip_count = self.side_effects._contextvar_first_mutation_node_count or 0
-
-        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
-
-        for i, node in enumerate(self.graph.nodes):
-            if i < skip_count or node.op != "call_function":
-                continue
-            target = node.target
-            if (
-                target is invoke_leaf_function
-                or id(target) in trace_rules._allowed_callable_ids
-                or getattr(target, "_torchdynamo_contextvar_runtime_observer", False)
-            ):
-                target_name = getattr(target, "__qualname__", repr(target))
-                unimplemented(
-                    gb_type="ContextVar.set()/reset() with opaque runtime function calls",
-                    context=f"target={target_name}",
-                    explanation=(
-                        "Dynamo does not support mixing ContextVar.set()/reset() "
-                        "with opaque runtime function calls in the same compiled "
-                        "region because the runtime call could observe stale "
-                        "ContextVar state."
-                    ),
-                    hints=[
-                        "Move the ContextVar mutation or the opaque runtime call outside the compiled region.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
 
     def bypass_package(self, reason: str = "", **kwargs: Any) -> None:
         """

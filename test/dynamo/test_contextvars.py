@@ -761,7 +761,9 @@ class TestContextVars(TestCase):
         self.assertEqual(out, torch.tensor(1))
         self.assertEqual(cv.get().tag, "new")
 
-    def test_contextvar_mutation_with_allow_in_graph_errors(self):
+    def test_contextvar_mutation_with_allow_in_graph_stale_read(self):
+        # Opaque runtime callables observe pre-mutation cv state (deferred replay).
+        # Same staleness semantics as globals and random state.
         cv = contextvars.ContextVar("allow_in_graph_cv", default="old")
 
         @torch.compiler.allow_in_graph
@@ -773,13 +775,9 @@ class TestContextVars(TestCase):
             cv.set("new")
             return x + read_cv()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "ContextVar\\.set\\(\\)/reset\\(\\) with opaque runtime function calls",
-        ):
-            fn(torch.tensor(0))
+        self.assertEqual(fn(torch.tensor(0)), torch.tensor(2))
 
-    def test_contextvar_mutation_with_nonstrict_trace_errors(self):
+    def test_contextvar_mutation_with_nonstrict_trace_stale_read(self):
         cv = contextvars.ContextVar("nonstrict_trace_cv", default="old")
 
         @torch.compiler.nonstrict_trace
@@ -794,13 +792,9 @@ class TestContextVars(TestCase):
             finally:
                 cv.reset(token)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "ContextVar\\.set\\(\\)/reset\\(\\) with opaque runtime function calls",
-        ):
-            fn(torch.tensor(0))
+        self.assertEqual(fn(torch.tensor(0)), torch.tensor(2))
 
-    def test_contextvar_mutation_with_leaf_function_errors(self):
+    def test_contextvar_mutation_with_leaf_function_stale_read(self):
         cv = contextvars.ContextVar("leaf_function_cv", default="old")
 
         from torch._dynamo.decorators import leaf_function
@@ -821,11 +815,7 @@ class TestContextVars(TestCase):
             finally:
                 cv.reset(token)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "ContextVar\\.set\\(\\)/reset\\(\\) with opaque runtime function calls",
-        ):
-            fn(torch.tensor(0))
+        self.assertEqual(fn(torch.tensor(0)), torch.tensor(2))
 
     def test_mutated_original_object_survives_rebind(self):
         cv = contextvars.ContextVar("mutated_old_object", default=None)
@@ -1143,6 +1133,33 @@ class TestContextVars(TestCase):
             return x + (1 if t2.old_value is contextvars.Token.MISSING else 2)
 
         self.assertEqual(fn(torch.tensor(0)), torch.tensor(1))
+
+    def test_reset_eager_apply_restores_real_cv(self):
+        cv = contextvars.ContextVar("eager_reset_cv")
+        cv.set("original")
+        fake_reads: list = []
+
+        with torch.library._scoped_library("_test_eager_reset", "DEF") as lib:
+            lib.define("read_cv(Tensor x) -> Tensor")
+
+            @torch.library.register_kernel("_test_eager_reset::read_cv", "cpu", lib=lib)
+            def _(x):
+                return x.clone()
+
+            @torch.library.register_fake("_test_eager_reset::read_cv", lib=lib)
+            def _(x):
+                fake_reads.append(cv.get())
+                return torch.empty_like(x)
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                token = cv.set("modified")
+                cv.reset(token)
+                return torch.ops._test_eager_reset.read_cv(x)
+
+            fn(torch.tensor(10))
+            self.assertEqual(fake_reads[0], "original")
+            self.assertEqual(cv.get(), "original")
 
 
 if __name__ == "__main__":
