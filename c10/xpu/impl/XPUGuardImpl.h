@@ -134,7 +134,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(device_index)
+    reusable = c10::xpu::get_raw_device(stream.device_index())
                    .has(sycl::aspect::ext_oneapi_per_event_profiling);
     if (reusable) {
       if (!xpu_event) {
@@ -181,7 +181,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     bool reusable = false;
 #if SYCL_COMPILER_VERSION >= 20260200
-    reusable = c10::xpu::get_raw_device(device_index)
+    reusable = c10::xpu::get_raw_device(stream.device_index())
                    .has(sycl::aspect::ext_oneapi_per_event_profiling);
     if (reusable) {
       sycl::ext::oneapi::experimental::enqueue_wait_event(
