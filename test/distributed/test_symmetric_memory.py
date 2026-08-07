@@ -55,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
@@ -94,6 +95,8 @@ device_module = torch.get_device_module(device_type)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -828,6 +831,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1228,6 +1233,8 @@ class AsyncTPTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -1351,6 +1358,8 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 # MultiProcessTestCase instead of MultiProcContinuousTest.
 @requires_cuda_p2p_access()
 class SymmMemNegativeTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -1524,6 +1533,8 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1813,6 +1824,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -1882,6 +1895,8 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
@@ -2399,6 +2414,8 @@ class LoweringTest(MultiProcContinuousTest):
 
 
 class SymmMemSingleProcTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_cuda
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -2478,6 +2495,8 @@ class SymmMemSingleProcTest(TestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemPoolTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -2654,6 +2673,8 @@ class SymmMemPoolTest(MultiProcContinuousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     """CUDA symm_mem rendezvous against a torchcomms-backed PG.
 
     Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
@@ -2708,6 +2729,8 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
 @skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class ExternalNcclCommRegistrationTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """Tests for the external NCCL comm registration API
     (``register_external_nccl_comm`` and the ``NcclCommRegistration`` handle
     from ``torch.distributed._symmetric_memory._nccl``), exercised against a
