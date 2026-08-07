@@ -114,7 +114,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
-from torch.utils.weak import TensorWeakRef
+from torch.utils.weak import _InternalTensorWeakRef, TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
@@ -257,6 +257,31 @@ def _cow_tensor_matches(value: Any, expected: Any) -> bool:
         return False
     actual = _try_is_cow_tensor(value)
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
+
+
+def _resume_arg_lifetime_observable(value: Any) -> bool:
+    if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+        value, torch._subclasses.FakeTensor
+    ):
+        # Package precompilation recomputes guard metadata from FakeTensors.
+        # Their compiler-owned weakrefs and Python state do not describe the
+        # eventual runtime tensor.  Treat the abstract value as having no
+        # user-visible observer; a runtime observer will then fail the guard.
+        return False
+
+    from .resume_execution import _resume_arg_has_observable_destruction
+
+    return _resume_arg_has_observable_destruction(value)
+
+
+def _resume_arg_lifetime_metadata(guard: Guard, value: Any) -> bool:
+    return _resume_arg_lifetime_observable(value)
+
+
+def _resume_arg_lifetime_matches(value: Any, expected: Any) -> bool:
+    if not isinstance(expected, bool):
+        return False
+    return _resume_arg_lifetime_observable(value) == expected
 
 
 dunder_attrs_assumed_constants = (
@@ -2549,6 +2574,25 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=_resume_arg_lifetime_metadata,
+        eval_fn=_resume_arg_lifetime_matches,
+    )
+    def RESUME_ARG_LIFETIME_MATCH(self, guard: Guard) -> None:
+        expected = _resume_arg_lifetime_metadata(guard, self.get(guard))
+        guard_manager = self.get_guard_manager(guard)
+
+        def guard_fn(x: Any) -> bool:
+            return _resume_arg_lifetime_matches(x, expected)
+
+        code = f"resume argument observable lifetime == {expected}"
+        self._set_guard_export_info(guard, [code], provided_guarded_object=expected)
+        guard_manager.add_lambda_guard(
+            guard_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is None,
     )
@@ -2708,6 +2752,21 @@ class GuardBuilder(GuardBuilderBase):
 
         def fn(x: Any) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
+    def AUTOGRAD_SAVED_TENSORS_HOOKS_PRESENT(self, guard: Guard) -> None:
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        hooks_present = bool(get_hooks())
+        code = [f"saved tensors hooks present == {hooks_present}"]
+        self._set_guard_export_info(guard, code)
+
+        def fn(x: Any) -> bool:
+            return hooks_present == bool(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -3898,7 +3957,16 @@ class GuardBuilder(GuardBuilderBase):
         if supports_weakref and not isinstance(
             guarded_object, (enum.Enum, tuple, weakref.ProxyTypes)
         ):
-            obj_ref = weakref.ref(guarded_object)
+            if isinstance(guarded_object, torch.Tensor):
+                existing_ref = guard.obj_weakref
+                obj_ref = (
+                    existing_ref
+                    if isinstance(existing_ref, _InternalTensorWeakRef)
+                    and existing_ref() is guarded_object
+                    else _InternalTensorWeakRef(guarded_object)
+                )
+            else:
+                obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
             func_name,

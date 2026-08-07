@@ -1153,6 +1153,10 @@ class CacheableAOTConfig:
     # this is always false outside of export.
     pre_dispatch: bool = False
     precompile_backend_id: str | None = None
+    # The serialized Dynamo caller invokes this backend with a single mutable
+    # list instead of positional arguments.  Bundled AOT artifacts must retain
+    # that ABI when they reconstruct their outer runtime wrapper.
+    precompile_boxed_call: bool = False
 
     def __post_init__(self) -> None:
         if self.pre_dispatch and not self.is_export:
@@ -1198,6 +1202,7 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    precompile_boxed_call: bool = False
 
     def to_cacheable(self) -> CacheableAOTConfig:
         return CacheableAOTConfig(
@@ -1212,6 +1217,7 @@ class AOTConfig:
             enable_log=self.enable_log,
             pre_dispatch=self.pre_dispatch,
             precompile_backend_id=self.precompile_backend_id,
+            precompile_boxed_call=self.precompile_boxed_call,
         )
 
     def __post_init__(self) -> None:

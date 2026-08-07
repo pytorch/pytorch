@@ -737,9 +737,20 @@ def deserialize_bundled_cache_entry(
 
     # TODO: this ignores flat_params, which can exist
     # if inline_builtin_nn_modules=False
-    @simple_wraps(compiled_fn)
-    def forward(*runtime_args: Any) -> Any:
-        return compiled_fn(list(runtime_args))
+    if getattr(entry.sanitized_aot_config, "precompile_boxed_call", False):
+
+        @simple_wraps(compiled_fn)
+        def forward(runtime_args: list[Any]) -> Any:
+            full_args = list(runtime_args)
+            runtime_args.clear()
+            return compiled_fn(full_args)
+
+        forward._boxed_call = True  # type: ignore[attr-defined]
+    else:
+
+        @simple_wraps(compiled_fn)
+        def forward(*runtime_args: Any) -> Any:
+            return compiled_fn(list(runtime_args))
 
     if not hasattr(compiled_fn, "serialize"):
         raise AssertionError("compiled_fn must have serialize attribute")

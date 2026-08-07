@@ -644,19 +644,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "bf16[s77, s77]", s77: "Sym(s77)", L_z_: "f32[s77, s77]"):
-        l_x_ = L_x_
-        l_z_ = L_z_
+    def forward(self, L_torch_dynamo_resume_args_3_: "bf16[s41, s41]", s41: "Sym(s41)", L_torch_dynamo_resume_args_4_: "f32[s41, s41]"):
+        l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
 
-        matmul: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
-
-        autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
-
-        clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
-
-        set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-        set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-        set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
+        matmul: "bf16[s41, s41]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
         return (matmul,)
 """,
             )
@@ -665,19 +657,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "bf16[3, 3]", L_z_: "f32[3, 3]"):
-        l_x_ = L_x_
-        l_z_ = L_z_
+    def forward(self, L_torch_dynamo_resume_args_3_: "bf16[3, 3]", L_torch_dynamo_resume_args_4_: "f32[3, 3]"):
+        l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
 
-        matmul: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
-
-        autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
-
-        clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
-
-        set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-        set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-        set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
+        matmul: "bf16[3, 3]" = l_torch_dynamo_resume_args_3_ @ l_torch_dynamo_resume_args_4_;  l_torch_dynamo_resume_args_3_ = l_torch_dynamo_resume_args_4_ = None
         return (matmul,)
 """,
             )
@@ -1312,12 +1296,12 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[]"):
-        l_y_ = L_y_
+    def forward(self, L_torch_dynamo_resume_args_4_: "f32[]"):
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        mul: "f32[]" = l_y_ * 2;  l_y_ = None
+        mul: "f32[]" = l_torch_dynamo_resume_args_4_ * 2;  l_torch_dynamo_resume_args_4_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (mul,)
@@ -3881,13 +3865,13 @@ class GraphModule(torch.nn.Module):
             normalize_gm(eager.graphs[1].print_readable(False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_stack0_: "f32[2]", L_stack1_: "f32[2]", L_x_: "f32[2]"):
-        l_stack0_ = L_stack0_
-        l_stack1_ = L_stack1_
-        l_x_ = L_x_
+    def forward(self, L_torch_dynamo_resume_args_2_: "f32[2]", L_torch_dynamo_resume_args_3_: "f32[2]", L_torch_dynamo_resume_args_4_: "f32[2]"):
+        l_torch_dynamo_resume_args_2_ = L_torch_dynamo_resume_args_2_
+        l_torch_dynamo_resume_args_3_ = L_torch_dynamo_resume_args_3_
+        l_torch_dynamo_resume_args_4_ = L_torch_dynamo_resume_args_4_
 
-        add: "f32[2]" = l_stack0_ + l_stack1_;  l_stack0_ = l_stack1_ = None
-        cos: "f32[2]" = l_x_.cos();  l_x_ = None
+        add: "f32[2]" = l_torch_dynamo_resume_args_2_ + l_torch_dynamo_resume_args_3_;  l_torch_dynamo_resume_args_2_ = l_torch_dynamo_resume_args_3_ = None
+        cos: "f32[2]" = l_torch_dynamo_resume_args_4_.cos();  l_torch_dynamo_resume_args_4_ = None
         add_1: "f32[2]" = add + cos;  add = cos = None
         return (add_1,)
 """,

@@ -765,6 +765,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 cacheable.enable_log,
                 cacheable.pre_dispatch,
                 cacheable.precompile_backend_id,
+                cacheable.precompile_boxed_call,
             ),
         )
 

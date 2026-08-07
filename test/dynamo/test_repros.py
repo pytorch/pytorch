@@ -14,9 +14,14 @@ import importlib
 import inspect
 import itertools
 import logging
+import operator
 import os
+import pickle
 import random
+import subprocess
 import sys
+import threading
+import time
 import types
 import typing
 import unittest
@@ -44,6 +49,7 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
+from torch._dynamo.output_graph import _as_boxed_call, _uses_boxed_call
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -55,7 +61,9 @@ from torch._dynamo.testing import (
     skipIfNotPy312,
     skipIfPy312,
 )
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor.utils import fresh_cache
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
     AuxRequest,
@@ -90,6 +98,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.weak import WeakIdKeyDictionary
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -8727,6 +8736,3098 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_graph_break_resume_args_cleanup_not_duplicated(self):
+        def graph(a):
+            return a + 1, a + 2
+
+        @torch._dynamo.disable()
+        def graph_break(a):
+            return a + 1
+
+        @torch._dynamo.disable()
+        def probe(a):
+            return a + 1
+
+        def fn(a):
+            a, b = graph(a)
+            a = graph_break(a)
+            c = a + b
+            return probe(c)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_graph_break_resume_args_finalizer_mutates_carrier(self):
+        class Token:
+            def __init__(self, clear_carriers=True):
+                self.clear_carriers = clear_carriers
+
+            def __del__(self):
+                if not self.clear_carriers:
+                    return
+                frame = sys._getframe(1)
+                while frame is not None:
+                    for name, value in list(frame.f_locals.items()):
+                        if name.startswith("__torch_dynamo_resume_args") and isinstance(
+                            value, list
+                        ):
+                            value.clear()
+                    frame = frame.f_back
+
+        @torch._dynamo.disable()
+        def make_token():
+            return Token()
+
+        @torch._dynamo.disable()
+        def probe(x):
+            return x
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x + 1
+
+        @torch._dynamo.disable()
+        def make_tokens():
+            return Token(), Token(False), Token(False)
+
+        def fn(x):
+            holder = make_token()
+            holder = None  # noqa: F841 - run finalizer during resume event replay
+            return probe(x)
+
+        x = torch.ones(2)
+        self.assertEqual(fn(x), x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x)
+
+        def fn_with_live_transfer(x):
+            holder = make_token()
+            y = hop(x)
+            holder = None  # noqa: F841 - finalizer clears the active carrier
+            return y + 1
+
+        expected = fn_with_live_transfer(x)
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(fn_with_live_transfer, backend="eager")(x), expected
+        )
+
+        def fn_with_repeated_stores(x):
+            a, b, c = make_tokens()
+            y = hop(x)
+            a = b  # noqa: F841 - finalizer clears the active carrier
+            c = b
+            c = None  # noqa: F841
+            b = None
+            return y + 1
+
+        expected = fn_with_repeated_stores(x)
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(fn_with_repeated_stores, backend="eager")(x), expected
+        )
+
+    def test_graph_break_resume_args_nested_event_source_snapshot(self):
+        events = []
+
+        class Token:
+            def __init__(self, label):
+                self.label = label
+
+            def __del__(self):
+                if self.label == "A":
+                    frame = sys._getframe(1)
+                    while frame is not None:
+                        for name, value in list(frame.f_locals.items()):
+                            if name.startswith(
+                                "__torch_dynamo_resume_args"
+                            ) and isinstance(value, list):
+                                for i, item in enumerate(value):
+                                    if isinstance(item, Token) and item.label == "D":
+                                        value[i] = Token("R")
+                        frame = frame.f_back
+                elif self.label in ("D", "R"):
+                    events.append(self.label)
+
+        @torch._dynamo.disable()
+        def make_tokens():
+            return Token("A"), Token("B"), Token("C"), Token("D")
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x + 1
+
+        @torch._dynamo.disable()
+        def observe():
+            return tuple(events)
+
+        def fn(x):
+            a, b, c, d = make_tokens()
+            y = hop(x)
+            c, a = [d], b
+            c = None  # noqa: F841
+            seen = observe()
+            d = None
+            b = None
+            a = None  # noqa: F841
+            return y + 1, seen
+
+        x = torch.ones(2)
+        expected = fn(x)
+        gc.collect()
+        self.assertEqual(expected[1], ())
+        self.assertEqual(events, ["D"])
+
+        events.clear()
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="eager")(x)
+        gc.collect()
+        self.assertEqual(actual, expected)
+        self.assertEqual(events, ["D"])
+
+    def test_graph_break_resume_args_snapshot_f_locals_lifetime(self):
+        events = []
+
+        class Token:
+            def __init__(self, label, clear=False):
+                self.label = label
+                self.clear = clear
+
+            def __del__(self):
+                events.append(f"del{self.label}")
+                if not self.clear:
+                    return
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if frame.f_code.co_name.startswith("torch_dynamo_resume_in_"):
+                        for name, value in list(frame.f_locals.items()):
+                            if name.startswith(
+                                "__torch_dynamo_resume_args"
+                            ) and isinstance(value, list):
+                                value.clear()
+                    frame = frame.f_back
+
+        @torch._dynamo.disable()
+        def make_tokens():
+            return Token("A", clear=True), Token("B"), Token("C")
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x + 1
+
+        @torch._dynamo.disable()
+        def observe(x):
+            return x * (10 if "delB" in events else 1)
+
+        def fn(x):
+            a, b, c = make_tokens()
+            y = hop(x)
+            a = b
+            c = b
+            c = None  # noqa: F841
+            b = None
+            a = None  # noqa: F841
+            return observe(y + 1)
+
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(expected, torch.full_like(x, 30))
+        self.assertEqual(events, ["delA", "delC", "delB"])
+
+        for _ in range(2):
+            events.clear()
+            torch._dynamo.reset()
+            actual = torch.compile(fn, backend="eager")(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(events, ["delA", "delC", "delB"])
+
+    def test_graph_break_resume_args_nested_event_snapshot_release_order(self):
+        events = []
+
+        class Token:
+            def __init__(self, label):
+                self.label = label
+
+            def __del__(self):
+                events.append(self.label)
+
+        @torch._dynamo.disable()
+        def make_tokens():
+            return Token("A"), Token("B"), Token("C"), Token("D")
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x + 1
+
+        @torch._dynamo.disable()
+        def observe():
+            return tuple(events)
+
+        def fn(x):
+            a, b, c, d = make_tokens()
+            y = hop(x)
+            c, a = [d], b
+            c = None  # noqa: F841
+            d = None
+            seen = observe()
+            b = a = None  # noqa: F841
+            return y, seen
+
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(expected[1], ("A", "C", "D"))
+
+        events.clear()
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual, expected)
+
+    def test_graph_break_resume_args_snapshot_holder_is_read_only(self):
+        class Token:
+            def __init__(self, label):
+                self.label = label
+
+            def __del__(self):
+                if self.label != "A":
+                    return
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if frame.f_code.co_name.startswith("torch_dynamo_resume_in_"):
+                        for name, value in list(frame.f_locals.items()):
+                            if name.startswith("resume_arg_") and isinstance(
+                                value, list
+                            ):
+                                value.clear()
+                    frame = frame.f_back
+
+        @torch._dynamo.disable()
+        def make_tokens():
+            return Token("A"), Token("B"), Token("C"), Token("D")
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x
+
+        @torch._dynamo.disable()
+        def observe():
+            return 0
+
+        def direct_fn(x):
+            a, b, c, d = make_tokens()
+            y = hop(x)
+            c, a = [d], b
+            c = None  # noqa: F841
+            z = observe()
+            d = None
+            b = a = None  # noqa: F841
+            return y, z
+
+        def graph_fn(x):
+            a, b, c, d = make_tokens()
+            y = hop(x)
+            c, a = [d], b
+            c = None  # noqa: F841
+            y = y + 1
+            z = observe()
+            d = None
+            b = a = None  # noqa: F841
+            return y, z
+
+        x = torch.ones(1)
+        for fn in (direct_fn, graph_fn):
+            with self.subTest(fn=fn.__name__):
+                expected = fn(x)
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+
+    def test_graph_break_resume_args_preserves_non_tensor_lifetime(self):
+        deleted = [False]
+
+        class Token:
+            def __del__(self):
+                deleted[0] = True
+
+        @torch._dynamo.disable()
+        def make_token():
+            return Token()
+
+        @torch._dynamo.disable()
+        def graph_break(token):
+            return lambda fn: fn
+
+        @torch._dynamo.disable()
+        def check_alive():
+            gc.collect()
+            self.assertFalse(deleted[0])
+
+        def fn(x):
+            token = make_token()
+            decorator = graph_break(token)
+
+            @decorator
+            def inner():
+                return None
+
+            check_alive()
+            inner()
+            return x + 1
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), x + 1)
+        deleted[0] = False
+        self.assertEqual(opt_fn(x), x + 1)
+
+    def test_graph_break_resume_args_releases_overwritten_local(self):
+        @torch._dynamo.disable()
+        def make_holder(x):
+            y = x + 1
+            return [y], weakref.ref(y)
+
+        @torch._dynamo.disable()
+        def check_dead(ref):
+            gc.collect()
+            return ref() is None
+
+        def fn(x):
+            holder, ref = make_holder(x)
+            keep = x + 2
+            torch._dynamo.graph_break()
+            alive_before_overwrite = not check_dead(ref)
+            holder = None  # noqa: F841 - exercise STORE_FAST lifetime
+            del keep
+            return alive_before_overwrite, check_dead(ref)
+
+        x = torch.randn(2)
+        self.assertEqual(fn(x), (True, True))
+        self.assertEqual(torch.compile(fn, backend="eager")(x), (True, True))
+
+        def fn_without_intervening_graph(x):
+            holder, ref = make_holder(x)
+            holder = 17  # noqa: F841 - replay a non-None overwrite too
+            return check_dead(ref)
+
+        self.assertTrue(fn_without_intervening_graph(x))
+        self.assertTrue(torch.compile(fn_without_intervening_graph, backend="eager")(x))
+
+        def fn_with_alias(x):
+            holder, ref = make_holder(x)
+            alias = holder
+            keep = x + 2
+            torch._dynamo.graph_break()
+            holder = None
+            del keep
+            alive_through_alias = not check_dead(ref)
+            alias = None  # noqa: F841 - release the final logical owner
+            return alive_through_alias, check_dead(ref)
+
+        self.assertEqual(fn_with_alias(x), (True, True))
+        self.assertEqual(torch.compile(fn_with_alias, backend="eager")(x), (True, True))
+
+        def fn_with_unmodified_alias(x):
+            holder, ref = make_holder(x)
+            alias = holder  # noqa: F841 - keep a second logical owner alive
+            keep = x + 2
+            torch._dynamo.graph_break()
+            holder = None
+            del keep
+            return not check_dead(ref)
+
+        self.assertTrue(fn_with_unmodified_alias(x))
+        self.assertTrue(torch.compile(fn_with_unmodified_alias, backend="eager")(x))
+
+        @torch._dynamo.disable()
+        def make_sibling_aliases(x):
+            y = x + 1
+            holder = [y]
+            return holder, holder, weakref.ref(y)
+
+        def fn_with_sibling_aliases(x):
+            first, second, ref = make_sibling_aliases(x)
+            keep = x + 2
+            torch._dynamo.graph_break()
+            first = None  # noqa: F841 - release one carrier path
+            alive_through_second = not check_dead(ref)
+            second = None  # noqa: F841 - release the aliased carrier path
+            del keep
+            return alive_through_second, check_dead(ref)
+
+        self.assertEqual(fn_with_sibling_aliases(x), (True, True))
+        self.assertEqual(
+            torch.compile(fn_with_sibling_aliases, backend="eager")(x),
+            (True, True),
+        )
+
+        sibling_refs = []
+
+        @torch._dynamo.disable()
+        def make_unmodified_sibling_alias(x):
+            y = x + 1
+            sibling_refs.append(weakref.ref(y))
+            holder = [y]
+            return holder, holder
+
+        def fn_with_unmodified_sibling_alias(x):
+            first, second = make_unmodified_sibling_alias(x)
+            first = None  # noqa: F841 - release only the first sibling
+            return not check_dead(sibling_refs[-1])
+
+        self.assertTrue(fn_with_unmodified_sibling_alias(x))
+        self.assertTrue(
+            torch.compile(fn_with_unmodified_sibling_alias, backend="eager")(x)
+        )
+
+        class WeakRefToken:
+            pass
+
+        def keep_weakref_result(x, ref):
+            obj = ref()
+            ref = None
+            y = x * 2
+            return y, obj
+
+        token = WeakRefToken()
+        token_ref = weakref.ref(token)
+        expected_y, expected_obj = keep_weakref_result(x, token_ref)
+        actual_y, actual_obj = torch.compile(keep_weakref_result, backend="eager")(
+            x, token_ref
+        )
+        self.assertEqual(actual_y, expected_y)
+        self.assertIs(expected_obj, token)
+        self.assertIs(actual_obj, token)
+
+        class SourceBase:
+            pass
+
+        class SourceChild(SourceBase):
+            pass
+
+        @torch._dynamo.disable()
+        def make_class():
+            return SourceBase
+
+        def keep_no_arg_call_result(x):
+            cls = make_class()
+            subclasses = cls.__subclasses__()
+            cls = None
+            y = x * 2
+            return y, subclasses
+
+        expected_y, expected_subclasses = keep_no_arg_call_result(x)
+        actual_y, actual_subclasses = torch.compile(
+            keep_no_arg_call_result, backend="eager"
+        )(x)
+        self.assertEqual(actual_y, expected_y)
+        self.assertEqual(actual_subclasses, expected_subclasses)
+        self.assertIn(SourceChild, actual_subclasses)
+
+        @torch._dynamo.disable()
+        def make_module():
+            module = torch.nn.Linear(2, 2, bias=False)
+            with torch.no_grad():
+                module.weight.fill_(3)
+            return module
+
+        def keep_module_parameter(x):
+            module = make_module()
+            weight = module.weight
+            module = None
+            y = x + 1
+            return y, weight
+
+        expected_y, expected_weight = keep_module_parameter(x)
+        actual_y, actual_weight = torch.compile(keep_module_parameter, backend="eager")(
+            x
+        )
+        self.assertEqual(actual_y, expected_y)
+        self.assertEqual(actual_weight, expected_weight)
+
+        @torch._dynamo.disable()
+        def make_default_fn(value):
+            def inner(default=value):
+                return default
+
+            return inner
+
+        def keep_default_value(x, value):
+            fn = make_default_fn(value)
+            default = fn()
+            fn = None
+            y = x * 2
+            return y, default
+
+        default_token = WeakRefToken()
+        expected_y, expected_default = keep_default_value(x, default_token)
+        actual_y, actual_default = torch.compile(keep_default_value, backend="eager")(
+            x, default_token
+        )
+        self.assertEqual(actual_y, expected_y)
+        self.assertIs(expected_default, default_token)
+        self.assertIs(actual_default, default_token)
+
+    def test_graph_break_resume_args_releases_nested_container_path(self):
+        @torch._dynamo.disable()
+        def check_dead(ref):
+            gc.collect()
+            return ref() is None
+
+        def check_lifetime(fn, x):
+            self.assertEqual(fn(x), (True, True))
+            self.assertEqual(torch.compile(fn, backend="eager")(x), (True, True))
+
+        dict_refs = []
+        dict_key = ("holder",)
+        opaque_key = object()
+
+        @torch._dynamo.disable()
+        def make_dict(x):
+            y = x + 1
+            dict_refs.append(weakref.ref(y))
+            return {dict_key: [y], opaque_key: None}
+
+        def dict_fn(x):
+            holder = make_dict(x)[dict_key]
+            keep = x + 2
+            torch._dynamo.graph_break()
+            alive_before_overwrite = not check_dead(dict_refs[-1])
+            holder = None  # noqa: F841 - exercise nested STORE_FAST lifetime
+            del keep
+            return alive_before_overwrite, check_dead(dict_refs[-1])
+
+        check_lifetime(dict_fn, torch.randn(2))
+
+        dict_subclass_refs = []
+
+        class HolderDict(dict):
+            pass
+
+        @torch._dynamo.disable()
+        def make_dict_subclass(x):
+            y = x + 1
+            dict_subclass_refs.append(weakref.ref(y))
+            return HolderDict(holder=[y], other=None)
+
+        def dict_subclass_fn(x):
+            holder = make_dict_subclass(x)["holder"]
+            keep = x + 2
+            torch._dynamo.graph_break()
+            alive_before_overwrite = not check_dead(dict_subclass_refs[-1])
+            holder = None  # noqa: F841 - exercise dict-subclass STORE_FAST
+            del keep
+            return alive_before_overwrite, check_dead(dict_subclass_refs[-1])
+
+        check_lifetime(dict_subclass_fn, torch.randn(2))
+
+        slice_refs = []
+
+        @torch._dynamo.disable()
+        def make_slice_source(x):
+            y = x + 1
+            slice_refs.append(weakref.ref(y))
+            return [[y], None]
+
+        def slice_fn(x):
+            holder = make_slice_source(x)[:1]
+            keep = x + 2
+            torch._dynamo.graph_break()
+            alive_before_overwrite = not check_dead(slice_refs[-1])
+            holder = None  # noqa: F841 - exercise slice-derived STORE_FAST
+            del keep
+            return alive_before_overwrite, check_dead(slice_refs[-1])
+
+        check_lifetime(slice_fn, torch.randn(2))
+
+        finalizer_events = []
+        finalizer_refs = []
+        finalizer_states = []
+        FinalizerPair = namedtuple("FinalizerPair", ("holder", "other"))
+        FinalizerPair.__del__ = lambda self: finalizer_events.append(  # type: ignore[attr-defined]
+            self.holder is None
+        )
+
+        @torch._dynamo.disable()
+        def make_finalizer_pair(x):
+            finalizer_events.clear()
+            y = x + 1
+            finalizer_refs.append(weakref.ref(y))
+            return FinalizerPair([y], 17)
+
+        def finalizer_backend(gm, _):
+            def run(*args):
+                gc.collect()
+                finalizer_states.append(finalizer_refs[-1]() is None)
+                return gm(*args)
+
+            return run
+
+        def finalizer_pair_fn(x):
+            holder, other = make_finalizer_pair(x)
+            holder = None  # noqa: F841 - exercise finalizer STORE_FAST
+            return x * 2, other
+
+        x = torch.randn(2)
+        self.assertEqual(finalizer_pair_fn(x), (x * 2, 17))
+        gc.collect()
+        self.assertEqual(finalizer_events, [False])
+        finalizer_events.clear()
+        self.assertEqual(
+            torch.compile(finalizer_pair_fn, backend=finalizer_backend)(x),
+            (x * 2, 17),
+        )
+        gc.collect()
+        self.assertEqual(finalizer_states, [True])
+        self.assertEqual(finalizer_events, [False])
+
+    def test_graph_break_resume_args_store_replacement_before_cleanup(self):
+        events = []
+        missing = object()
+
+        def render(value):
+            if value is missing:
+                return "<missing>"
+            if value is None or isinstance(value, int):
+                return repr(value)
+            return type(value).__name__
+
+        class Token:
+            def __del__(self):
+                chain = []
+                frame = sys._getframe(1)
+                while frame is not None and len(chain) < 5:
+                    chain.append(
+                        (
+                            frame.f_code.co_name,
+                            render(frame.f_locals.get("holder", missing)),
+                        )
+                    )
+                    frame = frame.f_back
+                events.append(chain)
+
+        @torch._dynamo.disable()
+        def make_token():
+            return Token()
+
+        @torch._dynamo.disable()
+        def make_replacement():
+            return 17
+
+        def fn_17(x):
+            holder = make_token()
+            holder = 17  # noqa: F841 - exercise non-None STORE_FAST ordering
+            return x + 1
+
+        def fn_none(x):
+            holder = make_token()
+            holder = None  # noqa: F841 - exercise None STORE_FAST ordering
+            return x + 1
+
+        def fn_tensor(x):
+            holder = make_token()
+            holder = x * 2  # noqa: F841 - replacement exists after graph call
+            return x + 1
+
+        x = torch.randn(2)
+        for fn, expected in (
+            (fn_17, "17"),
+            (fn_none, "None"),
+            (fn_tensor, "Tensor"),
+        ):
+            with self.subTest(fn=fn.__name__):
+                events.clear()
+                self.assertEqual(fn(x), x + 1)
+                gc.collect()
+                self.assertTrue(
+                    any(value == expected for _, value in events[0]), events
+                )
+
+                events.clear()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(x), x + 1)
+                gc.collect()
+                self.assertEqual(len(events), 1)
+                self.assertTrue(
+                    any(
+                        name.startswith("torch_dynamo_resume_in_") and value == expected
+                        for name, value in events[0]
+                    ),
+                    events,
+                )
+
+        def fn_graph_break_replacement(x):
+            holder = make_token()
+            holder = make_replacement()  # noqa: F841 - resume at STORE_FAST
+            return x + 1
+
+        for compiled in (False, True):
+            events.clear()
+            torch._dynamo.reset()
+            target = (
+                torch.compile(fn_graph_break_replacement, backend="eager")
+                if compiled
+                else fn_graph_break_replacement
+            )
+            self.assertEqual(target(x), x + 1)
+            gc.collect()
+            self.assertEqual(len(events), 1)
+            self.assertTrue(
+                any(value == "17" for _, value in events[0]),
+                events,
+            )
+
+    def test_graph_break_resume_args_runtime_weakref_observer(self):
+        events = []
+        holder_access = [None]
+        use_plain_ref = [True]
+        callback_refs = []
+
+        @torch.library.custom_op(
+            "test_repros::install_runtime_weakref_observer", mutates_args=()
+        )
+        def before(x: torch.Tensor) -> torch.Tensor:
+            events.append("before")
+            access = holder_access[0]
+            holder = access() if use_plain_ref[0] else access
+            if holder is None:
+                raise AssertionError(
+                    "resume holder was released before its source store"
+                )
+            callback_refs.append(
+                weakref.ref(holder, lambda _: events.append("weakref"))
+            )
+            holder_access[0] = None
+            del holder
+            return x.clone()
+
+        @before.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        before.register_effect(_EffectType.ORDERED)
+
+        @torch.library.custom_op(
+            "test_repros::after_runtime_weakref_observer", mutates_args=()
+        )
+        def after(x: torch.Tensor) -> torch.Tensor:
+            events.append("after")
+            return x.clone()
+
+        @after.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        after.register_effect(_EffectType.ORDERED)
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            holder_access[0] = weakref.ref(holder) if use_plain_ref[0] else holder
+            return holder
+
+        def fn(x):
+            holder = make_holder(x)
+            y = before(x)
+            holder = None  # noqa: F841 - callback must run at this source store
+            return after(y)
+
+        def implicit_fn(x):
+            holder = make_holder(x)  # noqa: F841 - CPython owns it to frame exit
+            y = before(x)
+            return after(y)
+
+        def protected_inner(x, holder):
+            try:
+                y = before(x)
+                holder = None  # noqa: F841 - protected inlined lifetime boundary
+                return after(y)
+            except RuntimeError:  # noqa: TRY203 - retain a protected region
+                raise
+
+        def protected_fn(x):
+            return protected_inner(x, make_holder(x))
+
+        x = torch.randn(2)
+        for plain_ref in (True, False):
+            use_plain_ref[0] = plain_ref
+            for source_fn, expected in (
+                (fn, ["before", "weakref", "after"]),
+                (protected_fn, ["before", "weakref", "after"]),
+                (implicit_fn, ["before", "after", "weakref"]),
+            ):
+                for compiled in (False, True):
+                    events.clear()
+                    callback_refs.clear()
+                    holder_access[0] = None
+                    torch._dynamo.reset()
+                    target = (
+                        torch.compile(source_fn, backend="eager")
+                        if compiled
+                        else source_fn
+                    )
+                    result = target(x)
+                    self.assertEqual(result, x)
+                    del result
+                    gc.collect()
+                    self.assertEqual(events, expected)
+
+    def test_graph_break_resume_args_implicit_local_observer_after_resume(self):
+        events = []
+        refs = []
+
+        @torch._dynamo.disable
+        def make_holder(x):
+            return x + 1
+
+        @torch._dynamo.disable
+        def capture(holder):
+            refs.append(weakref.ref(holder, lambda _: events.append("weakref")))
+
+        @torch._dynamo.disable
+        def after(x):
+            events.append("after")
+            return x
+
+        def fn(x):
+            holder = make_holder(x)
+            capture(holder)
+            return after(x * x)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager")
+        for target in (fn, compiled, compiled):
+            events.clear()
+            refs.clear()
+            result = target(x)
+            del result
+            gc.collect()
+            self.assertEqual(events, ["after", "weakref"])
+
+    def test_graph_break_resume_args_mapped_local_late_observer(self):
+        events = []
+        refs = []
+
+        def make_pair(x):
+            return x + 1, x + 2
+
+        @torch._dynamo.disable
+        def passthrough(x):
+            return x + 1
+
+        @torch._dynamo.disable
+        def capture(holder):
+            refs.append(weakref.ref(holder, lambda _: events.append("weakref")))
+
+        @torch._dynamo.disable
+        def after(x):
+            events.append("after")
+            return x
+
+        def fn(x):
+            value, holder = make_pair(x)
+            value = passthrough(value)
+            capture(holder)
+            return after(value * x)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager")
+        for target in (fn, compiled, compiled):
+            events.clear()
+            refs.clear()
+            result = target(x)
+            del result
+            gc.collect()
+            self.assertEqual(events, ["after", "weakref"])
+
+    def test_graph_break_resume_args_worker_fast_local_owner(self):
+        state = {}
+        events = []
+        errors = []
+        refs = []
+
+        @torch._dynamo.disable
+        def make_holder(x):
+            holder = x + 1
+            handoff = [holder]
+            ready = threading.Event()
+            release = threading.Event()
+            done = threading.Event()
+
+            def worker():
+                value = handoff.pop()
+                ready.set()
+                try:
+                    if not release.wait(10):
+                        errors.append("worker timed out waiting for release")
+                        return
+                    refs.append(weakref.ref(value, lambda _: events.append("weakref")))
+                    del value
+                finally:
+                    done.set()
+
+            thread = threading.Thread(target=worker)
+            thread.start()
+            self.assertTrue(ready.wait(10))
+            state.update(thread=thread, release=release, done=done)
+            return holder
+
+        @torch._dynamo.disable
+        def hop(x):
+            events.append("hop")
+            return x
+
+        @torch._dynamo.disable
+        def after(x):
+            state["release"].set()
+            self.assertTrue(state["done"].wait(10))
+            state["thread"].join(10)
+            events.append("after")
+            return x
+
+        def fn(x):
+            holder = make_holder(x)  # noqa: F841 - owned until frame exit
+            return after(hop(x * x))
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager")
+        for target in (fn, compiled, compiled):
+            state.clear()
+            events.clear()
+            errors.clear()
+            refs.clear()
+            result = target(x)
+            del result
+            gc.collect()
+            self.assertEqual(errors, [])
+            self.assertFalse(state["thread"].is_alive())
+            self.assertEqual(events, ["hop", "after", "weakref"])
+
+    def test_graph_break_resume_args_public_weak_dict_ref(self):
+        refs = []
+        states = []
+
+        @torch._dynamo.disable
+        def make_holder(x):
+            holder = x + 1
+            weak_dict = WeakIdKeyDictionary()
+            weak_dict[holder] = None
+            refs.append(weak_dict.keyrefs()[0])
+            return holder
+
+        @torch._dynamo.disable
+        def observe(x):
+            gc.collect()
+            states.append(refs[-1]() is not None)
+            return x
+
+        def fn(x):
+            holder = make_holder(x)  # noqa: F841 - owned until frame exit
+            return observe(x * x)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager")
+        for target in (fn, compiled, compiled):
+            refs.clear()
+            states.clear()
+            result = target(x)
+            self.assertEqual(states, [True])
+            del result
+
+    def test_graph_break_resume_args_saved_tensor_hook_observer(self):
+        events = []
+        holder_access = [None]
+        callback_refs = []
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            holder_access[0] = holder
+            return holder
+
+        @torch._dynamo.disable()
+        def after(x):
+            events.append("after")
+            return x
+
+        def implicit_fn(x):
+            holder = make_holder(x)  # noqa: F841 - CPython owns it to frame exit
+            y = x * x
+            return after(y)
+
+        def explicit_fn(x):
+            holder = make_holder(x)
+            y = x * x
+            holder = None  # noqa: F841 - callback runs at this source store
+            return after(y)
+
+        def pack_hook(tensor):
+            if holder_access[0] is not None:
+                events.append("pack_before")
+                holder = holder_access[0]
+                callback_refs.append(
+                    weakref.ref(holder, lambda _: events.append("weakref"))
+                )
+                holder_access[0] = None
+                del holder
+                events.append("pack_after")
+            return tensor.detach()
+
+        def unpack_hook(tensor):
+            return tensor
+
+        x = torch.randn(2, requires_grad=True)
+        for source_fn, expected, expected_graphs in (
+            (implicit_fn, ["pack_before", "pack_after", "after", "weakref"], 1),
+            (explicit_fn, ["pack_before", "pack_after", "weakref", "after"], 1),
+        ):
+            with self.subTest(source_fn=source_fn.__name__):
+                events.clear()
+                callback_refs.clear()
+                holder_access[0] = None
+                torch._dynamo.reset()
+                cnt = CompileCounter()
+                target = torch.compile(source_fn, backend=cnt)
+
+                # First populate a no-hooks cache entry, then verify that the
+                # runtime cleanup also handles observers added by a hook.
+                result = target(x)
+                holder_access[0] = None
+                del result
+                gc.collect()
+                events.clear()
+
+                with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+                    result = target(x)
+                del result
+                gc.collect()
+                self.assertEqual(events, expected)
+                self.assertEqual(cnt.frame_count, expected_graphs)
+
+    def test_graph_break_resume_args_cached_saved_tensor_hook_observer(self):
+        events = []
+        refs = []
+
+        @torch._dynamo.disable()
+        def after(x):
+            events.append("after")
+            return x
+
+        def fn(x):
+            holder = x + 1
+            torch._dynamo.graph_break()
+            y = holder * holder
+            return after(y)
+
+        def pack_hook(tensor):
+            events.append("pack")
+            if not refs:
+                refs.append(weakref.ref(tensor, lambda _: events.append("weakref")))
+            return tensor.detach()
+
+        def run(target, hooks):
+            events.clear()
+            refs.clear()
+            context = (
+                torch.autograd.graph.saved_tensors_hooks(
+                    pack_hook, lambda tensor: tensor
+                )
+                if hooks
+                else contextlib.nullcontext()
+            )
+            with context:
+                result = target(torch.ones(2, requires_grad=True))
+            events.append("returned")
+            del result
+            gc.collect()
+            return list(events)
+
+        expected = ["pack", "pack", "after", "weakref", "returned"]
+        self.assertEqual(run(fn, True), expected)
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        target = torch.compile(fn, backend=cnt)
+        self.assertEqual(run(target, False), ["after", "returned"])
+        self.assertEqual(run(target, True), expected)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_graph_break_resume_args_cached_hook_explicit_release(self):
+        events = []
+        refs = []
+        holder_access = [None]
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            holder_access[0] = holder
+            return holder
+
+        @torch._dynamo.disable()
+        def after(x):
+            events.append("after")
+            return x
+
+        def fn(x):
+            holder = make_holder(x)
+            y = x * x
+            holder = None  # noqa: F841 - callback precedes the next graph op
+            z = y * y
+            return after(z)
+
+        def pack_hook(tensor):
+            events.append("pack")
+            if not refs:
+                holder = holder_access[0]
+                refs.append(weakref.ref(holder, lambda _: events.append("weakref")))
+                holder_access[0] = None
+                del holder
+            return tensor.detach()
+
+        def run(target, hooks):
+            events.clear()
+            refs.clear()
+            holder_access[0] = None
+            context = (
+                torch.autograd.graph.saved_tensors_hooks(
+                    pack_hook, lambda tensor: tensor
+                )
+                if hooks
+                else contextlib.nullcontext()
+            )
+            with context:
+                result = target(torch.ones(2, requires_grad=True))
+            events.append("returned")
+            del result
+            gc.collect()
+            return list(events)
+
+        expected = [
+            "pack",
+            "pack",
+            "weakref",
+            "pack",
+            "pack",
+            "after",
+            "returned",
+        ]
+        self.assertEqual(run(fn, True), expected)
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        target = torch.compile(fn, backend=cnt)
+        self.assertEqual(run(target, False), ["after", "returned"])
+        warm_frames = cnt.frame_count
+        self.assertEqual(run(target, True), expected)
+        hook_frames = cnt.frame_count
+        # The externally observable opaque-call result already has a lifetime
+        # partition, so enabling hooks does not require another graph variant.
+        self.assertEqual(hook_frames, warm_frames)
+        self.assertEqual(run(target, True), expected)
+        self.assertEqual(cnt.frame_count, hook_frames)
+
+    def test_graph_break_resume_args_cached_weakref_explicit_release(self):
+        refs = []
+        armed = [False]
+        scale = [1]
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            if armed[0]:
+                refs.append(weakref.ref(holder, lambda _: scale.__setitem__(0, 2)))
+            return holder
+
+        def fn(x):
+            holder = make_holder(x)
+            y = x + 1
+            holder = None  # noqa: F841 - callback changes the following graph
+            return y * scale[0]
+
+        x = torch.ones(2)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        target = torch.compile(fn, backend=cnt)
+        self.assertEqual(target(x), torch.full_like(x, 2))
+        warm_frames = cnt.frame_count
+
+        armed[0] = True
+        for _ in range(2):
+            scale[0] = 1
+            self.assertEqual(target(x), torch.full_like(x, 4))
+            self.assertEqual(scale[0], 2)
+        # The callback changes the scalar seen by the compilable continuation,
+        # so its first armed invocation specializes that suffix after release.
+        self.assertGreater(cnt.frame_count, warm_frames)
+
+    def test_graph_break_resume_args_cached_concurrent_explicit_release(self):
+        events = []
+        holder_access = [None]
+        callback_refs = []
+        enable_worker = [False]
+        scale = [1]
+        holder_ready = threading.Event()
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            holder_access[0] = holder
+            if enable_worker[0]:
+                holder_ready.set()
+            return holder
+
+        @torch._dynamo.disable()
+        def hop(x):
+            return x
+
+        def fn(x):
+            holder = make_holder(x)
+            y = hop(x)
+            z = y @ y
+            holder = None  # noqa: F841 - callback changes the following graph
+            return z * scale[0]
+
+        def callback(_):
+            scale[0] = 2
+            events.append("weakref")
+
+        def install_observer():
+            if not holder_ready.wait(10):
+                return
+            # Pass both resume-entry guards before installing the observer.
+            # The one-thread matmul is deliberately long enough that this
+            # still happens before the source-level release.
+            time.sleep(0.05)
+            holder = holder_access[0]
+            callback_refs.append(weakref.ref(holder, callback))
+            holder_access[0] = None
+            del holder
+            events.append("worker_done")
+
+        prior_num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        self.addCleanup(torch.set_num_threads, prior_num_threads)
+        x = torch.randn(2048, 2048)
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager")
+        result = compiled(x)
+        holder_access[0] = None
+        del result
+
+        def run(target):
+            events.clear()
+            callback_refs.clear()
+            holder_access[0] = None
+            holder_ready.clear()
+            scale[0] = 1
+            enable_worker[0] = True
+            worker = threading.Thread(target=install_observer)
+            worker.start()
+            try:
+                result = target(x)
+            finally:
+                worker.join(10)
+                enable_worker[0] = False
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(events, ["worker_done", "weakref"])
+            self.assertEqual(scale[0], 2)
+            return result
+
+        expected = run(fn)
+        self.assertEqual(run(compiled), expected)
+
+    def test_graph_break_resume_args_concurrent_observer(self):
+        events = []
+        holder_access = [None]
+        callback_refs = []
+        enable_worker = [False]
+        holder_ready = threading.Event()
+        worker_done = threading.Event()
+        worker_delay = threading.Event()
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            holder = x.clone()
+            holder_access[0] = holder
+            if enable_worker[0]:
+                holder_ready.set()
+            return holder
+
+        @torch._dynamo.disable()
+        def after(x):
+            if enable_worker[0] and not worker_done.wait(10):
+                raise AssertionError("observer worker did not finish")
+            events.append("after")
+            return x
+
+        def fn(x):
+            holder = make_holder(x)  # noqa: F841 - CPython owns it to frame exit
+            y = x @ x
+            return after(y)
+
+        def install_observer():
+            if not holder_ready.wait(10):
+                return
+            # Let resume-entry guards and pre-graph bytecode finish while the
+            # large ATen matmul releases the GIL.
+            worker_delay.wait(0.05)
+            holder = holder_access[0]
+            callback_refs.append(
+                weakref.ref(holder, lambda _: events.append("weakref"))
+            )
+            holder_access[0] = None
+            del holder
+            events.append("worker_done")
+            worker_done.set()
+
+        x = torch.randn(2048, 2048)
+
+        def run(target):
+            events.clear()
+            callback_refs.clear()
+            holder_access[0] = None
+            holder_ready.clear()
+            worker_done.clear()
+            enable_worker[0] = True
+            worker = threading.Thread(target=install_observer)
+            worker.start()
+            try:
+                result = target(x)
+            finally:
+                worker.join(10)
+                enable_worker[0] = False
+            self.assertFalse(worker.is_alive())
+            del result
+            gc.collect()
+            self.assertEqual(events, ["worker_done", "after", "weakref"])
+
+        run(fn)
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        result = compiled(x)
+        holder_access[0] = None
+        del result
+        gc.collect()
+        run(compiled)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_graph_break_resume_args_side_effect_escape(self):
+        holder_access = [None]
+        events = []
+        errors = []
+        refs = []
+        poll = threading.Event()
+
+        @torch._dynamo.disable
+        def hop(x):
+            return x
+
+        def fn(x):
+            holder = x + 1
+            y = hop(x)
+            holder_access[0] = holder
+            torch._dynamo.graph_break()
+            return y @ y
+
+        def install_observer():
+            for _ in range(10000):
+                if holder_access[0] is not None:
+                    break
+                poll.wait(0.001)
+            else:
+                errors.append("worker timed out waiting for escaped holder")
+                return
+            holder = holder_access[0]
+            refs.append(weakref.ref(holder, lambda _: events.append("weakref")))
+            holder_access[0] = None
+            del holder
+            events.append("worker_done")
+
+        x = torch.randn(2048, 2048)
+        compiled = torch.compile(fn, backend="eager")
+        result = compiled(x)
+        holder_access[0] = None
+        del result
+        gc.collect()
+
+        worker = threading.Thread(target=install_observer)
+        worker.start()
+        result = compiled(x)
+        worker.join(10)
+        self.assertFalse(worker.is_alive())
+        del result
+        gc.collect()
+        self.assertEqual(errors, [])
+        self.assertEqual(events, ["worker_done", "weakref"])
+
+    def test_graph_break_resume_args_preserves_stale_f_locals(self):
+        events = []
+        refs = []
+
+        class Materializer:
+            def __del__(self):
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if frame.f_code.co_name == "fn" or frame.f_code.co_name.startswith(
+                        "torch_dynamo_resume_in_"
+                    ):
+                        frame.f_locals.get("observed")
+                        events.append("del_materializer")
+                        return
+                    frame = frame.f_back
+
+        class Observed:
+            pass
+
+        @torch._dynamo.disable
+        def make_pair():
+            observed = Observed()
+            refs.append(weakref.ref(observed, lambda _: events.append("del_observed")))
+            return Materializer(), observed
+
+        @torch._dynamo.disable
+        def mark(label, x):
+            events.append(label)
+            return x
+
+        def fn(x):
+            materializer, observed = make_pair()
+            x = mark("before", x + 1)
+            materializer = None  # noqa: F841 - materialize the frame's f_locals
+            observed = None  # noqa: F841 - cached f_locals retains this on 3.12
+            return mark("after", x + 1)
+
+        def run(target):
+            events.clear()
+            refs.clear()
+            result = target(torch.ones(2))
+            del result
+            gc.collect()
+            return list(events)
+
+        expected = run(fn)
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(run(compiled), expected)
+        self.assertEqual(run(compiled), expected)
+
+    def test_graph_break_resume_args_preserve_store_fast_order(self):
+        events = []
+        missing = object()
+
+        class Token:
+            def __init__(self, label):
+                self.label = label
+
+            def __del__(self):
+                frame = sys._getframe(1)
+                snapshots = []
+                while frame is not None and len(snapshots) < 5:
+                    if frame.f_code.co_name in (
+                        "fn",
+                        "repeated_store_fn",
+                        "mixed_phase_fn",
+                    ) or (frame.f_code.co_name.startswith("torch_dynamo_resume_in_")):
+                        frame_locals = frame.f_locals
+
+                        def render(name):
+                            value = frame_locals.get(name, missing)
+                            if value is missing:
+                                return "<missing>"
+                            if isinstance(value, Token):
+                                return value.label
+                            return repr(value)
+
+                        snapshots.append((render("a"), render("b")))
+                    frame = frame.f_back
+                events.append((self.label, snapshots))
+
+        @torch._dynamo.disable()
+        def make_token(label):
+            return Token(label)
+
+        def fn(x):
+            a = make_token("A")
+            b = make_token("B")
+            a = 1  # noqa: F841 - finalizer must observe source STORE_FAST order
+            b = 2  # noqa: F841 - finalizer must observe source STORE_FAST order
+            return x + 1
+
+        def first_snapshot(label):
+            return next(snapshots[0] for event, snapshots in events if event == label)
+
+        x = torch.randn(2)
+        self.assertEqual(fn(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("A"), ("1", "B"))
+
+        events.clear()
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("A"), ("1", "B"))
+
+        @torch._dynamo.disable()
+        def make_pair():
+            return object(), Token("B")
+
+        def repeated_store_fn(x):
+            a, b = make_pair()
+            a = 17
+            a = 23  # noqa: F841 - observed by b's finalizer
+            b = None  # noqa: F841 - finalizer must observe the latest a store
+            return x + 1
+
+        events.clear()
+        self.assertEqual(repeated_store_fn(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("B")[0], "23")
+
+        events.clear()
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(repeated_store_fn, backend="eager")(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("B")[0], "23")
+
+        alias_snapshots = []
+
+        class AliasToken:
+            def __del__(self):
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if frame.f_code.co_name == "repeated_alias_transition_fn" or (
+                        frame.f_code.co_name.startswith("torch_dynamo_resume_in_")
+                    ):
+                        frame_locals = frame.f_locals
+                        alias_snapshots.append(
+                            (
+                                frame_locals.get("holder", missing),
+                                frame_locals.get("alias", missing),
+                            )
+                        )
+                        break
+                    frame = frame.f_back
+
+        @torch._dynamo.disable()
+        def make_alias_token():
+            return AliasToken()
+
+        def repeated_alias_transition_fn(x):
+            holder = make_alias_token()
+            alias = holder
+            holder = None
+            alias = None  # noqa: F841 - final transition must precede cleanup
+            return x + 1
+
+        self.assertEqual(repeated_alias_transition_fn(x), x + 1)
+        gc.collect()
+        self.assertEqual(alias_snapshots, [(None, None)])
+
+        alias_snapshots.clear()
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(repeated_alias_transition_fn, backend="eager")(x), x + 1
+        )
+        gc.collect()
+        self.assertEqual(alias_snapshots, [(None, None)])
+
+        @torch._dynamo.disable()
+        def make_mixed_phase_values():
+            return Token("mixed"), object(), object()
+
+        def mixed_phase_fn(x):
+            a, b, c = make_mixed_phase_values()
+            a = 17  # noqa: F841 - pregraph carrier cleanup
+            c = x * 2  # noqa: F841 - graph-produced replacement
+            b = None  # noqa: F841 - postgraph shared-carrier cleanup
+            return x + 1
+
+        events.clear()
+        self.assertEqual(mixed_phase_fn(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("mixed")[0], "17")
+
+        events.clear()
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(mixed_phase_fn, backend="eager")(x), x + 1)
+        gc.collect()
+        self.assertEqual(first_snapshot("mixed")[0], "17")
+
+    def test_graph_break_resume_args_preserve_graph_event_order(self):
+        events = []
+        raise_in_before = [False]
+
+        @torch.library.custom_op(
+            "test_repros::before_resume_fast_local_order", mutates_args=()
+        )
+        def before(x: torch.Tensor) -> torch.Tensor:
+            events.append("before")
+            if raise_in_before[0]:
+                raise RuntimeError("before failed")
+            return x.clone()
+
+        @before.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @torch.library.custom_op(
+            "test_repros::after_resume_fast_local_order", mutates_args=()
+        )
+        def after(x: torch.Tensor) -> torch.Tensor:
+            events.append("after")
+            return x.clone()
+
+        @after.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        class Token:
+            def __del__(self):
+                events.append("del")
+
+        class Holder:
+            def __init__(self):
+                self.token = Token()
+
+        class HolderList(list):
+            pass
+
+        @torch._dynamo.disable()
+        def make_token():
+            return Token()
+
+        @torch._dynamo.disable()
+        def make_holder():
+            return Holder()
+
+        @torch._dynamo.disable()
+        def make_holder_list():
+            return HolderList([Token()])
+
+        @torch._dynamo.disable()
+        def make_tensor_with_token_attr(x):
+            holder = x.clone()
+            holder.token = Token()
+            return holder
+
+        token_refs = []
+
+        class WeakToken:
+            pass
+
+        @torch._dynamo.disable()
+        def make_weak_token():
+            token = WeakToken()
+            token_refs.append(weakref.ref(token, lambda _: events.append("weakref")))
+            return token
+
+        def store_fn(x):
+            holder = make_token()
+            y = before(x)
+            holder = None  # noqa: F841 - exercise STORE_FAST event ordering
+            return after(y)
+
+        def delete_fn(x):
+            holder = make_token()
+            y = before(x)
+            del holder
+            return after(y)
+
+        def walrus_fn(x):
+            holder = make_token()
+            y = (before(x), (holder := None), after(x))
+            return y[2] if holder is None else y[0]
+
+        def weakref_fn(x):
+            holder = make_weak_token()
+            y = before(x)
+            holder = None  # noqa: F841 - exercise weakref callback ordering
+            return after(y)
+
+        def protected_fn(x):
+            holder = make_token()
+            try:
+                y = before(x)
+                holder = None  # noqa: F841 - lifetime boundary inside try
+                return after(y)
+            except Exception:
+                return x
+
+        def custom_owner_fn(x):
+            holder = make_holder()
+            y = before(x)
+            holder = None  # noqa: F841 - owner releases nested finalizable state
+            return after(y)
+
+        def container_subclass_fn(x):
+            holder = make_holder_list()
+            y = before(x)
+            holder = None  # noqa: F841 - subclass releases its Token item
+            return after(y)
+
+        def tensor_attr_fn(x):
+            holder = make_tensor_with_token_attr(x)
+            y = before(x)
+            holder = None  # noqa: F841 - tensor releases its Python attributes
+            return after(y)
+
+        def closure_fn(x):
+            holder = make_token()
+
+            def closure():
+                return holder
+
+            y = before(x)
+            holder = None
+            result = after(y)
+            closure()
+            return result
+
+        def inner(x, holder):
+            y = before(x)
+            holder = None  # noqa: F841 - lifetime boundary in an inlined frame
+            return after(y)
+
+        def inlined_fn(x):
+            return inner(x, make_token())
+
+        def inner_walrus(x, holder):
+            y = (before(x), (holder := None), after(x))
+            return y[2] if holder is None else y[0]
+
+        def inlined_walrus_fn(x):
+            return inner_walrus(x, make_token())
+
+        def protected_inner(x, holder):
+            try:
+                y = before(x)
+                holder = None  # noqa: F841 - protected inlined lifetime boundary
+                return after(y)
+            except Exception:
+                return x
+
+        def inlined_protected_fn(x):
+            return protected_inner(x, make_token())
+
+        def protected_after_handler_inner(x, holder):
+            try:
+                y = before(x)
+            except RuntimeError:
+                y = x + 100
+            holder = None  # noqa: F841 - boundary follows the protected region
+            return after(y)
+
+        def inlined_protected_after_handler_fn(x):
+            return protected_after_handler_inner(x, make_token())
+
+        x = torch.randn(2)
+        for fn, finalizer_event, expected_graphs in (
+            (store_fn, "del", 2),
+            (delete_fn, "del", 2),
+            (walrus_fn, "del", 2),
+            (weakref_fn, "weakref", 2),
+            (protected_fn, "del", 0),
+            (custom_owner_fn, "del", 2),
+            (container_subclass_fn, "del", 2),
+            (tensor_attr_fn, "del", 2),
+            (closure_fn, "del", 0),
+            (inlined_fn, "del", 1),
+            (inlined_walrus_fn, "del", 1),
+            (inlined_protected_fn, "del", 0),
+            (inlined_protected_after_handler_fn, "del", 0),
+        ):
+            with self.subTest(fn=fn.__name__):
+                events.clear()
+                self.assertEqual(fn(x), x)
+                gc.collect()
+                self.assertEqual(events, ["before", finalizer_event, "after"])
+
+                events.clear()
+                torch._dynamo.reset()
+                cnt = CompileCounter()
+                self.assertEqual(torch.compile(fn, backend=cnt)(x), x)
+                gc.collect()
+                self.assertEqual(events, ["before", finalizer_event, "after"])
+                # Root frames compile both sides of the lifetime partition;
+                # ordinary inlined frames compile the prefix and use a skipped
+                # leaf continuation. Protected frames fall back. In every case,
+                # `after` must not be fused across the finalizer boundary.
+                self.assertEqual(cnt.frame_count, expected_graphs)
+                self.assertEqual(cnt.op_count, expected_graphs)
+
+        @torch._dynamo.disable()
+        def mark(label, value):
+            events.append(label)
+            return value
+
+        def inherited_carrier_fn(x):
+            holder = make_token()
+            x = mark("one", x + 1)
+            x = mark("two", x + 1)
+            x = x + 1
+            holder = None  # noqa: F841 - release a twice-nested carrier root
+            return mark("after", x)
+
+        for compiled in (False, True):
+            events.clear()
+            torch._dynamo.reset()
+            target = (
+                torch.compile(inherited_carrier_fn, backend="eager")
+                if compiled
+                else inherited_carrier_fn
+            )
+            self.assertEqual(target(x), x + 3)
+            gc.collect()
+            self.assertEqual(events, ["one", "two", "del", "after"])
+
+        observed_tensor_refs = []
+        observe_dead_tensor = [True]
+
+        @torch._dynamo.disable()
+        def make_observed_tensor(x):
+            value = x + 1
+            if observe_dead_tensor[0]:
+                observed_tensor_refs.append(
+                    weakref.ref(value, lambda _: events.append("weakref"))
+                )
+            return value
+
+        def implicit_dead_local_fn(x):
+            value = make_observed_tensor(x)  # noqa: F841 - retained until frame exit
+            return mark("after", x + 1)
+
+        for compiled in (False, True):
+            events.clear()
+            observed_tensor_refs.clear()
+            torch._dynamo.reset()
+            target = (
+                torch.compile(implicit_dead_local_fn, backend="eager")
+                if compiled
+                else implicit_dead_local_fn
+            )
+            result = target(x)
+            del result
+            gc.collect()
+            self.assertEqual(events, ["after", "weakref"])
+
+        torch._dynamo.reset()
+        opt_implicit_dead_local_fn = torch.compile(
+            implicit_dead_local_fn, backend="eager"
+        )
+        observe_dead_tensor[0] = False
+        events.clear()
+        result = opt_implicit_dead_local_fn(x)
+        del result
+        gc.collect()
+        self.assertEqual(events, ["after"])
+
+        observe_dead_tensor[0] = True
+        events.clear()
+        result = opt_implicit_dead_local_fn(x)
+        del result
+        gc.collect()
+        self.assertEqual(events, ["after", "weakref"])
+
+        user_weak_dict = WeakIdKeyDictionary()
+        weak_dict_lengths = []
+        add_to_user_weak_dict = [True]
+
+        @torch._dynamo.disable()
+        def make_user_weak_dict_tensor(x):
+            value = x + 1
+            if add_to_user_weak_dict[0]:
+                user_weak_dict[value] = None
+            return value
+
+        @torch._dynamo.disable()
+        def observe_user_weak_dict(x):
+            weak_dict_lengths.append(len(user_weak_dict))
+            return x
+
+        def implicit_user_weak_dict_fn(x):
+            value = make_user_weak_dict_tensor(x)  # noqa: F841
+            return observe_user_weak_dict(x + 1)
+
+        for compiled in (False, True):
+            user_weak_dict.clear()
+            weak_dict_lengths.clear()
+            torch._dynamo.reset()
+            target = (
+                torch.compile(implicit_user_weak_dict_fn, backend="eager")
+                if compiled
+                else implicit_user_weak_dict_fn
+            )
+            result = target(x)
+            self.assertEqual(weak_dict_lengths, [1])
+            del result
+            gc.collect()
+            self.assertEqual(len(user_weak_dict), 0)
+
+        torch._dynamo.reset()
+        opt_implicit_user_weak_dict_fn = torch.compile(
+            implicit_user_weak_dict_fn, backend="eager"
+        )
+        add_to_user_weak_dict[0] = False
+        weak_dict_lengths.clear()
+        result = opt_implicit_user_weak_dict_fn(x)
+        del result
+        gc.collect()
+        self.assertEqual(weak_dict_lengths, [0])
+
+        add_to_user_weak_dict[0] = True
+        weak_dict_lengths.clear()
+        result = opt_implicit_user_weak_dict_fn(x)
+        self.assertEqual(weak_dict_lengths, [1])
+        del result
+        gc.collect()
+        self.assertEqual(len(user_weak_dict), 0)
+
+        def protected_raising_inner(x, holder):
+            try:
+                y = before(x)
+                holder = None  # noqa: F841 - protected inlined boundary
+                return after(y)
+            except RuntimeError:
+                return x + 100
+
+        def inlined_protected_raising_fn(x):
+            return protected_raising_inner(x, make_token())
+
+        for fn in (
+            inlined_protected_raising_fn,
+            inlined_protected_after_handler_fn,
+        ):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(opt_fn(x), x)
+            self.assertEqual(cnt.frame_count, 0)
+            raise_in_before[0] = True
+            try:
+                self.assertEqual(opt_fn(x), x + 100)
+            finally:
+                raise_in_before[0] = False
+
+        class CallbackTrapRef(weakref.ref):
+            def __getattribute__(self, name):
+                if name == "__callback__":
+                    raise AssertionError("user weakref attribute access")
+                return super().__getattribute__(name)
+
+        callback_trap_refs = []
+
+        @torch._dynamo.disable()
+        def make_callback_trap_token():
+            token = WeakToken()
+            callback_trap_refs.append(
+                CallbackTrapRef(token, lambda _: events.append("trap_callback"))
+            )
+            return token
+
+        def callback_trap_fn(x):
+            holder = make_callback_trap_token()
+            y = before(x)
+            holder = None  # noqa: F841 - invoke the trapped weakref callback
+            return after(y)
+
+        events.clear()
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        self.assertEqual(torch.compile(callback_trap_fn, backend=cnt)(x), x)
+        gc.collect()
+        self.assertEqual(events, ["before", "trap_callback", "after"])
+        self.assertEqual(cnt.frame_count, 2)
+
+        callback_proxies = []
+
+        @torch._dynamo.disable()
+        def on_proxy_callback(_):
+            events.append("proxy_callback")
+
+        @torch._dynamo.disable()
+        def make_proxy_callback_token():
+            token = WeakToken()
+            callback_proxies.append(weakref.proxy(token, on_proxy_callback))
+            return token
+
+        def proxy_callback_fn(x):
+            holder = make_proxy_callback_token()
+            y = before(x)
+            holder = None  # noqa: F841 - invoke the weakref.proxy callback
+            return after(y)
+
+        events.clear()
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        self.assertEqual(torch.compile(proxy_callback_fn, backend=cnt)(x), x)
+        gc.collect()
+        self.assertEqual(events, ["before", "proxy_callback", "after"])
+        self.assertEqual(cnt.frame_count, 2)
+
+        add_tensor_callback = [False]
+        tensor_callback_refs = []
+
+        @torch._dynamo.disable()
+        def make_tensor_with_optional_callback(x):
+            holder = x.clone()
+            if add_tensor_callback[0]:
+                tensor_callback_refs.append(
+                    weakref.ref(holder, lambda _: events.append("late_weakref"))
+                )
+            return holder
+
+        def mutable_tensor_weakref_fn(x):
+            holder = make_tensor_with_optional_callback(x)
+            y = before(x)
+            holder = None  # noqa: F841 - callback presence changes after tracing
+            return after(y)
+
+        events.clear()
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(mutable_tensor_weakref_fn, backend=cnt)
+        self.assertEqual(opt_fn(x), x)
+        self.assertEqual(events, ["before", "after"])
+
+        events.clear()
+        add_tensor_callback[0] = True
+        try:
+            self.assertEqual(opt_fn(x), x)
+            gc.collect()
+        finally:
+            add_tensor_callback[0] = False
+        self.assertEqual(events, ["before", "late_weakref", "after"])
+        # Arbitrary graph work can attach the observer after tracing, so the
+        # release partitions the compiled prefix and suffix.
+        self.assertEqual(cnt.frame_count, 2)
+
+        track_tensor_finalizer = [False]
+        tensor_finalizer_ids = set()
+
+        @torch._dynamo.disable()
+        def make_tensor_with_mutable_finalizer(x):
+            holder = x.clone()
+            if track_tensor_finalizer[0]:
+                tensor_finalizer_ids.add(id(holder))
+            return holder
+
+        @torch._dynamo.disable()
+        def on_tensor_del(value):
+            value_id = id(value)
+            if value_id in tensor_finalizer_ids:
+                tensor_finalizer_ids.remove(value_id)
+                events.append("late_del")
+
+        def mutable_tensor_finalizer_fn(x):
+            holder = make_tensor_with_mutable_finalizer(x)
+            y = before(x)
+            holder = None  # noqa: F841 - __del__ presence changes after tracing
+            return after(y)
+
+        events.clear()
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(mutable_tensor_finalizer_fn, backend=cnt)
+        self.assertEqual(opt_fn(x), x)
+        self.assertEqual(events, ["before", "after"])
+
+        events.clear()
+        track_tensor_finalizer[0] = True
+        try:
+            with mock.patch.object(torch.Tensor, "__del__", on_tensor_del, create=True):
+                result = opt_fn(x)
+                self.assertEqual(result, x)
+                del result
+                gc.collect()
+        finally:
+            track_tensor_finalizer[0] = False
+        self.assertEqual(events, ["before", "late_del", "after"])
+        self.assertEqual(tensor_finalizer_ids, set())
+        self.assertEqual(cnt.frame_count, 2)
+
+        class PairToken:
+            def __init__(self, label):
+                self.label = label
+
+            def __del__(self):
+                events.append(f"del{self.label}")
+
+        @torch._dynamo.disable()
+        def make_pair():
+            return PairToken("A"), PairToken("B")
+
+        def repeated_alias_fn(x):
+            a, b = make_pair()
+            y = before(x)
+            a = b
+            del a
+            b = None
+            return after(y)
+
+        events.clear()
+        self.assertEqual(repeated_alias_fn(x), x)
+        gc.collect()
+        self.assertEqual(events, ["before", "delA", "delB", "after"])
+
+        events.clear()
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        self.assertEqual(torch.compile(repeated_alias_fn, backend=cnt)(x), x)
+        gc.collect()
+        self.assertEqual(events, ["before", "delA", "delB", "after"])
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_graph_break_resume_args_nonempty_stack_finalizer_boundary(self):
+        script = """
+import gc
+import torch
+from torch._dynamo.testing import CompileCounter
+
+events = []
+
+class Token:
+    def __del__(self):
+        events.append("del")
+
+@torch._dynamo.disable()
+def make_token():
+    return Token()
+
+def combine(a, unused, c):
+    return a + c
+
+def fn(x):
+    holder = make_token()
+    return combine(x + 1, (holder := None), x + 2)
+
+x = torch.ones(2)
+cnt = CompileCounter()
+actual = torch.compile(fn, backend=cnt)(x)
+torch.testing.assert_close(actual, torch.full_like(x, 5))
+gc.collect()
+assert events == ["del"], events
+assert cnt.frame_count == 2, cnt.frame_count
+assert cnt.op_count == 3, cnt.op_count
+"""
+        env = os.environ.copy()
+        env["PYTHONFAULTHANDLER"] = "1"
+        subprocess.check_output([sys.executable, "-c", script], text=True, env=env)
+
+    def test_graph_break_resume_args_releases_overwritten_local_before_graph(self):
+        refs = []
+        states = []
+
+        @torch._dynamo.disable()
+        def make_holder(x):
+            y = x + 1
+            refs.append(weakref.ref(y))
+            return [y]
+
+        def backend(gm, _):
+            def run(*args):
+                gc.collect()
+                states.append(refs[-1]() is None)
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            holder = make_holder(x)
+            keep = x + 2
+            torch._dynamo.graph_break()
+            holder = None  # noqa: F841 - exercise STORE_FAST lifetime
+            del keep
+            return x * 2
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend=backend)(x), x * 2)
+        self.assertEqual(states, [False, True])
+
+        @torch._dynamo.disable()
+        def make_sibling_aliases(x):
+            y = x + 1
+            refs.append(weakref.ref(y))
+            holder = [y]
+            return holder, holder
+
+        def fn_with_unmodified_sibling(x):
+            first, second = make_sibling_aliases(x)
+            first = None  # noqa: F841 - release only the first sibling
+            return x * 2
+
+        states.clear()
+        self.assertEqual(
+            torch.compile(fn_with_unmodified_sibling, backend=backend)(x), x * 2
+        )
+        self.assertEqual(states, [False])
+
+        @torch._dynamo.disable()
+        def make_discarded_holder(x):
+            y = x + 1
+            refs.append(weakref.ref(y))
+            return [[y], 17]
+
+        def pop_holder(x):
+            make_discarded_holder(x)[0]
+            return x * 2
+
+        def branch_on_holder(x):
+            if make_discarded_holder(x)[0]:
+                pass
+            return x * 2
+
+        def consume_holder(x):
+            len(make_discarded_holder(x)[0])
+            return x * 2
+
+        for discard_fn in (pop_holder, branch_on_holder, consume_holder):
+            states.clear()
+            self.assertEqual(torch.compile(discard_fn, backend=backend)(x), x * 2)
+            self.assertEqual(states, [True])
+
+        class Box:
+            pass
+
+        opaque_key = object()
+
+        @torch._dynamo.disable()
+        def make_side_effect_value(x):
+            y = x + 1
+            refs.append(weakref.ref(y))
+            return {"holder": [y], opaque_key: y, "other": 17}
+
+        def store_side_effect(x, box):
+            value = make_side_effect_value(x)
+            keep = x + 2
+            torch._dynamo.graph_break()
+            box.holder = value["holder"]
+            value = None
+            del keep
+            return x * 2
+
+        states.clear()
+        box = Box()
+        self.assertEqual(
+            torch.compile(store_side_effect, backend=backend)(x, box), x * 2
+        )
+        self.assertEqual(states, [False, False])
+        self.assertIsInstance(box.holder, list)
+        self.assertIsNotNone(refs[-1]())
+
+        class SetToken:
+            pass
+
+        @torch._dynamo.disable()
+        def make_set_aliases():
+            token = SetToken()
+            return {token}, weakref.ref(token)
+
+        @torch._dynamo.disable()
+        def is_dead(ref):
+            return ref() is None
+
+        def keep_set_item_alias_alive(x):
+            holder_set, ref = make_set_aliases()
+            holder = next(iter(holder_set))
+            holder_set = None
+            alive = not is_dead(ref)
+            holder = None  # noqa: F841 - keep the extracted alias until the check
+            return x + 1 if alive else x - 1
+
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(keep_set_item_alias_alive, backend="eager")(x), x + 1
+        )
+
+    def test_graph_break_resume_args_releases_explicitly_deleted_local(self):
+        deleted = [False]
+
+        class Token:
+            def __del__(self):
+                deleted[0] = True
+
+        @torch._dynamo.disable()
+        def make_token():
+            return Token()
+
+        @torch._dynamo.disable()
+        def check_deleted():
+            gc.collect()
+            return deleted[0]
+
+        def fn(x):
+            token = make_token()
+            torch._dynamo.graph_break()
+            del token
+            return check_deleted(), x + 1
+
+        x = torch.randn(2)
+        self.assertTrue(fn(x)[0])
+        deleted[0] = False
+        self.assertTrue(torch.compile(fn, backend="eager")(x)[0])
+
+    def test_graph_break_resume_args_releases_deleted_tensor_container(self):
+        @torch._dynamo.disable()
+        def make_ref(x):
+            return weakref.ref(x)
+
+        @torch._dynamo.disable()
+        def check_dead(ref):
+            gc.collect()
+            return ref() is None
+
+        def fn(x):
+            y = x + 1
+            ref = make_ref(y)
+            holder = (y,)
+            del y
+            torch._dynamo.graph_break()
+            del holder
+            return check_dead(ref)
+
+        x = torch.randn(2)
+        self.assertTrue(fn(x))
+        self.assertTrue(torch.compile(fn, backend="eager")(x))
+
+    def test_graph_break_resume_args_clears_dead_tensor_slots_per_index(self):
+        @torch._dynamo.disable()
+        def make_ref(x):
+            return weakref.ref(x)
+
+        @torch._dynamo.disable()
+        def check_dead(ref):
+            gc.collect()
+            self.assertIsNone(ref())
+
+        def fn(x):
+            y = x + 1
+            keep = x + 2
+            ref = make_ref(y)
+            del y
+            out = keep * 2
+            check_dead(ref)
+            return out + keep
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_graph_break_resume_args_cleared_when_resume_frame_skips(self):
+        def fn(x):
+            y = x + 1
+            ref = weakref.ref(y)
+            torch._dynamo.graph_break()
+            del y
+            return ref() is None
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(fn(x))
+        self.assertTrue(opt_fn(x))
+
+    def test_graph_break_resume_args_releases_tensor_subclass_local(self):
+        refs = []
+        states = []
+
+        class MyTensor(torch.Tensor):
+            pass
+
+        @torch._dynamo.disable()
+        def make_ref(x):
+            refs.append(weakref.ref(x))
+
+        def backend(gm, _):
+            def run(*args):
+                gc.collect()
+                if refs:
+                    states.append(refs[-1]() is None)
+                return gm(*args)
+
+            return run
+
+        def fn(x):
+            y = x + 1
+            make_ref(y)
+            del y
+            return x * 2
+
+        x = torch.randn(3).as_subclass(MyTensor)
+        result = torch.compile(fn, backend=backend)(x)
+        self.assertEqual(states, [True])
+        self.assertEqual(result, x * 2)
+
+    def test_graph_break_resume_args_releases_tensor_subclass_stack(self):
+        ref = [None]
+        states = []
+
+        class MyTensor(torch.Tensor):
+            pass
+
+        @torch._dynamo.disable()
+        def make_y(x):
+            y = x + 1
+            ref[0] = weakref.ref(y)
+            return y
+
+        @torch._dynamo.disable()
+        def check_dead():
+            gc.collect()
+            states.append(ref[0]() is None)
+
+        def fn(x):
+            out = make_y(x) * 2
+            check_dead()
+            return out
+
+        x = torch.randn(3).as_subclass(MyTensor)
+        result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(states, [True])
+        self.assertEqual(result, (x + 1) * 2)
+
+    def test_graph_break_resume_args_tensor_subclass_weakref_cycle(self):
+        script = """
+import gc
+import torch
+import weakref
+
+def fn():
+    finalized = [False, False]
+
+    class FirstTensor(torch.Tensor):
+        __slots__ = ["other"]
+
+        def __del__(self):
+            finalized[0] = True
+
+    class SecondTensor(FirstTensor):
+        __slots__ = ["other_again"]
+
+        def __del__(self):
+            finalized[1] = True
+
+    first = FirstTensor(torch.empty(2))
+    first_ref = weakref.ref(first)
+    second = SecondTensor(torch.empty(2))
+    first.other = second
+    second.other_again = first
+    del first
+    del second
+    gc.collect()
+    return finalized, first_ref()
+
+finalized, value = torch.compile(fn, backend="eager")()
+assert finalized == [True, True], finalized
+assert value is None, value
+"""
+        env = os.environ.copy()
+        env["PYTHONFAULTHANDLER"] = "1"
+        subprocess.check_output([sys.executable, "-c", script], text=True, env=env)
+
+    def test_graph_break_boxed_aot_specialization(self):
+        def fn(x, y):
+            dead = x + 1
+            torch._dynamo.graph_break()
+            del x, dead
+            return y * 2
+
+        x = torch.randn(5)
+        y = torch.randn(5)
+        torch._dynamo.mark_dynamic(
+            x,
+            0,
+            specialize_on=[lambda size: size == 7],
+        )
+        torch._dynamo.mark_dynamic(
+            y,
+            0,
+            specialize_on=[lambda size: size == 8],
+        )
+        with torch._dynamo.config.patch(verify_correctness=True):
+            for backend in ("eager", "aot_eager"):
+                with self.subTest(backend=backend):
+                    torch._dynamo.reset()
+                    opt_fn = torch.compile(fn, backend=backend)
+                    for args in (
+                        (x, y),
+                        (torch.randn(5), torch.randn(8)),
+                        (torch.randn(5), torch.randn(6)),
+                    ):
+                        self.assertEqual(fn(*args), opt_fn(*args))
+
+    def test_as_boxed_call_graph_modules(self):
+        def fn(x, y):
+            return x + y
+
+        def check_boxed(candidate):
+            original_codegen = (
+                candidate.graph._codegen
+                if isinstance(candidate, torch.fx.GraphModule)
+                else None
+            )
+            bound_self = (
+                candidate
+                if isinstance(candidate, torch.fx.GraphModule)
+                else candidate.__self__
+            )
+            original_forward = bound_self.forward
+            boxed = _as_boxed_call(candidate)
+            self.assertIsNotNone(boxed)
+            self.assertTrue(_uses_boxed_call(boxed))
+            if isinstance(candidate, torch.fx.GraphModule):
+                self.assertIs(candidate.graph._codegen, original_codegen)
+            self.assertIs(bound_self.forward.__func__, original_forward.__func__)
+            serialized = pickle.dumps(boxed)
+            self.assertIs(bound_self.forward.__func__, original_forward.__func__)
+            boxed = pickle.loads(serialized)
+            self.assertTrue(_uses_boxed_call(boxed))
+            boxed = copy.deepcopy(boxed)
+            boxed = pickle.loads(pickle.dumps(boxed))
+            self.assertTrue(_uses_boxed_call(boxed))
+
+            x = torch.randn(2)
+            y = torch.randn(2)
+            args = [x, y]
+            self.assertEqual(boxed(args), fn(x, y))
+            self.assertEqual(args, [])
+
+        check_boxed(torch.fx.symbolic_trace(fn))
+        check_boxed(torch.fx.symbolic_trace(fn).forward)
+        graph = torch.fx.Graph()
+        args_list = graph.placeholder("args_list")
+        graph.output(graph.call_function(torch.add, (args_list, 1)))
+        boxed = _as_boxed_call(torch.fx.GraphModule({}, graph).forward)
+        args = [torch.randn(2)]
+        expected = args[0] + 1
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+        check_boxed(_LazyGraphModule.from_graphmodule(torch.fx.symbolic_trace(fn)))
+        lazy_gm = _LazyGraphModule.from_graphmodule(torch.fx.symbolic_trace(fn))
+        check_boxed(lazy_gm.forward)
+
+    def test_as_boxed_call_preserves_late_graph_module_hooks(self):
+        def fn(x, y):
+            return x + y
+
+        gm = torch.fx.symbolic_trace(fn)
+        boxed = _as_boxed_call(gm)
+        args = [torch.randn(2), torch.randn(2)]
+        expected = fn(*args)
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+
+        seen = []
+
+        def pre_hook(module, args):
+            if module is gm:
+                seen.append(tuple(type(arg).__name__ for arg in args))
+
+        handle = torch.nn.modules.module.register_module_forward_pre_hook(pre_hook)
+        try:
+            args = [torch.randn(2), torch.randn(2)]
+            expected = fn(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+        finally:
+            handle.remove()
+        self.assertEqual(seen, [("Tensor", "Tensor")])
+
+        module_calls = []
+        original_module_call = torch.nn.Module.__call__
+
+        def patched_module_call(module, *args, **kwargs):
+            if module is gm:
+                module_calls.append(tuple(type(arg).__name__ for arg in args))
+            return original_module_call(module, *args, **kwargs)
+
+        with mock.patch.object(torch.nn.Module, "__call__", patched_module_call):
+            args = [torch.randn(2), torch.randn(2)]
+            expected = fn(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+        self.assertEqual(module_calls, [("Tensor", "Tensor")])
+
+        call_impl_calls = []
+        original_call_impl = torch.nn.Module._call_impl
+
+        def patched_call_impl(module, *args, **kwargs):
+            if module is gm:
+                call_impl_calls.append(tuple(type(arg).__name__ for arg in args))
+            return original_call_impl(module, *args, **kwargs)
+
+        with mock.patch.object(torch.nn.Module, "_call_impl", patched_call_impl):
+            args = [torch.randn(2), torch.randn(2)]
+            expected = fn(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+        self.assertEqual(call_impl_calls, [("Tensor", "Tensor")])
+
+        original_wrapped_call = torch.nn.Module._wrapped_call_impl
+
+        def patched_wrapped_call(module, *args, **kwargs):
+            result = original_wrapped_call(module, *args, **kwargs)
+            return result + 100 if module is gm else result
+
+        with (
+            mock.patch.object(
+                torch.nn.Module, "_wrapped_call_impl", patched_wrapped_call
+            ),
+            mock.patch.object(torch.nn.Module, "__call__", patched_wrapped_call),
+        ):
+            args = [torch.randn(2), torch.randn(2)]
+            expected = fn(*args) + 100
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+
+        class OtherModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y) * 10
+
+        other = OtherModule()
+        gm._call_impl = types.MethodType(torch.nn.Module._call_impl, other)
+        try:
+            args = [torch.randn(2), torch.randn(2)]
+            expected = gm(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+        finally:
+            del gm._call_impl
+
+        slow_gm = torch.fx.symbolic_trace(fn)
+
+        def custom_slow_forward(self, *args, **kwargs):
+            return self.forward(*args, **kwargs) + 100
+
+        slow_gm._slow_forward = types.MethodType(custom_slow_forward, slow_gm)
+        boxed = _as_boxed_call(slow_gm)
+        x, y = torch.randn(2), torch.randn(2)
+        args = [x, y]
+        with mock.patch.object(torch._C, "_get_tracing_state", return_value=True):
+            self.assertEqual(boxed(args), fn(x, y) + 100)
+        self.assertEqual(args, [])
+
+    def test_as_boxed_call_hook_install_at_dispatch(self):
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        boxed = _as_boxed_call(gm)
+        self.assertIsNotNone(boxed)
+        ready = threading.Event()
+        installed = threading.Event()
+        seen = []
+        handles = []
+        errors = []
+
+        def hook(_module, _args, output):
+            seen.append("hook")
+            return output + 100
+
+        def install_hook():
+            try:
+                if not ready.wait(timeout=5):
+                    raise RuntimeError("timed out waiting for boxed dispatch")
+                handles.append(gm.register_forward_hook(hook))
+                installed.set()
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=install_hook)
+        thread.start()
+        call_code = type(boxed).__call__.__code__
+        dispatch_line = max(
+            line for _, _, line in call_code.co_lines() if line is not None
+        )
+
+        def tracer(frame, event, arg):
+            if (
+                frame.f_code is call_code
+                and event == "line"
+                and frame.f_lineno == dispatch_line
+            ):
+                ready.set()
+                if not installed.wait(timeout=5):
+                    raise RuntimeError("timed out installing graph module hook")
+            return tracer
+
+        args = [torch.tensor(1)]
+        sys.settrace(tracer)
+        try:
+            actual = boxed(args)
+        finally:
+            sys.settrace(None)
+            thread.join(timeout=5)
+            for handle in handles:
+                handle.remove()
+        self.assertFalse(thread.is_alive())
+        if errors:
+            raise errors[0]
+        self.assertEqual(actual, torch.tensor(102))
+        self.assertEqual(seen, ["hook"])
+        self.assertEqual(args, [])
+
+    def test_as_boxed_call_preserves_custom_graph_modules(self):
+        def fn(x, y):
+            return x + y
+
+        class CustomCodeGen(torch.fx.graph.CodeGen):
+            pass
+
+        gm = torch.fx.symbolic_trace(fn)
+        codegen = CustomCodeGen()
+        gm.graph.set_codegen(codegen)
+        gm.recompile()
+        boxed = _as_boxed_call(gm)
+        args = [torch.randn(2), torch.randn(2)]
+        expected = fn(*args)
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+        self.assertIs(gm.graph._codegen, codegen)
+
+        def add_side_effect(body):
+            return ["self.seen.append('called')\n", *body]
+
+        for transformer_active in (False, True):
+            transformed_gm = torch.fx.symbolic_trace(fn)
+            transformed_gm.seen = []
+            ctx = transformed_gm.graph.on_generate_code(lambda _: add_side_effect)
+            with ctx:
+                transformed_gm.recompile()
+                if transformer_active:
+                    boxed = _as_boxed_call(transformed_gm)
+            if not transformer_active:
+                boxed = _as_boxed_call(transformed_gm)
+            args = [torch.randn(2), torch.randn(2)]
+            expected = fn(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+            self.assertEqual(transformed_gm.seen, ["called"])
+
+        custom_forward_gm = torch.fx.symbolic_trace(fn)
+        forward_calls = []
+
+        def custom_forward(self, x, y):
+            forward_calls.append((x, y))
+            return x - y
+
+        custom_forward_gm.forward = types.MethodType(custom_forward, custom_forward_gm)
+        boxed = _as_boxed_call(custom_forward_gm)
+        args = [torch.randn(2), torch.randn(2)]
+        expected = custom_forward_gm(*args)
+        forward_calls.clear()
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+        self.assertEqual(len(forward_calls), 1)
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(boxed)
+
+        child = torch.fx.symbolic_trace(lambda x: x + 1)
+        root = torch.nn.Module()
+        root.add_module("child", child)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(graph.call_module("child", (x,)))
+        parent = torch.fx.GraphModule(root, graph)
+        self.assertIs(parent.child, child)
+        child.seen = []
+
+        def child_transform(body):
+            return ["self.seen.append('called')\n", *body]
+
+        with child.graph.on_generate_code(lambda _: child_transform):
+            child.recompile()
+        child_code = child.code
+        child.seen.clear()
+        boxed = _as_boxed_call(parent)
+        args = [torch.randn(2)]
+        expected = parent(*args)
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+        self.assertEqual(child.code, child_code)
+        self.assertEqual(child.seen, ["called", "called"])
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(boxed)
+        with self.assertRaises(pickle.PicklingError):
+            copy.deepcopy(boxed)
+
+        hooked_child = torch.fx.symbolic_trace(lambda x: x + 1)
+        hooked_child.register_forward_hook(lambda _module, _args, output: output + 100)
+        root = torch.nn.Module()
+        root.add_module("child", hooked_child)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(graph.call_module("child", (x,)))
+        boxed = _as_boxed_call(torch.fx.GraphModule(root, graph))
+        args = [torch.tensor(2)]
+        self.assertEqual(boxed(args), torch.tensor(103))
+        self.assertEqual(args, [])
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(boxed)
+        with self.assertRaises(pickle.PicklingError):
+            copy.deepcopy(boxed)
+
+        def plus_one(x):
+            return x + 1
+
+        def times_ten(x):
+            return x * 10
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(graph.call_function(plus_one, (x,)))
+        globals_gm = torch.fx.GraphModule({}, graph)
+        global_name = next(
+            name
+            for name, value in globals_gm.forward.__globals__.items()
+            if value is plus_one
+        )
+        globals_gm.forward.__globals__[global_name] = times_ten
+        for candidate in (globals_gm, globals_gm.forward):
+            boxed = _as_boxed_call(candidate)
+            args = [torch.tensor(2)]
+            expected = globals_gm(*args)
+            self.assertEqual(boxed(args), expected)
+            self.assertEqual(args, [])
+            with self.assertRaises(pickle.PicklingError):
+                pickle.dumps(boxed)
+            self.assertEqual(globals_gm(torch.tensor(2)), torch.tensor(20))
+
+        class BackendState:
+            pass
+
+        state_gm = torch.fx.symbolic_trace(fn)
+        backend_state = BackendState()
+        backend_state_ref = weakref.ref(backend_state)
+        state_gm.backend_state = backend_state
+        boxed = _as_boxed_call(state_gm)
+        del state_gm.backend_state, backend_state
+        gc.collect()
+        self.assertIsNone(backend_state_ref())
+        args = [torch.randn(2), torch.randn(2)]
+        expected = fn(*args)
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+
+        calls = []
+
+        class CustomGraphModule(torch.fx.GraphModule):
+            def __call__(self, *args, **kwargs):
+                calls.append(tuple(type(arg).__name__ for arg in args))
+                return super().__call__(*args, **kwargs)
+
+        base = torch.fx.symbolic_trace(fn)
+        custom_gm = CustomGraphModule(base, base.graph)
+        boxed = _as_boxed_call(custom_gm)
+        args = [torch.randn(2), torch.randn(2)]
+        expected = fn(*args)
+        self.assertEqual(boxed(args), expected)
+        self.assertEqual(args, [])
+        self.assertEqual(calls, [("Tensor", "Tensor")])
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(boxed)
+
+        class CustomLazyGraphModule(_LazyGraphModule):
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs) + 100
+
+        for use_forward in (False, True):
+            custom_lazy_gm = CustomLazyGraphModule(base, base.graph)
+            candidate = custom_lazy_gm.forward if use_forward else custom_lazy_gm
+            boxed = _as_boxed_call(candidate)
+            with self.assertRaises(pickle.PicklingError):
+                pickle.dumps(boxed)
+
+    def test_as_boxed_call_rejects_stale_bound_forward_serialization(self):
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        boxed = _as_boxed_call(gm.forward)
+
+        call = next(node for node in gm.graph.nodes if node.op == "call_function")
+        call.target = operator.mul
+        gm.recompile()
+
+        args = [torch.tensor(3)]
+        self.assertEqual(boxed(args), torch.tensor(4))
+        self.assertEqual(args, [])
+        self.assertEqual(gm(torch.tensor(3)), torch.tensor(3))
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(boxed)
+        with self.assertRaises(pickle.PicklingError):
+            copy.deepcopy(boxed)
+
+    def test_as_boxed_call_does_not_mutate_shared_graph_codegen(self):
+        def fn(x, y):
+            return x + y
+
+        gm = torch.fx.symbolic_trace(fn)
+        original_codegen = gm.graph._codegen
+        original_python_code = torch.fx.Graph.python_code
+        blocked = False
+        started = threading.Event()
+        proceed = threading.Event()
+        result = []
+        errors = []
+
+        def blocking_python_code(graph, *args, **kwargs):
+            nonlocal blocked
+            if isinstance(graph._codegen, torch.fx.graph._BoxedCodeGen) and not blocked:
+                blocked = True
+                started.set()
+                if not proceed.wait(timeout=5):
+                    raise RuntimeError("timed out waiting for concurrent recompile")
+            return original_python_code(graph, *args, **kwargs)
+
+        def make_boxed():
+            try:
+                result.append(_as_boxed_call(gm))
+            except Exception as exc:
+                errors.append(exc)
+
+        with mock.patch.object(torch.fx.Graph, "python_code", blocking_python_code):
+            thread = threading.Thread(target=make_boxed)
+            thread.start()
+            self.assertTrue(started.wait(timeout=5))
+            gm.recompile()
+            proceed.set()
+            thread.join(timeout=5)
+
+        self.assertFalse(thread.is_alive())
+        if errors:
+            raise errors[0]
+        self.assertEqual(len(result), 1)
+        self.assertIs(gm.graph._codegen, original_codegen)
+        x, y = torch.randn(2), torch.randn(2)
+        self.assertEqual(gm(x, y), fn(x, y))
+        args = [x, y]
+        self.assertEqual(result[0](args), fn(x, y))
+        self.assertEqual(args, [])
+
+    def test_graph_break_boxed_graph_module_preserves_hooks(self):
+        seen = []
+
+        def backend(gm, _):
+            def pre_hook(_module, args):
+                self.assertIsInstance(args[0], torch.Tensor)
+                seen.append(type(args[0]).__name__)
+
+            gm.register_forward_pre_hook(pre_hook)
+            return gm
+
+        def fn(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            del x
+            return y * 2
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend=backend)(x), fn(x))
+        self.assertEqual(seen, ["Tensor", "Tensor"])
+
+    def test_graph_break_boxed_variadic_graph_module(self):
+        def backend(gm, example_inputs):
+            root = torch.nn.Module()
+            root.inner = gm
+            graph = torch.fx.Graph()
+            args = graph.placeholder("*args")
+            unpacked = [
+                graph.call_function(operator.getitem, (args, i))
+                for i in range(len(example_inputs))
+            ]
+            graph.output(graph.call_module("inner", tuple(unpacked)))
+            return torch.fx.GraphModule(root, graph)
+
+        def fn(x, y):
+            dead = x + 1
+            torch._dynamo.graph_break()
+            del dead, x
+            return y * 2
+
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend=backend)(x, y), fn(x, y))
+
+    def test_graph_break_boxed_graph_module_preimport_module_call_patch(self):
+        script = """
+import sys
+import numpy
+import torch
+
+assert "torch._dynamo.output_graph" not in sys.modules
+original_module_call = torch.nn.Module.__call__
+
+def patched_module_call(self, *args, **kwargs):
+    result = original_module_call(self, *args, **kwargs)
+    if getattr(self, "backend_marker", False):
+        return tuple(value + 100 for value in result)
+    return result
+
+torch.nn.Module.__call__ = patched_module_call
+
+def backend(gm, _):
+    gm.backend_marker = True
+    return gm
+
+def fn(y):
+    torch._dynamo.graph_break()
+    return y * 2
+
+actual = torch.compile(fn, backend=backend)(torch.ones(2))
+torch.testing.assert_close(actual, torch.full((2,), 102.0))
+"""
+        subprocess.check_output([sys.executable, "-c", script], text=True)
+
+    def test_graph_break_boxed_graph_module_preimport_call_impl_wrap(self):
+        script = """
+import functools
+import sys
+import numpy
+import torch
+
+assert "torch._dynamo.output_graph" not in sys.modules
+original_call_impl = torch.nn.Module._call_impl
+
+@functools.wraps(original_call_impl)
+def patched_call_impl(self, *args, **kwargs):
+    result = original_call_impl(self, *args, **kwargs)
+    if getattr(self, "backend_marker", False):
+        return tuple(value + 100 for value in result)
+    return result
+
+torch.nn.Module._call_impl = patched_call_impl
+
+def backend(gm, _):
+    gm.backend_marker = True
+    return gm
+
+def fn(y):
+    torch._dynamo.graph_break()
+    return y * 2
+
+actual = torch.compile(fn, backend=backend)(torch.ones(2))
+torch.testing.assert_close(actual, torch.full((2,), 102.0))
+"""
+        subprocess.check_output([sys.executable, "-c", script], text=True)
+
+    def test_resume_args_name_collision(self):
+        def user_arg_name(__resume_args):  # noqa: PYI063
+            return __resume_args + 1
+
+        def torch_dynamo_resume_in_user(__torch_dynamo_resume_args):  # noqa: PYI063
+            return __torch_dynamo_resume_args[0] + 1
+
+        def internal_arg_name(x):
+            __torch_dynamo_resume_args = x + 1
+            torch._dynamo.graph_break()
+            return __torch_dynamo_resume_args + 1
+
+        x = torch.randn(2)
+        self.assertEqual(
+            user_arg_name(x), torch.compile(user_arg_name, backend="eager")(x)
+        )
+        self.assertEqual(
+            internal_arg_name(x),
+            torch.compile(internal_arg_name, backend="eager")(x),
+        )
+        resume_args = [x]
+        self.assertEqual(
+            torch_dynamo_resume_in_user(resume_args),
+            torch.compile(torch_dynamo_resume_in_user, backend="eager")(resume_args),
+        )
+        self.assertEqual(len(resume_args), 1)
+        self.assertIs(resume_args[0], x)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
@@ -10043,6 +13144,158 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, -y.detach().sin())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_graph_break_resume_does_not_extend_tensor_lifetime(self):
+        def graph(a):
+            return a + 1, a + 2
+
+        @torch._dynamo.disable()
+        def graph_break(a):
+            return a + 1
+
+        def no_graph_break(a):
+            return a + 1
+
+        def resume(a, b):
+            out_0 = a + b
+            out_1 = out_0 * 2
+            out_2 = out_1 * 2
+            return out_0, out_1, out_2
+
+        def make_fn(gb, reassign_input):
+            if reassign_input:
+
+                def fn(b):
+                    a, b = graph(b)
+                    a = gb(a)
+                    return resume(a, b)
+
+            else:
+
+                def fn(a):
+                    a, b = graph(a)
+                    a = gb(a)
+                    return resume(a, b)
+
+            return fn
+
+        def measure_peak(gb, n, backend, reassign_input):
+            torch._dynamo.reset()
+            compiled = torch.compile(make_fn(gb, reassign_input), backend=backend)
+            a = torch.randn(n, n, device="cuda")
+            with torch.no_grad():
+                out = compiled(a)
+                torch.cuda.synchronize()
+                del out
+                gc.collect()
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+
+                out = compiled(a)
+                torch.cuda.synchronize()
+                peak = torch.cuda.max_memory_allocated()
+                del out
+
+            del a, compiled
+            gc.collect()
+            torch.cuda.empty_cache()
+            return peak
+
+        def graph_module_backend(gm, _):
+            return gm
+
+        n = 2048
+        tensor_bytes = n * n * torch.empty((), dtype=torch.float32).element_size()
+        backends = (
+            ("eager", "eager"),
+            ("aot_eager", "aot_eager"),
+            ("graph_module", graph_module_backend),
+        )
+        for backend_name, backend in backends:
+            for reassign_input in (False, True):
+                input_name = "b" if reassign_input else "a"
+                for dynamic_sources in (None, f"L['{input_name}']"):
+                    ctx = (
+                        contextlib.nullcontext()
+                        if dynamic_sources is None
+                        else torch.compiler.config.patch(
+                            dynamic_sources=dynamic_sources
+                        )
+                    )
+                    with (
+                        self.subTest(
+                            backend=backend_name,
+                            dynamic_sources=dynamic_sources,
+                            reassign_input=reassign_input,
+                        ),
+                        ctx,
+                    ):
+                        no_graph_break_peak = measure_peak(
+                            no_graph_break, n, backend, reassign_input
+                        )
+                        graph_break_peak = measure_peak(
+                            graph_break, n, backend, reassign_input
+                        )
+                        self.assertLessEqual(
+                            graph_break_peak,
+                            no_graph_break_peak + tensor_bytes,
+                        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_graph_break_resume_releases_dead_tensor_before_disabled_call(self):
+        def graph(a):
+            return a + 1, a + 2
+
+        @torch._dynamo.disable()
+        def graph_break(a):
+            return None
+
+        def no_graph_break(a):
+            return None
+
+        @torch._dynamo.disable()
+        def memory_probe(a):
+            torch.cuda.synchronize()
+            return torch.cuda.memory_allocated()
+
+        def make_fn(gb):
+            def fn(a):
+                a, b = graph(a)
+                gb(a)
+                del b
+                return memory_probe(a)
+
+            return fn
+
+        def measure_allocated(gb, n, backend):
+            torch._dynamo.reset()
+            compiled = torch.compile(make_fn(gb), backend=backend)
+            a = torch.randn(n, n, device="cuda")
+            with torch.no_grad():
+                compiled(a)
+                torch.cuda.synchronize()
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                allocated = compiled(a)
+                torch.cuda.synchronize()
+
+            del a, compiled
+            gc.collect()
+            torch.cuda.empty_cache()
+            return allocated
+
+        n = 2048
+        tensor_bytes = n * n * torch.empty((), dtype=torch.float32).element_size()
+        for backend in ("eager", "aot_eager"):
+            with self.subTest(backend=backend):
+                no_graph_break_allocated = measure_allocated(no_graph_break, n, backend)
+                graph_break_allocated = measure_allocated(graph_break, n, backend)
+                self.assertLessEqual(
+                    graph_break_allocated,
+                    no_graph_break_allocated + tensor_bytes // 2,
+                )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_sync(self):

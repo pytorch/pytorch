@@ -153,11 +153,11 @@ class GeneratorTests(GeneratorTestsBase):
             normalize_gm(eager.graphs[0].print_readable(False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_stack0_0_: "f32[2]", L_stack0_1_: "f32[2]"):
-        l_stack0_0_ = L_stack0_0_
-        l_stack0_1_ = L_stack0_1_
+    def forward(self, L_torch_dynamo_resume_args_2_0_: "f32[2]", L_torch_dynamo_resume_args_2_1_: "f32[2]"):
+        l_torch_dynamo_resume_args_2_0_ = L_torch_dynamo_resume_args_2_0_
+        l_torch_dynamo_resume_args_2_1_ = L_torch_dynamo_resume_args_2_1_
 
-        add: "f32[2]" = l_stack0_0_ + l_stack0_1_;  l_stack0_0_ = l_stack0_1_ = None
+        add: "f32[2]" = l_torch_dynamo_resume_args_2_0_ + l_torch_dynamo_resume_args_2_1_;  l_torch_dynamo_resume_args_2_0_ = l_torch_dynamo_resume_args_2_1_ = None
         return (add,)
 """,
         )

@@ -711,7 +711,9 @@ class GraphArg:
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
-            self._example = TensorWeakRef(self._example)
+            self._example = TensorWeakRef(
+                self._example, _is_internal_lifetime_observer=True
+            )
             if not is_fake(self.fake_tensor):
                 raise AssertionError("fake_tensor must be a FakeTensor")
 
@@ -2456,7 +2458,8 @@ class VariableBuilder:
                     value[i]
                 )
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                    GuardBuilder.TENSOR_MATCH,
+                    value=TensorWeakRef(value[i], _is_internal_lifetime_observer=True),
                 )
                 guards.append(source_i.make_guard(guard))
 
@@ -2743,10 +2746,11 @@ class VariableBuilder:
         # because ConstantVariable.is_literal() rejects non-exact types.
         # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
+            logical_source = _logical_source_for_resume(self.tx, self.source)
             # Check for user-provided spec from shapes_spec.
             if config._dynamic_shapes_spec is not None:
                 int_spec = lookup_spec_from_dynamo_source(
-                    self.source, config._dynamic_shapes_spec
+                    logical_source, config._dynamic_shapes_spec
                 )
                 if int_spec is None:
                     # shapes_spec is set but this int has no spec → force static
@@ -2772,9 +2776,11 @@ class VariableBuilder:
                         f"{int_spec!r} (expected int, IntVar, or None)"
                     )
 
-            if is_dynamic_source(self.source.name):
+            dynamic_source_name = logical_source.name
+            if is_dynamic_source(dynamic_source_name):
                 log.debug(
-                    "%s marked dynamic via dynamic-sources list", self.source.name
+                    "%s marked dynamic via dynamic-sources list",
+                    dynamic_source_name,
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
@@ -2786,9 +2792,9 @@ class VariableBuilder:
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
-            if is_unbacked_source(self.source.name):
+            if is_unbacked_source(dynamic_source_name):
                 log.debug(
-                    "%s marked unbacked via unbacked-sources list", self.source.name
+                    "%s marked unbacked via unbacked-sources list", dynamic_source_name
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
@@ -2912,7 +2918,10 @@ class VariableBuilder:
         # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
         _tensor_spec = cast(
             TensorSpec | None,
-            lookup_spec_from_dynamo_source(source, config._dynamic_shapes_spec),
+            lookup_spec_from_dynamo_source(
+                _logical_source_for_resume(self.tx, source),
+                config._dynamic_shapes_spec,
+            ),
         )
         _has_spec = _tensor_spec is not None
 
@@ -3145,7 +3154,7 @@ class VariableBuilder:
                     value=(
                         value
                         if isinstance(source, NumpyTensorSource)
-                        else TensorWeakRef(value)
+                        else TensorWeakRef(value, _is_internal_lifetime_observer=True)
                     ),
                 )
             )
@@ -4438,6 +4447,45 @@ def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     return False
 
 
+def _logical_source_for_resume(
+    tx: "InstructionTranslatorBase", source: Source
+) -> Source:
+    from ..resume_execution import (
+        _boxed_resume_arg_name,
+        _boxed_resume_local_source_info,
+    )
+
+    resume_args_varname = _boxed_resume_arg_name(tx.f_code)
+    if resume_args_varname is None:
+        return source
+
+    local_source_info = _boxed_resume_local_source_info(tx.f_code)
+
+    def remap_resume_carrier(current: Source) -> Source:
+        if (
+            isinstance(current, (GetItemSource, ListGetItemSource))
+            and isinstance(current.base, LocalSource)
+            and current.base.local_name == resume_args_varname
+            and isinstance(current.index, int)
+        ):
+            info = local_source_info.get(current.index)
+            if info is not None:
+                local_name, is_input, is_varargs, is_varkw = info
+                return LocalSource(
+                    local_name,
+                    is_input=is_input,
+                    is_varargs=is_varargs,
+                    is_varkw=is_varkw,
+                )
+        if isinstance(current, ChainedSource):
+            remapped_base = remap_resume_carrier(current.base)
+            if remapped_base is not current.base:
+                return dataclasses.replace(current, base=remapped_base)
+        return current
+
+    return remap_resume_carrier(source)
+
+
 def record_automatic_dynamic(
     tx: "InstructionTranslatorBase", name: str, e: torch.Tensor
 ) -> FrameStateSizeEntry:
@@ -4570,7 +4618,8 @@ def _automatic_dynamic(
             hints=[],
         )
 
-    name = source.name
+    logical_source = _logical_source_for_resume(tx, source)
+    name = logical_source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}

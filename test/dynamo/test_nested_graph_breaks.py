@@ -944,7 +944,9 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         res = f3(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 6)
+        # The protected continuation stays eager when releasing an externally
+        # observable carrier inside the context-manager exception region.
+        self.assertEqual(cnts.frame_count, 5)
 
     def test_recursive_compiled_fn_with_graph_break(self):
         """Recursive compiled functions should not disable NGB on self-calls.

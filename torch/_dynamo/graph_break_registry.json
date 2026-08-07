@@ -760,6 +760,16 @@
       "Hints": []
     }
   ],
+  "GB1530": [
+    {
+      "Gb_type": "Unsupported resume fast-local lifetime boundary",
+      "Context": "self.get_line_of_code_header()",
+      "Explanation": "Dynamo cannot preserve the eager ordering of a resumed local's finalizer or weakref callback at this point in the frame.",
+      "Hints": [
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+      ]
+    }
+  ],
   "GB8593": [
     {
       "Gb_type": "flex_gemm: unexpected kwargs",

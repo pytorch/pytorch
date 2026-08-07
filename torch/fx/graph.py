@@ -372,6 +372,12 @@ class CodeGen:
         self._body_transformer: TransformCodeFunc | None = None
         self._func_name: str = "forward"
 
+    def _gen_placeholder_assignment(
+        self, body: list[str], node: Node, raw_name: str
+    ) -> None:
+        if raw_name != repr(node):
+            body.append(f"{repr(node)} = {raw_name}\n")
+
     def _format_multiline_args(self, args: list[str]) -> str:
         """Helper to format function arguments in expanded multiline format."""
         return "".join(self._format_single_arg(arg) for arg in args)
@@ -876,8 +882,7 @@ class CodeGen:
                     f"{node.target}{maybe_type_annotation}{maybe_default_arg}{maybe_comment}"
                 )
                 raw_name = node.target.replace("*", "")
-                if raw_name != repr(node):
-                    body.append(f"{repr(node)} = {raw_name}\n")
+                self._gen_placeholder_assignment(body, node, raw_name)
                 return
             elif node.op == "call_method":
                 if not isinstance(node.target, str):
@@ -1135,6 +1140,13 @@ class _BoxedCodeGen(CodeGen):
     input tensors.
     """
 
+    def _gen_placeholder_assignment(
+        self, body: list[str], node: Node, raw_name: str
+    ) -> None:
+        super()._gen_placeholder_assignment(body, node, raw_name)
+        if raw_name != repr(node):
+            body.append(f"{raw_name} = None\n")
+
     def gen_fn_def(
         self,
         free_vars: list[str],
@@ -1149,21 +1161,22 @@ class _BoxedCodeGen(CodeGen):
         a single 'args_list' parameter, extracts placeholder values from it,
         and clears the list.
         """
-        # Generate the function signature with args_list parameter
-        fn_def = f"def {self._func_name}(self, args_list){maybe_return_annotation}:"
+        # This is horribly manual but we don't get the "raw" free vars
+        # without a bigger refactor.
+        placeholder_vars = [
+            v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
+        ]
+        args_list = "args_list"
+        while args_list in placeholder_vars:
+            args_list = f"_{args_list}"
 
-        if free_vars:
-            # This is horribly manual but we don't get the "raw" free vars
-            # without a bigger refactor.
-            placeholder_vars = [
-                v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
-            ]
+        # Generate the function signature with a collision-free carrier name.
+        fn_def = f"def {self._func_name}(self, {args_list}){maybe_return_annotation}:"
 
-            if placeholder_vars:
-                fn_def += "\n    args_iter = iter(args_list)"
-                for var in placeholder_vars:
-                    fn_def += f"\n    {var} = next(args_iter)"
-                fn_def += "\n    args_list.clear()"
+        if placeholder_vars:
+            for idx, var in enumerate(placeholder_vars):
+                fn_def += f"\n    {var} = {args_list}[{idx}]"
+            fn_def += f"\n    {args_list}.clear()"
 
         return fn_def
 
