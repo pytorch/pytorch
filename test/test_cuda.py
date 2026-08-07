@@ -5758,9 +5758,7 @@ exit(2)
                                 LARGE_BUFFER // 4, device="cuda"
                             )
                             conditional_body_temporary.fill_(2.0)
-                            conditional_body_sink.add_(
-                                conditional_body_temporary[0]
-                            )
+                            conditional_body_sink.add_(conditional_body_temporary[0])
                             conditional_body_pointer = (
                                 conditional_body_temporary.data_ptr()
                             )
@@ -5816,9 +5814,7 @@ exit(2)
                             LARGE_BUFFER // 4, device="cuda"
                         )
                         conditional_primary_temporary.fill_(1.0)
-                        conditional_primary_sink.add_(
-                            conditional_primary_temporary[0]
-                        )
+                        conditional_primary_sink.add_(conditional_primary_temporary[0])
                         conditional_primary_pointer = (
                             conditional_primary_temporary.data_ptr()
                         )
@@ -5837,9 +5833,7 @@ exit(2)
                         graph.end_capture_to_conditional_node()
                         graph.capture_end()
 
-                    self.assertNotEqual(
-                        conditional_primary_pointer, auxiliary_pointer
-                    )
+                    self.assertNotEqual(conditional_primary_pointer, auxiliary_pointer)
                     conditional_primary_sink.zero_()
                     auxiliary_sink.zero_()
                     graph.replay()
