@@ -784,16 +784,16 @@ def forward(self, x):
             """\
 def forward(self, x):
     c = self.c(x)
-    add = torch.ops.aten.add.Tensor(c, x);  c = x = None
-    return add""",
+    add_tensor = torch.ops.aten.add.Tensor(c, x);  c = x = None
+    return add_tensor""",
         )
         self.assertExpectedInline(
             str(ufm.b.c.graph_module.code).strip(),
             """\
 def forward(self, x):
-    cos = torch.ops.aten.cos.default(x);  x = None
-    sin = torch.ops.aten.sin.default(cos);  cos = None
-    return sin""",
+    cos_default = torch.ops.aten.cos.default(x);  x = None
+    sin_default = torch.ops.aten.sin.default(cos_default);  cos_default = None
+    return sin_default""",
         )
 
     def test_nested_leaf_non_strict(self):
