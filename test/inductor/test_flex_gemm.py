@@ -3187,6 +3187,72 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("extra_output", ("none", "aux", "local_reduce"))
+    @parametrize("swap_ab", (False, True))
+    def test_mm_bool_main_output(self, extra_output, swap_ab):
+        m, k, n = 256, 64, 256
+
+        def epilogue_fn(acc):
+            value = acc.float()
+            main = value > 0
+            match extra_output:
+                case "none":
+                    return main
+                case "aux":
+                    return main, value * 0.5
+                case "local_reduce":
+                    return main, value.view(m, -1, 16).sum(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={
+                    "backend": "QUACK",
+                    "config": {"swap_ab": swap_ab},
+                },
+            )
+
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
+        rows = torch.arange(k, device="cuda")[:, None]
+        cols = torch.arange(n, device="cuda")[None, :]
+        b = (((rows + cols) % 17) - 8).to(torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertEqual(actual, epilogue_fn(a @ b))
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "dtype",
+        (torch.uint8, torch.int32),
+        name_fn=lambda dtype: str(dtype).removeprefix("torch."),
+    )
+    def test_mm_generic_integer_main_output_rejected(self, dtype):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.to(dtype),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(
+            (InductorError, NotImplementedError),
+            "generic main outputs support only floating-point and bool dtypes",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "tuned",
         (False, True),
