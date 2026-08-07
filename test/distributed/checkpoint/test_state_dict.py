@@ -47,7 +47,11 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -1108,6 +1112,25 @@ class TestNoComm(MultiProcessTestCase):
         )
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
+
+
+class TestInitOptimState(TestCase):
+    def test_grad_dtype(self) -> None:
+        # An fp32 master weight accumulating bf16 grads rejects a param-dtype gradient, so
+        # _init_optim_state() has to prime the gradient at grad_dtype to materialize state.
+        class StateOnlyOptimizer(Optimizer):
+            def step(self, closure=None) -> None:
+                for group in self.param_groups:
+                    for param in group["params"]:
+                        self.state[param]["exp_avg"] = torch.zeros_like(param)
+
+        model = nn.Linear(4, 4, dtype=torch.float32)
+        for param in model.parameters():
+            param.grad_dtype = torch.bfloat16
+        optim = StateOnlyOptimizer(model.parameters(), {"lr": 0.0})
+
+        osd = get_optimizer_state_dict(model, optim)
+        self.assertEqual(sorted(osd["state"].keys()), ["bias", "weight"])
 
 
 if __name__ == "__main__":
