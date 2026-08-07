@@ -238,6 +238,19 @@ class FlexGemmRuntimeLocalReducePlan:
         return self.geometry.axis
 
 
+def swap_local_reduce_plan(
+    plan: FlexGemmRuntimeLocalReducePlan | None,
+) -> FlexGemmRuntimeLocalReducePlan | None:
+    """Transpose a physical local-reduction plan with the swapped GEMM output."""
+    if plan is None:
+        return None
+    return dataclasses.replace(
+        plan,
+        geometry=FlexGemmLocalReduceGeometry(plan.group, 1 - plan.axis),
+        out=None if plan.out is None else plan.out.mT,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeOutputPlan:
     """Bundle all user-visible output consumers into one generated ABI value."""
@@ -271,10 +284,14 @@ def validate_runtime_local_reduce(
     effective_C: torch.Tensor | None,
     alpha: float,
     beta: float,
+    *,
+    swap_ab: bool = False,
 ) -> None:
     """Validate local-reduce runtime tensor shapes and unsupported consumers."""
     if plan is None:
         return
+    if swap_ab and plan.callbacks is None:
+        raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
     validate_local_reduce_runtime_dense_mm(a.ndim)
     validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
@@ -282,7 +299,10 @@ def validate_runtime_local_reduce(
     if local_reduce_out is None:
         return
     check_matrix("local_reduce_out", local_reduce_out)
-    check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
+    if swap_ab:
+        check_matrix_row_major_layout("local_reduce_out.mT", local_reduce_out.mT)
+    else:
+        check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
     expected_local_reduce_shape = local_reduce_compressed_shape(
         expected_shape, plan.group, plan.axis
     )
@@ -380,12 +400,7 @@ def dispatch_gemm_act(
     output_contraction = output_plan.output_contraction
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
-    quack_out, quack_aux_outs, quack_local_reduce_out, quack_c = (
-        out,
-        aux_outs,
-        None if local_reduce is None else local_reduce.out,
-        C,
-    )
+    quack_out, quack_aux_outs, quack_c = out, aux_outs, C
     if config.swap_ab:
         if output_contraction is not None:
             raise NotImplementedError(
@@ -393,8 +408,7 @@ def dispatch_gemm_act(
             )
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
-        if local_reduce is not None:
-            raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
+        local_reduce = swap_local_reduce_plan(local_reduce)
         quack_aux_outs = tuple(aux_out.mT for aux_out in aux_outs)
         quack_c = None if C is None else C.mT
         row_args, col_args = col_args, row_args
@@ -402,6 +416,8 @@ def dispatch_gemm_act(
         epilogue_arg_kinds = tuple(
             _SWAPPED_ARG_KIND[kind] for kind in epilogue_arg_kinds
         )
+
+    quack_local_reduce_out = None if local_reduce is None else local_reduce.out
 
     # QuACK expects a leading batch dim; 2-D (non-batched) operands get one here.
     quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
@@ -524,6 +540,16 @@ def gemm_epilogue(
     aux_outs = output_plan.aux_outs
     local_reduce = output_plan.local_reduce
     output_contraction = output_plan.output_contraction
+    from torch._inductor.heuristics.template.flex_gemm import (
+        candidate_gemm_configs_for_device,
+        gemm_config_from_key,
+    )
+
+    config = (
+        gemm_config_from_key(config_key)
+        if config_key is not None
+        else candidate_gemm_configs_for_device(a.device)[0]
+    )
     logical_output_shape = output_plan.output_shape(physical_output_shape)
     if output_contraction is not None:
         device_capacity = (
@@ -573,6 +599,7 @@ def gemm_epilogue(
         effective_C,
         alpha,
         beta,
+        swap_ab=config.swap_ab,
     )
     if a.ndim == 3 and epilogue_args:
         raise NotImplementedError("FlexGEMM batched args are not supported yet")
@@ -617,10 +644,6 @@ def gemm_epilogue(
         torch.empty(logical_output_shape, device=a.device, dtype=expected_dtype)
         if out is None
         else out
-    )
-    from torch._inductor.heuristics.template.flex_gemm import (
-        candidate_gemm_configs_for_device,
-        gemm_config_from_key,
     )
     from torch._vendor.quack.cache import cache_dir_override
 
