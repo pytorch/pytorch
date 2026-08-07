@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyNativeDeviceTypes,
-    onlyOn,
     skipCUDAIf,
     skipMeta,
     skipXPUIf,
@@ -25,6 +24,7 @@ from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
     DeterministicGuard,
     dtype2prec_DONTUSE,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_JETSON,
     parametrize as parametrize_test,
@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestEmbeddingNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -248,6 +249,8 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # https://github.com/pytorch/pytorch/issues/130806
     @onlyAccelerator
     @largeTensorTest("40GB")
@@ -681,7 +684,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -773,7 +776,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
             )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -823,7 +826,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     lambda msg: f"{msg}\nExpected non-zero gradient for index {idx}",
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -874,7 +877,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertEqual(weight.grad, reference_grad, atol=0, rtol=0)
                 weight.grad = None
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         torch.bfloat16,
     )
@@ -957,9 +960,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
     # https://github.com/pytorch/pytorch/issues/188467
-    @onlyOn(["cuda"])
+    @onlyAccelerator
     @dtypes(torch.int32, torch.int64)
     @largeTensorTest("20GB", device="cuda")
+    @largeTensorTest("20GB", device="xpu")
     def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
         # chosen to guarantee an int32 overflow
         dim = 2**16
@@ -1120,7 +1124,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
