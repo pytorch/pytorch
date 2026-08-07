@@ -4167,62 +4167,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_invariant_indexing_applied = False
         if need_dense and not have_dense:
             if self.inside_reduction and self.is_native_matmul:
-                # This avoids full broadcasting (need_dense) when performing native matmul.
-                # For example, self._load_mask previously required tl.broadcast_to() in index_str.
-                # Due to the restrictions of tl.dot semantics, we only want to expand the block
-                # shape for the necessary axes.
-                #
-                # Previously:
-                #   tmp1 = tl.load(ptr + tl.broadcast_to(r0, [YBLOCK, XBLOCK, R0_BLOCK]),
-                #                  r0_mask & tmp0 & xmask)
-                #
-                # Now:
-                #   tmp1 = tl.load(ptr + tl.broadcast_to(r0, [1, 1, R0_BLOCK]),
-                #                  r0_mask & tmp0 & xmask)
-                #
-                # We achieve this by determining the required block shape through mask inspection.
-                # When a temporary variable appears in the mask (e.g., self._load_mask), we retrieve
-                # its true shape by inspecting tmp.mask_vars tracked by TritonCSEVariable.
-                #
-                # Caution: it may miss the correct block shape if the specific mask was constant
-                # and thus not tracked in TritonCSEVariable.mask_vars.
-                #
-                # TODO: Once the shape propagation PR lands, reimplement this logic:
-                #       https://github.com/pytorch/pytorch/pull/152198
-                mask_shape = mask_vars.copy()
+                required_masks = OrderedSet[str | TritonCSEVariable](mask_vars)
                 if self._load_mask:
-                    mask_shape.add(self._load_mask)
-
-                axis_masks = OrderedSet(
-                    tree.mask_name() for tree in self.active_range_trees()
+                    required_masks.add(self._load_mask)
+                minimal_shape = self._broadcast_shape_with_masks(
+                    TritonSymbols.get_block_shape(index), required_masks
                 )
-                while not mask_shape.issubset(axis_masks):
-                    tmp_masks = mask_shape.difference(axis_masks)
-                    tmp = tmp_masks.pop()
-                    if not isinstance(tmp, TritonCSEVariable):
-                        raise AssertionError(
-                            f"expected TritonCSEVariable, got {type(tmp)}"
-                        )
-                    mask_shape.discard(tmp)
-                    mask_shape.update(tmp.mask_vars)
-
-                # e.g., expand_list becomes ['ZBLOCK', 1, 1, 'R0_BLOCK']
-                expand_list = ["1"] * len(self.dense_size_list())
-                for mask in mask_shape:
-                    if not isinstance(mask, str):
-                        raise AssertionError(f"expected str mask, got {type(mask)}")
-                    for tree in self.active_range_trees():
-                        if tree.owns_mask(mask):
-                            dim = tree.tensor_dim
-                            if not isinstance(dim, int):
-                                raise AssertionError(
-                                    f"expected int dim, got {type(dim)}"
-                                )
-                            expand_list[dim] = self.dense_size_list()[dim]
-
-                expand_str = "[" + ",".join(map(str, expand_list)) + "]"
-                expand_shape = tuple(expand_list)
-                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                dense_shape = tuple(self.dense_size_list())
+                # Native matmul operands retain the kernel rank for scalar indices.
+                minimal_shape = self._preserve_scalar_shape_rank(minimal_shape)
+                # Native-matmul indexing producers currently yield owned masks and
+                # scalar/full-rank index shapes; keep dense indexing as a defensive
+                # fallback. Dense is valid for auxiliary loads, and real tl.dot
+                # operands are checked in reshape_transpose_broadcast_for_dot.
+                if minimal_shape is None or len(minimal_shape) != len(dense_shape):
+                    expand_str, expand_shape = _get_expand_str()
+                    index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                    mask_vars = dense_mask_vars
+                else:
+                    expand_str = "[" + ", ".join(map(str, minimal_shape)) + "]"
+                    expand_shape = minimal_shape
+                    index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             elif (
                 reduction_invariant_indexing
                 and not config.triton.dense_indexing
@@ -4548,6 +4513,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return result_shape
 
+    def _preserve_scalar_shape_rank(self, shape: BlockShapeType) -> BlockShapeType:
+        if shape is not None and not shape:
+            return tuple("1" for _ in range(self.triton_tensor_ndim()))
+        return shape
+
     def _reduction_invariant_indexing_shape(
         self,
         index: sympy.Expr,
@@ -4586,10 +4556,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         shape = self._broadcast_shape_with_masks(
             TritonSymbols.get_block_shape(index), load_masks
         )
+        shape = self._preserve_scalar_shape_rank(shape)
         if shape is None:
             return None
-        if not shape:
-            shape = tuple("1" for _ in range(self.triton_tensor_ndim()))
 
         dense_shape = tuple(self.dense_size_list())
         if len(shape) != len(dense_shape):

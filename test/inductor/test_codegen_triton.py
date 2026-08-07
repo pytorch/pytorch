@@ -457,6 +457,63 @@ def helper(x):
                     checked_index,
                 )
 
+    def test_native_matmul_indexing_uses_propagated_shapes(self):
+        ynumel = sympy.Integer(65)
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"y": ynumel, "x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], ynumel * xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with (
+            V.set_kernel_handler(kernel),
+            patch.object(kernel, "is_native_matmul", True),
+        ):
+            r_index = kernel.range_trees[2].full_range().symbol()
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+            for index, mask_shape, expected_shape in (
+                (
+                    invariant_index,
+                    ("YBLOCK", "XBLOCK", "1"),
+                    ("YBLOCK", "XBLOCK", "1"),
+                ),
+                (r_index, ("1", "1", "1"), ("1", "1", "R0_BLOCK")),
+            ):
+                with self.subTest(index=index, mask_shape=mask_shape):
+                    load_mask = TritonCSEVariable(
+                        "tmp0", ValueRanges.unknown(), torch.bool, shape=mask_shape
+                    )
+                    with patch.object(kernel, "_load_mask", load_mask):
+                        options = kernel.indexing(index)
+
+                    self.assertIsInstance(options, IndexingOptions)
+                    self.assertEqual(
+                        expected_shape,
+                        tuple(map(str, options.expand_shape or ())),
+                    )
+
+            unresolved_index = kernel.cse.namedvar(
+                "tmp1", dtype=torch.int64, shape=("1", "1", "1")
+            )
+            self.assertIsInstance(unresolved_index, TritonCSEVariable)
+            unresolved_index.mask_vars.add("unknown_mask")
+            load_mask = TritonCSEVariable(
+                "tmp2", ValueRanges.unknown(), torch.bool, shape=("1", "1", "1")
+            )
+            with patch.object(kernel, "_load_mask", load_mask):
+                options = kernel.indexing(
+                    sympy.Symbol(unresolved_index.name, integer=True)
+                )
+
+            self.assertIsInstance(options, IndexingOptions)
+            self.assertEqual(
+                ("YBLOCK", "XBLOCK", "R0_BLOCK"),
+                tuple(map(str, options.expand_shape or ())),
+            )
+
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
         from torch._inductor.utils import (
