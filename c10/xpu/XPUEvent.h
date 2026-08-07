@@ -80,25 +80,34 @@ struct XPUEvent {
   }
 
   void record(const XPUStream& stream) {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (!isCreated()) {
-      device_index_ = stream.device_index();
-      assignEvent(stream.queue());
-      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      createEvent(stream.device_index());
+      if (!reusable_) {
+        assignEvent(stream.queue());
+      }
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
-    } else {
-      TORCH_CHECK(
-          device_index_ == stream.device_index(),
-          "Event device ",
-          device_index_,
-          " does not match recording stream's device ",
-          stream.device_index(),
-          ".");
+    }
+    TORCH_CHECK(
+        device_index_ == stream.device_index(),
+        "Event device ",
+        device_index_,
+        " does not match recording stream's device ",
+        stream.device_index(),
+        ".");
+#if SYCL_COMPILER_VERSION >= 20260200
+    if (reusable_) {
+      syclex::enqueue_signal_event(stream.queue(), *event_);
+    }
+#endif
+    if (!reusable_) {
       reassignEvent(stream.queue());
     }
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
           c10::kXPU,
@@ -109,9 +118,18 @@ struct XPUEvent {
 
   void block(const XPUStream& stream) {
     if (isCreated()) {
-      std::vector<sycl::event> event_list{event()};
-      // Make this stream wait until event_ is completed.
-      stream.queue().ext_oneapi_submit_barrier(event_list);
+#if SYCL_COMPILER_VERSION >= 20260200
+      if (reusable_) {
+        sycl::ext::oneapi::experimental::enqueue_wait_event(
+            stream.queue(), *event_);
+      }
+#endif
+      if (!reusable_) {
+        std::vector<sycl::event> event_list{event()};
+        // Make this stream wait until event_ is completed.
+        stream.queue().ext_oneapi_submit_barrier(event_list);
+      }
+
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(
@@ -137,7 +155,7 @@ struct XPUEvent {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();
-    // Return the eplased time in milliseconds.
+    // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
@@ -168,10 +186,25 @@ struct XPUEvent {
     assignEvent(queue);
   }
 
+  void createEvent(c10::DeviceIndex device_index) {
+    device_index_ = device_index;
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    auto& device = c10::xpu::get_raw_device(device_index_);
+    // Base reusability on per-event profiling support regardless of
+    // enable_timing_, to align with c10::Event behavior.
+    reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    if (reusable_) {
+      event_ = std::make_unique<sycl::event>(syclex::make_event(
+          c10::xpu::get_device_context(),
+          syclex::properties{syclex::enable_profiling{enable_timing_}}));
+    }
+#endif
+  }
+
   bool enable_timing_ = false;
+  bool reusable_ = false;
   c10::DeviceIndex device_index_ = -1;
-  // Only need to track the last event, as events in an in-order queue are
-  // executed sequentially.
   std::unique_ptr<sycl::event> event_;
 };
 
