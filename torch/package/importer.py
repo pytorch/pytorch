@@ -101,7 +101,7 @@ class Importer(ABC):
         try:
             module = self.import_module(module_name)
             if sys.version_info >= (3, 14):
-                # pickle._getatribute signature changes in 3.14
+                # pickle._getattribute signature changes in 3.14
                 # to take iterable and return just one object
                 obj2 = _getattribute(module, name.split("."))
             else:
@@ -206,7 +206,7 @@ class OrderedImporter(Importer):
         If you intern `a.b` but never use `a` in your code, then `a` will be an
         empty module with no source. This can break cases where we are trying to
         re-package an object after adding a real dependency on `a`, since
-        OrderedImportere will resolve `a` to the dummy package and stop there.
+        OrderedImporter will resolve `a` to the dummy package and stop there.
 
         See: https://github.com/pytorch/pytorch/pull/71520#issuecomment-1029603769
         """
@@ -237,7 +237,7 @@ class OrderedImporter(Importer):
         for importer in self._importers:
             if not isinstance(importer, Importer):
                 raise TypeError(
-                    f"{importer} is not a Importer. "
+                    f"{importer} is not an Importer. "
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:

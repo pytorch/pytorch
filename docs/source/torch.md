@@ -889,7 +889,6 @@ False
     baddbmm
     bmm
     chain_matmul
-    cholesky
     cholesky_inverse
     cholesky_solve
     dot
@@ -916,7 +915,6 @@ False
     pinverse
     saddmm
     spmm
-    qr
     svd
     svd_lowrank
     pca_lowrank
