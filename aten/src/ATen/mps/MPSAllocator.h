@@ -285,7 +285,6 @@ class MPSHeapAllocatorImpl {
   explicit MPSHeapAllocatorImpl()
       : m_device(at::mps::MPSDevice::getInstance()->device()),
         m_max_buffer_size([m_device maxBufferLength]),
-        m_stream(getDefaultMPSStream()),
         m_event_pool(getMPSEventPool()) {
     init_allocator();
   }
@@ -327,6 +326,14 @@ class MPSHeapAllocatorImpl {
   // on the passed shared-buffer data pointers (list is used to lock the mutex once)
   // returns true if actually waited on any event
   bool waitForEvents(c10::ArrayRef<const void*> buffers);
+  // Marks a `ptr` as in use on a consumer `stream` that did not allocate it, so
+  // that it won't be recycled until that stream is done with it. Only the most
+  // recently recorded stream is tracked, so a buffer handed to more than one
+  // consumer stream in between allocation and free is only guarded against the
+  // last one recorded. Returns `true` if `ptr` is a currently-allocated
+  // shared-storage buffer.
+  // TODO: track every distinct consumer stream, not just the most recent one.
+  bool recordStream(const void* ptr, MPSStream* stream);
   // this indicates how far (in Megabytes) the current total allocations are from the
   // low watermark limit which is used to detect if we're under memory pressure
   // This returns zero if we've reached the low watermark limit
@@ -417,8 +424,6 @@ class MPSHeapAllocatorImpl {
   size_t m_low_watermark_limit;
   // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to set debug verbosity
   uint32_t m_debug_verbosity;
-  // default MPS stream
-  MPSStream* m_stream;
   // we hold a reference to MPSEventPool so it could get destroyed after MPSAllocator
   std::shared_ptr<MPSEventPool> m_event_pool;
 
