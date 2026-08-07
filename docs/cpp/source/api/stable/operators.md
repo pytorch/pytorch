@@ -82,7 +82,13 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::reshape
 ```
 
-```{doxygenfunction} torch::stable::view
+```{doxygenfunction} torch::stable::view(const torch::stable::Tensor &self, torch::headeronly::IntHeaderOnlyArrayRef size)
+```
+
+```{doxygenfunction} torch::stable::view(const torch::stable::Tensor &self, torch::headeronly::ScalarType dtype)
+```
+
+```{doxygenfunction} torch::stable::permute
 ```
 
 ```{doxygenfunction} torch::stable::flatten
