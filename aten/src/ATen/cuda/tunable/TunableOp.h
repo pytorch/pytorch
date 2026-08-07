@@ -287,14 +287,28 @@ class TunableOp {
           continue;
         }
 
+        double max_tuning_duration = ctx->GetMaxTuningDurationMs();
+        int max_tuning_iter = ctx->GetMaxTuningIterations();
+
         // 2nd phase skip, more aggressive
         approx_num_iter = 10;
-        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
-        approx_duration = s._mean;
-        // bail if too slow
-        if (approx_duration > 1.15 * min_duration_ms) {
-          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
-          continue;
+
+        // Skip the fixed 10-iteration second profile when either active tuning
+        // limit cannot accommodate it, based on the initial profile's mean.
+        // A limit of zero means that limit is disabled.
+        const bool skip_second_profile =
+            (max_tuning_iter > 0 && max_tuning_iter < approx_num_iter) ||
+            (max_tuning_duration > 0 &&
+             max_tuning_duration < approx_num_iter * approx_duration);
+
+        if (!skip_second_profile) {
+          s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+          approx_duration = s._mean;
+          // bail if too slow
+          if (approx_duration > 1.15 * min_duration_ms) {
+            TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
+            continue;
+          }
         }
 
         if (do_numerics_check) {
@@ -335,8 +349,6 @@ class TunableOp {
         }
 
         // for tuning does user set max duration, max iters, or both?
-        double max_tuning_duration = ctx->GetMaxTuningDurationMs();
-        int max_tuning_iter = ctx->GetMaxTuningIterations();
         int tuning_iter = 100; // default
         if (max_tuning_duration > 0) {
           int duration_iters = max_tuning_duration / approx_duration;
