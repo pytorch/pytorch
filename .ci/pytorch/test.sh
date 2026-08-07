@@ -463,6 +463,7 @@ test_python_smoke() {
   time python test/run_test.py --include test_linalg -k "test__int_mm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_nn -k "TestFusedRMSNormOverrideNumerics or TestFusedRMSNormOverrideRouting" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_scatter_gather_ops -k "test_smem_stage_alignment_multi_iter" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_gpu_arch_coverage_citest -k "test_probe_runs_on_sm90_or_later" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 

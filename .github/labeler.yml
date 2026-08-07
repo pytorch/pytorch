@@ -196,6 +196,7 @@
 - test/test_linalg.py
 - test/test_nn.py
 - test/test_scatter_gather_ops.py
+- test/test_gpu_arch_coverage_citest.py
 
 "ciflow/rocm-mi300":
 - test/test_matmul_cuda.py
