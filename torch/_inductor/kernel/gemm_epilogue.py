@@ -294,6 +294,24 @@ class NormalizedGetItem:
 
 
 @dataclasses.dataclass(frozen=True)
+class NormalizedSplit:
+    """Canonical source, width, and dimension for an FX tensor split."""
+
+    source: torch.fx.Node
+    split_size: Any
+    dim: int
+
+
+@dataclasses.dataclass(frozen=True)
+class NormalizedSelect:
+    """Canonical source, dimension, and index for an FX tensor select."""
+
+    source: torch.fx.Node
+    dim: int
+    index: Any
+
+
+@dataclasses.dataclass(frozen=True)
 class NormalizedUnsupportedReduction:
     """Canonical source and target for an unsupported FX reduction."""
 
@@ -307,6 +325,8 @@ NormalizedNode = (
     | NormalizedPrepareSoftmax
     | NormalizedSqueeze
     | NormalizedGetItem
+    | NormalizedSplit
+    | NormalizedSelect
     | NormalizedUnsupportedReduction
 )
 
@@ -385,6 +405,20 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
             )
         dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         return NormalizedPrepareSoftmax(source, dim)
+    if node.target is torch.ops.aten.split.Tensor:
+        source = node.args[0]
+        dim = node.args[2] if len(node.args) > 2 else node.kwargs.get("dim", 0)
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(f"malformed GEMM epilogue split: {node.format_node()}")
+        return NormalizedSplit(source, node.args[1], dim)
+    if node.target is torch.ops.aten.select.int:
+        source = node.args[0]
+        dim = node.args[1]
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(
+                f"malformed GEMM epilogue select: {node.format_node()}"
+            )
+        return NormalizedSelect(source, dim, node.args[2])
     if node.target in (
         torch.ops.aten.squeeze.dim,
         torch.ops.aten.squeeze.dims,
