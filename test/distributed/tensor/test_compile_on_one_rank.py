@@ -270,8 +270,6 @@ def _current_device_nodes(gm):
 
 
 class TestCompileOnOneRankDeviceAsParameter(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     """Device-as-parameter for the make_fx tracing path used by graph_trainer/CooR.
 
     Under compile_on_one_rank, a factory/cast op whose device matches the current
@@ -282,6 +280,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     A device that is a different accelerator, or a different index of the current
     accelerator, is refused (it could not run SPMD).
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -793,8 +793,6 @@ def _drop_distributed_meta(key):
 
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestCompileOnOneRankLegacyCollective(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     """Legacy in-place c10d collectives (dist.all_reduce) under compile_on_one_rank.
 
     The in-place op ``c10d.allreduce_`` binds the ProcessGroup directly, so make_fx
@@ -806,6 +804,8 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         group as an op argument.
     Single process with a fake PG -- this is the failing precompile CI step.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
