@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check that the proposed CODEOWNERS review surfaces cover every tracked path."""
 
+import argparse
+import json
 import subprocess
 import sys
 from collections import defaultdict
@@ -8,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+LINTER_CODE = "CODEOWNERS_TAXONOMY"
 HIERARCHY_MARKER = "# Review-surface hierarchy:"
 SECTION_MARKER = "# Draft grouped review-surface definitions:"
 GROUP_PREFIX = "# ["
@@ -66,22 +69,20 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
             if group in section_groups:
                 raise ValueError(f"{codeowners}:{line_number}: repeated group: {group}")
             section_groups.append(group)
-        elif line.startswith("# /"):
+        elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
-            pattern = line[2:]
+            active = line.startswith("/")
+            fields = (line if active else line[2:]).split()
+            pattern = fields[0]
             if group is None:
                 raise ValueError(f"{location}: pattern has no group")
-            if (
-                pattern == "/"
-                or any(character.isspace() for character in pattern)
-                or any(character in pattern for character in "*?[\\")
-            ):
+            if active and len(fields) == 1:
+                raise ValueError(f"{location}: active pattern has no owners")
+            if pattern == "/" or any(character in pattern for character in "*?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
             patterns.append((group, pattern[1:]))
         elif line and not line.startswith("#"):
-            raise ValueError(
-                f"{codeowners}:{line_number}: candidate patterns must be commented"
-            )
+            raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
     if not patterns:
         raise ValueError("taxonomy section contains no patterns")
@@ -104,9 +105,19 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     for pattern in patterns:
         patterns_by_path[pattern[1]].append(pattern)
 
+    activation_order = sorted(
+        patterns,
+        key=lambda pattern: (
+            pattern[1].rstrip("/").count("/"),
+            len(pattern[1]),
+            pattern[1],
+        ),
+    )
+    activation_rank = {pattern: index for index, pattern in enumerate(activation_order)}
     matched_patterns: set[TaxonomyPattern] = set()
     effective_patterns: set[TaxonomyPattern] = set()
     effective_groups = set()
+    activation_mismatches = []
     uncovered = []
     overridden = {}
     for path in paths:
@@ -127,35 +138,13 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
         effective_pattern = max(matches, key=lambda pattern: len(pattern[1]))
         effective_patterns.add(effective_pattern)
         effective_groups.add(effective_pattern[0])
+        active_pattern = max(matches, key=activation_rank.__getitem__)
+        if effective_pattern[0] != active_pattern[0]:
+            activation_mismatches.append(path)
 
     duplicates = {
         path: entries for path, entries in patterns_by_path.items() if len(entries) > 1
     }
-    activation_order = sorted(
-        patterns,
-        key=lambda pattern: (
-            pattern[1].rstrip("/").count("/"),
-            len(pattern[1]),
-            pattern[1],
-        ),
-    )
-    activation_rank = {
-        pattern: index for index, pattern in enumerate(activation_order)
-    }
-    activation_mismatches = []
-    for path in paths:
-        matches = [
-            pattern
-            for pattern in patterns
-            if path == pattern[1]
-            or pattern[1].endswith("/") and path.startswith(pattern[1])
-        ]
-        if matches:
-            abstract_group = max(matches, key=lambda pattern: len(pattern[1]))[0]
-            active_group = max(matches, key=activation_rank.__getitem__)[0]
-            if abstract_group != active_group:
-                activation_mismatches.append(path)
-
     return Report(
         tracked=len(paths),
         pattern_count=len(patterns),
@@ -212,8 +201,31 @@ def print_report(report: Report) -> None:
             print("\n".join(f"  {entry}" for entry in entries))
 
 
+def emit_lint_error(description: str) -> None:
+    """Emit a lintrunner-compatible taxonomy error."""
+    print(
+        json.dumps(
+            {
+                "path": "CODEOWNERS",
+                "line": None,
+                "char": None,
+                "code": LINTER_CODE,
+                "severity": "error",
+                "name": "invalid-taxonomy",
+                "original": None,
+                "replacement": None,
+                "description": description,
+            }
+        ),
+        flush=True,
+    )
+
+
 def main() -> int:
     """Run the taxonomy coverage check for the current Git repository."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lintrunner", action="store_true")
+    args = parser.parse_args()
     repo = Path(
         subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -228,19 +240,27 @@ def main() -> int:
         patterns, section_groups = parse_patterns(codeowners)
         report = analyze(tracked_paths(repo), patterns)
     except ValueError as error:
+        if args.lintrunner:
+            emit_lint_error(
+                f"CODEOWNERS taxonomy validation failed: {error}. "
+                "Run `python scripts/codeowners/check_taxonomy.py` for details."
+            )
+            return 0
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    print_report(report)
+    if not args.lintrunner:
+        print_report(report)
     declared_group_set = set(declared_groups)
     missing_groups = sorted(declared_group_set - report.groups)
     undeclared_groups = sorted(report.groups - declared_group_set)
-    if missing_groups:
-        print(f"Missing declared surfaces: {', '.join(missing_groups)}")
-    if undeclared_groups:
-        print(f"Undeclared effective surfaces: {', '.join(undeclared_groups)}")
+    if not args.lintrunner:
+        if missing_groups:
+            print(f"Missing declared surfaces: {', '.join(missing_groups)}")
+        if undeclared_groups:
+            print(f"Undeclared effective surfaces: {', '.join(undeclared_groups)}")
     section_order_mismatch = section_groups != declared_groups
-    if section_order_mismatch:
+    if section_order_mismatch and not args.lintrunner:
         print("Grouped sections do not match the declared hierarchy order")
     has_errors = bool(
         missing_groups or undeclared_groups or section_order_mismatch
@@ -253,6 +273,25 @@ def main() -> int:
             report.activation_mismatches,
         )
     )
+    if args.lintrunner and has_errors:
+        failure_counts = [
+            (len(report.uncovered), "uncovered paths"),
+            (len(report.duplicates), "duplicate patterns"),
+            (len(report.stale), "stale patterns"),
+            (len(report.ineffective), "ineffective patterns"),
+            (len(report.activation_mismatches), "ordering mismatches"),
+            (len(missing_groups), "missing surfaces"),
+            (len(undeclared_groups), "undeclared surfaces"),
+        ]
+        failures = [f"{count} {name}" for count, name in failure_counts if count]
+        if section_order_mismatch:
+            failures.append("section order does not match the hierarchy")
+        emit_lint_error(
+            "CODEOWNERS taxonomy validation failed: "
+            + ", ".join(failures)
+            + ". Run `python scripts/codeowners/check_taxonomy.py` for details."
+        )
+        return 0
     return int(has_errors)
 
 

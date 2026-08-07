@@ -271,9 +271,10 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # -----------------------------------------------------------------------------
 # Draft CODEOWNERS taxonomy: k100 disjoint review-surface cut
 #
-# Candidate patterns stay commented so this taxonomy cannot change ownership or
-# notification behavior. Do not uncomment these grouped definitions directly;
-# generate broad-to-specific active rules with owners in a separate change.
+# Candidate patterns start commented so this taxonomy cannot change ownership or
+# notification behavior. The checker treats commented patterns and active patterns
+# with owners identically, allowing review surfaces to be activated incrementally.
+# Active rules must still be ordered broad-to-specific for GitHub's last-match semantics.
 #
 # Quick methodology:
 # - start from every tracked file in the repository
@@ -293,6 +294,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # Validation:
 # - run `python scripts/codeowners/check_taxonomy.py`
 # - every tracked path must resolve to exactly one effective review surface
+# - commented and active patterns count equally toward taxonomy coverage;
+#   active patterns without owners fail validation
 # - intentional parent/child overrides are allowed; duplicate, stale, and
 #   ineffective patterns fail validation
 #
@@ -314,7 +317,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # - Quantization: quantization
 # - Profiling: profiler
 # - Mobile: mobile_runtime, mobile_android, mobile_delegates
-# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_codegen, infra_developer_tools, infra_test
+# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_linting, infra_codegen, infra_developer_tools, infra_test
 # - Third-party dependencies: third_party_backend_deps, third_party_core_build_deps, third_party_serialization_schema
 # - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
 # - Legacy: caffe2
@@ -839,7 +842,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_compile_benchmark_util.py
 # /test/test_complex.py
 # /test/test_content_store.py
-# /test/test_custom_ops.py
 # /test/test_dataloader.py
 # /test/test_datapipe.py
 # /test/test_decomp.py
@@ -989,7 +991,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/__init__.py
 # /torch/_appdirs.py
 # /torch/_awaits/
-# /torch/_classes.py
 # /torch/_compile.py
 # /torch/_decomp/
 # /torch/_dispatch/
@@ -1004,7 +1005,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/_native/
 # /torch/_numpy/
 # /torch/_opaque_base.py
-# /torch/_ops.py
 # /torch/_prims/
 # /torch/_prims_common/
 # /torch/_python_dispatcher.py
@@ -1096,17 +1096,28 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /aten/src/ATen/native/prim_native_functions.cpp
 # /aten/src/ATen/native/tags.yaml
 # /aten/src/ATen/native/ts_native_functions.yaml
+# /test/cpp/jit/test_custom_operators.cpp
 # /test/cpp_extensions/
 # /test/custom_operator/
+# /test/jit/test_custom_operators.py
 # /test/test_cpp_extensions_aot.py
 # /test/test_cpp_extensions_jit.py
 # /test/test_cpp_extensions_mtia_backend.py
 # /test/test_cpp_extensions_stream_and_event.py
+# /test/test_custom_ops.py
+# /torch/_classes.py
 # /torch/_custom_class_base.py
 # /torch/_custom_op/
 # /torch/_custom_ops.py
 # /torch/_library/
+# /torch/_ops.py
 # /torch/csrc/api/
+# /torch/csrc/jit/frontend/function_schema_parser.cpp
+# /torch/csrc/jit/frontend/function_schema_parser.h
+# /torch/csrc/jit/python/pybind_utils.cpp
+# /torch/csrc/jit/python/pybind_utils.h
+# /torch/csrc/utils/python_dispatch.cpp
+# /torch/csrc/utils/python_dispatch.h
 # /torch/custom_class.h
 # /torch/custom_class_detail.h
 # /torch/extension.h
@@ -1161,6 +1172,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [serialization_package]
 # /benchmarks/serialization/
+# /caffe2/serialize/
 # /test/package/
 # /test/test_package.py
 # /test/test_serialization.py
@@ -1219,21 +1231,15 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /.github/
 #
 # [infra_build_packaging]
-# /.bc-linter.yml
 # /.ci/manywheel/
-# /.clang-format
-# /.clang-tidy
-# /.cmakelintrc
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore
 # /.editorconfig
-# /.flake8
 # /.gdbinit
 # /.git-blame-ignore-revs
 # /.gitattributes
 # /.gitignore
-# /.lintrunner.toml
 # /.lldbinit
 # /.spin/
 # /BUCK.oss
@@ -1248,17 +1254,38 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /codex_setup.sh
 # /defs.bzl
 # /docker.Makefile
-# /mypy-strict.ini
-# /mypy.ini
 # /pt_ops.bzl
 # /pt_template_srcs.bzl
 # /pyproject.toml
-# /pyrefly.toml
 # /pytest.ini
 # /setup.py
 # /ubsan.supp
 # /ufunc_defs.bzl
 # /version.txt
+#
+# [infra_linting]
+# /.bc-linter.yml
+# /.clang-format
+# /.clang-tidy
+# /.cmakelintrc
+# /.flake8
+# /.github/actionlint.yaml
+# /.github/scripts/lint_native_functions.py
+# /.github/scripts/lintrunner.sh
+# /.github/workflows/_lint.yml
+# /.github/workflows/apply-lint.yml
+# /.github/workflows/lint-bc.yml
+# /.github/workflows/lint.yml
+# /.lintrunner.toml
+# /mypy-strict.ini
+# /mypy.ini
+# /mypy_plugins/
+# /pyrefly.toml
+# /scripts/codeowners/
+# /scripts/lint_urls.sh
+# /scripts/lint_xrefs.sh
+# /scripts/lintrunner.py
+# /tools/linter/
 #
 # [infra_codegen]
 # /tools/autograd/
@@ -1271,7 +1298,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /benchmarks/compare.sh
 # /benchmarks/upload_scribe.py
 # /binaries/
-# /mypy_plugins/
 # /scripts/
 # /tools/
 #
