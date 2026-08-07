@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     torch_to_numpy_dtype_dict,
     numpy_to_torch_dtype_dict,
+    numpy_to_torch_dtype,
     slowTest,
     set_default_dtype,
     set_default_tensor_type,
@@ -417,8 +418,7 @@ class TestTensorCreation(TestCase):
 
         expected_scipy_types = [
             torch.float64,
-            # windows scipy block_diag returns int32 types
-            torch.int32 if IS_WINDOWS else torch.int64,
+            numpy_to_torch_dtype(np.array(0).dtype),
             torch.complex128,
             torch.float64
         ]
@@ -1076,10 +1076,10 @@ class TestTensorCreation(TestCase):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
 
-        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        # Note: CUDA/MTIA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         refs = None
-        if self.device_type == 'cuda':
+        if self.device_type in ('cuda', 'mtia'):
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
