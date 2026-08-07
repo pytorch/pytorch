@@ -323,7 +323,6 @@ CPU_TEST_FAILURES = {
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     hw_classification = HardwareClassification.CPU
-
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -345,7 +344,6 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     hw_classification = HardwareClassification.CPU
-
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
