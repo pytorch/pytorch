@@ -82,7 +82,13 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::reshape
 ```
 
-```{doxygenfunction} torch::stable::view
+```{doxygenfunction} torch::stable::view(const torch::stable::Tensor &self, torch::headeronly::IntHeaderOnlyArrayRef size)
+```
+
+```{doxygenfunction} torch::stable::view(const torch::stable::Tensor &self, torch::headeronly::ScalarType dtype)
+```
+
+```{doxygenfunction} torch::stable::permute
 ```
 
 ```{doxygenfunction} torch::stable::flatten
@@ -143,4 +149,16 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::subtract
+```
+
+```{doxygenfunction} torch::stable::bitwise_and
+```
+
+```{doxygenfunction} torch::stable::bitwise_or
+```
+
+```{doxygenfunction} torch::stable::bitwise_left_shift
+```
+
+```{doxygenfunction} torch::stable::bitwise_right_shift
 ```
