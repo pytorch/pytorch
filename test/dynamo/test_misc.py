@@ -49,6 +49,7 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
