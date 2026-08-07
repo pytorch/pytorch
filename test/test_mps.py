@@ -2991,6 +2991,122 @@ class TestMPS(TestCaseMPS):
         cpu_last = F.layer_norm(x[-1].float().cpu(), (axis_size,))
         self.assertEqual(mps_y[-1].float().cpu(), cpu_last, atol=1e-2, rtol=1e-2)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("weighted", [True, False])
+    @parametrize("noncontiguous", [True, False])
+    def test_rms_norm_matches_unfused_cpu(self, dtype, weighted, noncontiguous):
+        torch.manual_seed(0)
+        if dtype == torch.float32:
+            reference_dtype, tolerance = torch.float64, {"atol": 1e-4, "rtol": 1e-4}
+        else:
+            reference_dtype, tolerance = dtype, {"atol": 1e-2, "rtol": 1e-2}
+        shapes_spanning_single_row_and_looped_kernels = [
+            ((2, 2, 2, 2), [2, 2]), ((3, 7, 17), [17]), ((64, 384), [384]),
+            ((8, 4096), [4096]), ((4, 8192), [8192])]
+        shapes_spanning_one_and_many_rows_per_block = [
+            ((4096, 64), [64]), ((128, 8192), [8192])]
+
+        for input_shape, normalized_shape in (shapes_spanning_single_row_and_looped_kernels
+                                              + shapes_spanning_one_and_many_rows_per_block):
+            wide_source = torch.randn(*input_shape[:-1], input_shape[-1] * 2)
+            contiguous_source = torch.randn(input_shape)
+            weight_source = torch.randn(normalized_shape)
+            upstream_grad = torch.randn(input_shape)
+
+            def forward_and_backward(device, dtype):
+                if noncontiguous:
+                    x = wide_source.to(device=device, dtype=dtype)[..., ::2].detach().requires_grad_()
+                    self.assertFalse(x.is_contiguous())
+                else:
+                    x = contiguous_source.to(device=device, dtype=dtype).detach().requires_grad_()
+                w = weight_source.to(device=device, dtype=dtype).detach().requires_grad_() if weighted else None
+                y = F.rms_norm(x, normalized_shape, w)
+                y.backward(upstream_grad.to(device=device, dtype=dtype))
+                return y, x.grad, (w.grad if weighted else None)
+
+            ref_y, ref_dx, ref_dw = forward_and_backward('cpu', reference_dtype)
+            y, dx, dw = forward_and_backward('mps', dtype)
+
+            self.assertEqual(y.cpu().double(), ref_y.double(), **tolerance)
+            self.assertEqual(dx.cpu().double(), ref_dx.double(), **tolerance)
+            if weighted:
+                self.assertEqual(dw.cpu().double(), ref_dw.double(), **tolerance)
+
+    @parametrize("input_requires_grad", [True, False])
+    @parametrize("weight_requires_grad", [True, False])
+    @parametrize("N", [384, 8192])
+    def test_rms_norm_grad_masks_match_cpu(self, input_requires_grad, weight_requires_grad, N):
+        cpu_x = torch.randn(8, N)
+        cpu_w = torch.randn(N)
+
+        def forward_and_backward(device):
+            x = cpu_x.to(device).detach().requires_grad_(input_requires_grad)
+            w = cpu_w.to(device).detach().requires_grad_(weight_requires_grad)
+            y = F.rms_norm(x, [N], w)
+            if input_requires_grad or weight_requires_grad:
+                y.backward(torch.ones_like(y))
+            return x.grad, w.grad
+
+        ref_dx, ref_dw = forward_and_backward('cpu')
+        dx, dw = forward_and_backward('mps')
+
+        self.assertIs(dx is None, ref_dx is None)
+        self.assertIs(dw is None, ref_dw is None)
+        if ref_dx is not None:
+            self.assertEqual(dx.cpu(), ref_dx)
+        if ref_dw is not None:
+            self.assertEqual(dw.cpu(), ref_dw)
+
+    def test_rms_norm_empty_input(self):
+        x = torch.randn(0, 384, device='mps', requires_grad=True)
+        w = torch.randn(384, device='mps', requires_grad=True)
+        F.rms_norm(x, [384], w).sum().backward()
+        self.assertEqual(x.grad.shape, x.shape)
+        self.assertEqual(w.grad, torch.zeros_like(w))
+
+    def test_rms_norm_rejects_malformed_shapes(self):
+        x = torch.randn(2, 4, device='mps')
+        with self.assertRaisesRegex(RuntimeError, r"expected input with shape \[\*, 2, 2, 2\]"):
+            torch.ops.aten._fused_rms_norm(x, [2, 2, 2], torch.randn(2, 2, 2, device='mps'), 1e-5)
+        with self.assertRaisesRegex(RuntimeError, "Expected weight to be of same shape"):
+            torch.ops.aten._fused_rms_norm(x, [4], torch.randn(8, device='mps'), 1e-5)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_rms_norm_double_backward_matches_cpu(self, dtype):
+        tolerance = {"atol": 1e-3, "rtol": 1e-3} if dtype == torch.float32 else {"atol": 1e-1, "rtol": 1e-1}
+        cpu_x = torch.randn(8, 64)
+        cpu_w = torch.randn(64)
+
+        def second_order(device, dtype):
+            x = cpu_x.to(device=device, dtype=dtype).detach().requires_grad_()
+            w = cpu_w.to(device=device, dtype=dtype).detach().requires_grad_()
+            (dx,) = torch.autograd.grad(F.rms_norm(x, [64], w).sum(), x, create_graph=True)
+            dx.pow(2).sum().backward()
+            return x.grad, w.grad
+
+        ref_dx, ref_dw = second_order('cpu', torch.float64)
+        dx, dw = second_order('mps', dtype)
+        self.assertEqual(dx.cpu().double(), ref_dx, **tolerance)
+        self.assertEqual(dw.cpu().double(), ref_dw, **tolerance)
+
+    def test_rms_norm_uses_fused_kernel_when_grad_required(self):
+        norm = torch.nn.RMSNorm(384, device='mps')
+        y = norm(torch.randn(4, 384, device='mps'))
+        self.assertEqual(y.grad_fn.name(), "FusedRmsNormBackward0")
+
+    @parametrize("input_scale", [1e-20, 1e-10, 1.0])
+    def test_rms_norm_default_eps_matches_cpu(self, input_scale):
+        x = torch.full((2, 64), input_scale)
+        w = torch.ones(64)
+        self.assertEqual(F.rms_norm(x.to('mps'), [64], w.to('mps')).cpu(), F.rms_norm(x, [64], w))
+
+    def test_fused_rms_norm_returns_rstd(self):
+        eps = 1e-5
+        x = torch.randn(8, 384, device='mps')
+        w = torch.randn(384, device='mps')
+        _, rstd = torch.ops.aten._fused_rms_norm(x, [384], w, eps)
+        self.assertEqual(rstd, torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps))
+
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
