@@ -443,6 +443,26 @@ test_python_smoke() {
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm -k "TestFullyShardSymmMem" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/tensor/test_matrix_ops -k "test_grouped_mm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include dynamo/test_logging -k "test_autotuning" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include dynamo/test_reconstruct -k "test_tma_experimental_reconstruct or test_tma_stable_reconstruct" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_aot_inductor -k "test_varlen_attn_paged_kv_cache" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_combo_kernels -k "test_combo_kernel_tma_descriptor_block_name or test_combo_kernel_yz_overflow or test_pdl_codegen_in_combo_kernel or test_pdl_combo_kernel_pointwise or test_pdl_combo_kernel_reduction" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_cuda_repro -k "test_atomic_add_bfloat16 or test_chunked_unrolled_slice_gather_int32_overflow or test_float8_e8m0fnu or test_index_add_fallback or test_index_add_fallback_direct" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_cutlass_fallback -k "test_addmm_fallback_on_cutlass_failure or test_extern_kernel_included_in_prescreening or test_fallback_to_aten_when_cutlass_benchmarks_fail or test_issue_171094_dimensions" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_flex_decoding -k "test_tma_decoding" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_flex_flash -k "test_dynamic_multiple_scalar_closures_with_max_autotune or test_max_autotune_score_mod" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_lookup_table -k "test_mixed_template_configs or test_multiple_configs_same_template or test_tma_lookup_table_entry" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_loop_ordering -k "test_fp8_cast_and_t" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_torchinductor -k "test_pdl_mutation or test_pdl_template_and_delay" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_triton_kernels -k "test_add_kernel_on_device_tma_new_api or test_add_kernel_on_device_tma_old_api or test_descriptor_load_store_read_write_detection" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_user_streams -k "test_pdl_correctness_with_multiple_streams or test_pdl_cross_stream_events_preserved or test_pdl_mutation_across_streams or test_pdl_no_fusion_across_streams or test_pdl_same_stream_consecutive_kernels or test_pdl_single_side_stream or test_pdl_stress_multistream_correctness" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_cuda -k "test_cublas_workspace_explicit_allocation or test_out_of_memory_retry or test_pinned_memory_use_background_threads or test_preferred_blas_library_settings" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_foreach -k "test_foreach_mm_cond_rejects or test_foreach_mm_fallback_correctness or test_foreach_mm_nvmath" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k "test__int_mm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_nn -k "TestFusedRMSNormOverrideNumerics or TestFusedRMSNormOverrideRouting" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_scatter_gather_ops -k "test_smem_stage_alignment_multi_iter" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -466,6 +486,11 @@ test_python_smoke_b200() {
       test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_cupy_as_tensor -k "test_cupy_as_tensor" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_max_autotune -k "test_honor_sm_carveout_with_triton_tma or test_max_autotune_addmm_persistent_tma or test_max_autotune_mm_persistent_tma_large_input_tensor_int64_indexing or test_max_autotune_regular_mm_persistent_tma or test_max_autotune_regular_mm_persistent_tma_strided or test_persistent_tma_epilogue_fusion_store_cache" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_max_autotune_blackwell -k "test_blackwell_addmm_1d_bias_epilogue_tma_load or test_blackwell_addmm_relu_epilogue_fusion_tma_store or test_blackwell_max_autotune_addmm_persistent_tma or test_blackwell_max_autotune_regular_mm_persistent_tma or test_blackwell_max_autotune_scaled_mm_per_row_persistent_tma or test_blackwell_max_autotune_scaled_mm_per_tensor_persistent_tma or test_blackwell_mm_scale_bias_epilogue_tma_load or test_blackwell_mm_sigmoid_epilogue_fusion_tma_store or test_blackwell_mm_sigmoid_epilogue_tma_load" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_torchinductor_strided_blocks -k "test_2d_welford_reduction or test_reduction" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include profiler/test_cupti_monitor -k "test_cupti_monitor_enable_hes_early_guard or test_cupti_monitor_observed_kinds_present" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 

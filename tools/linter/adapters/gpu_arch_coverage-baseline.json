@@ -1,30 +1,4 @@
 {
   "_comment": "Files with arch-gated tests that predate GPU_ARCH_COVERAGE. Remove entries as they are added to the smoke lists; do not add new ones.",
-  "known_uncovered": [
-    "ciflow/b200::distributed/test_cupy_as_tensor",
-    "ciflow/b200::inductor/test_max_autotune",
-    "ciflow/b200::inductor/test_max_autotune_blackwell",
-    "ciflow/b200::inductor/test_torchinductor_strided_blocks",
-    "ciflow/b200::profiler/test_cupti_monitor",
-    "ciflow/h100::distributed/_composable/fsdp/test_fully_shard_comm",
-    "ciflow/h100::distributed/tensor/test_matrix_ops",
-    "ciflow/h100::dynamo/test_logging",
-    "ciflow/h100::dynamo/test_reconstruct",
-    "ciflow/h100::inductor/test_aot_inductor",
-    "ciflow/h100::inductor/test_combo_kernels",
-    "ciflow/h100::inductor/test_cuda_repro",
-    "ciflow/h100::inductor/test_cutlass_fallback",
-    "ciflow/h100::inductor/test_flex_decoding",
-    "ciflow/h100::inductor/test_flex_flash",
-    "ciflow/h100::inductor/test_lookup_table",
-    "ciflow/h100::inductor/test_loop_ordering",
-    "ciflow/h100::inductor/test_torchinductor",
-    "ciflow/h100::inductor/test_triton_kernels",
-    "ciflow/h100::inductor/test_user_streams",
-    "ciflow/h100::test_cuda",
-    "ciflow/h100::test_foreach",
-    "ciflow/h100::test_linalg",
-    "ciflow/h100::test_nn",
-    "ciflow/h100::test_scatter_gather_ops"
-  ]
+  "known_uncovered": []
 }
