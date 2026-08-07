@@ -4,12 +4,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <ATen/ops/alias.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <structmember.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/FuncTorchTLS.h>
@@ -854,6 +856,11 @@ static void _wrap_outputs(
   auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr py_x(THPVariable_Wrap(x));
+    if (!py_x)
+      throw_python_error();
+    if (!torch::has_torch_function(py_x.get())) {
+      return at::alias(x);
+    }
     THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
     if (!py_view_as_method)
       throw_python_error();
