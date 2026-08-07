@@ -1897,7 +1897,7 @@ class ProcessGroupGlooTest(_ProcessGroupGlooBase):
 
 
 class ProcessGroupGlooCudaTest(_ProcessGroupGlooBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
@@ -2056,6 +2056,10 @@ class ProcessGroupGlooCudaTest(_ProcessGroupGlooBase):
 class _DistributedDataParallelTestBase(MultiProcessTestCase):
     """Shared setup and helpers for DDP test classes."""
 
+    @property
+    def world_size(self):
+        return 2
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -2206,7 +2210,7 @@ class _DistributedDataParallelTestBase(MultiProcessTestCase):
 
 
 class DistributedDataParallelTest(
-    _DistributedDataParallelTestBase, test_c10d_common.CommonDistributedDataParallelTest
+    _DistributedDataParallelTestBase,
 ):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2537,8 +2541,10 @@ class DistributedDataParallelTest(
         optimizer.step()
 
 
-class DistributedDataParallelCudaTest(_DistributedDataParallelTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class DistributedDataParallelCudaTest(
+    _DistributedDataParallelTestBase, test_c10d_common.CommonDistributedDataParallelTest
+):
+    hw_classification = HardwareClassification.CUDA
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
@@ -3259,7 +3265,7 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
 
 @skip_if_win32()
 class ProcessGroupGlooLazyInitCudaTest(ProcessGroupGlooCudaTest):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
     lazy_init = True
 
     def setUp(self):
@@ -3390,7 +3396,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
 
 class ProcessGroupGlooFRCudaTest(ProcessGroupGlooCudaTest):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
@@ -3489,7 +3495,7 @@ class CommTest(_CommTestBase):
 
 
 class CommCudaTest(_CommTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
