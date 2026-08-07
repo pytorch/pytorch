@@ -685,12 +685,12 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       encodeIndexBoundsCheck(computeEncoder, stream, index_, acc_result.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_add_{}_{}", scalarToMetalTypeString(acc_result), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, acc_result, index_, acc_source, params);
       mtl_setBytes(computeEncoder, getMPSScalar(alpha, acc_type), 4);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
   if (needs_acc_cast) {
@@ -795,7 +795,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
         auto pipeline_state = lib.getPipelineStateForFunc(
             fmt::format("index_select_dim_dense_{}bit_{}", copy_bytes * 8, scalarToMetalTypeString(index_)));
-        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
         [computeEncoder setComputePipelineState:pipeline_state];
         mtl_setArgs(computeEncoder, output, index_, self, params);
         const MTLSize grid = MTLSizeMake(inner_units, num_indices, outer);
@@ -804,7 +804,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         const NSUInteger tgY = std::min<NSUInteger>(num_indices, std::max<NSUInteger>(1, maxTG / tgX));
         const NSUInteger tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
         [computeEncoder dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
-        getMPSProfiler().endProfileKernel(pipeline_state);
+        getMPSProfiler().endProfileKernel(pipeline_state, stream);
       }
     });
     return output;
@@ -830,11 +830,11 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_select_dim_{}_{}", getBitSizeString(output), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, output, index_, self, params);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -947,11 +947,11 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
