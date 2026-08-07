@@ -124,6 +124,10 @@ def _cpython_has_simple_slice_bug() -> bool:
 
 
 class BaseListVariable(VariableTracker):
+    # CPython's ValueError text for a failed .index(); tuple (and so namedtuple
+    # and torch.Size) ignores the value while list/deque repr it.
+    _index_not_found_msg = "tuple.index(x): x not in tuple"
+
     @staticmethod
     def cls_for_instance(obj: Any) -> type["BaseListVariable"]:
         return BaseListVariable.cls_for(type(obj))
@@ -479,13 +483,14 @@ class BaseListVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError,
                     tx,
-                    args=["tuple.index()"],
+                    args=[self._index_not_found_msg.format(const_args[0])],
                 )
         except AsPythonConstantNotImplementedError:
+            not_found_msg = ConstantVariable.create(self._index_not_found_msg)
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
-                kwargs,
+                {**kwargs, "not_found_msg": not_found_msg},
             )
 
     def list_count(
@@ -582,7 +587,7 @@ class BaseListVariable(VariableTracker):
         if len(self.items) == 0:
             raise_observed_exception(IndexError, tx, args=["pop from empty list"])
 
-        if len(args):
+        if len(args) != 0:
             idx = args[0].as_python_constant()
             if idx >= len(self.items):
                 raise_observed_exception(
@@ -1125,6 +1130,7 @@ class RangeVariable(BaseListVariable):
 class ListVariable(BaseListVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
+    _index_not_found_msg = "{!r} is not in list"
 
     def richcompare_impl(
         self,
@@ -1358,6 +1364,7 @@ class DequeVariable(BaseListVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+    _index_not_found_msg = "{!r} is not in deque"
 
     _nonvar_fields = {
         "state",
