@@ -8,13 +8,13 @@ from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+)
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -61,7 +61,7 @@ class ChunkAllShardingPlanner(ShardingPlanner):
 
 class TestShardingPlan(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
-    
+
     @onlyAccelerator
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -125,7 +125,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             torch.device(device)
         )
         planner = ChunkAllShardingPlanner(
-            device_count=TEST_GPU_NUM,device_type=torch.device(device).type
+            device_count=TEST_GPU_NUM, device_type=torch.device(device).type
         )
         sharding_plan = planner.build_plan(megatron_lm)
 
