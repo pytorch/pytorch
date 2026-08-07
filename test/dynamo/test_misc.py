@@ -5869,6 +5869,70 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
 
+    def test_delete_deref(self):
+        # `del y` on a cell variable (captured by nested `g`) -> DELETE_DEREF
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            z = y * 3
+            del y
+            return z
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_then_reassign(self):
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            y = x + 100
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_read_after_delete(self):
+        # Reading a cell after `del` raises NameError in eager; Dynamo must match
+        # (reads of a deleted cell graph break and fall back to eager).
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        with self.assertRaises(NameError):
+            fn(x)
+        with self.assertRaises(NameError):
+            opt_fn(x)
+
+    def test_delete_deref_symint(self):
+        def fn(x):
+            s = x.shape[0] + 1
+
+            def g():
+                return s
+
+            del s
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_closure_with_mutation_and_graph_break(self):
         def fn():
             x = torch.zeros(1)
