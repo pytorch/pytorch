@@ -80,6 +80,8 @@ done < <(
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
     ':(exclude,glob)torch/_vendor/quack/**'
+    # Upstream CPython tests carry historical/dead links; headers point at
+    # raw.githubusercontent.com tags we already pin in each file.
     ':(exclude,glob)test/cpython/**'
   )
   if [ $# -eq 2 ]; then

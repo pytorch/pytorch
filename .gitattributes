@@ -8,3 +8,7 @@ torch/_inductor/kernel/vendored_templates/cutedsl/dense_gemm_efc.py linguist-gen
 torch/csrc/utils/generated_serialization_types.h linguist-generated=true
 benchmarks/operator_benchmark/aarch64_expected_ci_operator_benchmark_eager_float32_cpu.csv linguist-generated=true
 benchmarks/operator_benchmark/x86_64_expected_ci_operator_benchmark_eager_float32_cpu.csv linguist-generated=true
+# Adapted/upstream sync artifacts (regen via tools/regenerate_cpython_diffs.py).
+test/cpython/v3_13/** linguist-generated=true
+# Literal prefix for pr-sanity-check.sh (sed cannot expand ** globs).
+test/cpython/v3_13/ linguist-generated=true
