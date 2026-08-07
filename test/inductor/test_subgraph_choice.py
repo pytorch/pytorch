@@ -7,7 +7,8 @@ from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def decomposeK(a, b, kPartitions):
@@ -25,16 +26,18 @@ def decomposeK(a, b, kPartitions):
 
 
 class TestSubgraphChoice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
 
-    def _create_buffer(self, name, shape, dtype):
+    def _create_buffer(self, name, shape, dtype, device):
         return Buffer(
             name=name,
-            layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
+            layout=FixedLayout(torch.device(device), dtype=dtype, size=shape),
         )
 
-    def test_subgraph_decompose_k(self):
+    def test_subgraph_decompose_k(self, device):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
 
@@ -78,10 +81,10 @@ class TestSubgraphChoice(TestCase):
             return node
 
         a_in = torch.randn(
-            mat1_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
+            mat1_shape, dtype=torch.float16, device=torch.device(device)
         )
         b_in = torch.randn(
-            mat2_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
+            mat2_shape, dtype=torch.float16, device=torch.device(device)
         )
 
         def func(mat1, mat2):
@@ -94,15 +97,15 @@ class TestSubgraphChoice(TestCase):
         # Check same results of compiled result and regular torch.mm
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
-    def test_subgraph_freeze_layout(self):
+    def test_subgraph_freeze_layout(self, device):
         from torch._inductor.kernel.mm_common import mm_args
 
         M, N, K = (4, 128, 14240)
         a_in = torch.randn(
-            (M, K), dtype=torch.bfloat16, device=torch.device(f"{GPU_TYPE}:0")
+            (M, K), dtype=torch.bfloat16, device=torch.device(device)
         )
         b_in = torch.randn(
-            (K, N), dtype=torch.bfloat16, device=torch.device(f"{GPU_TYPE}:0")
+            (K, N), dtype=torch.bfloat16, device=torch.device(device)
         )
 
         @torch.library.custom_op("mylib::matmul_decompose_padding", mutates_args={})
@@ -170,7 +173,8 @@ class TestSubgraphChoice(TestCase):
             compiled_func(a_in, b_in)
 
 
+instantiate_device_type_tests(TestSubgraphChoice, globals(), except_for="cpu")
+
+
 if __name__ == "__main__":
-    # Set env to make it work in CI.
-    if HAS_GPU and HAS_CPU:
-        run_tests()
+    run_tests()
