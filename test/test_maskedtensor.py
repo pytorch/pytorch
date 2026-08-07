@@ -1011,9 +1011,9 @@ class TestOperators(TestCase):
         self._test_reduction_equality(device, dtype, op, layout)
 
 
-instantiate_device_type_tests(TestOperators, globals())
+instantiate_device_type_tests(TestOperators, globals(), allow_xpu=True)
 
-instantiate_device_type_tests(TestBasics, globals())
+instantiate_device_type_tests(TestBasics, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestUnary)
 instantiate_parametrized_tests(TestBinary)
 instantiate_parametrized_tests(TestReductions)
