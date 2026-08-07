@@ -28,11 +28,11 @@ run is not in the artifact.
 Know these before relying on an artifact in production:
 
 * Capture inference artifacts under ``torch.no_grad()`` or
-  ``torch.inference_mode()``. AOTAutograd only records a bundled backend once
-  the BACKWARD compiles, so a forward-only capture with grad enabled -- the
-  default, and what ``model.eval()`` still leaves you in -- records no backends
-  and cannot be saved. Capturing a training step that calls ``.backward()``
-  works too.
+  ``torch.inference_mode()``. With ``backend="inductor"`` and parameters that
+  require grad, AOTAutograd only records a bundled backend once the BACKWARD
+  compiles, so a forward-only capture with grad enabled -- the default, and what
+  ``model.eval()`` still leaves you in -- records no backends and cannot be
+  saved. Capturing a training step that calls ``.backward()`` works too.
 * A value that crosses a graph break is guarded by equality, so a model whose
   breaks come from ``.item()`` or other data-dependent control flow yields an
   artifact that only serves inputs reproducing those exact values.
@@ -42,6 +42,11 @@ Know these before relying on an artifact in production:
   that a guarded object was rebound. ``summary().dropped_guards`` is the
   authoritative list and ``risky_dropped_guards`` is a lint over it, not a
   proof -- see ``_is_risky_drop`` for what it does and does not catch.
+* SystemInfo checks Python, PyTorch, CUDA, Triton and GPU name at load, but NOT
+  the CPU vector ISA. Inductor bakes the vector width into generated CPU code,
+  so an artifact captured on an AVX-512 host and served on an AVX2 host can
+  produce wrong numbers with no error. Pin the ISA across your fleet, or gate
+  on it yourself, before deploying CPU artifacts.
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 * ``install()`` patches code objects process-globally, so an artifact is not
@@ -140,7 +145,12 @@ class PrecompileSummary:
 
     @property
     def complete(self) -> bool:
-        return not self.bypassed and not self.truncated and self.guarded_codes > 0
+        return (
+            not self.bypassed
+            and not self.truncated
+            and not self.uncovered_frames
+            and self.guarded_codes > 0
+        )
 
     def dropped_guard_types(self) -> dict[str, int]:
         return _count_types(self.dropped_guards)
@@ -383,6 +393,17 @@ class PrecompileSession:
                     f"accumulate them. Raise recompile_limit, or pass "
                     f"require_complete=False to accept a partial artifact."
                 )
+            if summary.uncovered_frames:
+                raise PackageError(
+                    f"Precompilation produced no compiled code for entry frame(s) "
+                    f"{list(summary.uncovered_frames)}, so install() will skip them "
+                    f"and they will run eager -- and because a skipped frame never "
+                    f"compiles, serving() cannot report the gap either. This is "
+                    f"expected when the frame only dispatches to submodules that ARE "
+                    f"covered; it also looks exactly like a frame Dynamo gave up on "
+                    f"(check TORCH_LOGS=graph_breaks for gb0124). Pass "
+                    f"require_complete=False once you have confirmed which."
+                )
             if summary.bypassed:
                 raise PackageError(
                     f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
@@ -390,18 +411,6 @@ class PrecompileSession:
                     f"This usually means their guards could not be serialized. Pass "
                     f"require_complete=False to accept a partial artifact."
                 )
-        if summary.uncovered_frames:
-            # Not fatal: an entry frame that only dispatches to submodules has no
-            # graph of its own while the submodules are still served. It IS how a
-            # frame Dynamo gave up on looks though (gb0124), in which case the
-            # model runs eager despite the artifact existing.
-            log.warning(
-                "precompile: no compiled code for entry frame(s) %s; install() will "
-                "skip them, so they run eager. Expected if the frame only "
-                "dispatches to submodules, otherwise check TORCH_LOGS=graph_breaks "
-                "for a frame Dynamo could not handle.",
-                list(summary.uncovered_frames),
-            )
         if summary.wont_generalize:
             log.warning(
                 "precompile: %d guard(s) pin a value that crossed a graph break "
