@@ -19,6 +19,7 @@ from torch.profiler._trace_validator import (
     _check_stream_wait_corr_id_populated,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -146,6 +147,8 @@ def _load_events(trace_path):
 class TestTraceValidatorRules(TestCase):
     """Synthetic tests for rules not exercised by real E2E payloads."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nccl_metadata_pass(self):
         events = [
             {
@@ -186,6 +189,8 @@ class TestTraceValidatorRules(TestCase):
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
 class TestTraceValidatorE2E(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     _trace_dir: str = ""
     _payloads: dict = {}
 
