@@ -28,6 +28,14 @@ set_property(CACHE KINETO_LIBRARY_TYPE PROPERTY STRINGS default shared static)
 option(KINETO_BUILD_TESTS "Build kineto unit tests" ON)
 option(KINETO_BUILD_BENCHMARKS "Build kineto benchmarks" OFF)
 
+# When Kineto is embedded in a larger project, that project's test runner
+# usually discovers C++ test binaries in the install tree rather than the
+# build tree. Installing the test executables lets it find them without
+# maintaining a hand-written list of Kineto's tests.
+option(KINETO_INSTALL_TESTS "Install kineto unit test binaries" OFF)
+set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING
+  "Install destination for kineto unit test binaries")
+
 set(LIBKINETO_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(LIBKINETO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(LIBKINETO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
