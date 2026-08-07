@@ -129,7 +129,7 @@ bool MPSEvent::synchronize() {
 }
 
 bool MPSEvent::query() const {
-  // return false if not recorded (in the current logical use) or signaled yet
+  // return false if not recorded or signaled yet
   return m_was_recorded && (m_event.signaledValue >= m_signalCounter);
 }
 
