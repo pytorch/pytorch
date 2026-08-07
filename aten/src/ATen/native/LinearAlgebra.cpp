@@ -163,22 +163,6 @@
 
 namespace at {
 
-namespace detail {
-  static void check_linalg_norm_dtype(std::optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
-    if (opt_dtype.has_value()) {
-      auto dtype = opt_dtype.value();
-      TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype), name, ": dtype should"
-          " be floating point or complex, but got ", dtype);
-      TORCH_CHECK(isComplexType(self_dtype) == isComplexType(dtype),
-          name, ": dtype should be ", isComplexType(self_dtype) ? "complex" : "real",
-          " for ", isComplexType(self_dtype) ? "complex" : "real", " inputs, but got ", dtype);
-      TORCH_CHECK(promoteTypes(self_dtype, dtype) == dtype,
-          name, ": the dtype of the input ", "(", self_dtype, ") should be convertible ",
-          "without narrowing to the specified dtype (", dtype, ")");
-    }
-  }
-}
-
 namespace meta {
 
 #define ADDMM_META() \
