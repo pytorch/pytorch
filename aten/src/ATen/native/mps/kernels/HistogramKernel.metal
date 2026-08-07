@@ -26,6 +26,16 @@ U upper_bound(constant T* arr, U first, U len, T val) {
   return first;
 }
 
+template <typename T>
+inline long linear_bin(
+    T element,
+    long num_bins,
+    T leftmost_edge,
+    T rightmost_edge) {
+  return static_cast<long>(
+      (element - leftmost_edge) * num_bins / (rightmost_edge - leftmost_edge));
+}
+
 // The implementation here is mostly taken from the CPU's implementation with
 // some modifications. Please see `aten/src/ATen/native/cpu/HistogramKernel.cpp`
 // for more details.
@@ -70,9 +80,11 @@ kernel void histogramdd(
         algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION ||
         algorithm ==
             BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-      pos = static_cast<int64_t>(
-          (element - leftmost_edge[dim]) * (num_bin_edges[dim] - 1) /
-          (rightmost_edge[dim] - leftmost_edge[dim]));
+      pos = linear_bin(
+          element,
+          num_bin_edges[dim] - 1,
+          leftmost_edge[dim],
+          rightmost_edge[dim]);
       if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
         int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
         int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
@@ -128,14 +140,11 @@ inline long histc_bin(
     long num_bins,
     T leftmost_edge,
     T rightmost_edge) {
-  constexpr auto eps = T(4e-6);
-  if (!(element >= (leftmost_edge - eps) &&
-        element <= (rightmost_edge + eps))) {
+  if (!(element >= leftmost_edge && element <= rightmost_edge)) {
     return -1;
   }
-  long pos = static_cast<long>(
-      (element - leftmost_edge) * num_bins / (rightmost_edge - leftmost_edge));
-  return pos == num_bins ? pos - 1 : pos;
+  long pos = linear_bin(element, num_bins, leftmost_edge, rightmost_edge);
+  return metal::clamp(pos, 0L, num_bins - 1);
 }
 
 template <typename T, bool dense>

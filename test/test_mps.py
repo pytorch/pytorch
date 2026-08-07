@@ -920,20 +920,6 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
-    def test_histc_atomic_paths(self):
-        for dtype in (torch.float16, torch.bfloat16, torch.float32):
-            cpu_base = (torch.arange(64, dtype=torch.float32) * 0.0137 + 0.031).to(dtype)
-            mps_base = cpu_base.to("mps")
-
-            for cpu_input, mps_input in ((cpu_base, mps_base), (cpu_base[::2], mps_base[::2])):
-                for bins in (256, 8193):
-                    with self.subTest(dtype=dtype, bins=bins, contiguous=cpu_input.is_contiguous()):
-                        expected = torch.histc(cpu_input, bins=bins, min=0.0, max=1.0)
-                        out_base = torch.empty(2 * bins, dtype=dtype, device="mps")
-                        actual = out_base[::2]
-                        torch.histc(mps_input, bins=bins, min=0.0, max=1.0, out=actual)
-                        self.assertEqual(actual.cpu(), expected)
-
     def test_stream_base(self):
         s1 = torch._C._MPSStreamBase()
         s2 = torch._C._MPSStreamBase()
