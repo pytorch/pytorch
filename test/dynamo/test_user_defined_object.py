@@ -7,7 +7,10 @@ import unittest
 import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 class SlotsOnly:
@@ -101,6 +104,8 @@ class SlotsAndProperty:
 
 
 class TestSlotsAttrAssignment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for attribute assignment on objects with __slots__."""
 
     def test_valid_slot_assignment(self):
@@ -491,6 +496,8 @@ class WithGetattribute:
 
 
 class TestSlotsFromCPython(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Slot tests extracted from CPython's test_descr.py::test_slots."""
 
     def setUp(self):
@@ -741,6 +748,8 @@ class TestSlotsFromCPython(TestCase):
 
 
 class TestUserDefinedClassDict(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_class_dict_read(self):
         class MyClass:
             x = 3
@@ -835,6 +844,8 @@ class TestUserDefinedClassDict(TestCase):
 
 
 class TestClassSetattr(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_setattr_class_attribute(self):
         class MyModule:
             x = 10
@@ -910,6 +921,8 @@ class _DelClassMeta(metaclass=_SetitemDelitemMeta):
 
 
 class TestUserDefinedSetitem(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV).
 
     enable_trace_load_build_class lets us define helper classes inside the
@@ -1214,6 +1227,8 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_object_call_identity(self):
         a = object()
