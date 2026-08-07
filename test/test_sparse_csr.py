@@ -237,6 +237,63 @@ def hybrid_nonhybrid(test_name='hybrid'):
 
 
 class TestSparseCompressed(TestCase):
+    @all_sparse_compressed_layouts()
+    @onlyCPU
+    def test_layout(self, layout):
+        self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
+        self.assertEqual(type(layout), torch.layout)
+
+    @skipMeta
+    @onlyCPU
+    @largeTensorTest("30GB", "cpu")
+    def test_invalid_input_csr_large(self):
+        rows = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
+            torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int32) // rows,
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (rows, 1))
+        torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int64) // rows,
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (rows, 1))
+
+        cols = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in column dimension'):
+            torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int32),
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (1, cols))
+        torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int64),
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (1, cols))
+
+        nnz = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in nnz'):
+            # nnz cannot be stored in int32 crow_indices
+            # but the `crow_indices[..., -1] == nnz`` check happens after the overflow validation
+            # So we can use `nnz - 1` here to avoid `value cannot be converted to type int32 without overflow`
+            # during construction of crow_indices
+            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz - 1], dtype=torch.int32),
+                                    torch.arange(nnz // 2, dtype=torch.int32).repeat(2),
+                                    torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+        torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int64),
+                                torch.arange(nnz // 2, dtype=torch.int64).repeat(2),
+                                torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+
+    @skipMeta
+    @onlyCPU
+    @all_sparse_compressed_layouts()
+    def test_dim(self, layout):
+        for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(layout, output_tensor=False):
+            size = kwargs['size']
+            batch_dim = compressed_indices.dim() - 1
+            sparse_dim = 2
+            block_dim = 2 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 0
+            dense_dim = values.dim() - batch_dim - block_dim - 1
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size, layout=layout)
+            self.assertEqual(sparse.sparse_dim(), sparse_dim)
+            self.assertEqual(sparse.dense_dim(), dense_dim)
+
+
+class TestSparseCompressedDevice(TestCase):
     """Testing sparse compressed (CSR, CSC, BSR, BSC) tensor generic features.
     """
 
@@ -244,12 +301,6 @@ class TestSparseCompressed(TestCase):
         if device is None:
             device = self.device_type
         return self.genSparseCompressedTensor(size, nnz, device=device, dtype=dtype, index_dtype=index_dtype, layout=layout)
-
-    @all_sparse_compressed_layouts()
-    @onlyCPU
-    def test_layout(self, layout):
-        self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
-        self.assertEqual(type(layout), torch.layout)
 
     @parametrize('shape_and_device_inference', [subtest(False, name='_'), subtest(True, name='shape_and_device_inference')])
     @parametrize('use_factory_function', [subtest(False, name='_'), subtest(True, name='factory')])
@@ -954,56 +1005,6 @@ class TestSparseCompressed(TestCase):
                     torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, layout=layout)
                 else:
                     raise NotImplementedError(target)
-
-    @skipMeta
-    @onlyCPU
-    @largeTensorTest("30GB", "cpu")
-    def test_invalid_input_csr_large(self):
-        rows = 2 ** 31
-        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
-            torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int32) // rows,
-                                    torch.tensor([0], dtype=torch.int32),
-                                    torch.tensor([1]), (rows, 1))
-        torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int64) // rows,
-                                torch.tensor([0], dtype=torch.int64),
-                                torch.tensor([1]), (rows, 1))
-
-        cols = 2 ** 31
-        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in column dimension'):
-            torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int32),
-                                    torch.tensor([0], dtype=torch.int32),
-                                    torch.tensor([1]), (1, cols))
-        torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int64),
-                                torch.tensor([0], dtype=torch.int64),
-                                torch.tensor([1]), (1, cols))
-
-        nnz = 2 ** 31
-        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in nnz'):
-            # nnz cannot be stored in int32 crow_indices
-            # but the `crow_indices[..., -1] == nnz`` check happens after the overflow validation
-            # So we can use `nnz - 1` here to avoid `value cannot be converted to type int32 without overflow`
-            # during construction of crow_indices
-            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz - 1], dtype=torch.int32),
-                                    torch.arange(nnz // 2, dtype=torch.int32).repeat(2),
-                                    torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
-        torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int64),
-                                torch.arange(nnz // 2, dtype=torch.int64).repeat(2),
-                                torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
-
-    @skipMeta
-    @onlyCPU
-    @all_sparse_compressed_layouts()
-    def test_dim(self, layout):
-        for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(layout, output_tensor=False):
-            size = kwargs['size']
-            batch_dim = compressed_indices.dim() - 1
-            sparse_dim = 2
-            block_dim = 2 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 0
-            dense_dim = values.dim() - batch_dim - block_dim - 1
-            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size, layout=layout)
-            self.assertEqual(sparse.sparse_dim(), sparse_dim)
-            self.assertEqual(sparse.dense_dim(), dense_dim)
-
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -4394,7 +4395,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
-instantiate_device_type_tests(TestSparseCompressed, globals())
+instantiate_device_type_tests(TestSparseCompressedDevice, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 
 if __name__ == '__main__':
