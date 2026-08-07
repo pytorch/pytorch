@@ -157,6 +157,27 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def is_gpu() -> bool:
+        """
+        Returns True if Inductor should treat this device as a GPU-class
+        accelerator (device guards, GPU codegen/fusion, cudagraph eligibility).
+        Defaults to False so unknown backends stay conservative until they opt in.
+        """
+        return False
+
+    @classmethod
+    def exposes_streams(cls) -> bool:
+        """
+        True when a subclass provides its own Stream. The base Stream is a
+        raising sentinel, so compare against it rather than None.
+
+        Overriding the Stream slot is the contract for stream support: it is
+        what opts a GPU-class device into stream guards (device_need_guard),
+        so stream-capable backends must override it.
+        """
+        return cls.Stream is not DeviceInterface.Stream
+
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
@@ -205,6 +226,10 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -305,6 +330,10 @@ class MtiaInterface(DeviceInterface):
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
 
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
     # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
@@ -389,6 +418,10 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -531,6 +564,10 @@ class CpuInterface(DeviceInterface):
 
 class MpsInterface(DeviceInterface):
     @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
 
@@ -620,6 +657,18 @@ _device_initialized = False
 def register_interface_for_device(
     device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
+    """Register a DeviceInterface for a device type.
+
+    Registration must happen before ``torch._inductor.utils`` is imported:
+    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
+    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
+    satisfy this by construction (init_device_reg() runs inside the scan
+    itself). Out-of-tree backends register at package import, either
+    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
+    an explicit ``import torch_npu``-style import, both of which precede any
+    import of inductor. Registering later is not supported and will not be
+    reflected in the snapshot.
+    """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
