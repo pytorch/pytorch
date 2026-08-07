@@ -2967,6 +2967,10 @@ Arguments:
               "unregister_abort_hook",
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::ProcessGroup::supportsCompletionHooks,
+              "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3129,6 +3133,10 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "unregister_abort_hook",
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::Backend::supportsCompletionHooks,
+              "(test whether the backend supports completion hooks)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,

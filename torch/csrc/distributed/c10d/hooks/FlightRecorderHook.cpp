@@ -10,7 +10,7 @@
 #include <chrono>
 #include <future>
 #include <set>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace c10d {
@@ -20,24 +20,6 @@ namespace {
 // Hook ids must not collide with user-registered hooks; carve out a range
 // far above small hand-picked ids.
 std::atomic<int64_t> next_hook_id{0x46524543 /* 'FREC' */};
-
-// Every live hook, so a dump can ask them all to observe what they are waiting
-// on before it reads the buffer. Weak, so a hook is still destroyed when its
-// owner drops it; the destructor unregisters.
-//
-// Lock order: this mutex is taken before a hook's mutex_, never after, so
-// unregistration happens in the destructor rather than in remove(), which
-// already holds mutex_.
-std::mutex& liveHooksMutex() {
-  static auto* mutex = new std::mutex();
-  return *mutex;
-}
-
-std::unordered_map<int64_t, std::weak_ptr<FlightRecorderHook>>& liveHooks() {
-  static auto* hooks =
-      new std::unordered_map<int64_t, std::weak_ptr<FlightRecorderHook>>();
-  return *hooks;
-}
 
 // These must be spelled the way the trace analyzer spells them, i.e. match
 // COLLECTIVES / P2P in torch/distributed/flight_recorder/components/types.py
@@ -229,6 +211,17 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
       self->onPost(args);
     }
   });
+  // How an entry learns its collective finished. Optional, like the abort hook
+  // below: a backend that has none leaves the post-hook to retire at issue.
+  if (hook->pg_->supportsCompletionHooks()) {
+    hook->pg_->registerCompletionHook(
+        hook->hook_id_, [weak](const CompletionHookArgs& args) {
+          if (auto self = weak.lock()) {
+            self->onCompletion(args);
+          }
+        });
+    hook->push_completion_ = true;
+  }
   // The dump-on-failure trigger. Abort hooks are optional -- gloo has none and
   // Backend's default implementation throws -- and recording is useful either
   // way, so ask before registering rather than swallowing the exception, which
@@ -241,27 +234,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     });
     hook->abort_hook_registered_ = true;
   }
-  {
-    std::lock_guard<std::mutex> lock(liveHooksMutex());
-    liveHooks()[hook->hook_id_] = weak;
-  }
   return hook;
-}
-
-void observeFlightRecorderHooks(FlightRecorder<c10::Event>* recorder) {
-  std::vector<std::shared_ptr<FlightRecorderHook>> hooks;
-  {
-    std::lock_guard<std::mutex> lock(liveHooksMutex());
-    hooks.reserve(liveHooks().size());
-    for (const auto& [hook_id, weak] : liveHooks()) {
-      if (auto hook = weak.lock()) {
-        hooks.push_back(std::move(hook));
-      }
-    }
-  }
-  for (const auto& hook : hooks) {
-    hook->observe(recorder);
-  }
 }
 
 FlightRecorderHook::FlightRecorderHook(
@@ -364,115 +337,79 @@ const FlightRecorderHook::BackendTarget& FlightRecorderHook::targetFor(
 }
 
 FlightRecorderHook::~FlightRecorderHook() {
-  {
-    // Before remove(), which takes mutex_: the registry mutex is always the
-    // outer one.
-    std::lock_guard<std::mutex> lock(liveHooksMutex());
-    liveHooks().erase(hook_id_);
-  }
   remove();
 }
 
 void FlightRecorderHook::remove() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!pg_) {
-    return;
+  // Nothing that calls into the backend runs under mutex_, unregistration
+  // included. A backend hook may be executing on another thread right now,
+  // blocked on mutex_, while the backend holds the lock that guards its own
+  // hook table -- so unregistering under mutex_ is a lock-order inversion and
+  // deadlocks. Detaching is therefore two steps: publish the removal by
+  // clearing pg_ under the lock, which is what the hooks check, then unregister
+  // with nothing held.
+  c10::intrusive_ptr<ProcessGroup> pg;
+  std::map<int64_t, InflightOp> inflight;
+  bool had_completion_hook = false;
+  bool had_abort_hook = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!pg_) {
+      return;
+    }
+    pg = std::move(pg_);
+    // Ops still in flight are simply abandoned -- they are never retired, so a
+    // dump keeps reporting them as issued and never seen to finish, which is
+    // all we know.
+    inflight = std::move(inflight_);
+    inflight_.clear();
+    work_ids_.clear();
+    had_completion_hook = std::exchange(push_completion_, false);
+    had_abort_hook = std::exchange(abort_hook_registered_, false);
   }
-  pg_->unregisterPreHook(hook_id_);
-  pg_->unregisterPostHook(hook_id_);
-  if (abort_hook_registered_) {
-    pg_->unregisterAbortHook(hook_id_);
-    abort_hook_registered_ = false;
+  pg->unregisterPreHook(hook_id_);
+  pg->unregisterPostHook(hook_id_);
+  if (had_completion_hook) {
+    pg->unregisterCompletionHook(hook_id_);
+  }
+  if (had_abort_hook) {
+    pg->unregisterAbortHook(hook_id_);
   }
   // Drop the Work references before the group, not after: a backend's Work may
   // hold a non-owning pointer back to the backend that created it (nccl2's
-  // WorkNCCL does), so nothing of ours may outlive the group. Ops still in
-  // flight are simply abandoned -- they are never retired, so a dump keeps
-  // reporting them as issued and never seen to finish, which is all we know.
-  inflight_.clear();
-  pg_.reset();
+  // WorkNCCL does), so nothing of ours may outlive the group.
+  inflight.clear();
 }
 
-std::optional<float> FlightRecorderHook::workDuration(Work& work) {
-  if (!durations_available_.load(std::memory_order_relaxed)) {
-    return std::nullopt;
-  }
-  try {
-    return work.getDuration();
-  } catch (const std::exception& e) {
-    // Work::getDuration() is not implemented by most backends and throws where
-    // it is implemented but timing was never enabled. Ask once: an exception
-    // per collective is not worth a field the backend cannot fill in. The
-    // entry then carries no duration_ms at all rather than a host-clock
-    // stand-in, which would measure how late the observation was, not the
-    // collective.
-    durations_available_.store(false, std::memory_order_relaxed);
-    LOG(INFO) << "FlightRecorderHook: backend reports no collective duration, "
-              << "leaving duration_ms unset: " << e.what();
-    return std::nullopt;
-  }
-}
-
-void FlightRecorderHook::observe(FlightRecorder<c10::Event>* recorder) {
-  // Two phases: snapshot under mutex_, poll outside it. Work::isCompleted()
-  // calls into the backend and may take backend locks, and nothing that does
-  // may run under mutex_ -- see the lock-order note. The snapshot copies the
-  // intrusive_ptrs, so a work cannot be freed while it is being polled.
-  std::vector<std::pair<int64_t, InflightOp>> pending;
+void FlightRecorderHook::onCompletion(const CompletionHookArgs& args) {
+  // Runs on whichever thread the backend established completion on, usually its
+  // watchdog. Only the map lookup happens under mutex_; the recorder call does
+  // not, for the same reason onPre's does not -- see the lock-order note.
+  InflightOp op;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    pending.reserve(inflight_.size());
-    for (const auto& [op_id, op] : inflight_) {
-      if (op.work && (recorder == nullptr || op.recorder == recorder)) {
-        pending.emplace_back(op_id, op);
-      }
+    auto id_it = work_ids_.find(args.work);
+    if (id_it == work_ids_.end()) {
+      // Not one of ours: an op recorded by a natively recording backend, one
+      // issued under a graph capture, one already evicted, or one from before
+      // this hook was attached.
+      return;
     }
-  }
-
-  // Ops to stop waiting on, in issue order, and which of them we saw finish.
-  std::vector<int64_t> done;
-  std::optional<std::pair<int64_t, HookOpName>> last_completed;
-  for (auto& [op_id, op] : pending) {
-    bool completed = false;
-    bool observed = true;
-    try {
-      completed = op.work->isCompleted();
-      // isCompleted() is also true for a work that failed or timed out, which
-      // is the opposite of what the trace should say about it. Stop observing
-      // such an op without retiring it: the entry keeps reading as issued and
-      // never completed, which is exactly the culprit a post-mortem is looking
-      // for.
-      observed = !completed || op.work->isSuccess();
-    } catch (const std::exception& e) {
-      LOG(WARNING) << "FlightRecorderHook: cannot observe op " << op_id << ": "
-                   << e.what();
-      observed = false;
+    auto op_id = id_it->second;
+    work_ids_.erase(id_it);
+    auto it = inflight_.find(op_id);
+    if (it == inflight_.end()) {
+      return;
     }
-    if (observed && !completed) {
-      continue;
-    }
-    if (observed) {
-      op.recorder->retire_completed(
-          op.trace_id.id, op.trace_id.reset_epoch, workDuration(*op.work));
-      last_completed = std::make_pair(op_id, op.name);
-    }
-    done.push_back(op_id);
+    op = std::move(it->second);
+    inflight_.erase(it);
+    // The hook only hears about successful completion, so this is the last op
+    // known to have finished.
+    pg_status_->lastCompletedSeq = op_id;
+    pg_status_->lastCompletedWorkName = std::string(hookOpName(op.name));
   }
-
-  if (done.empty()) {
-    return;
-  }
-  std::lock_guard<std::mutex> lock(mutex_);
-  for (auto op_id : done) {
-    // op_ids are monotonic per group, so this can never hit a different op that
-    // reused the id.
-    inflight_.erase(op_id);
-  }
-  if (last_completed) {
-    pg_status_->lastCompletedSeq = last_completed->first;
-    pg_status_->lastCompletedWorkName =
-        std::string(hookOpName(last_completed->second));
-  }
+  op.recorder->retire_completed(
+      op.trace_id.id, op.trace_id.reset_epoch, args.duration_ms);
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
@@ -562,7 +499,11 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   // releases its Work, so a backend that never finishes an op cannot be pinned
   // by the recorder for ever.
   while (inflight_.size() > max_inflight_) {
-    inflight_.erase(inflight_.begin());
+    auto oldest = inflight_.begin();
+    if (oldest->second.work) {
+      work_ids_.erase(oldest->second.work.get());
+    }
+    inflight_.erase(oldest);
   }
 }
 
@@ -670,34 +611,45 @@ void FlightRecorderHook::onAbort() {
 }
 
 void FlightRecorderHook::onPost(const PostHookArgs& args) {
-  FlightRecorder<c10::Event>* recorder = nullptr;
+  InflightOp retire_at_issue;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = inflight_.find(args.op_id);
     if (it == inflight_.end()) {
       // Nothing was recorded for this op -- the backend records natively, the
       // op was issued under a graph capture, or the hook was removed in
-      // between. Return before observing: during a capture in particular,
-      // polling any work is what would invalidate it.
+      // between.
       return;
     }
-    if (!args.work) {
-      // No handle to wait on (the hook contract allows a null work). Stop
-      // tracking it; the entry stays un-retired, same as an op whose backend
-      // threw before the post-hook.
-      inflight_.erase(it);
+    if (args.work && push_completion_) {
+      // The op is only *issued* at this point, so the entry stays un-retired.
+      // The backend's completion hook is what says when it is really done, and
+      // it names the op by this Work.
+      it->second.work = args.work;
+      work_ids_[args.work.get()] = args.op_id;
       return;
     }
-    // The op is only *issued* at this point, so the entry stays un-retired.
-    // Its Work is what says when it is really done.
-    it->second.work = args.work;
-    recorder = it->second.recorder;
+    // Either there is no handle a completion could name (the hook contract
+    // allows a null work), or the backend never pushes one. Either way this is
+    // the last time the hook hears about this op.
+    if (args.work) {
+      retire_at_issue = std::move(it->second);
+    }
+    inflight_.erase(it);
   }
-  // Retire whatever has finished since the last collective. This is what keeps
-  // the pending set, and the Work references it holds, short in a normal
-  // training loop; the dump entry points observe too, which is what covers the
-  // last op before an idle period and a process stuck in a collective.
-  observe(recorder);
+  if (retire_at_issue.recorder == nullptr) {
+    // Nothing was issued that we could point at, so the entry stays un-retired:
+    // the same honest report as an op whose backend threw before the post-hook.
+    return;
+  }
+  // Retired but not completed: nothing will ever tell this hook the op
+  // finished, and an entry nothing retires reads as a hang, so retire it here
+  // and leave it saying only what is known -- it was issued. No duration, and
+  // "scheduled" rather than "completed".
+  retire_at_issue.recorder->retire_id(
+      retire_at_issue.trace_id.id,
+      retire_at_issue.trace_id.reset_epoch,
+      /*compute_duration=*/false);
 }
 
 } // namespace c10d

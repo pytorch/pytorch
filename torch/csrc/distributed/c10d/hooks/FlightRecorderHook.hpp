@@ -7,20 +7,20 @@
 // The pre-hook records an entry into the serving backend's own
 // FlightRecorder<c10::Event> instance (getFlightRecorder, keyed by backend
 // name). The post-hook does not retire it: it fires when the collective is
-// *issued*, not when it finishes. Instead the hook keeps the op's Work
-// (PostHookArgs::work) and retires the entry only once that Work reports
-// completion, taking duration_ms from Work::getDuration(). That is stock
-// ProcessGroupNCCL's model -- its watchdog retires on real completion -- and it
-// is what lets a dump tell a finished collective from a hung one: a collective
-// that never completes is never retired and reads "scheduled", one that
-// finished reads "completed".
+// *issued*, not when it finishes. The entry is retired from the backend's
+// completion hook (Hooks.hpp), which fires where the backend establishes that
+// the op really finished and carries the backend's own duration measurement.
+// That is stock ProcessGroupNCCL's model -- its watchdog retires on real
+// completion -- and it is what lets a dump tell a finished collective from a
+// hung one: a collective that never completes is never retired and reads
+// "scheduled", one that finished reads "completed". Nothing is polled: a hang
+// needs no observer, since work that never completes is simply never reported.
 //
-// There is no watchdog thread here. Pending works are observed from the next
-// post-hook, which keeps the pending set short in a training loop, and from the
-// dump entry points (observeFlightRecorderHooks, called by
-// dump_fr_trace{,_json}), which is what covers the two cases a post-hook sweep
-// cannot: the last op before the process goes idle, and a process stuck in a
-// collective that will never finish.
+// Backends with no completion hook fall back to retiring in the post-hook, i.e.
+// at issue. Such an entry carries no duration and never reads "completed", only
+// "scheduled" and retired -- degraded, but honest, because without a push there
+// is genuinely no moment at which this hook learns the op finished. Leaving
+// those entries un-retired instead would make every healthy op look hung.
 //
 // The hook owns no device events. One it recorded itself could only say whether
 // the *caller's* stream reached the op, which for an async_op collective is not
@@ -44,19 +44,20 @@
 // can be attached to a group of any composition without duplicating what a
 // native backend already recorded.
 //
-// attach() additionally registers an abort hook on backends that support one,
-// which writes the trace to disk when the backend detects a timeout or an
-// error. That is the single trigger for a dump-on-failure: backends do not dump
-// themselves, they only run their abort hooks.
+// attach() registers a completion hook on backends that support one, and an
+// abort hook on backends that support one. The abort hook writes the trace to
+// disk when the backend detects a timeout or an error, and is the single
+// trigger for a dump-on-failure: backends do not dump themselves, they only run
+// their abort hooks.
 
 #pragma once
 
-#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <c10/core/Event.h>
@@ -92,11 +93,6 @@ class TORCH_API FlightRecorderHook
   // Detach from the process group. Idempotent.
   void remove();
 
-  // Polls the ops this hook is still waiting on and retires the entries whose
-  // Work has finished. recorder selects whose entries to look at; null means
-  // all of them. Safe to call from any thread and from several at once.
-  void observe(FlightRecorder<c10::Event>* recorder);
-
  private:
   // The backend serving one device type of the group. A group can mix
   // backends ("cpu:gloo,cuda:nccl2"), so the recorder instance, the comm_lib
@@ -113,6 +109,10 @@ class TORCH_API FlightRecorderHook
   // between the pre-hook and the post-hook, and stays null if the backend threw
   // in between -- such an entry is never retired, which is the honest report:
   // it was issued and never seen to finish.
+  //
+  // The Work reference is what makes the pointer in CompletionHookArgs a safe
+  // key: an address can only be reused once its Work is freed, and this holds
+  // one for as long as work_ids_ can resolve it.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
@@ -128,11 +128,12 @@ class TORCH_API FlightRecorderHook
   const BackendTarget& targetFor(std::optional<c10::Device> device) const;
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
+  // Retires the entry of the op whose Work just completed. Fires on the
+  // backend's thread; see the lock-order note on mutex_.
+  void onCompletion(const CompletionHookArgs& args);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
   // hook lock; see the definition.
   void onAbort();
-  // Work::getDuration() if the backend can serve one, nullopt otherwise.
-  std::optional<float> workDuration(Work& work);
 
   c10::intrusive_ptr<ProcessGroup> pg_;
   int64_t hook_id_;
@@ -141,21 +142,20 @@ class TORCH_API FlightRecorderHook
   // Whether attach() got an abort hook registered; false for backends that
   // have none (gloo), whose unregister call would throw just as loudly.
   bool abort_hook_registered_{false};
+  // Whether the backend pushes completion. When false the post-hook retires the
+  // entry at issue, since nothing else ever will. Asked of the default backend,
+  // the one ProcessGroup routes hook registration to, so a mixed group whose
+  // default backend has no completion hooks falls back for all of its ops.
+  bool push_completion_{false};
   size_t pg_id_;
   // Cap on inflight_, see onPre.
   size_t max_inflight_{0};
   std::shared_ptr<ProcessGroupStatus> pg_status_;
-  // Cleared the first time Work::getDuration() throws. Backends that do not
-  // implement it, and backends that do but were not asked to time collectives
-  // (ProcessGroup::_enable_collectives_timing), both answer by throwing, and
-  // asking once per op would turn that into an exception per collective.
-  // Consequence: timing has to be enabled before the group's first collective
-  // to be picked up.
-  std::atomic<bool> durations_available_{true};
 
   // Sequencing and the op_id -> in-flight-op map. The mutex guards against
   // concurrent collectives from multiple threads (the hooks fire on the issuing
-  // thread) and against remove() running while one is in flight.
+  // thread), against a completion arriving on a backend thread, and against
+  // remove() running while an op is in flight.
   //
   // Lock order: nothing that can block on the GIL, and nothing that calls into
   // a backend, may run under this mutex. remove() runs with the GIL held -- the
@@ -163,13 +163,21 @@ class TORCH_API FlightRecorderHook
   // drops the handle -- and blocks on this mutex, so a collective thread that
   // held it while waiting for the GIL would deadlock the process with no
   // timeout. That is why onPre() calls the recorder, which gathers a traceback
-  // under the GIL, outside the lock, and why observe() polls Works outside it.
+  // under the GIL, outside the lock. It also outranks the backend's own hook
+  // lock: remove() takes it and then unregisters, so a backend must never
+  // invoke a hook while holding the lock that guards its hook table.
   std::mutex mutex_;
   size_t collective_seq_{0};
   size_t p2p_seq_{0};
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
+  // The reverse index a completion needs: CompletionHookArgs identifies the op
+  // by its Work, since op_id is assigned above the backend and a Work does not
+  // carry it, and the post-hook is where the two are seen together. Kept in
+  // step with inflight_ -- every entry here has a live entry there holding the
+  // Work.
+  std::unordered_map<const Work*, int64_t> work_ids_;
 };
 
 } // namespace c10d

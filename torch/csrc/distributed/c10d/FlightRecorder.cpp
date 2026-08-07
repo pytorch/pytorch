@@ -130,9 +130,7 @@ std::string dump_fr_trace(
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
-  auto* recorder = getFlightRecorder(backend);
-  observeFlightRecorderHooks(recorder);
-  return recorder->dump(
+  return getFlightRecorder(backend)->dump(
       std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>{},
@@ -145,9 +143,7 @@ std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive,
     const std::string& backend) {
-  auto* recorder = getFlightRecorder(backend);
-  observeFlightRecorderHooks(recorder);
-  return recorder->dump_json(
+  return getFlightRecorder(backend)->dump_json(
       std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>{},

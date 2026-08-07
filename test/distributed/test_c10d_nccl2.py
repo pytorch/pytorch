@@ -435,6 +435,21 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertEqual(len(hung), 1)
                 self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
                 self.assertEqual(hung[0]["timeout_ms"], 5000)
+                # ... and it has to read as unfinished. The watchdog marked this
+                # work TIMEDOUT, which Work::isCompleted() also answers true to,
+                # so a completion report on a failed work would retire the entry
+                # and hide the culprit. Only successful completion is pushed.
+                self.assertFalse(hung[0]["retired"], msg=str(hung[0]))
+                self.assertNotEqual(hung[0]["state"], "completed", msg=str(hung[0]))
+                # Unset reads None here; the JSON dump spells the same thing 0.
+                self.assertIsNone(hung[0]["time_discovered_completed_ns"])
+                # The healthy collectives on the same group did get their
+                # completion pushed, so the dump distinguishes them.
+                healthy = [e for e in dump["entries"] if e["input_sizes"] == [[4]]]
+                self.assertTrue(healthy)
+                for e in healthy:
+                    self.assertTrue(e["retired"], msg=str(e))
+                    self.assertEqual(e["state"], "completed", msg=str(e))
                 # A culprit with no code location is most of the diagnostic
                 # value gone, so the abort dump attempts stack traces (default
                 # on, TORCH_INCLUDE_STACK_TRACE) instead of giving up on them

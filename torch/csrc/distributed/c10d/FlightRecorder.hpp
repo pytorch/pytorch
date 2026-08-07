@@ -429,16 +429,6 @@ TORCH_API bool try_dump_fr_trace_file(
     bool onlyActive,
     const std::string& backend = kDefaultFRBackend);
 
-// Gives every FlightRecorderHook recording into this instance a chance to
-// observe the collectives it is still waiting on, so that ops which have since
-// finished are retired and read "completed" in the dump that follows. Ops that
-// never finish stay un-retired, which is what makes a hang visible. Defined in
-// hooks/FlightRecorderHook.cpp and called by the dump entry points below; the
-// hooks have no watchdog of their own, so a dump is the only thing that
-// observes the last op before an idle period, or anything at all while a
-// collective is stuck.
-TORCH_API void observeFlightRecorderHooks(FlightRecorder<c10::Event>* recorder);
-
 // Drops everything recorded so far, so a subsequent dump only shows what came
 // after. Backend-agnostic counterpart of reset_nccl_trace. Same cross-DSO
 // caveat as try_dump_fr_trace_file: callers outside libtorch_cpu must go

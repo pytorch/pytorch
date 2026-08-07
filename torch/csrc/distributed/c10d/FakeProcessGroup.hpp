@@ -19,8 +19,8 @@ class FakeWork : public Work {
 
   // A fake collective is done the moment it is "issued". Work's default reads
   // completed_, which nothing here ever sets, so without this a fake op would
-  // report as permanently in flight to anyone polling it (the flight recorder
-  // hook does) even though wait() returns immediately.
+  // report as permanently in flight to anyone polling it even though wait()
+  // returns immediately.
   bool isCompleted() override {
     return true;
   }

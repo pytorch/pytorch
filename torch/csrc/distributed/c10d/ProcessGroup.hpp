@@ -1128,6 +1128,21 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->unregisterAbortHook(hook_id);
   }
 
+  // Completion hooks forward to the default backend for the same reason abort
+  // hooks do: completion is detected inside the backend, not by the dispatcher
+  // kernels that fire the pre/post hooks below.
+  virtual bool supportsCompletionHooks() const {
+    return getDefaultBackend()->supportsCompletionHooks();
+  }
+
+  virtual void registerCompletionHook(int64_t hook_id, CompletionHook hook) {
+    getDefaultBackend()->registerCompletionHook(hook_id, std::move(hook));
+  }
+
+  virtual void unregisterCompletionHook(int64_t hook_id) {
+    getDefaultBackend()->unregisterCompletionHook(hook_id);
+  }
+
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
     preHooks_[hook_id] = std::move(hook);
   }
