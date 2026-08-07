@@ -8197,6 +8197,27 @@ for dtype in (torch.int32, torch.int64):
         )
         self.common(fn, (*inp,), reference_in_float=self.device != "mps")
 
+    def test_polar_empty(self):
+        # Empty inputs used to fail to lower: Inductor collapses the layout of
+        # a 0-element tensor so the last stride becomes 0, while aten.view.dtype
+        # requires stride(-1) == 1.
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        dtype = highest_precision_float(self.device)
+        for shape in [(0,), (0, 10, 3), (2, 0, 3)]:
+            inp = (torch.rand(shape, dtype=dtype), torch.rand(shape, dtype=dtype))
+            self.common(fn, inp, reference_in_float=self.device != "mps")
+
+    def test_polar_scalar(self):
+        # 0-dim inputs exercise the decomposition's reshape/squeeze path.
+        def fn(dist, angle):
+            return torch.polar(dist, angle)
+
+        dtype = highest_precision_float(self.device)
+        inp = (torch.tensor(2.0, dtype=dtype), torch.tensor(np.pi / 2, dtype=dtype))
+        self.common(fn, inp, reference_in_float=self.device != "mps")
+
     @skip_if_gpu_halide  # incorrect result on CUDA
     def test_cauchy(self):
         def fn(x, y):

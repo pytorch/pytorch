@@ -699,6 +699,35 @@ def add(
     return result
 
 
+@register_decomposition([aten.polar])
+def polar(abs: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+    complex_type = utils.corresponding_complex_dtype(abs.dtype)
+    # flatten(start_dim=-2) below needs >=2 dims, so promote 0-dim inputs to [1]
+    # and squeeze the result back to 0-dim via output_size_zero.
+    output_size_zero = abs.ndim == 0 and angle.ndim == 0
+    if abs.ndim == 0:
+        abs = abs.reshape(1)
+    if angle.ndim == 0:
+        angle = angle.reshape(1)
+    re = abs * torch.cos(angle)
+    im = abs * torch.sin(angle)
+    if re.numel() == 0:
+        # aten.view.dtype requires stride(-1) == 1, but Inductor collapses the
+        # layout of a 0-element tensor so the last stride becomes 0, tripping
+        # that check ("self.stride(-1) must be 1 to view Float as ComplexFloat
+        # (different element sizes), but got 0"). There is no data to
+        # reinterpret here, so build the empty complex result directly.
+        # .contiguous() does not help: Inductor already considers an empty
+        # tensor contiguous and keeps the collapsed layout.
+        result = torch.empty_like(re, dtype=complex_type)
+    else:
+        # Interleave real/imag into the last dim, flatten, then reinterpret as
+        # complex via aten.view.dtype; flatten avoids a trailing size-1 dim.
+        interleaved = torch.flatten(torch.stack((re, im), dim=-1), start_dim=-2)
+        result = interleaved.view(complex_type)
+    return result[0] if output_size_zero else result
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
     if self.is_complex():
