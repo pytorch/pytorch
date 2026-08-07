@@ -57,7 +57,6 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
-    _CONTEXTVAR_EXPLICIT_STATE_SENTINEL,
     AttrSource,
     ContextVarExplicitStateSource,
     ContextVarExplicitValueSource,
@@ -68,6 +67,7 @@ from ..source import (
     WeakRefCallSource,
 )
 from ..utils import (
+    _CONTEXTVAR_EXPLICIT_STATE_SENTINEL,
     check_positional,
     check_unspec_or_constant_args,
     identity,
@@ -2836,6 +2836,10 @@ class ContextVarVariable(VariableTracker):
             from_tracing_set=True,
         )
         tx.output.side_effects.record_contextvar_set(self, args[0], token)
+        real_value = args[0].get_real_python_backed_value()
+        if real_value is not NO_SUCH_SUBOBJ:
+            real_token = self.cv_obj.set(real_value)
+            tx.output.add_cleanup_hook(lambda: self.cv_obj.reset(real_token))
         return token
 
     def _handle_reset(
@@ -2914,6 +2918,17 @@ class ContextVarVariable(VariableTracker):
 
         tx.output.side_effects.record_contextvar_reset(self, token)
         tx.output.side_effects.mark_contextvar_token_used(token)
+
+        from ..side_effects import _ContextVarStateKind
+
+        if (
+            token.old_state_kind is _ContextVarStateKind.EXPLICIT
+            and token.old_value is not None
+        ):
+            old_real = token.old_value.get_real_python_backed_value()
+            if old_real is not NO_SUCH_SUBOBJ:
+                self.cv_obj.set(old_real)
+
         return ConstantVariable.create(None)
 
     tp_getset = {
