@@ -2395,6 +2395,20 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # Requires use_runtime_constant_folding. Constants that only the const graph
+    # reads are dead once folding has run, but the runtime keeps them resident
+    # forever. When set, those constants are kept outside the shared constant
+    # blob and released after the first successful fold.
+    # Opt-in: default off. Enable per model via aot_inductor_config.
+    # Trade-off: the model can no longer re-fold from its own weights, so a later
+    # update_constant_buffer must supply every released constant. The delta-update
+    # path does supply them all, since it refuses to run in place unless every
+    # non-empty constant is available. The runtime raises if one is missing rather
+    # than silently folding stale values.
+    free_fold_input_only_constants: bool = (
+        os.environ.get("AOT_INDUCTOR_FREE_FOLD_INPUT_ONLY_CONSTANTS", "0") == "1"
+    )
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False

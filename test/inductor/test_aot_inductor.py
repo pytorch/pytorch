@@ -151,8 +151,6 @@ def use_fa3():
 
 if HAS_GPU:
     import triton  # @manual
-    from triton import language as tl
-
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -174,6 +172,7 @@ if HAS_GPU:
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
     )
+    from triton import language as tl
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -243,6 +242,29 @@ def get_triton_grid_info(kernel, total_elements, src_code):
         return int(grid_match.group(1)), expected_grids
     else:
         return None, expected_grids
+
+
+def compile_with_fold_input_only_freeing(model, example_inputs):
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+                "aot_inductor.free_fold_input_only_constants": True,
+            }
+        ),
+    ):
+        return run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+
+
+def fold_input_only_names(code):
+    """Names of the constants codegen marked as fold-input-only."""
+    names = dict(re.findall(r'constants_info_\[(\d+)\]\.name = "([^"]+)";', code))
+    marked = re.findall(r"constants_info_\[(\d+)\]\.fold_input_only = true;", code)
+    return {names[idx] for idx in marked}
 
 
 class AOTInductorTestsTemplate:
@@ -616,6 +638,314 @@ class AOTInductorTestsTemplate:
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
 
+    def test_free_fold_input_only_constants_marks_dead_constants(self):
+        # w_pre and b feed only the folded subgraph. direct_w is read by the
+        # main graph as well, so it has to stay resident.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+                self.direct_w = torch.randn(4, 4, device=device)
+
+            def forward(self, x):
+                w_relu = torch.nn.functional.relu(torch.transpose(self.w_pre, 0, 1))
+                return torch.matmul(x, w_relu + self.b) + torch.matmul(x, self.direct_w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        _, code = compile_with_fold_input_only_freeing(
+            Model(self.device), example_inputs
+        )
+
+        marked = fold_input_only_names(code)
+        self.assertTrue(any(name.endswith("w_pre") for name in marked), marked)
+        self.assertTrue(any(name.endswith("_b") for name in marked), marked)
+        self.assertFalse(any("direct_w" in name for name in marked), marked)
+        self.assertEqual(len(marked), 2, marked)
+
+    def test_free_fold_input_only_constants_constant_shared_with_main_graph(self):
+        # w feeds the fold and is also read elementwise against x. split_const_gm
+        # emits w as a const-graph output as well, so the main graph reads a
+        # folded copy rather than the original, which is what makes releasing
+        # the original safe. Pin that structure and the resulting numerics.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(4, 4, device=device)
+
+            def forward(self, x):
+                folded = torch.nn.functional.relu(torch.transpose(self.w, 0, 1))
+                return torch.matmul(x, folded) + self.w * x
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        so_path, code = compile_with_fold_input_only_freeing(model, example_inputs)
+
+        all_names = re.findall(r'constants_info_\[\d+\]\.name = "([^"]+)";', code)
+        self.assertTrue(
+            any(
+                name.startswith("_FOLDED_CONST_") and "w" in name for name in all_names
+            ),
+            f"expected a folded copy of w; all constants: {all_names}",
+        )
+        marked = fold_input_only_names(code)
+        self.assertFalse(
+            any(name.startswith("_FOLDED_CONST_") for name in marked),
+            f"folded outputs must never be released: {marked}",
+        )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        test_inputs = torch.randn(4, 4, device=self.device)
+        self.assertEqual(model(test_inputs), runner.run([test_inputs])[0])
+
+    def test_free_fold_input_only_constants_releases_memory(self):
+        """A/B the feature: identical outputs, and only the enabled build gives
+        the fold inputs back across the first run."""
+        if self.device != "cuda":
+            raise unittest.SkipTest("memory accounting check is CUDA-specific")
+
+        # A large fold-only input reducing to a tiny folded output, so the
+        # allocator delta across the first run isolates the released input.
+        fold_rows = 1 << 20
+        fold_input_bytes = fold_rows * 4 * 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(fold_rows, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                return x * (torch.nn.functional.relu(self.w_pre).sum(dim=0) + self.b)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, device=self.device),)
+        test_inputs = torch.randn(4, device=self.device)
+        eager = model(test_inputs)
+
+        outputs = {}
+        freed = {}
+        for enabled in (False, True):
+            with (
+                torch.no_grad(),
+                config.patch(
+                    {
+                        "always_keep_tensor_constants": True,
+                        "aot_inductor.use_runtime_constant_folding": True,
+                        "aot_inductor.free_fold_input_only_constants": enabled,
+                    }
+                ),
+            ):
+                so_path = AOTIRunnerUtil.legacy_compile(
+                    model=model, example_inputs=example_inputs
+                )
+            runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+            torch.cuda.synchronize()
+            after_load = torch.cuda.memory_allocated(self.device)
+            # The first run triggers constant folding.
+            outputs[enabled] = runner.run([test_inputs])[0]
+            torch.cuda.synchronize()
+            freed[enabled] = after_load - torch.cuda.memory_allocated(self.device)
+            del runner
+
+        # Accuracy: releasing the fold inputs must not change results.
+        self.assertEqual(eager, outputs[False])
+        self.assertEqual(outputs[False], outputs[True])
+        # Memory: only the enabled build reclaims w_pre. With the feature off the
+        # fold inputs sit in the raw-cudaMalloc blob, which the caching allocator
+        # never sees, so its delta is dominated by the (tiny) folded output.
+        self.assertGreater(
+            freed[True] - freed[False],
+            fold_input_bytes * 0.9,
+            f"expected ~{fold_input_bytes} bytes reclaimed; freed={freed}",
+        )
+
+    def test_free_fold_input_only_constants_disabled_by_default(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_relu = torch.nn.functional.relu(torch.transpose(self.w_pre, 0, 1))
+                return torch.matmul(x, w_relu + self.b)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, Model(self.device), example_inputs
+            )
+        self.assertEqual(len(fold_input_only_names(code)), 0)
+
+    def test_free_fold_input_only_constants_update_after_release(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_relu = torch.nn.functional.relu(torch.transpose(self.w_pre, 0, 1))
+                return torch.matmul(x, w_relu + self.b)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        so_path, code = compile_with_fold_input_only_freeing(model, example_inputs)
+        marked = fold_input_only_names(code)
+        self.assertEqual(len(marked), 2, marked)
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        test_inputs = torch.randn(4, 4, device=self.device)
+
+        # First run folds, then releases w_pre and b.
+        self.assertEqual(model(test_inputs), runner.run([test_inputs])[0])
+
+        # A full update restores the released constants, so the re-fold works.
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        runner.update_constant_buffer(new_weights, False, False)
+        self.assertEqual(model(test_inputs), runner.run([test_inputs])[0])
+
+        # A partial update cannot re-fold, since the missing constant was
+        # released rather than left stale. It has to fail rather than fold
+        # against freed memory. (The fbcode runner surfaces the C ABI failure
+        # without the underlying message, so only the raise is asserted.)
+        runner.update_constant_buffer(
+            {"L__self___b": torch.randn(4, device=self.device)}, False, False
+        )
+        with self.assertRaises(Exception):
+            runner.run([test_inputs])
+
+    @common_utils.parametrize(
+        "update_mode", ["default", "user_managed", "allow_h2d_copy"]
+    )
+    def test_free_fold_input_only_constants_update_modes(self, update_mode):
+        """A weight update must re-fold correctly in every update flavor.
+
+        The fold inputs are released after the first fold, so each mode has to
+        restore them by a different route: an owning clone (default), the
+        caller's own pointer (user_managed), or a CPU tensor copied H2D into
+        fresh owned storage (allow_h2d_copy). user_managed and allow_h2d_copy
+        are mutually exclusive, so there is no fourth combination.
+
+        Also asserts the release actually happens, which numerics alone cannot
+        show: default and allow_h2d_copy hand the container owned storage, so
+        the re-fold must reclaim it, while user_managed hands it the caller's
+        pointer, so the release must reclaim nothing.
+        """
+        if update_mode == "allow_h2d_copy" and self.device != GPU_TYPE:
+            raise unittest.SkipTest("allow_h2d_copy only applies to device models")
+        check_memory = self.device == "cuda"
+
+        # Large enough that the released fold input dominates the allocator
+        # delta across a run; the folded output is 4 elements.
+        fold_rows = 1 << 20
+        fold_input_bytes = fold_rows * 4 * 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.nn.Parameter(
+                    torch.randn(fold_rows, 4, device=device)
+                )
+                self.b = torch.nn.Parameter(torch.randn(4, device=device))
+
+            def forward(self, x):
+                return x * (torch.nn.functional.relu(self.w_pre).sum(dim=0) + self.b)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, device=self.device),)
+        # The package loader is what exposes user_managed and allow_h2d_copy;
+        # the fbcode legacy runner has no update_constant_buffer_from_cpu.
+        with torch.no_grad():
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                model,
+                example_inputs,
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                    "aot_inductor.free_fold_input_only_constants": True,
+                },
+            )
+        self.assertEqual(len(fold_input_only_names(code)), 2)
+
+        compiled = torch._inductor.aoti_load_package(package_path)
+        # get_constant_fqns also reports the folded output, which no update may
+        # supply; only the two fold inputs are ours to restore.
+        self.assertTrue({"w_pre", "b"}.issubset(compiled.get_constant_fqns()))
+        test_inputs = torch.randn(4, device=self.device)
+        from_cpu = update_mode == "allow_h2d_copy"
+
+        def run_and_measure_freed():
+            """Run once and return (output, bytes the run gave back)."""
+            if not check_memory:
+                return compiled(test_inputs), None
+            torch.cuda.synchronize()
+            before = torch.cuda.memory_allocated(self.device)
+            out = compiled(test_inputs)
+            torch.cuda.synchronize()
+            return out, before - torch.cuda.memory_allocated(self.device)
+
+        with torch.no_grad():
+            # First run folds, then releases w_pre and b. This always goes
+            # through the load-time owned-storage path, whatever the mode is.
+            previous, freed = run_and_measure_freed()
+            self.assertEqual(model(test_inputs), previous)
+            if check_memory:
+                self.assertGreater(freed, fold_input_bytes * 0.9)
+
+            # Twice, so the release/re-arm cycle runs past the first update.
+            for _ in range(2):
+                new_values = {
+                    "w_pre": torch.randn(fold_rows, 4, device=self.device),
+                    "b": torch.randn(4, device=self.device),
+                }
+                # Also keeps the tensors alive past the fold, which user_managed
+                # needs since the container holds no copy of them.
+                model.w_pre = torch.nn.Parameter(new_values["w_pre"])
+                model.b = torch.nn.Parameter(new_values["b"])
+                expected = model(test_inputs)
+
+                compiled.load_constants(
+                    {
+                        fqn: value.cpu() if from_cpu else value
+                        for fqn, value in new_values.items()
+                    },
+                    check_full_update=False,
+                    user_managed=update_mode == "user_managed",
+                    allow_h2d_copy=from_cpu,
+                )
+
+                actual, freed = run_and_measure_freed()
+                self.assertEqual(expected, actual)
+                # An unchanged result would mean the re-fold was skipped and the
+                # stale folded constant survived.
+                self.assertFalse(torch.allclose(previous, actual))
+                if check_memory and update_mode == "user_managed":
+                    # The container never copied, so it has nothing of its own
+                    # to reclaim and new_values still holds the tensor. Pinning
+                    # this documents that user_managed forgoes the saving.
+                    self.assertLess(freed, fold_input_bytes * 0.5)
+                elif check_memory:
+                    # default clones and allow_h2d_copy allocates owned device
+                    # storage, so both must hand it back at the next fold.
+                    self.assertGreater(freed, fold_input_bytes * 0.9)
+                previous = actual
+
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
             raise unittest.SkipTest("MPS baseline mismatch")
@@ -832,6 +1162,102 @@ class AOTInductorTestsTemplate:
             )
 
     @requires_gpu
+    def test_constant_folding_with_update_free_fold_inputs(self):
+        """test_constant_folding_with_update with fold-input-only release on.
+
+        This is the path that broke on a real model: the buffer folds, releases
+        the constants only the const graph reads, and must still re-fold
+        correctly when a weight update restores them -- once on the active
+        buffer and once on the inactive buffer followed by a swap. Also asserts
+        the release actually frees device memory, on the first fold and again
+        after the update-driven re-fold.
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("memory accounting check is CUDA-specific")
+
+        # Large enough that the released fold input dominates the allocator
+        # delta across a run; the folded output is 4 elements.
+        fold_rows = 1 << 20
+        fold_input_bytes = fold_rows * 4 * 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(fold_rows, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                return x * (torch.nn.functional.relu(self.w_pre).sum(dim=0) + self.b)
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                    "aot_inductor.free_fold_input_only_constants": True,
+                }
+            ),
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model, example_inputs=example_inputs
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        test_inputs = torch.randn(4, device=self.device)
+
+        def run_and_measure_freed():
+            """Run once (which folds) and return (output, bytes freed)."""
+            torch.cuda.synchronize()
+            before = torch.cuda.memory_allocated(self.device)
+            out = runner.run([test_inputs])[0]
+            torch.cuda.synchronize()
+            return out, before - torch.cuda.memory_allocated(self.device)
+
+        # First fold: releases w_pre.
+        expected = model(test_inputs)
+        output, freed = run_and_measure_freed()
+        self.assertEqual(expected, output)
+        self.assertGreater(
+            freed,
+            fold_input_bytes * 0.9,
+            f"first fold should release ~{fold_input_bytes} bytes, freed={freed}",
+        )
+
+        # Active-buffer update. The update restores every fold input, so the
+        # buffer re-arms and must fold again rather than serving stale values.
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(fold_rows, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, False, False)
+        output, freed = run_and_measure_freed()
+        self.assertEqual(expected, output)
+        self.assertGreater(
+            freed,
+            fold_input_bytes * 0.9,
+            f"re-fold should release again, freed={freed}",
+        )
+
+        # Inactive-buffer update, then swap.
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(fold_rows, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, True, False)
+        # Not swapped yet: still the previous weights' result.
+        self.assertEqual(output, runner.run([test_inputs])[0])
+        runner.swap_constant_buffer()
+        self.assertEqual(expected, runner.run([test_inputs])[0])
+
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
