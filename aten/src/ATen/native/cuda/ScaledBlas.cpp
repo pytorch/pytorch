@@ -12,10 +12,12 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/ScaledBlasUtils.h>
+#include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/StringUtil.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
@@ -64,38 +66,29 @@ using at::blas::SwizzleType;
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
+using scaled_blas::scaled_mm_arch_allowed;
 
 namespace at::native {
 
 namespace{
 
-bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
-#ifdef USE_ROCM
-    static const std::vector<std::string> archs = {
-        "gfx942",
-#if ROCM_VERSION >= 60300
-        "gfx1200", "gfx1201",
-#endif
-#if ROCM_VERSION >= 60500
-        "gfx950"
-#endif
-    };
-    return at::detail::getCUDAHooks().isGPUArch(archs);
-#else
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-
-    if (sm90_only || sm100_only) {
-      return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
-    } else {
-      return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
-    }
-#endif
-}
-
 #ifdef USE_ROCM
 bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
+
+#if ROCM_VERSION >= 70000
+static void check_blockwise_e8m0fnu_arch_supported() {
+  std::vector<std::string> mx_archs{"gfx950"};
+#if ROCM_VERSION >= 71400
+  mx_archs.push_back("gfx1250");
+#endif
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::detail::getCUDAHooks().isGPUArch(mx_archs),
+      "Block-wise scaling for Float8_e8m0fnu is only supported on ",
+      c10::Join(",", mx_archs));
+}
+#endif
 #endif
 
 /*
@@ -367,11 +360,20 @@ _scaled_gemm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           Tensor& out,
+          const std::optional<Tensor>& scale_result = std::nullopt,
           const std::optional<Tensor>& alpha = std::nullopt) {
-  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
+  cublasCommonArgs args(
+      mat1,
+      mat2,
+      out,
+      scale_a,
+      scale_b,
+      isFloat8Type(out.scalar_type()) ? scale_result : std::nullopt,
+      scaling_choice_a,
+      scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  if (_scaled_mm_allowed_device(true, false)) {
+  if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
   }
 // ROCM enables the TunableOp path only
@@ -470,7 +472,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out) {
   // Check sizes
-  bool allowed_device = _scaled_mm_allowed_device();
+  bool allowed_device = scaled_mm_arch_allowed();
   TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
@@ -591,7 +593,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
         ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
-      TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+      TORCH_CHECK_VALUE(
+          out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+              out.dtype() == kFloat,
+          "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
       return _scaled_rowwise_rowwise(
           mat1,
           mat2,
@@ -620,9 +625,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
   else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
 #ifdef USE_ROCM
-    #if ROCM_VERSION >= 70000
-    TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+#if ROCM_VERSION >= 70000
+    check_blockwise_e8m0fnu_arch_supported();
 
     int packed_factor = 1;
     if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
@@ -643,7 +647,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out, scale_result);
 }
 
 Tensor
@@ -739,7 +743,10 @@ _scaled_rowwise_rowwise(
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
-    TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+    TORCH_CHECK_VALUE(
+        out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+            out.dtype() == kFloat,
+        "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
         mat_b,
@@ -1063,8 +1070,7 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1150,8 +1156,7 @@ _scaled_mxfp4_mxfp4(
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1221,7 +1226,7 @@ _scaled_nvfp4_nvfp4(
 
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, std::nullopt, alpha);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif
@@ -1305,7 +1310,7 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-  bool allowed_device = _scaled_mm_allowed_device();
+  bool allowed_device = scaled_mm_arch_allowed();
   TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
       "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
 
@@ -1387,10 +1392,13 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
   }
   {
     auto bias_ = bias.has_value() ? *bias : Tensor();
+    auto global_scale_a = scale_a.size() > 1 ? scale_a[1] : Tensor();
+    auto global_scale_b = scale_b.size() > 1 ? scale_b[1] : Tensor();
 
     // NOLINTNEXTLINE(*c-array*)
     TensorArg targs[]{{out, "out", 0}, {mat_a, "mat_a", 1}, {mat_b, "mat_b", 2},
-                      {bias_, "bias", 3}, {scale_a[0], "scale_a", 4}, {scale_b[0], "scale_b", 5}};
+                      {bias_, "bias", 3}, {scale_a[0], "scale_a", 4}, {scale_b[0], "scale_b", 5},
+                      {global_scale_a, "global_scale_a", 6}, {global_scale_b, "global_scale_b", 7}};
     checkAllSameGPU(__func__, targs);
   }
 
