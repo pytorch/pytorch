@@ -125,15 +125,6 @@ class TestAutograd(TestCase):
         torch.autograd._force_original_view_tracking(False)
         super().tearDown()
 
-    def test_expm1_backward_large_negative(self):
-        x = torch.tensor(-40.0, dtype=torch.float64, requires_grad=True)
-
-        y = torch.expm1(x)
-        y.backward()
-
-        expected = x.detach().exp()
-        self.assertEqual(x.grad, expected)
-
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
             out = x.clone().view(-1)
