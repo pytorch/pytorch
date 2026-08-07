@@ -128,11 +128,26 @@ def _version_is_ok() -> bool:
 
 
 @functools.cache
+def _get_flydsl_device_arch(device_index: int) -> str | None:
+    """Return the cached ROCm architecture reported for a device."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(device_index)
+            arch = getattr(props, "gcnArchName", None)
+            if arch:
+                return str(arch).split(":", 1)[0]
+    except Exception:
+        log.debug("Could not determine FlyDSL GPU arch", exc_info=True)
+    return None
+
+
 def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the gfx name to compile for, or None if it cannot be determined.
 
-    FLYDSL_GPU_ARCH wins, then HSA_OVERRIDE_GFX_VERSION, then the device's own
-    gcnArchName. Reads only the environment and torch's device properties.
+    FLYDSL_GPU_ARCH wins, then HSA_OVERRIDE_GFX_VERSION, then the device's
+    cached gcnArchName. Environment overrides are read on every call.
     """
     env = _environ.get("FLYDSL_GPU_ARCH")
     if env:
@@ -149,17 +164,7 @@ def _resolve_rocm_arch(device_index: int) -> str | None:
             except ValueError:
                 log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa)
 
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            props = torch.cuda.get_device_properties(device_index)
-            arch = getattr(props, "gcnArchName", None)
-            if arch:
-                return str(arch).split(":", 1)[0]
-    except Exception:
-        log.debug("Could not determine FlyDSL GPU arch", exc_info=True)
-    return None
+    return _get_flydsl_device_arch(device_index)
 
 
 def deregister_op_overrides() -> None:

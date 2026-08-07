@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import functools
 from collections import namedtuple
-from threading import Lock, RLock
+from threading import Lock
 from typing import Any, TYPE_CHECKING
 
 
@@ -57,7 +57,7 @@ def flydsl_jit_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     cache: dict[_CacheKey, Any] = {}
-    key_locks: dict[_CacheKey, RLock] = {}
+    key_locks: dict[_CacheKey, Lock] = {}
     lock = Lock()
     hits = 0
     misses = 0
@@ -80,7 +80,7 @@ def flydsl_jit_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
         with lock:
             key_lock = key_locks.get(cache_key)
             if key_lock is None:
-                key_lock = RLock()
+                key_lock = Lock()
                 key_locks[cache_key] = key_lock
 
         # One compile per specialization; different specializations still

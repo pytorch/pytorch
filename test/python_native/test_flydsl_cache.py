@@ -6,6 +6,29 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFlyDSLCache(TestCase):
+    def test_method_binding_keys_on_instance(self):
+        calls = []
+
+        class Compiler:
+            @flydsl_jit_cache
+            def compile(self, key):
+                calls.append((self, key))
+                return object()
+
+        first_instance = Compiler()
+        second_instance = Compiler()
+        first = first_instance.compile("key")
+        self.assertIs(first_instance.compile("key"), first)
+        second = second_instance.compile("key")
+
+        self.assertIsNot(second, first)
+        self.assertEqual(
+            calls,
+            [(first_instance, "key"), (second_instance, "key")],
+        )
+        info = Compiler.compile.cache_info()
+        self.assertEqual((info.hits, info.misses, info.currsize), (1, 2, 2))
+
     def test_compile_args_are_excluded_from_cache_key(self):
         calls = []
 
