@@ -335,6 +335,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -775,7 +784,7 @@ static PyObject* set_autocast_enabled(
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   int enabled_id = 0;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -798,7 +807,7 @@ static PyObject* is_autocast_enabled(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
   }
