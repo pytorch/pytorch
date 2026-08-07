@@ -42,7 +42,9 @@ if not IS_WINDOWS:
         @classmethod
         def setUpClass(cls):
             """Set up test environment once for all tests."""
-            cls.csrc_dir = Path(__file__).parent / "libtorch_agn_2_10" / "csrc"
+            ext_dir = Path(__file__).parent
+            cls.csrc_dir = ext_dir / "csrc"
+            cls.csrc_dir_2_9 = ext_dir.parent / "libtorch_agn_2_9_extension" / "csrc"
             cls.build_dir = Path(tempfile.mkdtemp(prefix="version_check_"))
 
             cls.pytorch_includes = [
@@ -173,24 +175,19 @@ if not IS_WINDOWS:
                 "the appropriate version guards.",
             )
 
-        def test_mv_tensor_accessor_cpu_works_with_2_9(self):
-            """Test that mv_tensor_accessor_cpu.cpp compiles successfully with 2.9.0.
+        def test_kernel_works_with_2_9(self):
+            """Test that the 2.9 extension's kernel.cpp compiles successfully with 2.9.0.
 
-            This is a negative test - it ensures that a file we expect to work with 2.9.0
-            actually does compile. This validates that our test infrastructure correctly
-            distinguishes between files that require 2.10+ and those that don't.
+            This is a control test - it ensures that a file we expect to work with 2.9.0
+            actually does compile. Every other test in this suite asserts that
+            compilation *fails* for sources that require 2.10+, so we have this test to
+            validate that our test infra correctly distinguishes when a source can compile
+            fine with 2.9.
             """
-            cpp_file = (
-                Path(self.csrc_dir).parent
-                / "libtorch_agn_2_9_extension"
-                / "csrc"
-                / "mv_tensor_accessor_cpu.cpp"
-            )
+            cpp_file = self.csrc_dir_2_9 / "kernel.cpp"
+            self.assertTrue(cpp_file.exists(), f"{cpp_file} does not exist")
 
-            if not cpp_file.exists():
-                self.skipTest(f"{cpp_file} not found - this is a test file only")
-
-            obj_file = self.build_dir / "mv_tensor_accessor_cpu.o"
+            obj_file = self.build_dir / "kernel.o"
             success, error_msg = self._compile_cpp_file(cpp_file, obj_file)
 
             # Clean up
@@ -199,15 +196,13 @@ if not IS_WINDOWS:
             if not success:
                 relevant_errors = self._extract_relevant_errors(error_msg)
                 if relevant_errors:
-                    print(
-                        "\n  Unexpected compilation errors for mv_tensor_accessor_cpu:"
-                    )
+                    print("\n  Unexpected compilation errors for kernel.cpp:")
                     for err in relevant_errors:
                         print(f"{err}")
 
             self.assertTrue(
                 success,
-                lambda msg: f"{msg}\nmv_tensor_accessor_cpu.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
+                lambda msg: f"{msg}\nkernel.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
@@ -215,7 +210,7 @@ if not IS_WINDOWS:
         def test_cuda_kernel_works_with_2_9(self):
             """Test that cuda_kernel.cu compiles successfully with 2.9.0.
 
-            This is a negative test - it ensures that a .cu file we expect to work with 2.9.0
+            This is a control test - it ensures that a .cu file we expect to work with 2.9.0
             actually does compile. This validates that our test infrastructure correctly
             compiles CUDA files and distinguishes between files that require 2.10+ and those
             that don't.
@@ -223,15 +218,8 @@ if not IS_WINDOWS:
             if not self.cuda_available:
                 self.skipTest("CUDA not available, skipping cuda_kernel.cu test")
 
-            cu_file = (
-                Path(self.csrc_dir).parent
-                / "libtorch_agn_2_9_extension"
-                / "csrc"
-                / "cuda_kernel.cu"
-            )
-
-            if not cu_file.exists():
-                self.skipTest(f"{cu_file} not found - this is a test file only")
+            cu_file = self.csrc_dir_2_9 / "cuda_kernel.cu"
+            self.assertTrue(cu_file.exists(), f"{cu_file} does not exist")
 
             obj_file = self.build_dir / "cuda_kernel.o"
             success, error_msg = self._compile_cu_file(cu_file, obj_file)
@@ -293,12 +281,9 @@ if not IS_WINDOWS:
     _csrc_dir = Path(__file__).parent / "csrc"
     if not _csrc_dir.exists():
         raise AssertionError(f"Expected csrc directory to exist at {_csrc_dir}")
-    # Collect both .cpp and .cu files, excluding those used for negative test
-    # already defined above
-    _source_files = sorted(
-        [f for f in _csrc_dir.rglob("*.cpp") if f.name != "mv_tensor_accessor_cpu.cpp"]
-        + list(_csrc_dir.rglob("*.cu"))
-    )
+    # Collect both .cpp and .cu files. The control tests defined above compile
+    # sources from the 2.9 extension, which is not globbed here.
+    _source_files = sorted([*_csrc_dir.rglob("*.cpp"), *_csrc_dir.rglob("*.cu")])
 
     for _source_file in _source_files:
         _test_method = _create_test_method_for_file(_source_file)
