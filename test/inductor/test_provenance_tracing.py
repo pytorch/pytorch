@@ -1188,6 +1188,7 @@ class ProvenanceTracingKernelContextTemplate:
             torch.compile(model)(*example_inputs)
 
     @unittest.skipIf(sys.platform == "darwin", "Different kernel names on MacOS")
+    @config.patch(shape_padding=False)
     def test_aoti_python_stack_traces(self):
         class Model(torch.nn.Module):
             def __init__(self):
