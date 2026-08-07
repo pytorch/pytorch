@@ -207,12 +207,6 @@ def _cute_call(
             all(isinstance(dim, int) and dim == 1 for dim in value.shape)
             for value in input_values
         )
-    if op_name == "nvfp4_pack":
-        return V.kernel.cse.generate(
-            V.kernel.body,
-            f"nvfp4_pack_intrinsic({args[0]})",
-            dtype=torch.uint8,
-        )
     try:
         op = getattr(V.get_ops_handler(), op_name)
     except AttributeError:
