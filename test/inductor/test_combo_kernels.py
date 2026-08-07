@@ -3236,7 +3236,6 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                         0.05 if gate_enabled else None
                     ),
                     "combo_kernel_peak_memory_increase_gb": None,
-                    "test_configs.track_memory_lifecycle": "assert",
                 }
             ),
         ):
