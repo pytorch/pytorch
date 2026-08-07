@@ -23,8 +23,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -729,7 +729,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -853,7 +853,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
             return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
@@ -1303,7 +1303,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     def test_dynamic_rblock_bounds(self):
         class ForcePersistent(InductorChoices):
             @staticmethod
@@ -1472,7 +1472,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
-    @onlyOn(GPU_TYPE)
+    @onlyAccelerator
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_sympy_infinity_bounds_in_persistent_reduction(self):
