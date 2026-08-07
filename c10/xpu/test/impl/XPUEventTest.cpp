@@ -32,9 +32,6 @@ TEST(XPUEventTest, IPCSupport) {
   c10::xpu::XPUEvent event2(current_device, handle);
   EXPECT_EQ(event2.event().ext_oneapi_ipc_enabled(), true);
 
-  // TODO: Confirm with SYCL compiler team whether a paired pull() call is
-  // required to release each handle returned by ipc::event::get().
-
   event1.synchronize();
   event2.synchronize();
 #else
