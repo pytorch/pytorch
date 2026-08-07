@@ -396,10 +396,7 @@ def _distributed_backend_available(device_type: str) -> bool:
         backend = dist.get_default_backend_for_device(device_type)
     except (AttributeError, ValueError):
         return False
-    is_backend_available = getattr(dist, "is_backend_available", None)
-    if is_backend_available is not None:
-        return is_backend_available(backend)
-    return backend in dist.Backend.backend_list
+    return dist.is_backend_available(backend)
 
 
 def _device_module_available(device_type: str) -> bool:
