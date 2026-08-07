@@ -84,9 +84,7 @@ struct XPUEvent {
     if (!isCreated()) {
       device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
-      event_ = std::make_unique<sycl::event>(syclex::make_event(
-          c10::xpu::get_device_context(),
-          syclex::properties{syclex::enable_profiling{enable_timing_}}));
+      createEvent();
 #else
       assignEvent(stream.queue());
 #endif
@@ -171,6 +169,7 @@ struct XPUEvent {
   }
 
  private:
+#if SYCL_COMPILER_VERSION < 20260200
   void assignEvent(sycl::queue& queue) {
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
@@ -184,6 +183,14 @@ struct XPUEvent {
     event_.reset();
     assignEvent(queue);
   }
+#else
+  void createEvent() {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    event_ = std::make_unique<sycl::event>(syclex::make_event(
+        c10::xpu::get_device_context(),
+        syclex::properties{syclex::enable_profiling{enable_timing_}}));
+  }
+#endif
 
   bool enable_timing_ = false;
   c10::DeviceIndex device_index_ = -1;
