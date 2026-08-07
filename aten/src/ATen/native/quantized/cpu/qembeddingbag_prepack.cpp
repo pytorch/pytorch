@@ -70,11 +70,11 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   const auto& channel_scales = qweight.q_per_channel_scales();
   const auto& channel_zero_points = qweight.q_per_channel_zero_points();
   std::vector<float> weight_scales(
-      channel_scales.data_ptr<float>(),
-      channel_scales.data_ptr<float>() + embedding_rows);
+      channel_scales.const_data_ptr<float>(),
+      channel_scales.const_data_ptr<float>() + embedding_rows);
   std::vector<float> weight_zero_points(
-      channel_zero_points.data_ptr<float>(),
-      channel_zero_points.data_ptr<float>() + embedding_rows);
+      channel_zero_points.const_data_ptr<float>(),
+      channel_zero_points.const_data_ptr<float>() + embedding_rows);
 
   for (const auto i : c10::irange(embedding_rows)) {
     // As of now weight_zero_points and weight_scales are initialized with
@@ -299,9 +299,9 @@ Tensor& qembeddingbag_byte_prepack_out(
 
   if (weight_contig->scalar_type() == at::ScalarType::Half) {
     const auto weight_data =
-        static_cast<fbgemm::float16*>(weight_contig->data_ptr());
+        static_cast<const fbgemm::float16*>(weight_contig->const_data_ptr());
     const auto rowwise_min_max_data = is_valid_rowwise_min_max
-        ? static_cast<fbgemm::float16*>(rowwise_min_max_contig->data_ptr())
+        ? static_cast<const fbgemm::float16*>(rowwise_min_max_contig->const_data_ptr())
         : nullptr;
     at::parallel_for(
         0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
@@ -314,9 +314,9 @@ Tensor& qembeddingbag_byte_prepack_out(
               (is_valid_rowwise_min_max ? (rowwise_min_max_data + start_idx * kRowwiseMinMaxNumCols) : nullptr));
         });
   } else {
-    const auto weight_data = weight_contig->data_ptr<float>();
+    const auto weight_data = weight_contig->const_data_ptr<float>();
     const auto rowwise_min_max_data =
-        is_valid_rowwise_min_max ? rowwise_min_max_contig->data_ptr<float>() : nullptr;
+        is_valid_rowwise_min_max ? rowwise_min_max_contig->const_data_ptr<float>() : nullptr;
     at::parallel_for(
         0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
           fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(

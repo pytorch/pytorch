@@ -12,7 +12,8 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 aten = torch.ops.aten
@@ -83,8 +84,8 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
             with patch_exp_decomp():
-                vq_compiled = torch.compile(vq)
-                x = torch.randn(4, 400, 256).cuda()
+                vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
+                x = torch.randn(4, 400, 256, device=GPU_TYPE)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -124,7 +125,7 @@ class TestCompilerBisector(TestCase):
             inp = torch.rand([10])
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -158,10 +159,10 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device="cuda")
+            inp = torch.rand([10], device=GPU_TYPE)
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -174,7 +175,7 @@ class TestCompilerBisector(TestCase):
 
     def test_rng(self):
         def foo():
-            return torch.rand([10], device="cuda") + 1
+            return torch.rand([10], device=GPU_TYPE) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -182,7 +183,7 @@ class TestCompilerBisector(TestCase):
             with preserve_rng_state():
                 out = foo()
             with preserve_rng_state():
-                out_c = torch.compile(foo)()
+                out_c = torch.compile(foo)()  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -228,7 +229,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_close(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))  # noqa: UNSPECIFIED_BACKEND
                 except Exception:
                     return False
                 return True
@@ -248,9 +249,9 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
             eager_scale = calculate_scale(inp)
-            compile_scale = torch.compile(calculate_scale)(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.equal(eager_scale, compile_scale)
 
@@ -266,9 +267,9 @@ class TestCompilerBisector(TestCase):
                 def my_func(x):
                     return ((x * -1) - 0.01).relu()
 
-                inp = torch.rand([100], device="cuda")
+                inp = torch.rand([100], device=GPU_TYPE)
 
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
 
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
@@ -328,7 +329,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device="cuda")
+            x = torch.randn(1024, device=GPU_TYPE)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
@@ -338,6 +339,8 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
 
+    # XPU doesn't support cudagrah
+    @requires_cuda
     def test_cudagraph_bisect_max(self):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
@@ -365,9 +368,9 @@ class TestCompilerBisector(TestCase):
             counters.clear()
             CompilerBisector.bisection_enabled = True
             try:
-                foo_c = torch.compile(foo, mode="reduce-overhead")
-                bar_c = torch.compile(bar, mode="reduce-overhead")
-                x = torch.randn(10, device="cuda")
+                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                x = torch.randn(10, device=GPU_TYPE)
                 foo_c(x)
                 bar_c(x)
 

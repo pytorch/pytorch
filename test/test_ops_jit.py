@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import unittest
 from functools import partial
 from textwrap import dedent
 
@@ -19,9 +18,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
-    IS_LINUX,
     IS_SANDCASTLE,
-    IS_WINDOWS,
     run_tests,
     TestCase,
     unMarkDynamoStrictTest,
@@ -57,10 +54,6 @@ class TestJit(JitCommonTestCase):
     #   same values for the cross-product of op variants (function, method, inplace)
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
-    @unittest.skipIf(
-        IS_LINUX or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/95412"
-    )
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179743")
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = dtype in op.supported_backward_dtypes(

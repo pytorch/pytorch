@@ -442,7 +442,7 @@ def _load_packed_weight(
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
-    # pop the packed param attributesn
+    # pop the packed param attributes
     for attr_name in attrs_to_pop:
         state_dict.pop(attr_name)
 
