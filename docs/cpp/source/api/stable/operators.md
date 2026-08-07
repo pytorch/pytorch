@@ -144,3 +144,15 @@ auto tensor = torch::stable::empty(
 
 ```{doxygenfunction} torch::stable::subtract
 ```
+
+```{doxygenfunction} torch::stable::bitwise_and
+```
+
+```{doxygenfunction} torch::stable::bitwise_or
+```
+
+```{doxygenfunction} torch::stable::bitwise_left_shift
+```
+
+```{doxygenfunction} torch::stable::bitwise_right_shift
+```
