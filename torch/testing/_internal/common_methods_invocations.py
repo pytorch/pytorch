@@ -1784,8 +1784,8 @@ def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
 def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
-    low = 2
-    high = 10
+    low = 2 if dtype != torch.bool else 0
+    high = 10 if dtype != torch.bool else 2
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         sample.kwargs.setdefault('device', device)
@@ -1795,8 +1795,8 @@ def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(low, high, sample.input.shape, *sample.args, **sample.kwargs)
 
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
-    low = 2
-    high = 10
+    low = 2 if dtype != torch.bool else 0
+    high = 10 if dtype != torch.bool else 2
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         # With high
@@ -19862,7 +19862,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('randint',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
            dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.complex64, torch.bool),
            op=lambda *args, **kwargs:
                wrapper_set_seed(torch.randint, *args, **kwargs),
@@ -19892,7 +19892,7 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.float32, torch.int64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('randint_like',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randint_like, inp, *args, **kwargs),
            supports_out=False,
