@@ -268,6 +268,31 @@ class TestLibtorchAgnostic(TestCase):
         # Sparse tensors do not own a contiguous storage.
         self.assertFalse(libtorch_agnostic.ops.my_has_storage(t.to_sparse()))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "torch_op,other_high",
+        [
+            (torch.bitwise_and, 256),
+            (torch.bitwise_or, 256),
+            (torch.bitwise_left_shift, 8),
+            (torch.bitwise_right_shift, 8),
+        ],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_bitwise_ops(self, device, torch_op, other_high):
+        """Test bitwise_*.Tensor stable ops (same-shape + broadcasting)."""
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}")
+
+        a = torch.randint(0, 256, (3, 4), device=device, dtype=torch.int64)
+        other = torch.randint(0, other_high, (3, 4), device=device, dtype=torch.int64)
+        self.assertEqual(stable_op(a, other), torch_op(a, other))
+
+        # Test broadcasting
+        other_1d = torch.randint(0, other_high, (4,), device=device, dtype=torch.int64)
+        self.assertEqual(stable_op(a, other_1d), torch_op(a, other_1d))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
