@@ -1463,6 +1463,21 @@ class DeviceCachingAllocator {
   //     ends.
   ska::flat_hash_map<Block*, std::vector<cudaGraphNode_t>> deferred_blocks;
 
+  // Allocator state for one CUDA capture ID. Parent IDs form the conditional
+  // capture tree. Keep conditional body state until the root capture ends.
+  struct CaptureState {
+    MempoolId_t mempool_id;
+    std::optional<CaptureId_t> parent_capture_id;
+    CaptureId_t root_capture_id{0};
+    bool is_active{true};
+    size_t invalid_capture_free_count{0};
+  };
+
+  // Map each CUDA capture ID to one node in the conditional capture tree.
+  ska::flat_hash_map<CaptureId_t, CaptureState> capture_states;
+  // Map each block allocated during capture to its allocation capture.
+  ska::flat_hash_map<Block*, CaptureId_t> block_allocation_capture_ids;
+
   // Incremental reverse-traversal state cached per graph.
   // We never re-traverse nodes we've already seen
   struct GraphReuseContext {
@@ -1687,6 +1702,67 @@ class DeviceCachingAllocator {
     }
     pool.erase_from_blocks(block);
     return block;
+  }
+
+  // Return the registered capture state for an actively capturing stream.
+  // Primary and auxiliary streams in one capture have the same capture ID.
+  auto active_capture_state_for_stream(cudaStream_t stream) {
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return capture_states.end();
+    }
+    auto capture_id = c10::cuda::captureIdMayInitCtx(stream);
+    if (!capture_id.has_value()) {
+      return capture_states.end();
+    }
+    auto capture_it = capture_states.find(capture_id.value());
+    if (capture_it == capture_states.end()) {
+      // The compatibility hook has no CaptureState.
+      return capture_states.end();
+    }
+    TORCH_INTERNAL_ASSERT(
+        capture_it->second.is_active,
+        "Active CUDA capture has inactive allocator state");
+    return capture_it;
+  }
+
+  void record_block_allocation_capture_id(
+      Block* block,
+      cudaStream_t request_stream) {
+    // The common path returns before any CUDA query or map lookup.
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return;
+    }
+    auto capture_it = active_capture_state_for_stream(request_stream);
+    if (capture_it != capture_states.end()) {
+      block_allocation_capture_ids[block] = capture_it->first;
+    }
+  }
+
+  // Walk from the allocation capture to the root. Allow only the same capture
+  // or an ancestor capture to free the block.
+  //
+  // Allocation capture        Free capture         Result
+  // root capture              same capture         allow
+  // conditional body capture  same capture         allow
+  // conditional body capture  ancestor capture     allow
+  // ancestor capture          descendant capture   reject
+  // sibling capture A         sibling capture B    reject
+  // capture in tree A         capture in tree B    reject
+  bool is_free_in_allocation_capture_or_ancestor(
+      CaptureId_t allocation_capture_id,
+      CaptureId_t free_capture_id) const {
+    while (true) {
+      if (allocation_capture_id == free_capture_id) {
+        return true;
+      }
+      auto allocation_capture_it = capture_states.find(allocation_capture_id);
+      if (allocation_capture_it == capture_states.end() ||
+          !allocation_capture_it->second.parent_capture_id.has_value()) {
+        return false;
+      }
+      allocation_capture_id =
+          allocation_capture_it->second.parent_capture_id.value();
+    }
   }
 
   void prepare_for_malloc(
@@ -1956,8 +2032,10 @@ class DeviceCachingAllocator {
 
     bool split_remainder = should_split(
         params.block, params.size(), params.is_expandable_segments_active);
-    return alloc_found_block(
+    Block* block = alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
+    record_block_allocation_capture_id(block, stream);
+    return block;
   }
 
   Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
@@ -2025,6 +2103,7 @@ class DeviceCachingAllocator {
           prefix_size,
           context,
           true /* always split for prefix */);
+      record_block_allocation_capture_id(prefix_block, stream);
       requested_source = prefix_block->next;
       // alloc_found_block re-inserts the split remainder into the pool. We have
       // to manually erase the requested_source.
@@ -2044,6 +2123,7 @@ class DeviceCachingAllocator {
         should_split(requested_source, size, is_expandable_segments_active);
     Block* requested_block = alloc_found_block(
         requested_params, orig_size, std::move(context), split_remainder);
+    record_block_allocation_capture_id(requested_block, stream);
     if (prefix_block) {
       free_locked(prefix_block, nullptr);
     }
@@ -2441,6 +2521,29 @@ class DeviceCachingAllocator {
 
     if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
+
+    // Keep the allocation capture ID because a conditional body capture may
+    // end before an ancestor capture frees the block.
+    if (C10_UNLIKELY(!block_allocation_capture_ids.empty())) {
+      auto block_allocation_capture_it =
+          block_allocation_capture_ids.find(block);
+      if (block_allocation_capture_it != block_allocation_capture_ids.end()) {
+        auto free_stream = c10::cuda::getCurrentCUDAStream(block->device);
+        auto free_capture_it =
+            active_capture_state_for_stream(free_stream.stream());
+        if (free_capture_it != capture_states.end()) {
+          const CaptureId_t allocation_capture_id =
+              block_allocation_capture_it->second;
+          if (!is_free_in_allocation_capture_or_ancestor(
+                  allocation_capture_id, free_capture_it->first)) {
+            // Tensor destruction cannot throw. Report this error at capture
+            // end.
+            ++free_capture_it->second.invalid_capture_free_count;
+          }
+        }
+        block_allocation_capture_ids.erase(block_allocation_capture_it);
+      }
+    }
 
     // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
@@ -3203,13 +3306,91 @@ class DeviceCachingAllocator {
     num_active_captures_++;
   }
 
-  // Called by CUDAGraph after cudaStreamEndCapture.
+  // Compatibility path for callers built against the metadata-free hook.
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     TORCH_INTERNAL_ASSERT(
         num_active_captures_ > 0,
         "markCaptureEnd called with no captures in progress");
     num_active_captures_--;
+  }
+
+  void markCaptureBegin(const CaptureRegistration& registration) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        registration.capture_id != 0,
+        "markCaptureBegin requires a valid capture ID");
+    TORCH_INTERNAL_ASSERT(
+        capture_states.find(registration.capture_id) == capture_states.end(),
+        "Capture ID is already registered");
+
+    CaptureState capture_state{
+        .mempool_id = registration.mempool_id,
+        .parent_capture_id = registration.parent_capture_id,
+        .root_capture_id = registration.capture_id,
+    };
+    if (registration.parent_capture_id.has_value()) {
+      auto parent_it =
+          capture_states.find(registration.parent_capture_id.value());
+      TORCH_INTERNAL_ASSERT(
+          parent_it != capture_states.end() && parent_it->second.is_active,
+          "Conditional body capture parent is not active");
+      TORCH_INTERNAL_ASSERT(
+          parent_it->second.mempool_id == registration.mempool_id,
+          "Conditional body capture must share its parent's private memory pool");
+      capture_state.root_capture_id = parent_it->second.root_capture_id;
+    }
+
+    capture_states.emplace(registration.capture_id, capture_state);
+    num_active_captures_++;
+  }
+
+  // Mark one capture inactive. Keep conditional body state until the root ends.
+  // Return delayed free-validation errors to CUDAGraph.
+  size_t markCaptureEnd(CaptureId_t capture_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        num_active_captures_ > 0,
+        "markCaptureEnd called with no captures in progress");
+
+    auto capture_it = capture_states.find(capture_id);
+    TORCH_INTERNAL_ASSERT(
+        capture_it != capture_states.end() && capture_it->second.is_active,
+        "markCaptureEnd called for an unknown or inactive capture");
+    const CaptureState ended_capture_state = capture_it->second;
+    capture_it->second.is_active = false;
+    num_active_captures_--;
+
+    if (ended_capture_state.parent_capture_id.has_value()) {
+      auto parent_it =
+          capture_states.find(ended_capture_state.parent_capture_id.value());
+      TORCH_INTERNAL_ASSERT(
+          parent_it != capture_states.end() && parent_it->second.is_active,
+          "Parent capture is not active");
+      // A conditional body error must make every ancestor capture fail.
+      parent_it->second.invalid_capture_free_count +=
+          ended_capture_state.invalid_capture_free_count;
+    } else {
+      for (auto it = block_allocation_capture_ids.begin();
+           it != block_allocation_capture_ids.end();) {
+        auto allocation_capture_it = capture_states.find(it->second);
+        if (allocation_capture_it != capture_states.end() &&
+            allocation_capture_it->second.root_capture_id == capture_id) {
+          it = block_allocation_capture_ids.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      for (auto it = capture_states.begin(); it != capture_states.end();) {
+        if (it->second.root_capture_id == capture_id) {
+          it = capture_states.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
+
+    return ended_capture_state.invalid_capture_free_count;
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -5093,6 +5274,18 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->markCaptureEnd();
   }
 
+  void markCaptureBegin(
+      c10::DeviceIndex device,
+      const CaptureRegistration& registration) {
+    assertValidDevice(device);
+    device_allocator[device]->markCaptureBegin(registration);
+  }
+
+  size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id) {
+    assertValidDevice(device);
+    return device_allocator[device]->markCaptureEnd(capture_id);
+  }
+
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->releasePool(std::move(mempool_id));
@@ -5321,6 +5514,27 @@ void local_raw_delete(void* ptr) {
 }
 
 } // namespace Native
+
+void markCaptureBegin(
+    c10::DeviceIndex device,
+    const CaptureRegistration& registration) {
+  auto* current_allocator = get();
+  if (current_allocator == &Native::allocator) {
+    Native::allocator.markCaptureBegin(device, registration);
+  } else {
+    current_allocator->markCaptureBegin(device);
+  }
+}
+
+size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id) {
+  auto* current_allocator = get();
+  if (current_allocator == &Native::allocator) {
+    return Native::allocator.markCaptureEnd(device, capture_id);
+  } else {
+    current_allocator->markCaptureEnd(device);
+    return 0;
+  }
+}
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.

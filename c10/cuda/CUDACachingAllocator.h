@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -122,6 +123,14 @@ struct StreamSegmentSize {
   cudaStream_t stream;
   bool is_small_pool;
   size_t total_size;
+};
+
+// One CUDA capture records one per-capture CUDA DAG. Parent IDs link each
+// conditional body capture to its parent, forming a conditional capture tree.
+struct CaptureRegistration {
+  MempoolId_t mempool_id;
+  CaptureId_t capture_id{0};
+  std::optional<CaptureId_t> parent_capture_id;
 };
 
 class CUDAAllocator : public DeviceAllocator {
@@ -441,6 +450,14 @@ inline void markCaptureBegin(c10::DeviceIndex device) {
 inline void markCaptureEnd(c10::DeviceIndex device) {
   get()->markCaptureEnd(device);
 }
+
+// Metadata-aware hooks for CUDAGraph. The native allocator records the
+// conditional capture tree. Custom allocators keep the existing virtual hooks.
+C10_CUDA_API void markCaptureBegin(
+    c10::DeviceIndex device,
+    const CaptureRegistration& registration);
+C10_CUDA_API size_t
+markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id);
 
 inline void recordHistory(
     bool enabled,
