@@ -10,7 +10,7 @@
     { include: [ "<c10/util/Float8_e4m3fnuz-inl.h>", private, "<c10/util/Float8_e4m3fnuz.h>", public ] },
 
     { include: [ "<c10/util/complex_math.h>", private, "<c10/util/complex.h>", public ] },
-    { include: [ "<c10/util/complex_utils.h>", private, "<c10/util/complex.h>", public ] },
+    { include: [ "<torch/headeronly/util/complex_utils.h>", private, "<c10/util/complex.h>", public ] },
 
     { include: [ "<c10/util/logging_is_google_glog.h>", private, "<c10/util/Logging.h>", public ] },
     { include: [ "<c10/util/logging_is_not_google_glog.h>", private, "<c10/util/Logging.h>", public ] },
