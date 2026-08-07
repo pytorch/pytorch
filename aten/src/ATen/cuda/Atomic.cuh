@@ -65,7 +65,7 @@ struct AtomicFPOp<at::BFloat16> {
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
     bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return bsum.x;
+    return bsum;
   }
 };
 
