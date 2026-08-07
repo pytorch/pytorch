@@ -863,6 +863,9 @@ def _unflatten_optim_state_dict(
                 if not param.requires_grad:
                     continue
 
+                if param not in optim.state or not optim.state[param]:
+                    continue
+
                 # Reconstruct state for this parameter
                 # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
