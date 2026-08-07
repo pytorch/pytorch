@@ -3,8 +3,13 @@
 # related to a specific file path. Approvals from people in this
 # file are not required for merges.
 
-# This is a comment.
-# Each line is a file pattern followed by one or more owners.
+# CODEOWNERS semantics:
+# - GitHub uses the last matching pattern for each path.
+# - A pattern without owners is valid and explicitly leaves matching paths unowned.
+# - Therefore, uncommenting the draft taxonomy before assigning owners would
+#   override existing entries and suppress their code-owner review requests.
+#
+# Each active assignment is a file pattern followed by one or more owners.
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
 /torch/utils/cpp_extension.py @fmassa @ezyang @malfet
@@ -24,16 +29,15 @@
 /.github/merge_rules.yaml @albanD @malfet
 
 # Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/ao_sparse @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda @jerryzh168
 /aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168 @hdcharles
+/test/ao/ @jerryzh168
 /test/quantization/ @jerryzh168
 /torch/quantization/ @jerryzh168
-ao/sparisty/ @hdcharles
 ao/quantization/ @jerryzh168
 nn/intrinsic/ @jerryzh168
 nn/quantized/ @jerryzh168
@@ -41,8 +45,8 @@ nn/quantizable/ @jerryzh168
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
 
 # Distributed
 # c10d backend APIs
@@ -62,6 +66,9 @@ nn/qat/ @jerryzh168
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 
+# TVM backend
+/torch/_dynamo/backends/tvm.py @guan404ming
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 /torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
@@ -79,7 +86,7 @@ nn/qat/ @jerryzh168
 /.ci/docker/common/install_miopen.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
@@ -124,10 +131,11 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/fx/proxy.py @zou3519
 
 # HOPs
-torch/_higher_order_ops/*.py @zou3519 @aorenste
-torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste
-test/test_hop_infra.py @zou3519 @aorenste
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste
+torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+docs/source/higher_order_ops/ @bohnstingl
+test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
@@ -263,2683 +271,1109 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # -----------------------------------------------------------------------------
 # Draft CODEOWNERS taxonomy: k100 disjoint review-surface cut
 #
-# Section headers stay commented for review context. Candidate pattern lines are
-# active CODEOWNERS-shaped paths without owners so reviewers can discuss the cut.
-# Before landing notification behavior, each accepted pattern needs owners.
+# Candidate patterns stay commented so this taxonomy cannot change ownership or
+# notification behavior. Do not uncomment these grouped definitions directly;
+# generate broad-to-specific active rules with owners in a separate change.
 #
 # Quick methodology:
 # - start from every tracked file in the repository
 # - build a first-pass leaf taxonomy from path structure, co-change history,
 #   authors, Approved-by trailers, existing CODEOWNERS, and merge_rules.yaml
 # - require every file to have exactly one primary leaf region
-# - construct a coarser k100 cut by fusing obvious test/implementation pairs
-#   and splitting oversized parent buckets by path family
-# - emit candidate CODEOWNERS patterns from a repo trie: a directory pattern is
-#   emitted only when the entire subtree belongs to one k100 group; otherwise
-#   the generator recurses until patterns are disjoint
+# - retain the detailed leaf taxonomy as generation evidence, then fuse it into
+#   review surfaces based on contributor, reviewer, and module locality
+# - collate each subject into one section and model narrower paths as child
+#   overrides; flat documentation remains one surface until finer ownership is needed
 #
-# Coverage evidence:
-# - tracked files audited: 21,523
-# - files with k100 group: 21,523
-# - files without k100 group: 0
-# - proposed groups: 111
-# - disjoint candidate patterns emitted: 2423
-# - groups over 1000 files: 2 (compiler_compiled_autograd, compiler_dynamo)
-# - groups under 3 files: 5 (benchmark_diffusion, benchmark_nested_tensor, functorch_legacy_misc_review, infra_typing, third_party_distributed_comm)
-# - new candidate pattern overlaps: 0
+# Consumer contract:
+# - GitHub evaluates active CODEOWNERS in file order and uses the last match
+# - this grouped taxonomy is source data, not active CODEOWNERS rule order
+# - auto-request-review and merge_rules.yaml remain separate routing and merge systems
+#
+# Validation:
+# - run `python scripts/codeowners/check_taxonomy.py`
+# - every tracked path must resolve to exactly one effective review surface
+# - intentional parent/child overrides are allowed; duplicate, stale, and
+#   ineffective patterns fail validation
 #
 # Known manual review points:
-# - compiler_dynamo is huge because it includes Dynamo expectation metadata.
-# - compiler_compiled_autograd is huge because it is skip metadata.
-# - core_aten_native_ops is still large and may need operator/backend subcuts.
-# - python_top_level_api is a facade bucket and may need implementation routing.
-# - infra_tools_misc may need manual splitting if it is too broad.
-#
-# Draft k100 disjoint CODEOWNERS-shaped rules:
-#
-# [compiler_dynamo] files=7725; patterns=9; leaves=test_compiler_dynamo_expectation_metadata (7571), test_compiler_dynamo_frontend (154)
-/test/distributed/test_dynamo_distributed.py
-/test/dynamo/
-/test/dynamo_expected_failures/
-/test/dynamo_skips/
-/test/export/test_dynamic_shapes.py
-/test/onnx/exporter/test_dynamic_shapes.py
-/test/test_dynamic_shapes.py
-/test/test_fake_tensor.py
-/test/test_proxy_tensor.py
-#
-# [compiler_compiled_autograd] files=1204; patterns=1; leaves=test_compiler_compiled_autograd_expectation_metadata (1204)
-/test/compiled_autograd_skips/
-#
-# [core_aten_native_ops] files=957; patterns=250; leaves=core_runtime (957)
-/aten/src/ATen/native/Activation.cpp
-/aten/src/ATen/native/Activation.h
-/aten/src/ATen/native/AdaptiveAveragePooling.cpp
-/aten/src/ATen/native/AdaptiveAveragePooling3d.cpp
-/aten/src/ATen/native/AdaptiveMaxPooling2d.cpp
-/aten/src/ATen/native/AdaptiveMaxPooling3d.cpp
-/aten/src/ATen/native/AdaptivePooling.h
-/aten/src/ATen/native/AffineGridGenerator.cpp
-/aten/src/ATen/native/AmpKernels.cpp
-/aten/src/ATen/native/AmpKernels.h
-/aten/src/ATen/native/AutogradComposite.cpp
-/aten/src/ATen/native/AveragePool2d.cpp
-/aten/src/ATen/native/AveragePool3d.cpp
-/aten/src/ATen/native/BatchLinearAlgebra.cpp
-/aten/src/ATen/native/BatchLinearAlgebra.h
-/aten/src/ATen/native/BatchLinearAlgebraKernel.cpp
-/aten/src/ATen/native/BinaryOps.cpp
-/aten/src/ATen/native/BinaryOps.h
-/aten/src/ATen/native/Blas.cpp
-/aten/src/ATen/native/BlasKernel.cpp
-/aten/src/ATen/native/Bucketization.cpp
-/aten/src/ATen/native/BucketizationUtils.h
-/aten/src/ATen/native/CPUBlas.cpp
-/aten/src/ATen/native/CPUBlas.h
-/aten/src/ATen/native/CPUFallback.cpp
-/aten/src/ATen/native/CPUFallback.h
-/aten/src/ATen/native/CanUse32BitIndexMath.h
-/aten/src/ATen/native/ChanelShuffle.cpp
-/aten/src/ATen/native/Col2Im.cpp
-/aten/src/ATen/native/ComparisonUtils.cpp
-/aten/src/ATen/native/ComplexHelper.h
-/aten/src/ATen/native/CompositeRandomAccessor.h
-/aten/src/ATen/native/CompositeRandomAccessorCommon.h
-/aten/src/ATen/native/Constraints.cpp
-/aten/src/ATen/native/ConvUtils.h
-/aten/src/ATen/native/Convolution.cpp
-/aten/src/ATen/native/ConvolutionMM2d.cpp
-/aten/src/ATen/native/ConvolutionMM3d.cpp
-/aten/src/ATen/native/ConvolutionMM3d.h
-/aten/src/ATen/native/ConvolutionTBC.cpp
-/aten/src/ATen/native/Copy.cpp
-/aten/src/ATen/native/Copy.h
-/aten/src/ATen/native/Correlation.cpp
-/aten/src/ATen/native/Cross.cpp
-/aten/src/ATen/native/Cross.h
-/aten/src/ATen/native/DilatedConvolutionUtils.h
-/aten/src/ATen/native/DilatedMaxPool2d.cpp
-/aten/src/ATen/native/DilatedMaxPool3d.cpp
-/aten/src/ATen/native/DispatchStub.cpp
-/aten/src/ATen/native/DispatchStub.h
-/aten/src/ATen/native/Distance.cpp
-/aten/src/ATen/native/Distance.h
-/aten/src/ATen/native/DistributionTemplates.h
-/aten/src/ATen/native/Distributions.cpp
-/aten/src/ATen/native/Distributions.h
-/aten/src/ATen/native/Dropout.cpp
-/aten/src/ATen/native/Embedding.cpp
-/aten/src/ATen/native/EmbeddingBag.cpp
-/aten/src/ATen/native/EmbeddingBag.h
-/aten/src/ATen/native/Fill.cpp
-/aten/src/ATen/native/Fill.h
-/aten/src/ATen/native/ForeachOpsKernels.cpp
-/aten/src/ATen/native/ForeachUtils.h
-/aten/src/ATen/native/FractionalMaxPool2d.cpp
-/aten/src/ATen/native/FractionalMaxPool3d.cpp
-/aten/src/ATen/native/FractionalMaxPooling.h
-/aten/src/ATen/native/FunctionOfAMatrixUtils.cpp
-/aten/src/ATen/native/FunctionOfAMatrixUtils.h
-/aten/src/ATen/native/FusedAdagrad.cpp
-/aten/src/ATen/native/FusedAdagrad.h
-/aten/src/ATen/native/FusedAdam.cpp
-/aten/src/ATen/native/FusedAdam.h
-/aten/src/ATen/native/FusedSGD.cpp
-/aten/src/ATen/native/FusedSGD.h
-/aten/src/ATen/native/GatedLinearUnit.cpp
-/aten/src/ATen/native/Gelu.h
-/aten/src/ATen/native/GridSampler.cpp
-/aten/src/ATen/native/GridSampler.h
-/aten/src/ATen/native/GridSamplerUtils.h
-/aten/src/ATen/native/GroupedMMUtils.h
-/aten/src/ATen/native/Histogram.cpp
-/aten/src/ATen/native/Histogram.h
-/aten/src/ATen/native/Im2Col.cpp
-/aten/src/ATen/native/IndexKernel.h
-/aten/src/ATen/native/IndexingUtils.cpp
-/aten/src/ATen/native/IndexingUtils.h
-/aten/src/ATen/native/Integration.cpp
-/aten/src/ATen/native/Itertools.cpp
-/aten/src/ATen/native/LegacyBatching.cpp
-/aten/src/ATen/native/Lerp.cpp
-/aten/src/ATen/native/Lerp.h
-/aten/src/ATen/native/Linear.cpp
-/aten/src/ATen/native/LinearAlgebra.cpp
-/aten/src/ATen/native/LinearAlgebra.h
-/aten/src/ATen/native/LinearAlgebraUtils.h
-/aten/src/ATen/native/Loss.cpp
-/aten/src/ATen/native/LossCTC.cpp
-/aten/src/ATen/native/LossMulti.h
-/aten/src/ATen/native/LossMultiLabelMargin.cpp
-/aten/src/ATen/native/LossMultiMargin.cpp
-/aten/src/ATen/native/LossNLL.cpp
-/aten/src/ATen/native/LossNLL2d.cpp
-/aten/src/ATen/native/Math.h
-/aten/src/ATen/native/MathBitFallThroughLists.h
-/aten/src/ATen/native/MathBitsFallback.h
-/aten/src/ATen/native/MaxPooling.cpp
-/aten/src/ATen/native/MaxPooling.h
-/aten/src/ATen/native/MaxUnpooling.cpp
-/aten/src/ATen/native/Memory.cpp
-/aten/src/ATen/native/MetaTensor.cpp
-/aten/src/ATen/native/NNPACK.cpp
-/aten/src/ATen/native/NaiveConvolutionTranspose2d.cpp
-/aten/src/ATen/native/NaiveConvolutionTranspose3d.cpp
-/aten/src/ATen/native/NaiveDilatedConvolution.cpp
-/aten/src/ATen/native/NegateFallback.cpp
-/aten/src/ATen/native/NonEmptyUtils.h
-/aten/src/ATen/native/NonSymbolicBC.h
-/aten/src/ATen/native/Normalization.cpp
-/aten/src/ATen/native/Normalization.h
-/aten/src/ATen/native/Onehot.cpp
-/aten/src/ATen/native/PackedSequence.cpp
-/aten/src/ATen/native/PadNd.cpp
-/aten/src/ATen/native/Padding.h
-/aten/src/ATen/native/PixelShuffle.cpp
-/aten/src/ATen/native/PixelShuffle.h
-/aten/src/ATen/native/PointwiseOps.cpp
-/aten/src/ATen/native/PointwiseOps.h
-/aten/src/ATen/native/Pool.h
-/aten/src/ATen/native/Pooling.cpp
-/aten/src/ATen/native/Pow.cpp
-/aten/src/ATen/native/Pow.h
-/aten/src/ATen/native/QuantizedLinear.cpp
-/aten/src/ATen/native/README.md
-/aten/src/ATen/native/RNN.cpp
-/aten/src/ATen/native/RNN.h
-/aten/src/ATen/native/RangeFactories.cpp
-/aten/src/ATen/native/RangeFactories.h
-/aten/src/ATen/native/RangeUtils.h
-/aten/src/ATen/native/ReduceAllOps.cpp
-/aten/src/ATen/native/ReduceAllOps.h
-/aten/src/ATen/native/ReduceOps.cpp
-/aten/src/ATen/native/ReduceOps.h
-/aten/src/ATen/native/ReduceOpsUtils.h
-/aten/src/ATen/native/ReductionType.h
-/aten/src/ATen/native/ReflectionPad.cpp
-/aten/src/ATen/native/Repeat.cpp
-/aten/src/ATen/native/Repeat.h
-/aten/src/ATen/native/ReplicationPadding.cpp
-/aten/src/ATen/native/Resize.cpp
-/aten/src/ATen/native/Resize.h
-/aten/src/ATen/native/ResizeCommon.h
-/aten/src/ATen/native/RowwisePrune.cpp
-/aten/src/ATen/native/Scalar.cpp
-/aten/src/ATen/native/ScaledBlas.cpp
-/aten/src/ATen/native/ScaledBlasUtils.cpp
-/aten/src/ATen/native/ScaledBlasUtils.h
-/aten/src/ATen/native/ScatterGatherChecks.h
-/aten/src/ATen/native/SegmentReduce.cpp
-/aten/src/ATen/native/SegmentReduce.h
-/aten/src/ATen/native/SharedReduceOps.h
-/aten/src/ATen/native/SobolEngineOps.cpp
-/aten/src/ATen/native/SobolEngineOpsUtils.cpp
-/aten/src/ATen/native/SobolEngineOpsUtils.h
-/aten/src/ATen/native/SoftMax.cpp
-/aten/src/ATen/native/Sorting.cpp
-/aten/src/ATen/native/Sorting.h
-/aten/src/ATen/native/SortingUtils.h
-/aten/src/ATen/native/SparseTensorUtils.cpp
-/aten/src/ATen/native/SparseTensorUtils.h
-/aten/src/ATen/native/SpectralOps.cpp
-/aten/src/ATen/native/SpectralOpsUtils.h
-/aten/src/ATen/native/StridedRandomAccessor.h
-/aten/src/ATen/native/SummaryOps.cpp
-/aten/src/ATen/native/TensorAdvancedIndexing.cpp
-/aten/src/ATen/native/TensorAdvancedIndexing.h
-/aten/src/ATen/native/TensorAdvancedIndexingUtils.h
-/aten/src/ATen/native/TensorCompare.cpp
-/aten/src/ATen/native/TensorCompare.h
-/aten/src/ATen/native/TensorConversions.cpp
-/aten/src/ATen/native/TensorConversions.h
-/aten/src/ATen/native/TensorDimApply.h
-/aten/src/ATen/native/TensorFactories.cpp
-/aten/src/ATen/native/TensorFactories.h
-/aten/src/ATen/native/TensorIterator.h
-/aten/src/ATen/native/TensorIteratorDynamicCasting.h
-/aten/src/ATen/native/TensorIteratorReduce.cpp
-/aten/src/ATen/native/TensorProperties.cpp
-/aten/src/ATen/native/TensorProperties.h
-/aten/src/ATen/native/TensorShape.cpp
-/aten/src/ATen/native/TensorShape.h
-/aten/src/ATen/native/TensorTransformations.cpp
-/aten/src/ATen/native/TensorTransformations.h
-/aten/src/ATen/native/TestOps.cpp
-/aten/src/ATen/native/TopKImpl.h
-/aten/src/ATen/native/TransposeType.h
-/aten/src/ATen/native/TriangularOps.cpp
-/aten/src/ATen/native/TriangularOpsUtils.h
-/aten/src/ATen/native/TypeProperties.cpp
-/aten/src/ATen/native/TypeProperties.h
-/aten/src/ATen/native/UnaryOps.cpp
-/aten/src/ATen/native/UnaryOps.h
-/aten/src/ATen/native/Unfold2d.cpp
-/aten/src/ATen/native/Unfold2d.h
-/aten/src/ATen/native/Unfold3d.cpp
-/aten/src/ATen/native/Unfold3d.h
-/aten/src/ATen/native/UnfoldBackward.cpp
-/aten/src/ATen/native/UnfoldBackward.h
-/aten/src/ATen/native/Unique.cpp
-/aten/src/ATen/native/UpSample.cpp
-/aten/src/ATen/native/UpSample.h
-/aten/src/ATen/native/UpSampleBicubic2d.cpp
-/aten/src/ATen/native/UpSampleBilinear2d.cpp
-/aten/src/ATen/native/UpSampleLanczos2d.cpp
-/aten/src/ATen/native/UpSampleLinear1d.cpp
-/aten/src/ATen/native/UpSampleNearest1d.cpp
-/aten/src/ATen/native/UpSampleNearest2d.cpp
-/aten/src/ATen/native/UpSampleNearest3d.cpp
-/aten/src/ATen/native/UpSampleTrilinear3d.cpp
-/aten/src/ATen/native/VariableMethodStubs.cpp
-/aten/src/ATen/native/WeightNorm.cpp
-/aten/src/ATen/native/ao_sparse/
-/aten/src/ATen/native/batch_norm.h
-/aten/src/ATen/native/cpu/
-/aten/src/ATen/native/cudnn/
-/aten/src/ATen/native/group_norm.cpp
-/aten/src/ATen/native/group_norm.h
-/aten/src/ATen/native/hip/
-/aten/src/ATen/native/im2col.h
-/aten/src/ATen/native/im2col_shape_check.h
-/aten/src/ATen/native/kleidiai/
-/aten/src/ATen/native/layer_norm.cpp
-/aten/src/ATen/native/layer_norm.h
-/aten/src/ATen/native/metal/
-/aten/src/ATen/native/miopen/
-/aten/src/ATen/native/mkl/
-/aten/src/ATen/native/mkldnn/
-/aten/src/ATen/native/native_functions.yaml
-/aten/src/ATen/native/nested/
-/aten/src/ATen/native/prim_native_functions.cpp
-/aten/src/ATen/native/sparse/
-/aten/src/ATen/native/tags.yaml
-/aten/src/ATen/native/transformers/
-/aten/src/ATen/native/ts_native_functions.yaml
-/aten/src/ATen/native/ufunc/
-/aten/src/ATen/native/utils/
-/aten/src/ATen/native/verbose_wrapper.cpp
-/aten/src/ATen/native/verbose_wrapper.h
-/aten/src/ATen/native/vol2col.h
-/aten/src/ATen/native/vulkan/
-/aten/src/ATen/native/xnnpack/
-#
-# [distributed_core] files=951; patterns=68; leaves=distributed_core (630), test_distributed (321)
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_distributed.py
-/test/distributed/_composable/
-/test/distributed/_pycute/
-/test/distributed/_shard/
-/test/distributed/_test_template.py
-/test/distributed/_tools/
-/test/distributed/algorithms/
-/test/distributed/argparse_util_test.py
-/test/distributed/bin/
-/test/distributed/checkpoint/
-/test/distributed/elastic/
-/test/distributed/flight_recorder/
-/test/distributed/fsdp/
-/test/distributed/launcher/
-/test/distributed/local_tensor_tutorial_examples/
-/test/distributed/nn/
-/test/distributed/optim/
-/test/distributed/pipelining/
-/test/distributed/rpc/
-/test/distributed/tensor/
-/test/distributed/test_aten_comm_compute_reordering.py
-/test/distributed/test_backends.py
-/test/distributed/test_c10d_common.py
-/test/distributed/test_c10d_functional_native.py
-/test/distributed/test_c10d_gloo.py
-/test/distributed/test_c10d_logger.py
-/test/distributed/test_c10d_nccl.py
-/test/distributed/test_c10d_object_collectives.py
-/test/distributed/test_c10d_ops_nccl.py
-/test/distributed/test_c10d_pypg.py
-/test/distributed/test_c10d_spawn.py
-/test/distributed/test_c10d_spawn_gloo.py
-/test/distributed/test_c10d_spawn_nccl.py
-/test/distributed/test_c10d_spawn_ucc.py
-/test/distributed/test_c10d_torchcomms.py
-/test/distributed/test_c10d_ucc.py
-/test/distributed/test_ce_colls.py
-/test/distributed/test_collective_utils.py
-/test/distributed/test_composability.py
-/test/distributed/test_compute_comm_reordering.py
-/test/distributed/test_control_collectives.py
-/test/distributed/test_cupy_as_tensor.py
-/test/distributed/test_data_parallel.py
-/test/distributed/test_debug.py
-/test/distributed/test_decomp_comms.py
-/test/distributed/test_device_mesh.py
-/test/distributed/test_dist2.py
-/test/distributed/test_distributed_spawn.py
-/test/distributed/test_fake_pg.py
-/test/distributed/test_functional_api.py
-/test/distributed/test_functional_differentials.py
-/test/distributed/test_launcher.py
-/test/distributed/test_local_tensor.py
-/test/distributed/test_multi_threaded_pg.py
-/test/distributed/test_nan_check.py
-/test/distributed/test_nccl.py
-/test/distributed/test_nvshmem.py
-/test/distributed/test_overlap_bucketing_unit.py
-/test/distributed/test_p2p_ipc.py
-/test/distributed/test_pg_wrapper.py
-/test/distributed/test_processgroup_jit.py
-/test/distributed/test_run.py
-/test/distributed/test_serialization.py
-/test/distributed/test_shmem_triton.py
-/test/distributed/test_store.py
-/test/distributed/test_symmetric_memory.py
-/torch/csrc/distributed/
-/torch/distributed/
-#
-# [compiler_core] files=738; patterns=212; leaves=compiler_core (738)
-/torch/_dynamo/
-/torch/_export/
-/torch/_higher_order_ops/__init__.py
-/torch/_higher_order_ops/_invoke_quant.py
-/torch/_higher_order_ops/aoti_call_delegate.py
-/torch/_higher_order_ops/associative_scan.py
-/torch/_higher_order_ops/auto_functionalize.py
-/torch/_higher_order_ops/base_hop.py
-/torch/_higher_order_ops/cond.py
-/torch/_higher_order_ops/cudagraph_conditional_nodes.py
-/torch/_higher_order_ops/effects.py
-/torch/_higher_order_ops/executorch_call_delegate.py
-/torch/_higher_order_ops/flat_apply.py
-/torch/_higher_order_ops/foreach_map.py
-/torch/_higher_order_ops/hints_wrap.py
-/torch/_higher_order_ops/inline_asm_elementwise.py
-/torch/_higher_order_ops/invoke_leaf_function.py
-/torch/_higher_order_ops/invoke_subgraph.py
-/torch/_higher_order_ops/local_map.py
-/torch/_higher_order_ops/map.py
-/torch/_higher_order_ops/out_dtype.py
-/torch/_higher_order_ops/partitioner.py
-/torch/_higher_order_ops/passes/
-/torch/_higher_order_ops/print.py
-/torch/_higher_order_ops/register_hook.py
-/torch/_higher_order_ops/run_const_graph.py
-/torch/_higher_order_ops/scan.py
-/torch/_higher_order_ops/schema.py
-/torch/_higher_order_ops/strict_mode.py
-/torch/_higher_order_ops/torchbind.py
-/torch/_higher_order_ops/triton_kernel_wrap.py
-/torch/_higher_order_ops/utils.py
-/torch/_higher_order_ops/while_loop.py
-/torch/_higher_order_ops/wrap.py
-/torch/_inductor/__autotune_main__.py
-/torch/_inductor/__init__.py
-/torch/_inductor/_functionalize_collectives.py
-/torch/_inductor/analysis/
-/torch/_inductor/analyze_preserves_zero_mask.py
-/torch/_inductor/aoti_eager.py
-/torch/_inductor/async_compile.py
-/torch/_inductor/augmented_graph_helper.py
-/torch/_inductor/autoheuristic/
-/torch/_inductor/autotune_process.py
-/torch/_inductor/await_utils.py
-/torch/_inductor/bounds.py
-/torch/_inductor/cache.py
-/torch/_inductor/cache_key.py
-/torch/_inductor/choices.py
-/torch/_inductor/codecache.py
-/torch/_inductor/codegen/__init__.py
-/torch/_inductor/codegen/aoti_hipify_utils.py
-/torch/_inductor/codegen/aoti_runtime/
-/torch/_inductor/codegen/block_analysis.py
-/torch/_inductor/codegen/common.py
-/torch/_inductor/codegen/cpp.py
-/torch/_inductor/codegen/cpp_bmm_template.py
-/torch/_inductor/codegen/cpp_gemm_template.py
-/torch/_inductor/codegen/cpp_grouped_gemm_template.py
-/torch/_inductor/codegen/cpp_micro_gemm.py
-/torch/_inductor/codegen/cpp_template.py
-/torch/_inductor/codegen/cpp_template_kernel.py
-/torch/_inductor/codegen/cpp_utils.py
-/torch/_inductor/codegen/cpp_wrapper_cpu.py
-/torch/_inductor/codegen/cpp_wrapper_cpu_array_ref.py
-/torch/_inductor/codegen/cpp_wrapper_gpu.py
-/torch/_inductor/codegen/cpp_wrapper_mps.py
-/torch/_inductor/codegen/cpu_device_op_overrides.py
-/torch/_inductor/codegen/cuda/
-/torch/_inductor/codegen/cuda_combined_scheduling.py
-/torch/_inductor/codegen/custom_extern_kernel_codegen.py
-/torch/_inductor/codegen/cutedsl/
-/torch/_inductor/codegen/cutlass/
-/torch/_inductor/codegen/debug_utils.py
-/torch/_inductor/codegen/halide.py
-/torch/_inductor/codegen/memory_planning.py
-/torch/_inductor/codegen/metal_flex_attention_template.py
-/torch/_inductor/codegen/mps.py
-/torch/_inductor/codegen/mps_device_op_overrides.py
-/torch/_inductor/codegen/mtia/
-/torch/_inductor/codegen/multi_kernel.py
-/torch/_inductor/codegen/nv_universal_gemm/
-/torch/_inductor/codegen/pallas.py
-/torch/_inductor/codegen/python_wrapper_mtia.py
-/torch/_inductor/codegen/rocm/
-/torch/_inductor/codegen/segmented_tree.py
-/torch/_inductor/codegen/simd.py
-/torch/_inductor/codegen/simd_kernel_features.py
-/torch/_inductor/codegen/subgraph.py
-/torch/_inductor/codegen/triton.py
-/torch/_inductor/codegen/triton_combo_kernel.py
-/torch/_inductor/codegen/triton_split_scan.py
-/torch/_inductor/codegen/triton_utils.py
-/torch/_inductor/codegen/wrapper.py
-/torch/_inductor/codegen/wrapper_fxir.py
-/torch/_inductor/codegen/xpu/
-/torch/_inductor/comm_analysis.py
-/torch/_inductor/comm_lowering.py
-/torch/_inductor/comms.py
-/torch/_inductor/comms_debug.py
-/torch/_inductor/compile_fx.py
-/torch/_inductor/compile_fx_async.py
-/torch/_inductor/compile_fx_ext.py
-/torch/_inductor/compile_fx_subproc.py
-/torch/_inductor/compile_worker/
-/torch/_inductor/compiler_bisector.py
-/torch/_inductor/config.py
-/torch/_inductor/config_comms.py
-/torch/_inductor/constant_folding.py
-/torch/_inductor/cpp_builder.py
-/torch/_inductor/cpu_vec_isa.py
-/torch/_inductor/cudagraph_trees.py
-/torch/_inductor/cudagraph_utils.py
-/torch/_inductor/custom_graph_pass.py
-/torch/_inductor/debug.py
-/torch/_inductor/decomposition.py
-/torch/_inductor/dependencies.py
-/torch/_inductor/distributed_autotune.py
-/torch/_inductor/dtype_propagation.py
-/torch/_inductor/exc.py
-/torch/_inductor/extern_node_serializer.py
-/torch/_inductor/freezing.py
-/torch/_inductor/freezing_utils.py
-/torch/_inductor/fuzzer.py
-/torch/_inductor/fx_passes/README.md
-/torch/_inductor/fx_passes/__init__.py
-/torch/_inductor/fx_passes/apply_gumbel_max_trick.py
-/torch/_inductor/fx_passes/auto_chunker/
-/torch/_inductor/fx_passes/b2b_gemm.py
-/torch/_inductor/fx_passes/binary_folding.py
-/torch/_inductor/fx_passes/bucketing.py
-/torch/_inductor/fx_passes/control_dependencies.py
-/torch/_inductor/fx_passes/ddp_fusion.py
-/torch/_inductor/fx_passes/decomp_comms.py
-/torch/_inductor/fx_passes/decompose_mem_bound_mm.py
-/torch/_inductor/fx_passes/dedupe_symint_uses.py
-/torch/_inductor/fx_passes/efficient_conv_bn_eval.py
-/torch/_inductor/fx_passes/freezing_patterns.py
-/torch/_inductor/fx_passes/fsdp.py
-/torch/_inductor/fx_passes/fuse_attention.py
-/torch/_inductor/fx_passes/fusion_regions.py
-/torch/_inductor/fx_passes/graph_view.py
-/torch/_inductor/fx_passes/group_batch_fusion.py
-/torch/_inductor/fx_passes/joint_graph.py
-/torch/_inductor/fx_passes/low_contention_collectives.py
-/torch/_inductor/fx_passes/memory_estimator.py
-/torch/_inductor/fx_passes/micro_pipeline_tp.py
-/torch/_inductor/fx_passes/misc_patterns.py
-/torch/_inductor/fx_passes/node_runtime_estimation.py
-/torch/_inductor/fx_passes/numeric_utils.py
-/torch/_inductor/fx_passes/overlap_manual_scheduling.py
-/torch/_inductor/fx_passes/overlap_preserving_bucketer.py
-/torch/_inductor/fx_passes/overlap_scheduling.py
-/torch/_inductor/fx_passes/pad_mm.py
-/torch/_inductor/fx_passes/post_grad.py
-/torch/_inductor/fx_passes/pre_grad.py
-/torch/_inductor/fx_passes/profile_guided_estimation.py
-/torch/_inductor/fx_passes/reduced_atomic_contention.py
-/torch/_inductor/fx_passes/reinplace.py
-/torch/_inductor/fx_passes/replace_random.py
-/torch/_inductor/fx_passes/serialized_patterns/
-/torch/_inductor/fx_passes/split_cat.py
-/torch/_inductor/fx_passes/spmd_check.py
-/torch/_inductor/fx_passes/utils.py
-/torch/_inductor/fx_utils.py
-/torch/_inductor/graph.py
-/torch/_inductor/hooks.py
-/torch/_inductor/index_propagation.py
-/torch/_inductor/inductor_prims.py
-/torch/_inductor/invert_expr_analysis.py
-/torch/_inductor/ir.py
-/torch/_inductor/jagged_lowerings.py
-/torch/_inductor/kernel/
-/torch/_inductor/kernel_inputs.py
-/torch/_inductor/kernel_template_choice.py
-/torch/_inductor/lookup_table/
-/torch/_inductor/loop_body.py
-/torch/_inductor/lowering.py
-/torch/_inductor/memory.py
-/torch/_inductor/metrics.py
-/torch/_inductor/mkldnn_ir.py
-/torch/_inductor/mkldnn_lowerings.py
-/torch/_inductor/mock_cache.py
-/torch/_inductor/ops_handler.py
-/torch/_inductor/optimize_indexing.py
-/torch/_inductor/output_code.py
-/torch/_inductor/package/
-/torch/_inductor/pattern_matcher.py
-/torch/_inductor/quantized_lowerings.py
-/torch/_inductor/remote_cache.py
-/torch/_inductor/remote_gemm_autotune_cache.py
-/torch/_inductor/rocm_multiarch_utils.py
-/torch/_inductor/runtime/
-/torch/_inductor/scheduler.py
-/torch/_inductor/script.ld
-/torch/_inductor/select_algorithm.py
-/torch/_inductor/shape_propagation.py
-/torch/_inductor/sizevars.py
-/torch/_inductor/standalone_compile.py
-/torch/_inductor/stream_constants.py
-/torch/_inductor/stream_utils.py
-/torch/_inductor/subgraph_lowering.py
-/torch/_inductor/template_heuristics/
-/torch/_inductor/test_case.py
-/torch/_inductor/test_operators.py
-/torch/_inductor/tiling_utils.py
-/torch/_inductor/triton_bundler.py
-/torch/_inductor/utils.py
-/torch/_inductor/virtualized.py
-/torch/_inductor/wrapper_benchmark.py
-/torch/export/
-/torch/fx/
-#
-# [core_jit_cpp_runtime] files=683; patterns=36; leaves=core_runtime (683)
-/torch/csrc/jit/JIT-AUTOCAST.md
-/torch/csrc/jit/OVERVIEW.md
-/torch/csrc/jit/README.md
-/torch/csrc/jit/api/
-/torch/csrc/jit/backends/backend.h
-/torch/csrc/jit/backends/backend_debug_handler.cpp
-/torch/csrc/jit/backends/backend_debug_handler.h
-/torch/csrc/jit/backends/backend_debug_info.cpp
-/torch/csrc/jit/backends/backend_debug_info.h
-/torch/csrc/jit/backends/backend_detail.cpp
-/torch/csrc/jit/backends/backend_detail.h
-/torch/csrc/jit/backends/backend_exception.h
-/torch/csrc/jit/backends/backend_init.cpp
-/torch/csrc/jit/backends/backend_init.h
-/torch/csrc/jit/backends/backend_interface.cpp
-/torch/csrc/jit/backends/backend_interface.h
-/torch/csrc/jit/backends/backend_preprocess.h
-/torch/csrc/jit/backends/backend_resolver.cpp
-/torch/csrc/jit/backends/backend_resolver.h
-/torch/csrc/jit/codegen/
-/torch/csrc/jit/cuda/
-/torch/csrc/jit/docs/
-/torch/csrc/jit/frontend/
-/torch/csrc/jit/ir/
-/torch/csrc/jit/jit_log.cpp
-/torch/csrc/jit/jit_log.h
-/torch/csrc/jit/jit_opt_limit.cpp
-/torch/csrc/jit/jit_opt_limit.h
-/torch/csrc/jit/operator_upgraders/
-/torch/csrc/jit/passes/
-/torch/csrc/jit/python/
-/torch/csrc/jit/resource_guard.h
-/torch/csrc/jit/runtime/
-/torch/csrc/jit/serialization/
-/torch/csrc/jit/tensorexpr/
-/torch/csrc/jit/testing/
-#
-# [compiler_inductor] files=677; patterns=11; leaves=test_compiler_inductor_expectation_metadata (369), test_compiler_inductor (303), inductor_flex_attention (2)
-/test/cpp/nativert/test_triton_kernel_manager_registration.cpp
-/test/distributed/test_inductor_collectives.py
-/test/distributed/test_inductor_compile_collectives.py
-/test/inductor/
-/test/inductor_expected_failures/
-/test/inductor_skips/
-/test/test_triton_utils.py
-/torch/_higher_order_ops/flex_attention.py
-/torch/_inductor/codegen/cpp_flex_attention_template.py
-/torch/_inductor/fx_passes/mkldnn_fusion.py
-/torch/_inductor/fx_passes/quantization.py
-#
-# [core_aten_runtime] files=578; patterns=161; leaves=core_runtime (578)
-/aten/src/ATen/.gitignore
-/aten/src/ATen/ATen.h
-/aten/src/ATen/ATenConfig.cmake.in
-/aten/src/ATen/AccumulateType.cpp
-/aten/src/ATen/AccumulateType.h
-/aten/src/ATen/ArrayRef.h
-/aten/src/ATen/Backend.h
-/aten/src/ATen/Backtrace.h
-/aten/src/ATen/BlasBackend.h
-/aten/src/ATen/CMakeLists.txt
-/aten/src/ATen/CPUApplyUtils.h
-/aten/src/ATen/CPUGeneratorImpl.cpp
-/aten/src/ATen/CPUGeneratorImpl.h
-/aten/src/ATen/CachedTensorUtils.cpp
-/aten/src/ATen/CachedTensorUtils.h
-/aten/src/ATen/CollapseDims.h
-/aten/src/ATen/Config.h.in
-/aten/src/ATen/ConjugateFallback.cpp
-/aten/src/ATen/Context.cpp
-/aten/src/ATen/Context.h
-/aten/src/ATen/DLConvertor.cpp
-/aten/src/ATen/DLConvertor.h
-/aten/src/ATen/DTensorState.cpp
-/aten/src/ATen/DTensorState.h
-/aten/src/ATen/Device.h
-/aten/src/ATen/DeviceAccelerator.cpp
-/aten/src/ATen/DeviceAccelerator.h
-/aten/src/ATen/DeviceGuard.h
-/aten/src/ATen/DimVector.h
-/aten/src/ATen/Dispatch.cpp
-/aten/src/ATen/Dispatch.h
-/aten/src/ATen/Dispatch_v2.h
-/aten/src/ATen/DynamicLibrary.cpp
-/aten/src/ATen/DynamicLibrary.h
-/aten/src/ATen/EmptyTensor.cpp
-/aten/src/ATen/EmptyTensor.h
-/aten/src/ATen/ExpandBase.h
-/aten/src/ATen/ExpandUtils.cpp
-/aten/src/ATen/ExpandUtils.h
-/aten/src/ATen/Formatting.h
-/aten/src/ATen/FuncTorchTLS.cpp
-/aten/src/ATen/FuncTorchTLS.h
-/aten/src/ATen/FunctionalInverses.cpp
-/aten/src/ATen/FunctionalStorageImpl.cpp
-/aten/src/ATen/FunctionalStorageImpl.h
-/aten/src/ATen/FunctionalTensorWrapper.cpp
-/aten/src/ATen/FunctionalTensorWrapper.h
-/aten/src/ATen/FunctionalizeFallbackKernel.cpp
-/aten/src/ATen/FunctionalizeFallbackKernel.h
-/aten/src/ATen/Generator.h
-/aten/src/ATen/InferSize.h
-/aten/src/ATen/InitialTensorOptions.h
-/aten/src/ATen/Layout.h
-/aten/src/ATen/LegacyBatchedFallback.cpp
-/aten/src/ATen/LegacyBatchedFallback.h
-/aten/src/ATen/LegacyBatchedTensorImpl.cpp
-/aten/src/ATen/LegacyBatchedTensorImpl.h
-/aten/src/ATen/LegacyBatchingRegistrations.cpp
-/aten/src/ATen/LegacyVmapMode.cpp
-/aten/src/ATen/LegacyVmapMode.h
-/aten/src/ATen/LegacyVmapTransforms.cpp
-/aten/src/ATen/LegacyVmapTransforms.h
-/aten/src/ATen/LinalgBackend.h
-/aten/src/ATen/MapAllocator.cpp
-/aten/src/ATen/MapAllocator.h
-/aten/src/ATen/MatrixRef.h
-/aten/src/ATen/MemoryOverlap.cpp
-/aten/src/ATen/MemoryOverlap.h
-/aten/src/ATen/NestedTensorImpl.cpp
-/aten/src/ATen/NestedTensorImpl.h
-/aten/src/ATen/NumericUtils.h
-/aten/src/ATen/OpMathType.h
-/aten/src/ATen/OpaqueTensorImpl.h
-/aten/src/ATen/PTThreadPool.h
-/aten/src/ATen/PadNd.h
-/aten/src/ATen/Parallel-inl.h
-/aten/src/ATen/Parallel.h
-/aten/src/ATen/ParallelCommon.cpp
-/aten/src/ATen/ParallelFuture.h
-/aten/src/ATen/ParallelNative.cpp
-/aten/src/ATen/ParallelNative.h
-/aten/src/ATen/ParallelOpenMP.cpp
-/aten/src/ATen/ParallelOpenMP.h
-/aten/src/ATen/ParallelThreadPoolNative.cpp
-/aten/src/ATen/PythonTorchFunctionTLS.cpp
-/aten/src/ATen/PythonTorchFunctionTLS.h
-/aten/src/ATen/ROCmFABackend.h
-/aten/src/ATen/SDPBackend.h
-/aten/src/ATen/SavedTensorHooks.cpp
-/aten/src/ATen/SavedTensorHooks.h
-/aten/src/ATen/Scalar.h
-/aten/src/ATen/ScalarOps.cpp
-/aten/src/ATen/ScalarOps.h
-/aten/src/ATen/ScalarType.h
-/aten/src/ATen/SequenceNumber.cpp
-/aten/src/ATen/SequenceNumber.h
-/aten/src/ATen/SmallVector.h
-/aten/src/ATen/SparseCsrTensorImpl.cpp
-/aten/src/ATen/SparseCsrTensorImpl.h
-/aten/src/ATen/SparseCsrTensorUtils.h
-/aten/src/ATen/SparseTensorImpl.cpp
-/aten/src/ATen/SparseTensorImpl.h
-/aten/src/ATen/Storage.h
-/aten/src/ATen/StorageUtils.cpp
-/aten/src/ATen/StorageUtils.h
-/aten/src/ATen/Tensor.h
-/aten/src/ATen/TensorAccessor.h
-/aten/src/ATen/TensorGeometry.cpp
-/aten/src/ATen/TensorGeometry.h
-/aten/src/ATen/TensorIndexing.cpp
-/aten/src/ATen/TensorIndexing.h
-/aten/src/ATen/TensorIterator.cpp
-/aten/src/ATen/TensorIterator.h
-/aten/src/ATen/TensorIteratorInternal.h
-/aten/src/ATen/TensorMeta.cpp
-/aten/src/ATen/TensorMeta.h
-/aten/src/ATen/TensorOperators.h
-/aten/src/ATen/TensorOptions.h
-/aten/src/ATen/TensorSubclassLikeUtils.h
-/aten/src/ATen/TensorUtils.cpp
-/aten/src/ATen/TensorUtils.h
-/aten/src/ATen/ThreadLocalPythonObjects.cpp
-/aten/src/ATen/ThreadLocalPythonObjects.h
-/aten/src/ATen/ThreadLocalState.cpp
-/aten/src/ATen/ThreadLocalState.h
-/aten/src/ATen/TracerMode.h
-/aten/src/ATen/TypeDefault.h
-/aten/src/ATen/Utils.cpp
-/aten/src/ATen/Utils.h
-/aten/src/ATen/Version.cpp
-/aten/src/ATen/Version.h
-/aten/src/ATen/VmapModeRegistrations.cpp
-/aten/src/ATen/WrapDimUtils.h
-/aten/src/ATen/WrapDimUtilsMulti.h
-/aten/src/ATen/ZeroTensorFallback.cpp
-/aten/src/ATen/accelerator/
-/aten/src/ATen/autocast_mode.cpp
-/aten/src/ATen/autocast_mode.h
-/aten/src/ATen/benchmarks/
-/aten/src/ATen/ceil_div.h
-/aten/src/ATen/code_template.h
-/aten/src/ATen/core/
-/aten/src/ATen/cpp_custom_type_hack.h
-/aten/src/ATen/cpu/
-/aten/src/ATen/cudnn/
-/aten/src/ATen/detail/
-/aten/src/ATen/div_rtn.h
-/aten/src/ATen/dlpack.h
-/aten/src/ATen/jit_macros.h
-/aten/src/ATen/jiterator_macros.h
-/aten/src/ATen/metal/
-/aten/src/ATen/miopen/
-/aten/src/ATen/mkl/
-/aten/src/ATen/nnapi/
-/aten/src/ATen/ops/
-/aten/src/ATen/quantized/
-/aten/src/ATen/record_function.cpp
-/aten/src/ATen/record_function.h
-/aten/src/ATen/templates/
-/aten/src/ATen/test/
-/aten/src/ATen/vulkan/
-#
-# [core_quantized_native] files=484; patterns=1; leaves=core_runtime (484)
-/aten/src/ATen/native/quantized/
-#
-# [docs_topic_owned] files=420; patterns=143; leaves=docs_topic_owned (420)
-/AGENTS.md
-/CITATION.cff
-/CLAUDE.md
-/CODE_OF_CONDUCT.md
-/CONTRIBUTING.md
-/GLOSSARY.md
-/LICENSE
-/NOTICE
-/README.md
-/RELEASE.md
-/SECURITY.md
-/docs/.gitignore
-/docs/Makefile
-/docs/README.md
-/docs/cpp/
-/docs/libtorch.rst
-/docs/make.bat
-/docs/requirements.txt
-/docs/source/_static/
-/docs/source/_templates/
-/docs/source/accelerator/
-/docs/source/accelerator.md
-/docs/source/amp.md
-/docs/source/autograd.md
-/docs/source/backends.md
-/docs/source/benchmark_utils.md
-/docs/source/checkpoint.md
-/docs/source/community/
-/docs/source/complex_numbers.md
-/docs/source/conf.py
-/docs/source/config_mod.md
-/docs/source/cpp_extension.md
-/docs/source/cpp_index.md
-/docs/source/cpu.md
-/docs/source/cuda._sanitizer.md
-/docs/source/cuda.aliases.md
-/docs/source/cuda.md
-/docs/source/cuda.tunable.md
-/docs/source/cuda_environment_variables.md
-/docs/source/cudnn_persistent_rnn.rst
-/docs/source/cudnn_rnn_determinism.md
-/docs/source/data.md
-/docs/source/ddp_comm_hooks.md
-/docs/source/debugging_environment_variables.md
-/docs/source/deterministic.md
-/docs/source/distributed._dist2.md
-/docs/source/distributed.algorithms.join.md
-/docs/source/distributed.checkpoint.md
-/docs/source/distributed.elastic.md
-/docs/source/distributed.fsdp.fully_shard.md
-/docs/source/distributed.md
-/docs/source/distributed.optim.md
-/docs/source/distributed.pipelining.md
-/docs/source/distributed.tensor.md
-/docs/source/distributed.tensor.parallel.md
-/docs/source/distributions.md
-/docs/source/dlpack.md
-/docs/source/docutils.conf
-/docs/source/elastic/
-/docs/source/fft.md
-/docs/source/fsdp.md
-/docs/source/future_mod.md
-/docs/source/futures.md
-/docs/source/fx.experimental.md
-/docs/source/fx.md
-/docs/source/higher_order_ops/
-/docs/source/hub.md
-/docs/source/index.md
-/docs/source/jit_utils.md
-/docs/source/library.md
-/docs/source/linalg.md
-/docs/source/logging.md
-/docs/source/masked.md
-/docs/source/math-quantizer-equation.png
-/docs/source/meta.md
-/docs/source/miscellaneous_environment_variables.md
-/docs/source/mobile_optimizer.md
-/docs/source/model_zoo.md
-/docs/source/module_tracker.md
-/docs/source/monitor.md
-/docs/source/mps.md
-/docs/source/mps_environment_variables.md
-/docs/source/mtia.md
-/docs/source/mtia.memory.md
-/docs/source/mtia.mtia_graph.md
-/docs/source/multiprocessing.md
-/docs/source/nativert.md
-/docs/source/nested.md
-/docs/source/nn.aliases.md
-/docs/source/nn.attention.bias.md
-/docs/source/nn.attention.experimental.md
-/docs/source/nn.attention.flex_attention.md
-/docs/source/nn.attention.md
-/docs/source/nn.attention.varlen.md
-/docs/source/nn.functional.md
-/docs/source/nn.init.md
-/docs/source/nn.md
-/docs/source/notes/
-/docs/source/notes.md
-/docs/source/onnx.md
-/docs/source/onnx_export.md
-/docs/source/onnx_ops.md
-/docs/source/onnx_testing.md
-/docs/source/onnx_verification.md
-/docs/source/optim.aliases.md
-/docs/source/optim.md
-/docs/source/package.md
-/docs/source/profiler.md
-/docs/source/pytorch-api.md
-/docs/source/quantization-support.aliases.md
-/docs/source/quantization-support.md
-/docs/source/quantization.md
-/docs/source/random.md
-/docs/source/redirects.py
-/docs/source/rpc/
-/docs/source/rpc.md
-/docs/source/scripts/
-/docs/source/signal.md
-/docs/source/size.md
-/docs/source/sparse.md
-/docs/source/special.md
-/docs/source/storage.md
-/docs/source/symmetric_memory.md
-/docs/source/tensor_attributes.md
-/docs/source/tensor_view.md
-/docs/source/tensorboard.md
-/docs/source/tensors.md
-/docs/source/testing.md
-/docs/source/threading_environment_variables.md
-/docs/source/torch.aliases.md
-/docs/source/torch.compiler_api.md
-/docs/source/torch.compiler_troubleshooting_old.md
-/docs/source/torch.intermediate_debug_printer.md
-/docs/source/torch.md
-/docs/source/torch.overrides.md
-/docs/source/torch_cuda_memory.md
-/docs/source/torch_environment_variables.md
-/docs/source/torch_nccl_environment_variables.md
-/docs/source/type_info.md
-/docs/source/user_guide/
-/docs/source/utils.md
-/docs/source/xpu.aliases.md
-/docs/source/xpu.md
-#
-# [serialization_jit_onnx_export] files=384; patterns=176; leaves=serialization_jit_onnx_export (145), test_jit_torchscript (135), test_serialization_package (53)
-/test/cpp/jit/test_jit_logging_levels.cpp
-/test/cpp/jit/test_jit_type.cpp
-/test/cpp/jit/test_save_load.cpp
-/test/cpp/nativert/test_serialization.cpp
-/test/jit/__init__.py
-/test/jit/_imported_class_test/
-/test/jit/fixtures/
-/test/jit/fixtures_srcs/
-/test/jit/mydecorator.py
-/test/jit/myexception.py
-/test/jit/myfunction_a.py
-/test/jit/myfunction_b.py
-/test/jit/test_alias_analysis.py
-/test/jit/test_async.py
-/test/jit/test_aten_pow.py
-/test/jit/test_attr.py
-/test/jit/test_autodiff.py
-/test/jit/test_autodiff_subgraph_slicing.py
-/test/jit/test_await.py
-/test/jit/test_backend_nnapi.py
-/test/jit/test_backends.py
-/test/jit/test_batch_mm.py
-/test/jit/test_builtins.py
-/test/jit/test_class_type.py
-/test/jit/test_complex.py
-/test/jit/test_complexity.py
-/test/jit/test_concrete_module_type.py
-/test/jit/test_convert_activation.py
-/test/jit/test_cuda.py
-/test/jit/test_custom_operators.py
-/test/jit/test_data_parallel.py
-/test/jit/test_dataclasses.py
-/test/jit/test_dce.py
-/test/jit/test_decorator.py
-/test/jit/test_device_analysis.py
-/test/jit/test_dtype_analysis.py
-/test/jit/test_enum.py
-/test/jit/test_exception.py
-/test/jit/test_freezing.py
-/test/jit/test_fuser_common.py
-/test/jit/test_generator.py
-/test/jit/test_graph_rewrite_passes.py
-/test/jit/test_hash.py
-/test/jit/test_hooks.py
-/test/jit/test_hooks_modules.py
-/test/jit/test_ignorable_args.py
-/test/jit/test_ignore_context_manager.py
-/test/jit/test_isinstance.py
-/test/jit/test_jit_utils.py
-/test/jit/test_list_dict.py
-/test/jit/test_logging.py
-/test/jit/test_misc.py
-/test/jit/test_models.py
-/test/jit/test_module_apis.py
-/test/jit/test_module_containers.py
-/test/jit/test_module_interface.py
-/test/jit/test_modules.py
-/test/jit/test_op_decompositions.py
-/test/jit/test_optimize_for_mobile_preserve_debug_info.py
-/test/jit/test_parametrization.py
-/test/jit/test_pdt.py
-/test/jit/test_peephole.py
-/test/jit/test_profiler.py
-/test/jit/test_python_bindings.py
-/test/jit/test_python_builtins.py
-/test/jit/test_python_ir.py
-/test/jit/test_recursive_script.py
-/test/jit/test_remove_mutation.py
-/test/jit/test_save_load.py
-/test/jit/test_save_load_for_op_version.py
-/test/jit/test_script_profile.py
-/test/jit/test_scriptmod_ann.py
-/test/jit/test_slice.py
-/test/jit/test_sparse.py
-/test/jit/test_string_formatting.py
-/test/jit/test_symbolic_shape_analysis.py
-/test/jit/test_tensor_creation_ops.py
-/test/jit/test_tensor_methods.py
-/test/jit/test_torchbind.py
-/test/jit/test_tracer.py
-/test/jit/test_type_sharing.py
-/test/jit/test_types.py
-/test/jit/test_typing.py
-/test/jit/test_union.py
-/test/jit/test_union_pep604.py
-/test/jit/test_unsupported_ops.py
-/test/jit/test_upgraders.py
-/test/jit/test_warn.py
-/test/jit/test_with.py
-/test/jit/xnnpack/
-/test/jit_hooks/
-/test/onnx/assets/
-/test/onnx/autograd_helper.py
-/test/onnx/exporter/README.md
-/test/onnx/exporter/test_api.py
-/test/onnx/exporter/test_building.py
-/test/onnx/exporter/test_capture_strategies.py
-/test/onnx/exporter/test_core.py
-/test/onnx/exporter/test_hf_models_e2e.py
-/test/onnx/exporter/test_input_observer.py
-/test/onnx/exporter/test_ir_passes.py
-/test/onnx/exporter/test_onnx_program.py
-/test/onnx/exporter/test_small_models_e2e.py
-/test/onnx/exporter/test_tensors.py
-/test/onnx/exporter/test_verification.py
-/test/onnx/internal/
-/test/onnx/model_defs/
-/test/onnx/onnx_test_common.py
-/test/onnx/ops/
-/test/onnx/pytorch_test_common.py
-/test/onnx/test_autograd_funs.py
-/test/onnx/test_custom_ops.py
-/test/onnx/test_lazy_import.py
-/test/onnx/test_models.py
-/test/onnx/test_models_onnxruntime.py
-/test/onnx/test_onnx_opset.py
-/test/onnx/test_onnxscript_no_runtime.py
-/test/onnx/test_onnxscript_runtime.py
-/test/onnx/test_op_consistency.py
-/test/onnx/test_pytorch_jit_onnx.py
-/test/onnx/test_pytorch_onnx_onnxruntime.py
-/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py
-/test/onnx/test_pytorch_onnx_shape_inference.py
-/test/onnx/test_symbolic_helper.py
-/test/onnx/test_utility_funs.py
-/test/onnx/torchlib/
-/test/onnx/verify.py
-/test/package/__init__.py
-/test/package/common.py
-/test/package/generate_bc_packages.py
-/test/package/module_a.py
-/test/package/module_a_remapped_path.py
-/test/package/package_a/
-/test/package/package_b/
-/test/package/package_bc/test_nn_module.pt
-/test/package/package_bc/test_torchscript_module.pt
-/test/package/package_c/
-/test/package/package_d/
-/test/package/package_e/
-/test/package/test_analyze.py
-/test/package/test_dependency_api.py
-/test/package/test_dependency_hooks.py
-/test/package/test_digraph.py
-/test/package/test_directory_reader.py
-/test/package/test_glob_group.py
-/test/package/test_importer.py
-/test/package/test_load_bc_packages.py
-/test/package/test_mangling.py
-/test/package/test_misc.py
-/test/package/test_model.py
-/test/package/test_package_fx.py
-/test/package/test_package_script.py
-/test/package/test_repackage.py
-/test/package/test_resources.py
-/test/package/test_save_load.py
-/test/package/test_trace_dep/
-/test/test_jit.py
-/test/test_jit_autocast.py
-/test/test_jit_disabled.py
-/test/test_jit_fuser.py
-/test/test_jit_fuser_legacy.py
-/test/test_jit_fuser_te.py
-/test/test_jit_legacy.py
-/test/test_jit_llga_fuser.py
-/test/test_jit_profiling.py
-/test/test_jit_simple.py
-/test/test_jit_string.py
-/test/test_jiterator.py
-/test/test_package.py
-/test/test_serialization.py
-/test/test_tensorexpr.py
-/test/test_tensorexpr_pybind.py
-/torch/jit/
-/torch/onnx/
-/torch/package/
-/torch/serialization.py
-#
-# [quantization_torchao] files=371; patterns=6; leaves=quantization_torchao (223), test_quantization_ao (148)
-/test/ao/
-/test/onnx/test_models_quantized_onnxruntime.py
-/test/quantization/
-/test/test_quantization.py
-/torch/ao/
-/torch/quantization/
-#
-# [core_c10_dispatch] files=357; patterns=11; leaves=core_runtime (357)
-/c10/BUCK.oss
-/c10/CMakeLists.txt
-/c10/benchmark/
-/c10/build.bzl
-/c10/core/
-/c10/macros/
-/c10/metal/
-/c10/mobile/
-/c10/ovrsource_defs.bzl
-/c10/test/
-/c10/util/
-#
-# [core_cuda_native] files=336; patterns=1; leaves=core_runtime (336)
-/aten/src/ATen/native/cuda/
-#
-# [benchmark_compiler_dynamo] files=303; patterns=2; leaves=benchmark_compiler_dynamo_microbenchmarks (184), benchmark_compiler_dynamo_expected_accuracy (52), benchmark_compiler_dynamo_harness (42)
-/benchmarks/dynamo/
-/benchmarks/inductor_backends/
-#
-# [python_top_level_api] files=288; patterns=82; leaves=python_api_frontend (288)
-/torch/CMakeLists.txt
-/torch/_C/
-/torch/_C_flatbuffer/
-/torch/_VF.py
-/torch/__config__.py
-/torch/__future__.py
-/torch/__init__.py
-/torch/_appdirs.py
-/torch/_awaits/
-/torch/_classes.py
-/torch/_compile.py
-/torch/_custom_op/
-/torch/_custom_ops.py
-/torch/_decomp/
-/torch/_dispatch/
-/torch/_environment.py
-/torch/_guards.py
-/torch/_jit_internal.py
-/torch/_lazy/
-/torch/_library/
-/torch/_linalg_utils.py
-/torch/_lobpcg.py
-/torch/_lowrank.py
-/torch/_meta_registrations.py
-/torch/_numpy/
-/torch/_opaque_base.py
-/torch/_ops.py
-/torch/_prims/
-/torch/_prims_common/
-/torch/_python_dispatcher.py
-/torch/_refs/
-/torch/_size_docs.py
-/torch/_sources.py
-/torch/_storage_docs.py
-/torch/_streambase.py
-/torch/_strobelight/
-/torch/_subclasses/
-/torch/_tensor.py
-/torch/_tensor_docs.py
-/torch/_tensor_iterator.py
-/torch/_tensor_str.py
-/torch/_thread_safe_fork.py
-/torch/_torch_docs.py
-/torch/_utils.py
-/torch/_utils_internal.py
-/torch/_vmap_internals.py
-/torch/_weights_only_unpickler.py
-/torch/accelerator/
-/torch/amp/
-/torch/compiler/
-/torch/contrib/
-/torch/cpu/
-/torch/custom_class.h
-/torch/custom_class_detail.h
-/torch/distributions/
-/torch/extension.h
-/torch/fft/
-/torch/functional.py
-/torch/futures/
-/torch/header_only_apis.txt
-/torch/hub.py
-/torch/legacy/
-/torch/lib/
-/torch/linalg/
-/torch/monitor/
-/torch/mtia/
-/torch/multiprocessing/
-/torch/nested/
-/torch/numa/
-/torch/overrides.py
-/torch/profiler/
-/torch/py.typed
-/torch/quasirandom.py
-/torch/random.py
-/torch/return_types.py
-/torch/script.h
-/torch/signal/
-/torch/sparse/
-/torch/special/
-/torch/storage.py
-/torch/torch_version.py
-/torch/types.py
-#
-# [cpp_runtime_tests] files=273; patterns=123; leaves=test_cpp_frontend_runtime (273)
-/test/cpp/__init__.py
-/test/cpp/aoti_abi_check/
-/test/cpp/aoti_eager/
-/test/cpp/aoti_inference/
-/test/cpp/api/
-/test/cpp/c10d/
-/test/cpp/common/
-/test/cpp/dist_autograd/
-/test/cpp/jit/CMakeLists.txt
-/test/cpp/jit/README.md
-/test/cpp/jit/__init__.py
-/test/cpp/jit/script_module_v4.ptl
-/test/cpp/jit/script_module_v5.ptl
-/test/cpp/jit/script_module_v6.ptl
-/test/cpp/jit/source_range_test.cpp
-/test/cpp/jit/test_add_if_then_else.cpp
-/test/cpp/jit/test_alias_analysis.cpp
-/test/cpp/jit/test_argument_spec.cpp
-/test/cpp/jit/test_autodiff.cpp
-/test/cpp/jit/test_backend.cpp
-/test/cpp/jit/test_backend_compiler_lib.cpp
-/test/cpp/jit/test_backend_compiler_preprocess.cpp
-/test/cpp/jit/test_backend_lib.cpp
-/test/cpp/jit/test_class_import.cpp
-/test/cpp/jit/test_class_parser.cpp
-/test/cpp/jit/test_class_type.cpp
-/test/cpp/jit/test_cleanup_passes.cpp
-/test/cpp/jit/test_code_template.cpp
-/test/cpp/jit/test_concat_opt.cpp
-/test/cpp/jit/test_constant_pooling.cpp
-/test/cpp/jit/test_create_autodiff_subgraphs.cpp
-/test/cpp/jit/test_cs_debug_info_serialization.cpp
-/test/cpp/jit/test_custom_class.cpp
-/test/cpp/jit/test_custom_class_registrations.cpp
-/test/cpp/jit/test_custom_class_registrations.h
-/test/cpp/jit/test_custom_operators.cpp
-/test/cpp/jit/test_dce.cpp
-/test/cpp/jit/test_exception.cpp
-/test/cpp/jit/test_file_format.cpp
-/test/cpp/jit/test_flatbuffer.cpp
-/test/cpp/jit/test_fuser.cpp
-/test/cpp/jit/test_graph_executor.cpp
-/test/cpp/jit/test_graph_iterator.cpp
-/test/cpp/jit/test_inliner.cpp
-/test/cpp/jit/test_interface.cpp
-/test/cpp/jit/test_interpreter.cpp
-/test/cpp/jit/test_interpreter_async.pt
-/test/cpp/jit/test_ir.cpp
-/test/cpp/jit/test_irparser.cpp
-/test/cpp/jit/test_lexer.cpp
-/test/cpp/jit/test_lite_interpreter.cpp
-/test/cpp/jit/test_lite_interpreter_direct.cpp
-/test/cpp/jit/test_lite_trainer.cpp
-/test/cpp/jit/test_load_upgraders.cpp
-/test/cpp/jit/test_memory_dag.cpp
-/test/cpp/jit/test_misc.cpp
-/test/cpp/jit/test_module_api.cpp
-/test/cpp/jit/test_op_replacement.cpp
-/test/cpp/jit/test_peephole_optimize.cpp
-/test/cpp/jit/test_qualified_name.cpp
-/test/cpp/jit/test_schema_info.cpp
-/test/cpp/jit/test_schema_matching.cpp
-/test/cpp/jit/test_script_profile.cpp
-/test/cpp/jit/test_shape_analysis.cpp
-/test/cpp/jit/test_stack_opt.cpp
-/test/cpp/jit/test_subgraph_matcher.cpp
-/test/cpp/jit/test_subgraph_rewriter.cpp
-/test/cpp/jit/test_subgraph_utils.cpp
-/test/cpp/jit/test_te.cpp
-/test/cpp/jit/test_union.cpp
-/test/cpp/jit/test_upgrader_utils.cpp
-/test/cpp/jit/test_utils.cpp
-/test/cpp/jit/test_utils.h
-/test/cpp/jit/tests_setup.py
-/test/cpp/jit/torch_python_test.cpp
-/test/cpp/jit/upgrader_models/
-/test/cpp/lazy/
-/test/cpp/lite_interpreter_runtime/CMakeLists.txt
-/test/cpp/lite_interpreter_runtime/delegate_test.ptl
-/test/cpp/lite_interpreter_runtime/delegated_submodule_with_debug_info.ptl
-/test/cpp/lite_interpreter_runtime/light_model.ptl
-/test/cpp/lite_interpreter_runtime/main.cpp
-/test/cpp/lite_interpreter_runtime/resources.h
-/test/cpp/lite_interpreter_runtime/sequence.ptl
-/test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl
-/test/cpp/lite_interpreter_runtime/test_lite_interpreter_runtime.cpp
-/test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl
-/test/cpp/monitor/
-/test/cpp/nativert/CMakeLists.txt
-/test/cpp/nativert/static_kernel_test_utils.h
-/test/cpp/nativert/test_alias_analyzer.cpp
-/test/cpp/nativert/test_aoti_model_container_registration.cpp
-/test/cpp/nativert/test_c10_kernel.cpp
-/test/cpp/nativert/test_execution_frame.cpp
-/test/cpp/nativert/test_execution_planner.cpp
-/test/cpp/nativert/test_file_util.cpp
-/test/cpp/nativert/test_graph.cpp
-/test/cpp/nativert/test_graph_signature.cpp
-/test/cpp/nativert/test_itree.cpp
-/test/cpp/nativert/test_layout_planner.cpp
-/test/cpp/nativert/test_layout_planner_algorithm.cpp
-/test/cpp/nativert/test_mpmc_queue.cpp
-/test/cpp/nativert/test_op_kernel.cpp
-/test/cpp/nativert/test_pass_manager.cpp
-/test/cpp/nativert/test_placement.cpp
-/test/cpp/nativert/test_static_dispatch_kernel_registration.cpp
-/test/cpp/nativert/test_static_kernel_ops.cpp
-/test/cpp/nativert/test_tensor_meta.cpp
-/test/cpp/nativert/test_weights.cpp
-/test/cpp/profiler/CMakeLists.txt
-/test/cpp/profiler/comms_id.cpp
-/test/cpp/profiler/containers.cpp
-/test/cpp/profiler/perf_events.cpp
-/test/cpp/profiler/record_function.cpp
-/test/cpp/profiler/test_privateuse1_profiler.cpp
-/test/cpp/rpc/
-/test/cpp/shim/
-/test/cpp_api_parity/
-/test/test_cpp_api_parity.py
-/test/test_cpp_extensions_aot.py
-/test/test_cpp_extensions_jit.py
-/test/test_cpp_extensions_mtia_backend.py
-/test/test_cpp_extensions_stream_and_event.py
-#
-# [core_cpp_api] files=223; patterns=1; leaves=core_runtime (223)
-/torch/csrc/api/
-#
-# [python_api_tests] files=212; patterns=140; leaves=test_python_cpython_compat (114), test_python_numpy_compat (38), test_python_nn (23)
-/test/autograd/test_complex.py
-/test/autograd/test_logging.py
-/test/autograd/test_node_lifecycle.py
-/test/cpython/v3_13/CHANGES.txt
-/test/cpython/v3_13/LICENSE
-/test/cpython/v3_13/data/
-/test/cpython/v3_13/exception_hierarchy.txt
-/test/cpython/v3_13/list_tests.diff
-/test/cpython/v3_13/list_tests.py
-/test/cpython/v3_13/mapping_tests.diff
-/test/cpython/v3_13/mapping_tests.py
-/test/cpython/v3_13/mathdata/
-/test/cpython/v3_13/seq_tests.diff
-/test/cpython/v3_13/seq_tests.py
-/test/cpython/v3_13/test_baseexception.diff
-/test/cpython/v3_13/test_baseexception.py
-/test/cpython/v3_13/test_binop.diff
-/test/cpython/v3_13/test_binop.py
-/test/cpython/v3_13/test_bool.diff
-/test/cpython/v3_13/test_bool.py
-/test/cpython/v3_13/test_builtin.diff
-/test/cpython/v3_13/test_builtin.py
-/test/cpython/v3_13/test_class.diff
-/test/cpython/v3_13/test_class.py
-/test/cpython/v3_13/test_cmath.diff
-/test/cpython/v3_13/test_cmath.py
-/test/cpython/v3_13/test_collections.diff
-/test/cpython/v3_13/test_collections.py
-/test/cpython/v3_13/test_complex.diff
-/test/cpython/v3_13/test_complex.py
-/test/cpython/v3_13/test_contextlib.diff
-/test/cpython/v3_13/test_contextlib.py
-/test/cpython/v3_13/test_defaultdict.diff
-/test/cpython/v3_13/test_defaultdict.py
-/test/cpython/v3_13/test_deque.diff
-/test/cpython/v3_13/test_deque.py
-/test/cpython/v3_13/test_descr.diff
-/test/cpython/v3_13/test_descr.py
-/test/cpython/v3_13/test_dict.diff
-/test/cpython/v3_13/test_dict.py
-/test/cpython/v3_13/test_enum.diff
-/test/cpython/v3_13/test_enum.py
-/test/cpython/v3_13/test_exception_variations.diff
-/test/cpython/v3_13/test_exception_variations.py
-/test/cpython/v3_13/test_exceptions.diff
-/test/cpython/v3_13/test_exceptions.py
-/test/cpython/v3_13/test_float.diff
-/test/cpython/v3_13/test_float.py
-/test/cpython/v3_13/test_generator_stop.diff
-/test/cpython/v3_13/test_generator_stop.py
-/test/cpython/v3_13/test_generators.diff
-/test/cpython/v3_13/test_generators.py
-/test/cpython/v3_13/test_heapq.diff
-/test/cpython/v3_13/test_heapq.py
-/test/cpython/v3_13/test_int.diff
-/test/cpython/v3_13/test_int.py
-/test/cpython/v3_13/test_int_literal.diff
-/test/cpython/v3_13/test_int_literal.py
-/test/cpython/v3_13/test_isinstance.diff
-/test/cpython/v3_13/test_isinstance.py
-/test/cpython/v3_13/test_iter.diff
-/test/cpython/v3_13/test_iter.py
-/test/cpython/v3_13/test_itertools.diff
-/test/cpython/v3_13/test_itertools.py
-/test/cpython/v3_13/test_list.diff
-/test/cpython/v3_13/test_list.py
-/test/cpython/v3_13/test_math.diff
-/test/cpython/v3_13/test_math.py
-/test/cpython/v3_13/test_numeric_tower.diff
-/test/cpython/v3_13/test_numeric_tower.py
-/test/cpython/v3_13/test_operator.diff
-/test/cpython/v3_13/test_operator.py
-/test/cpython/v3_13/test_ordered_dict.diff
-/test/cpython/v3_13/test_ordered_dict.py
-/test/cpython/v3_13/test_patma.diff
-/test/cpython/v3_13/test_patma.py
-/test/cpython/v3_13/test_raise.diff
-/test/cpython/v3_13/test_raise.py
-/test/cpython/v3_13/test_range.diff
-/test/cpython/v3_13/test_range.py
-/test/cpython/v3_13/test_set.diff
-/test/cpython/v3_13/test_set.py
-/test/cpython/v3_13/test_slice.diff
-/test/cpython/v3_13/test_slice.py
-/test/cpython/v3_13/test_sort.diff
-/test/cpython/v3_13/test_sort.py
-/test/cpython/v3_13/test_sys.diff
-/test/cpython/v3_13/test_sys.py
-/test/cpython/v3_13/test_tuple.diff
-/test/cpython/v3_13/test_tuple.py
-/test/cpython/v3_13/test_types.diff
-/test/cpython/v3_13/test_types.py
-/test/cpython/v3_13/test_unittest/
-/test/cpython/v3_13/test_userdict.diff
-/test/cpython/v3_13/test_userdict.py
-/test/cpython/v3_13/test_userlist.diff
-/test/cpython/v3_13/test_userlist.py
-/test/cpython/v3_13/test_with.diff
-/test/cpython/v3_13/test_with.py
-/test/cpython/v3_13/typinganndata/
-/test/distributions/
-/test/nn/
-/test/optim/
-/test/test_autograd.py
-/test/test_autograd_fallback.py
-/test/test_modules.py
-/test/test_nn.py
-/test/test_nnapi.py
-/test/test_numpy_interop.py
-/test/test_optim.py
-/test/test_transformers.py
-/test/test_type_hints.py
-/test/test_typing.py
-/test/test_varlen_attention.py
-/test/torch_np/__init__.py
-/test/torch_np/check_tests_conform.py
-/test/torch_np/conftest.py
-/test/torch_np/numpy_tests/core/
-/test/torch_np/numpy_tests/fft/
-/test/torch_np/numpy_tests/lib/test_arraypad.py
-/test/torch_np/numpy_tests/lib/test_arraysetops.py
-/test/torch_np/numpy_tests/lib/test_histograms.py
-/test/torch_np/numpy_tests/lib/test_index_tricks.py
-/test/torch_np/numpy_tests/lib/test_shape_base_.py
-/test/torch_np/numpy_tests/lib/test_twodim_base.py
-/test/torch_np/numpy_tests/lib/test_type_check.py
-/test/torch_np/numpy_tests/linalg/
-/test/torch_np/test_basic.py
-/test/torch_np/test_binary_ufuncs.py
-/test/torch_np/test_dtype.py
-/test/torch_np/test_indexing.py
-/test/torch_np/test_ndarray_methods.py
-/test/torch_np/test_nep50_examples.py
-/test/torch_np/test_random.py
-/test/torch_np/test_reductions.py
-/test/torch_np/test_scalars_0D_arrays.py
-/test/torch_np/test_ufuncs_basic.py
-/test/torch_np/test_unary_ufuncs.py
-/test/typing/
-/test/xpu/test_transformers.py
-#
-# [core_torch_csrc_misc] files=191; patterns=78; leaves=core_runtime (191)
-/torch/csrc/CudaIPCTypes.cpp
-/torch/csrc/CudaIPCTypes.h
-/torch/csrc/DataLoader.cpp
-/torch/csrc/DataLoader.h
-/torch/csrc/Device.cpp
-/torch/csrc/Device.h
-/torch/csrc/DeviceAccelerator.cpp
-/torch/csrc/DeviceAccelerator.h
-/torch/csrc/Dtype.cpp
-/torch/csrc/Dtype.h
-/torch/csrc/DynamicTypes.cpp
-/torch/csrc/DynamicTypes.h
-/torch/csrc/Event.cpp
-/torch/csrc/Event.h
-/torch/csrc/Exceptions.cpp
-/torch/csrc/Exceptions.h
-/torch/csrc/Export.h
-/torch/csrc/Generator.cpp
-/torch/csrc/Generator.h
-/torch/csrc/Layout.cpp
-/torch/csrc/Layout.h
-/torch/csrc/MemoryFormat.cpp
-/torch/csrc/MemoryFormat.h
-/torch/csrc/Module.cpp
-/torch/csrc/Module.h
-/torch/csrc/PyInterpreter.cpp
-/torch/csrc/PyInterpreter.h
-/torch/csrc/PyInterpreterHooks.cpp
-/torch/csrc/PyInterpreterHooks.h
-/torch/csrc/QScheme.cpp
-/torch/csrc/QScheme.h
-/torch/csrc/README.md
-/torch/csrc/Size.cpp
-/torch/csrc/Size.h
-/torch/csrc/Storage.cpp
-/torch/csrc/Storage.h
-/torch/csrc/StorageMethods.cpp
-/torch/csrc/StorageMethods.h
-/torch/csrc/StorageSharing.cpp
-/torch/csrc/StorageSharing.h
-/torch/csrc/Stream.cpp
-/torch/csrc/Stream.h
-/torch/csrc/THConcat.h
-/torch/csrc/THP.h
-/torch/csrc/TensorIterator.cpp
-/torch/csrc/TensorIterator.h
-/torch/csrc/TypeInfo.cpp
-/torch/csrc/TypeInfo.h
-/torch/csrc/Types.h
-/torch/csrc/acc/
-/torch/csrc/copy_utils.h
-/torch/csrc/cpu/
-/torch/csrc/empty.c
-/torch/csrc/export/
-/torch/csrc/functionalization/
-/torch/csrc/fx/
-/torch/csrc/instruction_counter/
-/torch/csrc/itt.cpp
-/torch/csrc/itt.h
-/torch/csrc/itt_wrapper.cpp
-/torch/csrc/itt_wrapper.h
-/torch/csrc/monitor/
-/torch/csrc/mtia/
-/torch/csrc/multiprocessing/
-/torch/csrc/onnx/
-/torch/csrc/python_headers.h
-/torch/csrc/serialization.cpp
-/torch/csrc/serialization.h
-/torch/csrc/shim_common.cpp
-/torch/csrc/shim_conversion_utils.h
-/torch/csrc/shim_exception_state.cpp
-/torch/csrc/shim_exception_state.h
-/torch/csrc/stable/
-/torch/csrc/stub.c
-/torch/csrc/tensor/
-/torch/csrc/utils/
-/torch/csrc/utils.cpp
-/torch/csrc/utils.h
-#
-# [cpp_extension_tests] files=183; patterns=61; leaves=test_cpp_extensions (183)
-/test/cpp_extensions/cpp_c10d_extension.cpp
-/test/cpp_extensions/cpp_c10d_extension.hpp
-/test/cpp_extensions/cpp_frontend_extension.cpp
-/test/cpp_extensions/cublas_extension.cpp
-/test/cpp_extensions/cuda_dlink_extension.cpp
-/test/cpp_extensions/cuda_dlink_extension_add.cu
-/test/cpp_extensions/cuda_dlink_extension_add.cuh
-/test/cpp_extensions/cuda_dlink_extension_kernel.cu
-/test/cpp_extensions/cuda_extension.cpp
-/test/cpp_extensions/cuda_extension.cu
-/test/cpp_extensions/cuda_extension_kernel.cu
-/test/cpp_extensions/cuda_extension_kernel2.cu
-/test/cpp_extensions/cudnn_extension.cpp
-/test/cpp_extensions/cusolver_extension.cpp
-/test/cpp_extensions/dangling_impl_extension.cpp
-/test/cpp_extensions/doubler.h
-/test/cpp_extensions/extension.cpp
-/test/cpp_extensions/identity.cpp
-/test/cpp_extensions/jit_extension.cpp
-/test/cpp_extensions/jit_extension2.cpp
-/test/cpp_extensions/libtorch_agn_2_10_extension/
-/test/cpp_extensions/libtorch_agn_2_11_extension/
-/test/cpp_extensions/libtorch_agn_2_12_extension/
-/test/cpp_extensions/libtorch_agn_2_13_extension/
-/test/cpp_extensions/libtorch_agn_2_9_extension/
-/test/cpp_extensions/maia_extension.cpp
-/test/cpp_extensions/mps_extension.mm
-/test/cpp_extensions/mtia_extension.cpp
-/test/cpp_extensions/no_python_abi_suffix_test/
-/test/cpp_extensions/open_registration_extension/torch_openreg/CMakeLists.txt
-/test/cpp_extensions/open_registration_extension/torch_openreg/README.md
-/test/cpp_extensions/open_registration_extension/torch_openreg/cmake/
-/test/cpp_extensions/open_registration_extension/torch_openreg/csrc/
-/test/cpp_extensions/open_registration_extension/torch_openreg/include/
-/test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml
-/test/cpp_extensions/open_registration_extension/torch_openreg/setup.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/cpp/
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_autocast.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_autograd.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_compile.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_device.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_event.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_memory.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_misc.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_ops.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_rng.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_storage.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_streams.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_testing.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_utils.py
-/test/cpp_extensions/open_registration_extension/torch_openreg/third_party/
-/test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/
-/test/cpp_extensions/open_registration_extension.cpp
-/test/cpp_extensions/python_agnostic_extension/
-/test/cpp_extensions/rng_extension.cpp
-/test/cpp_extensions/self_compiler_include_dirs_test/
-/test/cpp_extensions/setup.py
-/test/cpp_extensions/test_libtorch_agnostic.py
-/test/cpp_extensions/torch_library.cu
-/test/cpp_extensions/torch_test_cpp_extension/
-/test/cpp_extensions/xpu_extension.sycl
-#
-# [infra_tools_misc] files=174; patterns=50; leaves=build_infra (174)
-/tools/BUCK.bzl
-/tools/BUCK.oss
-/tools/README.md
-/tools/__init__.py
-/tools/alerts/
-/tools/amd_build/
-/tools/build_defs/
-/tools/build_libtorch.py
-/tools/build_pytorch_libs.py
-/tools/build_with_debinfo.py
-/tools/clean.py
-/tools/code_analyzer/
-/tools/code_coverage/
-/tools/coverage_plugins_package/
-/tools/create_worktree.py
-/tools/download_mnist.py
-/tools/dynamo/
-/tools/embed_libomp_macos.py
-/tools/experimental/
-/tools/extract_scripts.py
-/tools/gdb/
-/tools/gen_flatbuffers.sh
-/tools/gen_vulkan_spv.py
-/tools/generate_torch_version.py
-/tools/generated_dirs.txt
-/tools/git_add_generated_dirs.sh
-/tools/git_reset_generated_dirs.sh
-/tools/github/
-/tools/iwyu/
-/tools/jit/
-/tools/lite_interpreter/
-/tools/lldb/
-/tools/merge_compile_commands.py
-/tools/nightly.py
-/tools/nightly_hotpatch.py
-/tools/nvcc_fix_deps.py
-/tools/optional_submodules.py
-/tools/packaging/
-/tools/pyi/
-/tools/render_junit.py
-/tools/setup_helpers/
-/tools/shared/
-/tools/stale_issues.py
-/tools/stats/
-/tools/strtobool.py
-/tools/substitute.py
-/tools/update_masked_docs.py
-/tools/vendoring/
-/tools/vscode_settings.py
-/tools/wrap_headers.py
-#
-# [test_infra_shared] files=163; patterns=12; leaves=test_infra_shared (147), test_shared_harness_misc (16)
-/test/benchmark_utils/
-/test/scripts/
-/test/spincli/
-/test/strobelight/
-/test/test_public_bindings.py
-/test/test_testing.py
-/test/test_utils.py
-/test/test_utils_config_module.py
-/test/test_utils_filelock.py
-/torch/_logging/
-/torch/testing/
-/torch/utils/benchmark/
-#
-# [core_cuda_runtime] files=146; patterns=2; leaves=core_runtime (146)
-/aten/src/ATen/cuda/
-/c10/cuda/
-#
-# [infra_github_workflows] files=145; patterns=1; leaves=build_infra (145)
-/.github/workflows/
-#
-# [core_mps_native] files=140; patterns=1; leaves=core_runtime (140)
-/aten/src/ATen/native/mps/
-#
-# [python_nn_api] files=138; patterns=1; leaves=python_api_frontend (138)
-/torch/nn/
-#
-# [backend_device_runtime] files=126; patterns=42; leaves=backend_device_runtime (101), test_backend_devices (25)
-/test/custom_backend/
-/test/metal/
-/test/test_cuda.py
-/test/test_cuda_compatibility.py
-/test/test_cuda_expandable_segments.py
-/test/test_cuda_graph_debug.py
-/test/test_cuda_graph_utils.py
-/test/test_cuda_multigpu.py
-/test/test_cuda_nvml_based_avail.py
-/test/test_cuda_primary_ctx.py
-/test/test_cuda_sanitizer.py
-/test/test_cuda_trace.py
-/test/test_metal.py
-/test/test_mps.py
-/test/test_xpu.py
-/test/test_xpu_expandable_segments.py
-/test/xpu/test_conv.py
-/test/xpu/test_fusion.py
-/test/xpu/test_gemm.py
-/torch/backends/__init__.py
-/torch/backends/cpu/
-/torch/backends/cuda/
-/torch/backends/cudnn/
-/torch/backends/cusparselt/
-/torch/backends/kleidiai/
-/torch/backends/mha/
-/torch/backends/miopen/
-/torch/backends/mkl/
-/torch/backends/mkldnn/
-/torch/backends/mps/
-/torch/backends/nnpack/
-/torch/backends/openmp/
-/torch/backends/opt_einsum/
-/torch/backends/python_native/
-/torch/backends/quantized/
-/torch/backends/xeon/
-/torch/csrc/cuda/
-/torch/csrc/mps/
-/torch/csrc/xpu/
-/torch/cuda/
-/torch/mps/
-/torch/xpu/
-#
-# [core_runtime_tests] files=115; patterns=96; leaves=test_core_compatibility_expect (68), test_core_python_tensor (20), test_core_ops_opinfo (19)
-/test/bench_mps_ops.py
-/test/custom_operator/
-/test/expect/HasDecompTest.test_aten_core_operators.expect
-/test/expect/HasDecompTest.test_has_decomposition.expect
-/test/expect/TestAutograd.test_function-x_grad_desc.expect
-/test/expect/TestAutograd.test_function-y_grad_desc.expect
-/test/expect/TestFXAPIBackwardCompatibility.test_class_member_back_compat-fx_backcompat_class_members.expect
-/test/expect/TestFXAPIBackwardCompatibility.test_function_back_compat-fx_backcompat_function_signatures.expect
-/test/expect/TestJit.test_cu_escaped_number.expect
-/test/expect/TestJit.test_import_method.expect
-/test/expect/TestJit.test_non_ascii_string.expect
-/test/expect/TestJit.test_pretty_printer-empty_float_list_test.expect
-/test/expect/TestJit.test_pretty_printer-empty_int_list_test.expect
-/test/expect/TestJit.test_pretty_printer-if_one.expect
-/test/expect/TestJit.test_pretty_printer-if_test.expect
-/test/expect/TestJit.test_pretty_printer-loop_use_test.expect
-/test/expect/TestJit.test_pretty_printer-print_weird_test.expect
-/test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
-/test/expect/TestJit.test_pretty_printer-while_if_test.expect
-/test/expect/TestJit.test_pretty_printer-while_test.expect
-/test/expect/TestPytorchExportModes.test_aten_fallback.expect
-/test/expect/TestPytorchExportModes.test_onnx_aten.expect
-/test/expect/TestScript.test_annot_ast_mypy_fn.expect
-/test/expect/TestScript.test_annot_ast_mypy_method.expect
-/test/expect/TestScript.test_annot_ast_py3_fn.expect
-/test/expect/TestScript.test_annot_ast_py3_method.expect
-/test/expect/TestScript.test_annot_string_mypy_fn.expect
-/test/expect/TestScript.test_annot_string_mypy_method.expect
-/test/expect/TestScript.test_annot_string_py3_fn.expect
-/test/expect/TestScript.test_annot_string_py3_method.expect
-/test/expect/TestScript.test_annotated_script_fn.expect
-/test/expect/TestScript.test_annotated_script_method.expect
-/test/expect/TestScript.test_format-stdout.expect
-/test/expect/TestScript.test_listconstruct_erasure.expect
-/test/expect/TestScript.test_parser_type_annotations.expect
-/test/expect/TestScript.test_parser_type_annotations_comment.expect
-/test/expect/TestScript.test_print-stdout.expect
-/test/expect/TestScript.test_python_frontend.expect
-/test/expect/TestScript.test_python_frontend_py2.expect
-/test/expect/TestScript.test_python_frontend_py3.expect
-/test/expect/TestScript.test_string_print-stdout.expect
-/test/expect/TestScript.test_torch_dot_tensor_annotation.expect
-/test/expect/TestTensorBoard.test_audio.expect
-/test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
-/test/expect/TestTensorBoard.test_caffe2_simple_model.expect
-/test/expect/TestTensorBoard.test_histogram_auto.expect
-/test/expect/TestTensorBoard.test_histogram_doane.expect
-/test/expect/TestTensorBoard.test_histogram_fd.expect
-/test/expect/TestTensorBoard.test_hparams_bool.expect
-/test/expect/TestTensorBoard.test_hparams_number.expect
-/test/expect/TestTensorBoard.test_hparams_string.expect
-/test/expect/TestTensorBoard.test_image_with_3_channel_batched.expect
-/test/expect/TestTensorBoard.test_image_with_boxes.expect
-/test/expect/TestTensorBoard.test_image_with_one_channel.expect
-/test/expect/TestTensorBoard.test_image_with_one_channel_batched.expect
-/test/expect/TestTensorBoard.test_image_without_channel.expect
-/test/expect/TestTensorBoard.test_mesh.expect
-/test/expect/TestTensorBoard.test_nested_nn_squential.expect
-/test/expect/TestTensorBoard.test_pr_curve.expect
-/test/expect/TestTensorBoard.test_pr_curve_raw.expect
-/test/expect/TestTensorBoard.test_pytorch_graph.expect
-/test/expect/TestTensorBoard.test_scalar_new_style.expect
-/test/expect/TestTensorBoard.test_text.expect
-/test/expect/TestTensorBoard.test_video.expect
-/test/expect/TestTorch.test_is_nonzero-empty.expect
-/test/expect/TestTorch.test_is_nonzero-multiple.expect
-/test/expect/TestTorch.test_print-non_contiguous.expect
-/test/expect/__init__.py
-/test/forward_backward_compatibility/
-/test/lazy/test_meta_kernel.py
-/test/python_native/
-/test/test_binary_ufuncs.py
-/test/test_custom_ops.py
-/test/test_meta.py
-/test/test_nestedtensor.py
-/test/test_ops.py
-/test/test_ops_fwd_gradients.py
-/test/test_ops_gradients.py
-/test/test_ops_jit.py
-/test/test_ops_unbacked.py
-/test/test_overrides.py
-/test/test_scatter_gather_ops.py
-/test/test_shape_ops.py
-/test/test_stateless.py
-/test/test_stateless_rng.py
-/test/test_subclass.py
-/test/test_tensor_creation_ops.py
-/test/test_tensor_iterator.py
-/test/test_tensorboard.py
-/test/test_torch.py
-/test/test_torch_config_hash_determinism.py
-/test/test_torchfuzz_repros.py
-/test/test_type_info.py
-/test/test_type_promotion.py
-/test/test_unary_ufuncs.py
-/test/test_view_ops.py
-#
-# [python_nativert_api] files=107; patterns=1; leaves=python_api_frontend (107)
-/torch/nativert/
-#
-# [benchmark_operator_benchmark] files=102; patterns=1; leaves=benchmark_operator_benchmark (102)
-/benchmarks/operator_benchmark/
-#
-# [core_autograd_cpp] files=101; patterns=1; leaves=core_runtime (101)
-/torch/csrc/autograd/
-#
-# [infra_pytorch_ci] files=98; patterns=1; leaves=build_infra (98)
-/.ci/pytorch/
-#
-# [test_misc_review] files=97; patterns=96; leaves=test_misc_review (97)
-/test/HowToWriteTestsUsingFileCheck.md
-/test/allowlist_for_publicAPI.json
-/test/backends/
-/test/complex_tensor/
-/test/conftest.py
-/test/create_dummy_torchscript_model.py
-/test/error_messages/
-/test/lazy/__init__.py
-/test/lazy/test_bindings.py
-/test/lazy/test_debug_util.py
-/test/lazy/test_extract_compiled_graph.py
-/test/lazy/test_generator.py
-/test/lazy/test_reuse_ir.py
-/test/lazy/test_step_closures.py
-/test/lazy/test_ts_opinfo.py
-/test/linear.py
-/test/load_torchscript_model.py
-/test/minioptest_failures_dict.json
-/test/mkl_verbose.py
-/test/mkldnn_verbose.py
-/test/pytest_shard_custom.py
-/test/run_doctests.sh
-/test/run_test.py
-/test/simulate_nccl_errors.py
-/test/slow_tests.json
-/test/test_accelerator.py
-/test/test_ao_sparsity.py
-/test/test_appending_byte_serializer.py
-/test/test_as_strided.py
-/test/test_autocast.py
-/test/test_autoload.py
-/test/test_bmm_outer_product.py
-/test/test_bundled_images.py
-/test/test_bundled_inputs.py
-/test/test_ci_sanity_check_fail.py
-/test/test_comparison_utils.py
-/test/test_compile_benchmark_util.py
-/test/test_complex.py
-/test/test_content_store.py
-/test/test_dataloader.py
-/test/test_datapipe.py
-/test/test_decomp.py
-/test/test_determination.py
-/test/test_dispatch.py
-/test/test_dlpack.py
-/test/test_expanded_weights.py
-/test/test_extension_utils.py
-/test/test_file_check.py
-/test/test_flop_counter.py
-/test/test_foreach.py
-/test/test_futures.py
-/test/test_hop_infra.py
-/test/test_hub.py
-/test/test_img/
-/test/test_import_stats.py
-/test/test_indexing.py
-/test/test_inspect_utils.py
-/test/test_itt.py
-/test/test_kernel_launch_checks.py
-/test/test_legacy_vmap.py
-/test/test_license.py
-/test/test_logging.py
-/test/test_mkl_verbose.py
-/test/test_mkldnn.py
-/test/test_mkldnn_fusion.py
-/test/test_mkldnn_verbose.py
-/test/test_model_exports_to_core_aten.py
-/test/test_module_tracker.py
-/test/test_monitor.py
-/test/test_multiprocessing.py
-/test/test_multiprocessing_spawn.py
-/test/test_namedtuple_return_api.py
-/test/test_native_functions.py
-/test/test_native_mha.py
-/test/test_numa_binding.py
-/test/test_numba_integration.py
-/test/test_opaque_obj_v2.py
-/test/test_openmp.py
-/test/test_out_dtype_op.py
-/test/test_per_overload_api.py
-/test/test_prims.py
-/test/test_privateuseone_python_backend.py
-/test/test_pruning_op.py
-/test/test_python_dispatch.py
-/test/test_pytree.py
-/test/test_reductions.py
-/test/test_rename_privateuse1_to_existing_device.py
-/test/test_schema_check.py
-/test/test_segment_reductions.py
-/test/test_set_default_mobile_cpu_allocator.py
-/test/test_show_pickle.py
-/test/test_sort_and_select.py
-/test/test_static_runtime.py
-/test/test_sympy_utils.py
-/test/test_tsan.py
-/test/test_weak.py
-#
-# [infra_torchgen_codegen] files=94; patterns=1; leaves=build_infra (94)
-/torchgen/
-#
-# [infra_test_runner] files=91; patterns=2; leaves=build_infra (91)
-/tools/test/
-/tools/testing/
-#
-# [compiler_inductor_cpp_runtime] files=91; patterns=1; leaves=core_runtime (91)
-/torch/csrc/inductor/
-#
-# [core_lazy_runtime] files=88; patterns=1; leaves=core_runtime (88)
-/torch/csrc/lazy/
-#
-# [python_utils_api] files=88; patterns=60; leaves=python_api_frontend (88)
-/torch/utils/__init__.py
-/torch/utils/_appending_byte_serializer.py
-/torch/utils/_config_module.py
-/torch/utils/_config_typing.pyi
-/torch/utils/_content_store.py
-/torch/utils/_contextlib.py
-/torch/utils/_cpp_embed_headers.py
-/torch/utils/_cpp_extension_versioner.py
-/torch/utils/_cuda_debug.py
-/torch/utils/_cxx_pytree.py
-/torch/utils/_debug_mode/
-/torch/utils/_device.py
-/torch/utils/_dtype_abbrs.py
-/torch/utils/_exposed_in.py
-/torch/utils/_filelock.py
-/torch/utils/_foreach_utils.py
-/torch/utils/_functools.py
-/torch/utils/_get_clean_triton.py
-/torch/utils/_helion.py
-/torch/utils/_import_utils.py
-/torch/utils/_inspect.py
-/torch/utils/_mode_utils.py
-/torch/utils/_ordered_set.py
-/torch/utils/_pallas.py
-/torch/utils/_python_dispatch.py
-/torch/utils/_pytree.py
-/torch/utils/_runtime_estimation.py
-/torch/utils/_stats.py
-/torch/utils/_strobelight/
-/torch/utils/_sympy/
-/torch/utils/_thunk.py
-/torch/utils/_traceback.py
-/torch/utils/_triton.py
-/torch/utils/_typing_utils.py
-/torch/utils/_zip.py
-/torch/utils/backcompat/
-/torch/utils/backend_registration.py
-/torch/utils/bundled_inputs.py
-/torch/utils/checkpoint.py
-/torch/utils/collect_env.py
-/torch/utils/cpp_backtrace.py
-/torch/utils/cpp_extension.py
-/torch/utils/debug_log.py
-/torch/utils/deterministic.py
-/torch/utils/dlpack.py
-/torch/utils/file_baton.py
-/torch/utils/flop_counter.py
-/torch/utils/hipify/
-/torch/utils/hooks.py
-/torch/utils/jit/
-/torch/utils/mkldnn.py
-/torch/utils/mobile_optimizer.py
-/torch/utils/model_dump/
-/torch/utils/model_zoo.py
-/torch/utils/module_tracker.py
-/torch/utils/serialization/
-/torch/utils/show_pickle.py
-/torch/utils/throughput_benchmark.py
-/torch/utils/viz/
-/torch/utils/weak.py
-#
-# [infra_docker_images] files=83; patterns=1; leaves=build_infra (83)
-/.ci/docker/
-#
-# [infra_cmake_build] files=81; patterns=1; leaves=build_infra (81)
-/cmake/
-#
-# [compiler_export_fx_hops] files=76; patterns=44; leaves=test_compiler_export (35), test_compiler_fx (33), test_compiler_higher_order_ops (8)
-/test/export/__init__.py
-/test/export/opinfo_schema.py
-/test/export/random_dag.py
-/test/export/test_converter.py
-/test/export/test_cpp_serdes.py
-/test/export/test_db.py
-/test/export/test_draft_export.py
-/test/export/test_experimental.py
-/test/export/test_export.py
-/test/export/test_export_opinfo.py
-/test/export/test_export_strict.py
-/test/export/test_export_training_ir_to_run_decomp.py
-/test/export/test_functionalized_assertions.py
-/test/export/test_hop.py
-/test/export/test_lift_unlift.py
-/test/export/test_nativert.py
-/test/export/test_package.py
-/test/export/test_pass_infra.py
-/test/export/test_passes.py
-/test/export/test_retraceability.py
-/test/export/test_schema.py
-/test/export/test_serdes.py
-/test/export/test_serialize.py
-/test/export/test_sparse.py
-/test/export/test_strict_export_v2.py
-/test/export/test_swap.py
-/test/export/test_tools.py
-/test/export/test_torchbind.py
-/test/export/test_tree_utils.py
-/test/export/test_unflatten.py
-/test/export/test_unflatten_training_ir.py
-/test/export/test_upgrader.py
-/test/export/test_verifier.py
-/test/export/testing.py
-/test/fx/
-/test/higher_order_ops/
-/test/onnx/exporter/test_exportable_module.py
-/test/onnx/test_fx_type_promotion.py
-/test/package/package_bc/test_fx_module.pt
-/test/test_fx.py
-/test/test_fx_experimental.py
-/test/test_fx_graph_print.py
-/test/test_fx_passes.py
-/test/test_fx_reinplace_pass.py
-#
-# [infra_github_scripts] files=71; patterns=1; leaves=build_infra (71)
-/.github/scripts/
-#
-# [mobile_lite_interpreter] files=71; patterns=52; leaves=mobile_lite_interpreter_runtime (47), mobile_lite_compatibility (8), mobile_lite_interpreter_test (7)
-/test/cpp/jit/test_mobile_type_parser.cpp
-/test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
-/test/mobile/lightweight_dispatch/
-/test/mobile/test_bytecode.py
-/test/mobile/test_lite_script_module.py
-/test/mobile/test_lite_script_type.py
-/test/mobile/test_quantize_fx_lite_script_module.py
-/test/mobile/test_upgrader_bytecode_table_example.cpp
-/test/mobile/test_upgrader_codegen.py
-/test/mobile/test_upgraders.py
-/test/test_mobile_optimizer.py
-/torch/csrc/jit/mobile/code.h
-/torch/csrc/jit/mobile/compatibility/
-/torch/csrc/jit/mobile/debug_info.cpp
-/torch/csrc/jit/mobile/debug_info.h
-/torch/csrc/jit/mobile/file_format.h
-/torch/csrc/jit/mobile/flatbuffer_loader.cpp
-/torch/csrc/jit/mobile/flatbuffer_loader.h
-/torch/csrc/jit/mobile/frame.h
-/torch/csrc/jit/mobile/function.cpp
-/torch/csrc/jit/mobile/function.h
-/torch/csrc/jit/mobile/import.cpp
-/torch/csrc/jit/mobile/import.h
-/torch/csrc/jit/mobile/import_data.cpp
-/torch/csrc/jit/mobile/import_data.h
-/torch/csrc/jit/mobile/import_export_common.h
-/torch/csrc/jit/mobile/interpreter.cpp
-/torch/csrc/jit/mobile/interpreter.h
-/torch/csrc/jit/mobile/method.h
-/torch/csrc/jit/mobile/module.cpp
-/torch/csrc/jit/mobile/module.h
-/torch/csrc/jit/mobile/observer.cpp
-/torch/csrc/jit/mobile/observer.h
-/torch/csrc/jit/mobile/parse_bytecode.cpp
-/torch/csrc/jit/mobile/parse_bytecode.h
-/torch/csrc/jit/mobile/parse_operators.cpp
-/torch/csrc/jit/mobile/parse_operators.h
-/torch/csrc/jit/mobile/prim_ops_registery.cpp
-/torch/csrc/jit/mobile/prim_ops_registery.h
-/torch/csrc/jit/mobile/profiler_edge.cpp
-/torch/csrc/jit/mobile/profiler_edge.h
-/torch/csrc/jit/mobile/promoted_prim_ops.cpp
-/torch/csrc/jit/mobile/promoted_prim_ops.h
-/torch/csrc/jit/mobile/quantization.cpp
-/torch/csrc/jit/mobile/quantization.h
-/torch/csrc/jit/mobile/register_ops_common_utils.cpp
-/torch/csrc/jit/mobile/register_ops_common_utils.h
-/torch/csrc/jit/mobile/train/
-/torch/csrc/jit/mobile/type_parser.cpp
-/torch/csrc/jit/mobile/type_parser.h
-/torch/csrc/jit/mobile/upgrader_mobile.cpp
-/torch/csrc/jit/mobile/upgrader_mobile.h
-#
-# [mobile_android_api] files=70; patterns=4; leaves=mobile_android_test_assets (36), mobile_android_java_api (18), mobile_android_torchvision (9)
-/android/pytorch_android/src/androidTest/
-/android/pytorch_android/src/main/cpp/
-/android/pytorch_android/src/main/java/
-/android/pytorch_android_torchvision/
-#
-# [core_profiler_cpp] files=64; patterns=1; leaves=core_runtime (64)
-/torch/csrc/profiler/
-#
-# [infra_ci_misc] files=60; patterns=7; leaves=build_infra (60)
-/.ci/caffe2/
-/.ci/flash-attention/
-/.ci/libtorch/
-/.ci/lumen_cli/
-/.ci/magma/
-/.ci/magma-rocm/
-/.ci/wheel/
-#
-# [functorch_docs_examples] files=54; patterns=11; leaves=functorch_docs_examples (54)
-/docs/source/func.api.md
-/docs/source/func.batch_norm.md
-/docs/source/func.md
-/docs/source/func.migrating.md
-/docs/source/func.ux_limitations.md
-/docs/source/func.whirlwind_tour.md
-/functorch/COMPILE_README.md
-/functorch/README.md
-/functorch/docs/
-/functorch/examples/
-/functorch/writing_batching_rules.md
-#
-# [python_vendor_code] files=54; patterns=1; leaves=python_api_frontend (54)
-/torch/_vendor/
-#
-# [infra_linting] files=53; patterns=1; leaves=build_infra (53)
-/tools/linter/
-#
-# [python_data_api] files=52; patterns=1; leaves=python_api_frontend (52)
-/torch/utils/data/
-#
-# [infra_github_misc] files=49; patterns=19; leaves=build_infra (49)
-/.github/ISSUE_TEMPLATE/
-/.github/PULL_REQUEST_TEMPLATE/
-/.github/actionlint.yaml
-/.github/allowlist.yml
-/.github/arc.yaml
-/.github/auto_request_review.yml
-/.github/ci_commit_pins/
-/.github/ci_configs/
-/.github/copilot-instructions.md
-/.github/dependabot.yml
-/.github/label_to_label.yml
-/.github/labeler.yml
-/.github/merge_rules.yaml
-/.github/nitpicks.yml
-/.github/pytorch-probot.yml
-/.github/regenerate.sh
-/.github/requirements/
-/.github/requirements-gha-cache.txt
-/.github/templates/
-#
-# [core_xpu_runtime] files=48; patterns=2; leaves=core_runtime (48)
-/aten/src/ATen/xpu/
-/c10/xpu/
-#
-# [functorch_csrc_aten_batching] files=46; patterns=2; leaves=functorch_csrc_aten_batching (46)
-/aten/src/ATen/functorch/
-/torch/csrc/functorch/
-#
-# [python_headeronly_api] files=45; patterns=1; leaves=python_api_frontend (45)
-/torch/headeronly/
-#
-# [caffe2_legacy_runtime] files=44; patterns=34; leaves=caffe2_serialization (13), caffe2_threadpool_utils (11), caffe2_core_runtime (10)
-/caffe2/core/common.cc
-/caffe2/core/common.h
-/caffe2/core/macros.h
-/caffe2/core/macros.h.in
-/caffe2/core/timer.h
-/caffe2/perfkernels/common.h
-/caffe2/perfkernels/common_avx.cc
-/caffe2/perfkernels/common_avx2.cc
-/caffe2/perfkernels/common_sve.cc
-/caffe2/perfkernels/embedding_lookup_idx.cc
-/caffe2/perfkernels/embedding_lookup_idx.h
-/caffe2/perfkernels/embedding_lookup_idx_avx2.cc
-/caffe2/perfkernels/embedding_lookup_idx_sve.cc
-/caffe2/perfkernels/hp_emblookup_codegen.py
-/caffe2/perfkernels/sve_emblookup_codegen.py
-/caffe2/serialize/crc.cc
-/caffe2/serialize/crc_alt.h
-/caffe2/serialize/file_adapter.cc
-/caffe2/serialize/file_adapter.h
-/caffe2/serialize/in_memory_adapter.h
-/caffe2/serialize/inline_container.cc
-/caffe2/serialize/inline_container.h
-/caffe2/serialize/inline_container_test.cc
-/caffe2/serialize/istream_adapter.cc
-/caffe2/serialize/istream_adapter.h
-/caffe2/serialize/read_adapter_interface.cc
-/caffe2/serialize/read_adapter_interface.h
-/caffe2/serialize/versions.h
-/caffe2/utils/fixed_divisor.h
-/caffe2/utils/proto_wrap.cc
-/caffe2/utils/proto_wrap.h
-/caffe2/utils/string_utils.cc
-/caffe2/utils/string_utils.h
-/caffe2/utils/threadpool/
-#
-# [functorch_eager_transforms] files=41; patterns=34; leaves=functorch_eager_transforms_vmap_grad (17), test_functorch_torch_func (15), functorch_tests_eager_transforms_vmap (9)
-/functorch/__init__.py
-/functorch/_src/
-/functorch/compile/
-/functorch/experimental/
-/test/autograd/test_functional.py
-/test/cpp/nativert/test_function_schema.cpp
-/test/cpython/v3_13/test_funcattrs.diff
-/test/cpython/v3_13/test_funcattrs.py
-/test/cpython/v3_13/test_functools.diff
-/test/cpython/v3_13/test_functools.py
-/test/functorch/test_ac_logging.py
-/test/functorch/test_control_flow.py
-/test/functorch/test_control_flow_cuda_initialization.py
-/test/functorch/test_eager_transforms.py
-/test/functorch/test_leaf_function.py
-/test/functorch/test_logging.py
-/test/functorch/test_ops.py
-/test/functorch/test_vmap.py
-/test/functorch/test_vmap_registrations.py
-/test/jit/test_functional_blocks.py
-/test/lazy/test_functionalization.py
-/test/test_function_schema.py
-/test/test_functional_autograd_benchmark.py
-/test/test_functional_optim.py
-/test/test_functionalization.py
-/test/test_functionalization_of_rng_ops.py
-/test/torch_np/numpy_tests/lib/test_function_base.py
-/test/torch_np/test_function_base.py
-/torch/_functorch/apis.py
-/torch/_functorch/eager_transforms.py
-/torch/_functorch/functional_call.py
-/torch/_functorch/make_functional.py
-/torch/_functorch/vmap.py
-/torch/func/
-#
-# [build_infra_parent_needs_split] files=39; patterns=39; leaves=build_infra (39)
-/.bc-linter.yml
-/.clang-format
-/.clang-tidy
-/.cmakelintrc
-/.coveragerc
-/.ctags.d/
-/.dockerignore
-/.editorconfig
-/.flake8
-/.gdbinit
-/.git-blame-ignore-revs
-/.gitattributes
-/.gitignore
-/.lintrunner.toml
-/.lldbinit
-/.spin/
-/BUCK.oss
-/CMakeLists.txt
-/CODEOWNERS
-/Dockerfile
-/MANIFEST.in
-/Makefile
-/buckbuild.bzl
-/build.bzl
-/build_variables.bzl
-/codex_setup.sh
-/defs.bzl
-/docker.Makefile
-/mypy-strict.ini
-/mypy.ini
-/pt_ops.bzl
-/pt_template_srcs.bzl
-/pyproject.toml
-/pyrefly.toml
-/pytest.ini
-/setup.py
-/ubsan.supp
-/ufunc_defs.bzl
-/version.txt
-#
-# [infra_autograd_codegen] files=39; patterns=1; leaves=build_infra (39)
-/tools/autograd/
-#
-# [functorch_aot_autograd_compile] files=38; patterns=17; leaves=functorch_aot_autograd_compile (26), functorch_tests_aot_autograd_compile (12)
-/test/functorch/test_aot_joint_with_descriptors.py
-/test/functorch/test_aotdispatch.py
-/test/functorch/test_codegen_backward_epilogue.py
-/test/functorch/test_codegen_backward_prologue.py
-/test/functorch/test_codegen_debug_assert.py
-/test/functorch/test_codegen_dedup.py
-/test/functorch/test_codegen_mutation_epilogue.py
-/test/functorch/test_codegen_output_alias.py
-/test/functorch/test_codegen_runtime_wrapper.py
-/test/functorch/test_memory_efficient_fusion.py
-/test/functorch/test_minifier.py
-/test/functorch/test_subclass_codegen.py
-/torch/_functorch/_aot_autograd/
-/torch/_functorch/aot_autograd.py
-/torch/_functorch/compile_utils.py
-/torch/_functorch/compilers.py
-/torch/_functorch/partitioners.py
-#
-# [infra_dev_environment] files=36; patterns=3; leaves=build_infra (36)
-/.claude/
-/.devcontainer/
-/.vscode/
-#
-# [infra_scripts] files=35; patterns=1; leaves=build_infra (35)
-/scripts/
-#
-# [mobile_delegate_backends] files=33; patterns=8; leaves=mobile_delegate_backend_coreml (15), mobile_delegate_backend_xnnpack (11), mobile_delegate_backend_nnapi (5)
-/test/test_vulkan.py
-/test/test_xnnpack_integration.py
-/torch/backends/_coreml/
-/torch/backends/_nnapi/
-/torch/backends/xnnpack/
-/torch/csrc/jit/backends/coreml/
-/torch/csrc/jit/backends/nnapi/
-/torch/csrc/jit/backends/xnnpack/
-#
-# [mobile_android_build_packaging] files=29; patterns=21; leaves=mobile_android_build_packaging (24), mobile_custom_build_test (5)
-/android/.gitignore
-/android/README.md
-/android/build.gradle
-/android/common.sh
-/android/gradle/
-/android/gradle.properties
-/android/gradlew
-/android/gradlew.bat
-/android/libs/
-/android/pytorch_android/CMakeLists.txt
-/android/pytorch_android/build.gradle
-/android/pytorch_android/generate_test_asset.cpp
-/android/pytorch_android/generate_test_torchscripts.py
-/android/pytorch_android/gradle.properties
-/android/pytorch_android/host/
-/android/pytorch_android/src/main/AndroidManifest.xml
-/android/pytorch_android/src/main/res/
-/android/pytorch_android/test_asset.jit
-/android/run_tests.sh
-/android/settings.gradle
-/test/mobile/custom_build/
-#
-# [mobile_model_runtime] files=29; patterns=2; leaves=mobile_model_tracer (16), mobile_model_coverage_test (13)
-/test/mobile/model_test/
-/torch/csrc/jit/mobile/model_tracer/
-#
-# [linalg_fft_sparse_tests] files=28; patterns=28; leaves=test_sparse_masked (24), test_linalg_fft_numerics (4)
-/test/expect/TestSparseCPU.test_print_coalesced_cpu_float64.expect
-/test/expect/TestSparseCPU.test_print_uncoalesced_cpu_float64.expect
-/test/expect/TestSparseCUDA.test_print_coalesced_cuda_float64.expect
-/test/expect/TestSparseCUDA.test_print_uncoalesced_cuda_float64.expect
-/test/expect/TestSparseCompressedCPU.test_print_SparseBSC_cpu.expect
-/test/expect/TestSparseCompressedCPU.test_print_SparseBSR_cpu.expect
-/test/expect/TestSparseCompressedCPU.test_print_SparseCSC_cpu.expect
-/test/expect/TestSparseCompressedCPU.test_print_SparseCSR_cpu.expect
-/test/expect/TestSparseCompressedCUDA.test_print_SparseBSC_cuda.expect
-/test/expect/TestSparseCompressedCUDA.test_print_SparseBSR_cuda.expect
-/test/expect/TestSparseCompressedCUDA.test_print_SparseCSC_cuda.expect
-/test/expect/TestSparseCompressedCUDA.test_print_SparseCSR_cuda.expect
-/test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
-/test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
-/test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
-/test/expect/TestSparseMeta.test_print_meta_SparseBSR_float64.expect
-/test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
-/test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
-/test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
-/test/test_linalg.py
-/test/test_masked.py
-/test/test_maskedtensor.py
-/test/test_matmul_cuda.py
-/test/test_scaled_matmul_cuda.py
-/test/test_sparse.py
-/test/test_sparse_csr.py
-/test/test_sparse_semi_structured.py
-/test/test_spectral_ops.py
-#
-# [compiler_dynamo_cpp_runtime] files=28; patterns=1; leaves=core_runtime (28)
-/torch/csrc/dynamo/
-#
-# [infra_github_actions] files=27; patterns=1; leaves=build_infra (27)
-/.github/actions/
-#
-# [python_native_ops] files=26; patterns=1; leaves=python_api_frontend (26)
-/torch/_native/
-#
-# [python_optim_api] files=23; patterns=1; leaves=python_api_frontend (23)
-/torch/optim/
-#
-# [benchmark_jit_tensorexpr] files=21; patterns=2; leaves=benchmark_jit_tensorexpr (19), benchmark_jit_fuser (2)
-/benchmarks/fuser/
-/benchmarks/tensorexpr/
-#
-# [core_mps_runtime] files=20; patterns=1; leaves=core_runtime (20)
-/aten/src/ATen/mps/
-#
-# [functorch_dims_einops] files=20; patterns=6; leaves=functorch_dim_experimental (12), functorch_tests_dims_einops (5), functorch_einops (3)
-/functorch/dim/
-/functorch/einops/
-/test/functorch/dim/
-/test/functorch/test_dims.py
-/test/functorch/test_parsing.py
-/test/functorch/test_rearrange.py
-#
-# [third_party_backend_deps] files=19; patterns=19; leaves=third_party_mobile_cpu_kernels (10), third_party_gpu_kernel_libs (5), third_party_quantization_fbgemm (3)
-/third_party/NNPACK
-/third_party/VulkanMemoryAllocator
-/third_party/XNNPACK
-/third_party/aiter
-/third_party/composable_kernel
-/third_party/cpuinfo
-/third_party/cudnn_frontend
-/third_party/cutlass
-/third_party/fbgemm
-/third_party/flash-attention
-/third_party/gemmlowp/
-/third_party/ideep
-/third_party/kleidiai
-/third_party/pthreadpool
-/third_party/xnnpack.buck.bzl
-/third_party/xnnpack_buck_shim.bzl
-/third_party/xnnpack_src_defs.bzl
-/third_party/xnnpack_wrapper_defs.bzl
-/third_party/xpu.txt
-#
-# [test_profiler_benchmark] files=18; patterns=4; leaves=test_profiler_benchmark (18)
-/test/cpp/profiler/test_profiler_collection.cpp
-/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_profiler.py
-/test/profiler/
-/test/test_throughput_benchmark.py
-#
-# [benchmark_python_core] files=17; patterns=3; leaves=benchmark_autograd_functional (9), benchmark_framework_overhead (4), benchmark_python_overrides (4)
-/benchmarks/framework_overhead_benchmark/
-/benchmarks/functional_autograd_benchmark/
-/benchmarks/overrides_benchmark/
-#
-# [benchmark_inference_serving] files=17; patterns=1; leaves=benchmark_inference_serving (17)
-/benchmarks/inference/
-#
-# [benchmark_runtime_perf] files=17; patterns=1; leaves=benchmark_instruction_counts (17)
-/benchmarks/instruction_counts/
-#
-# [python_autograd_api] files=16; patterns=1; leaves=python_api_frontend (16)
-/torch/autograd/
-#
-# [third_party_core_deps] files=15; patterns=11; leaves=third_party_runtime_memory_threading (8), third_party_math_numerics (7)
-/third_party/FP16
-/third_party/FXdiv
-/third_party/concurrentqueue/
-/third_party/eigen_pin.txt
-/third_party/llvm-openmp/
-/third_party/mimalloc
-/third_party/mslk
-/third_party/pocketfft
-/third_party/psimd
-/third_party/sleef
-/third_party/sleef.bzl
-#
-# [third_party_serialization_schema] files=15; patterns=4; leaves=third_party_serialization_schema (15)
-/third_party/flatbuffers
-/third_party/miniz-3.0.2/
-/third_party/onnx
-/third_party/protobuf
-#
-# [benchmark_rnn_legacy] files=14; patterns=2; leaves=benchmark_rnn_legacy (14)
-/benchmarks/compare-fastrnn-results.py
-/benchmarks/fastrnns/
-#
-# [benchmark_transformer_gpt] files=14; patterns=2; leaves=benchmark_gpt_fast (7), benchmark_transformer (7)
-/benchmarks/gpt_fast/
-/benchmarks/transformer/
-#
-# [mobile_nnc_backend] files=13; patterns=2; leaves=mobile_nnc_backend (7), mobile_nnc_test (6)
-/test/mobile/nnc/
-/torch/csrc/jit/mobile/nnc/
-#
-# [infra_binary_packaging] files=12; patterns=1; leaves=build_infra (12)
-/.ci/manywheel/
-#
-# [benchmark_sparse] files=12; patterns=1; leaves=benchmark_sparse (12)
-/benchmarks/sparse/
-#
-# [binaries_runtime_tools] files=12; patterns=1; leaves=binaries_runtime_tools (5), binaries_benchmark_tools (5), binaries_mobile_benchmark_tools (2)
-/binaries/
-#
-# [third_party_build_deps] files=12; patterns=12; leaves=third_party_testing_build_tools (7), third_party_build_glue (4), third_party_codegen_build_tools (1)
-/third_party/BUCK.oss
-/third_party/README.md
-/third_party/benchmark
-/third_party/cpp-httplib
-/third_party/fmt
-/third_party/generate-cpuinfo-wrappers.py
-/third_party/generate-xnnpack-wrappers.py
-/third_party/glog.buck.bzl
-/third_party/googletest
-/third_party/nlohmann
-/third_party/pybind11
-/third_party/python-peachpy
-#
-# [functorch_public_api_shims] files=12; patterns=12; leaves=functorch_public_api_shims (12)
-/torch/_functorch/__init__.py
-/torch/_functorch/autograd_function.py
-/torch/_functorch/batch_norm_replacement.py
-/torch/_functorch/config.py
-/torch/_functorch/deprecated.py
-/torch/_functorch/einops.py
-/torch/_functorch/fx_minifier.py
-/torch/_functorch/predispatch.py
-/torch/_functorch/pyfunctorch.py
-/torch/_functorch/python_key.py
-/torch/_functorch/pytree_hacks.py
-/torch/_functorch/utils.py
-#
-# [functorch_benchmarks_op_analysis] files=11; patterns=4; leaves=functorch_benchmarks_op_analysis (11)
-/functorch/benchmarks/
-/functorch/op_analysis/
-/torch/_functorch/benchmark_utils.py
-/torch/_functorch/top_operators_github_usage.py
-#
-# [python_masked_api] files=11; patterns=1; leaves=python_api_frontend (11)
-/torch/masked/
-#
-# [core_runtime_parent_needs_split] files=10; patterns=6; leaves=core_runtime (10)
-/aten/CMakeLists.txt
-/aten/src/README.md
-/aten/src/THC/
-/aten/tools/
-/torch/library.h
-/torch/library.py
-#
-# [benchmark_static_runtime] files=10; patterns=1; leaves=benchmark_static_runtime (10)
-/benchmarks/static_runtime/
-#
-# [python_tensorboard_api] files=9; patterns=1; leaves=python_api_frontend (9)
-/torch/utils/tensorboard/
-#
-# [functorch_activation_checkpointing] files=8; patterns=3; leaves=functorch_activation_checkpointing (6), functorch_tests_activation_checkpointing (2)
-/test/functorch/test_ac.py
-/test/functorch/test_ac_knapsack.py
-/torch/_functorch/_activation_checkpointing/
-#
-# [third_party_profiler_tracing] files=7; patterns=5; leaves=third_party_profiler_tracing (7)
-/third_party/NVTX
-/third_party/ittapi
-/third_party/kineto
-/third_party/kineto.buck.bzl
-/third_party/valgrind-headers/
-#
-# [core_rocm_runtime] files=6; patterns=2; leaves=core_runtime (6)
-/aten/src/ATen/hip/
-/c10/hip/
-#
-# [caffe2_build_integration] files=6; patterns=6; leaves=caffe2_build_integration (5), caffe2_misc_review (1)
-/caffe2/.clang-format
-/caffe2/CMakeLists.txt
-/caffe2/core/CMakeLists.txt
-/caffe2/perfkernels/CMakeLists.txt
-/caffe2/serialize/CMakeLists.txt
-/caffe2/utils/CMakeLists.txt
-#
-# [functorch_tests_misc] files=6; patterns=6; leaves=functorch_tests_misc (6)
-/test/functorch/attn_ft.py
-/test/functorch/attn_positional.py
-/test/functorch/common_utils.py
-/test/functorch/discover_coverage.py
-/test/functorch/functorch_additional_op_db.py
-/test/functorch/xfail_suggester.py
-#
-# [benchmark_distributed] files=4; patterns=1; leaves=benchmark_distributed (4)
-/benchmarks/distributed/
-#
-# [third_party_dependency_manifests] files=3; patterns=3; leaves=third_party_dependency_manifests (3)
-/.gitmodules
-/requirements-build.txt
-/requirements.txt
-#
-# [benchmark_infra_misc_review] files=3; patterns=3; leaves=benchmark_infra_misc_review (3)
-/benchmarks/README.md
-/benchmarks/compare.sh
-/benchmarks/upload_scribe.py
-#
-# [benchmark_data_loading] files=3; patterns=1; leaves=benchmark_data_loading (3)
-/benchmarks/data/
-#
-# [benchmark_profiler] files=3; patterns=2; leaves=benchmark_profiler (3)
-/benchmarks/profiler_benchmark/
-/benchmarks/record_function_benchmark/
-#
-# [benchmark_serialization] files=3; patterns=1; leaves=benchmark_serialization (3)
-/benchmarks/serialization/
-#
-# [functorch_activation_offloading] files=3; patterns=1; leaves=functorch_activation_offloading (3)
-/torch/_functorch/_activation_offloading/
-#
-# [infra_typing] files=2; patterns=1; leaves=build_infra (2)
-/mypy_plugins/
-#
-# [third_party_distributed_comm] files=2; patterns=2; leaves=third_party_distributed_comm (2)
-/third_party/gloo
-/third_party/tensorpipe
-#
-# [benchmark_diffusion] files=1; patterns=1; leaves=benchmark_diffusion (1)
-/benchmarks/diffusion/
-#
-# [benchmark_nested_tensor] files=1; patterns=1; leaves=benchmark_nested_tensor (1)
-/benchmarks/nested/
-#
-# [functorch_legacy_misc_review] files=1; patterns=1; leaves=functorch_legacy_misc_review (1)
-/functorch/.gitignore
-#
-# -----------------------------------------------------------------------------
+# - compiler_dynamo and compiler_autograd include large expectation/skip datasets.
+# - core_aten_native_ops remains broad after linalg and optimizer subcuts.
+# - backend_vulkan remains because USE_VULKAN build support and tests exist.
+# - python_core_api is a facade surface and may need implementation routing.
+# - infra_developer_tools may need another split before assigning owners.
+# - docs_general intentionally starts at /docs/ rather than enumerating topics.
+#
+# Review-surface hierarchy:
+# - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
+# - Core operators and runtime: core_aten_native_ops, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests
+# - Backends and devices: backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan
+# - Public APIs and extensions: python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_api_custom_ops, cpp_runtime_tests, nativert
+# - Distributed: distributed
+# - Serialization and export: jit_torchscript, onnx_export, serialization_package
+# - Quantization: quantization
+# - Profiling: profiler
+# - Mobile: mobile_runtime, mobile_android, mobile_delegates
+# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_codegen, infra_developer_tools, infra_test
+# - Third-party dependencies: third_party_backend_deps, third_party_core_build_deps, third_party_serialization_schema
+# - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
+# - Legacy: caffe2
+# - Repository-wide material: ai_agent_tooling, docs_general
+#
+# Draft grouped review-surface definitions:
+# Patterns are collated by subject for review. Within this taxonomy, a
+# more-specific path overrides a broader parent path. Before activation,
+# generated CODEOWNERS rules must place broader defaults before overrides.
+#
+# [compiler_dynamo]
+# /test/distributed/test_dynamo_distributed.py
+# /test/dynamo/
+# /test/dynamo_expected_failures/
+# /test/dynamo_skips/
+# /test/export/test_dynamic_shapes.py
+# /test/onnx/exporter/test_dynamic_shapes.py
+# /torch/_dynamo/
+# /torch/csrc/dynamo/
+#
+# [compiler_inductor]
+# /test/distributed/test_inductor_collectives.py
+# /test/distributed/test_inductor_compile_collectives.py
+# /test/inductor/
+# /test/inductor_expected_failures/
+# /test/inductor_skips/
+# /test/test_precompile.py
+# /test/test_triton_utils.py
+# /torch/_higher_order_ops/flex_attention.py
+# /torch/_inductor/
+# /torch/_precompile.py
+# /torch/_precompile_driver.py
+# /torch/csrc/inductor/
+# /torch/utils/_indented_buffer.py
+#
+# [compiler_export_fx]
+# /test/export/
+# /test/fx/
+# /test/higher_order_ops/
+# /test/onnx/exporter/test_exportable_module.py
+# /test/onnx/test_fx_type_promotion.py
+# /test/package/package_bc/test_fx_module.pt
+# /test/test_dynamic_spec_make_fx.py
+# /test/test_fx.py
+# /test/test_fx_experimental.py
+# /test/test_fx_graph_print.py
+# /test/test_fx_passes.py
+# /test/test_fx_reinplace_pass.py
+# /torch/_export/
+# /torch/_higher_order_ops/
+# /torch/export/
+# /torch/fx/
+#
+# [compiler_autograd]
+# /test/compiled_autograd_skips/
+# /test/functorch/test_aot_joint_with_descriptors.py
+# /test/functorch/test_aotdispatch.py
+# /test/functorch/test_codegen_backward_epilogue.py
+# /test/functorch/test_codegen_backward_prologue.py
+# /test/functorch/test_codegen_debug_assert.py
+# /test/functorch/test_codegen_dedup.py
+# /test/functorch/test_codegen_mutation_epilogue.py
+# /test/functorch/test_codegen_output_alias.py
+# /test/functorch/test_codegen_runtime_wrapper.py
+# /test/functorch/test_compile_to_python.py
+# /test/functorch/test_memory_efficient_fusion.py
+# /test/functorch/test_minifier.py
+# /test/functorch/test_source_emit.py
+# /test/functorch/test_subclass_codegen.py
+# /test/test_functionalization_of_rng_ops.py
+# /torch/_functorch/_aot_autograd/
+# /torch/_functorch/aot_autograd.py
+# /torch/_functorch/compile_utils.py
+# /torch/_functorch/compilers.py
+# /torch/_functorch/partitioners.py
+#
+# [functorch]
+# /aten/src/ATen/functorch/
+# /functorch/
+# /test/functorch/
+# /torch/_functorch/
+# /torch/csrc/functorch/
+# /torch/func/
+#
+# [core_aten_native_ops]
+# /aten/
+#
+# [core_aten_linalg]
+# /aten/src/ATen/native/BatchLinearAlgebra.cpp
+# /aten/src/ATen/native/BatchLinearAlgebra.h
+# /aten/src/ATen/native/BatchLinearAlgebraKernel.cpp
+# /aten/src/ATen/native/Blas.cpp
+# /aten/src/ATen/native/BlasKernel.cpp
+# /aten/src/ATen/native/CPUBlas.cpp
+# /aten/src/ATen/native/CPUBlas.h
+# /aten/src/ATen/native/Cross.cpp
+# /aten/src/ATen/native/Cross.h
+# /aten/src/ATen/native/Distance.cpp
+# /aten/src/ATen/native/Distance.h
+# /aten/src/ATen/native/FunctionOfAMatrixUtils.cpp
+# /aten/src/ATen/native/FunctionOfAMatrixUtils.h
+# /aten/src/ATen/native/GroupedMMUtils.h
+# /aten/src/ATen/native/LinearAlgebra.cpp
+# /aten/src/ATen/native/LinearAlgebra.h
+# /aten/src/ATen/native/LinearAlgebraUtils.h
+# /aten/src/ATen/native/ScaledBlas.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.h
+# /aten/src/ATen/native/SpectralOps.cpp
+# /aten/src/ATen/native/SpectralOpsUtils.h
+# /aten/src/ATen/native/TriangularOps.cpp
+# /aten/src/ATen/native/TriangularOpsUtils.h
+# /test/test_linalg.py
+# /test/test_matmul_cuda.py
+# /test/test_scaled_matmul_cuda.py
+# /test/test_spectral_ops.py
+# /torch/linalg/
+#
+# [sparse]
+# /aten/src/ATen/native/SparseTensorUtils.cpp
+# /aten/src/ATen/native/SparseTensorUtils.h
+# /aten/src/ATen/native/sparse/
+# /test/expect/TestSparseCPU.test_print_coalesced_cpu_float64.expect
+# /test/expect/TestSparseCPU.test_print_uncoalesced_cpu_float64.expect
+# /test/expect/TestSparseCUDA.test_print_coalesced_cuda_float64.expect
+# /test/expect/TestSparseCUDA.test_print_uncoalesced_cuda_float64.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseBSC_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseBSR_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseCSC_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseCSR_cpu.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseBSC_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseBSR_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseCSC_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseCSR_cuda.expect
+# /test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
+# /test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSR_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+# /test/test_sparse.py
+# /test/test_sparse_csr.py
+# /test/test_sparse_semi_structured.py
+# /torch/sparse/
+#
+# [core_aten_optimizers]
+# /aten/src/ATen/native/ForeachOpsKernels.cpp
+# /aten/src/ATen/native/ForeachUtils.h
+# /aten/src/ATen/native/FusedAdagrad.cpp
+# /aten/src/ATen/native/FusedAdagrad.h
+# /aten/src/ATen/native/FusedAdam.cpp
+# /aten/src/ATen/native/FusedAdam.h
+# /aten/src/ATen/native/FusedSGD.cpp
+# /aten/src/ATen/native/FusedSGD.h
+# /test/test_functional_optim.py
+# /torch/optim/
+#
+# [core_aten_runtime]
+# /aten/CMakeLists.txt
+# /aten/src/ATen/.gitignore
+# /aten/src/ATen/ATen.h
+# /aten/src/ATen/ATenConfig.cmake.in
+# /aten/src/ATen/AccumulateType.cpp
+# /aten/src/ATen/AccumulateType.h
+# /aten/src/ATen/ArrayRef.h
+# /aten/src/ATen/Backend.h
+# /aten/src/ATen/Backtrace.h
+# /aten/src/ATen/BlasBackend.h
+# /aten/src/ATen/CMakeLists.txt
+# /aten/src/ATen/CPUApplyUtils.h
+# /aten/src/ATen/CPUGeneratorImpl.cpp
+# /aten/src/ATen/CPUGeneratorImpl.h
+# /aten/src/ATen/CachedTensorUtils.cpp
+# /aten/src/ATen/CachedTensorUtils.h
+# /aten/src/ATen/CollapseDims.h
+# /aten/src/ATen/Config.h.in
+# /aten/src/ATen/ConjugateFallback.cpp
+# /aten/src/ATen/Context.cpp
+# /aten/src/ATen/Context.h
+# /aten/src/ATen/DLConvertor.cpp
+# /aten/src/ATen/DLConvertor.h
+# /aten/src/ATen/DTensorState.cpp
+# /aten/src/ATen/DTensorState.h
+# /aten/src/ATen/Device.h
+# /aten/src/ATen/DeviceAccelerator.cpp
+# /aten/src/ATen/DeviceAccelerator.h
+# /aten/src/ATen/DeviceGuard.h
+# /aten/src/ATen/DimVector.h
+# /aten/src/ATen/Dispatch.cpp
+# /aten/src/ATen/Dispatch.h
+# /aten/src/ATen/Dispatch_v2.h
+# /aten/src/ATen/DynamicLibrary.cpp
+# /aten/src/ATen/DynamicLibrary.h
+# /aten/src/ATen/EmptyTensor.cpp
+# /aten/src/ATen/EmptyTensor.h
+# /aten/src/ATen/ExpandBase.h
+# /aten/src/ATen/ExpandUtils.cpp
+# /aten/src/ATen/ExpandUtils.h
+# /aten/src/ATen/FakeTensorDispatchTables.cpp
+# /aten/src/ATen/FakeTensorDispatchTables.h
+# /aten/src/ATen/Formatting.h
+# /aten/src/ATen/FuncTorchTLS.cpp
+# /aten/src/ATen/FuncTorchTLS.h
+# /aten/src/ATen/FunctionalInverses.cpp
+# /aten/src/ATen/FunctionalStorageImpl.cpp
+# /aten/src/ATen/FunctionalStorageImpl.h
+# /aten/src/ATen/FunctionalTensorWrapper.cpp
+# /aten/src/ATen/FunctionalTensorWrapper.h
+# /aten/src/ATen/FunctionalizeFallbackKernel.cpp
+# /aten/src/ATen/FunctionalizeFallbackKernel.h
+# /aten/src/ATen/Generator.h
+# /aten/src/ATen/InferSize.h
+# /aten/src/ATen/InitialTensorOptions.h
+# /aten/src/ATen/Layout.h
+# /aten/src/ATen/LegacyBatchedFallback.cpp
+# /aten/src/ATen/LegacyBatchedFallback.h
+# /aten/src/ATen/LegacyBatchedTensorImpl.cpp
+# /aten/src/ATen/LegacyBatchedTensorImpl.h
+# /aten/src/ATen/LegacyBatchingRegistrations.cpp
+# /aten/src/ATen/LegacyVmapMode.cpp
+# /aten/src/ATen/LegacyVmapMode.h
+# /aten/src/ATen/LegacyVmapTransforms.cpp
+# /aten/src/ATen/LegacyVmapTransforms.h
+# /aten/src/ATen/LinalgBackend.h
+# /aten/src/ATen/MapAllocator.cpp
+# /aten/src/ATen/MapAllocator.h
+# /aten/src/ATen/MatrixRef.h
+# /aten/src/ATen/MemoryOverlap.cpp
+# /aten/src/ATen/MemoryOverlap.h
+# /aten/src/ATen/NestedTensorImpl.cpp
+# /aten/src/ATen/NestedTensorImpl.h
+# /aten/src/ATen/NodeCreationHooks.cpp
+# /aten/src/ATen/NodeCreationHooks.h
+# /aten/src/ATen/NumericUtils.h
+# /aten/src/ATen/OpMathType.h
+# /aten/src/ATen/OpaqueTensorImpl.h
+# /aten/src/ATen/PTThreadPool.h
+# /aten/src/ATen/PadNd.h
+# /aten/src/ATen/Parallel-inl.h
+# /aten/src/ATen/Parallel.h
+# /aten/src/ATen/ParallelCommon.cpp
+# /aten/src/ATen/ParallelFuture.h
+# /aten/src/ATen/ParallelNative.cpp
+# /aten/src/ATen/ParallelNative.h
+# /aten/src/ATen/ParallelOpenMP.cpp
+# /aten/src/ATen/ParallelOpenMP.h
+# /aten/src/ATen/ParallelThreadPoolNative.cpp
+# /aten/src/ATen/PythonTorchFunctionTLS.cpp
+# /aten/src/ATen/PythonTorchFunctionTLS.h
+# /aten/src/ATen/ROCmFABackend.h
+# /aten/src/ATen/SDPBackend.h
+# /aten/src/ATen/SavedTensorHooks.cpp
+# /aten/src/ATen/SavedTensorHooks.h
+# /aten/src/ATen/Scalar.h
+# /aten/src/ATen/ScalarOps.cpp
+# /aten/src/ATen/ScalarOps.h
+# /aten/src/ATen/ScalarType.h
+# /aten/src/ATen/SequenceNumber.cpp
+# /aten/src/ATen/SequenceNumber.h
+# /aten/src/ATen/SmallVector.h
+# /aten/src/ATen/SparseCsrTensorImpl.cpp
+# /aten/src/ATen/SparseCsrTensorImpl.h
+# /aten/src/ATen/SparseCsrTensorUtils.h
+# /aten/src/ATen/SparseTensorImpl.cpp
+# /aten/src/ATen/SparseTensorImpl.h
+# /aten/src/ATen/Storage.h
+# /aten/src/ATen/StorageUtils.cpp
+# /aten/src/ATen/StorageUtils.h
+# /aten/src/ATen/Tensor.h
+# /aten/src/ATen/TensorAccessor.h
+# /aten/src/ATen/TensorGeometry.cpp
+# /aten/src/ATen/TensorGeometry.h
+# /aten/src/ATen/TensorIndexing.cpp
+# /aten/src/ATen/TensorIndexing.h
+# /aten/src/ATen/TensorIterator.cpp
+# /aten/src/ATen/TensorIterator.h
+# /aten/src/ATen/TensorIteratorInternal.h
+# /aten/src/ATen/TensorMeta.cpp
+# /aten/src/ATen/TensorMeta.h
+# /aten/src/ATen/TensorOperators.h
+# /aten/src/ATen/TensorOptions.h
+# /aten/src/ATen/TensorSubclassLikeUtils.h
+# /aten/src/ATen/TensorUtils.cpp
+# /aten/src/ATen/TensorUtils.h
+# /aten/src/ATen/ThreadLocalPythonObjects.cpp
+# /aten/src/ATen/ThreadLocalPythonObjects.h
+# /aten/src/ATen/ThreadLocalState.cpp
+# /aten/src/ATen/ThreadLocalState.h
+# /aten/src/ATen/TracerMode.h
+# /aten/src/ATen/TypeDefault.h
+# /aten/src/ATen/Utils.cpp
+# /aten/src/ATen/Utils.h
+# /aten/src/ATen/Version.cpp
+# /aten/src/ATen/Version.h
+# /aten/src/ATen/VmapModeRegistrations.cpp
+# /aten/src/ATen/WrapDimUtils.h
+# /aten/src/ATen/WrapDimUtilsMulti.h
+# /aten/src/ATen/ZeroTensorFallback.cpp
+# /aten/src/ATen/accelerator/
+# /aten/src/ATen/autocast_mode.cpp
+# /aten/src/ATen/autocast_mode.h
+# /aten/src/ATen/benchmarks/
+# /aten/src/ATen/ceil_div.h
+# /aten/src/ATen/code_template.h
+# /aten/src/ATen/core/
+# /aten/src/ATen/cpp_custom_type_hack.h
+# /aten/src/ATen/cpu/
+# /aten/src/ATen/cudnn/
+# /aten/src/ATen/detail/
+# /aten/src/ATen/div_rtn.h
+# /aten/src/ATen/dlpack.h
+# /aten/src/ATen/jit_macros.h
+# /aten/src/ATen/jiterator_macros.h
+# /aten/src/ATen/miopen/
+# /aten/src/ATen/mkl/
+# /aten/src/ATen/nnapi/
+# /aten/src/ATen/ops/
+# /aten/src/ATen/quantized/
+# /aten/src/ATen/record_function.cpp
+# /aten/src/ATen/record_function.h
+# /aten/src/ATen/templates/
+# /aten/src/ATen/test/
+# /aten/src/ATen/vulkan/
+# /aten/src/README.md
+# /aten/src/THC/
+# /aten/tools/
+#
+# [core_c10_dispatch]
+# /c10/
+#
+# [autograd]
+# /torch/autograd/
+# /torch/csrc/autograd/
+#
+# [core_csrc_misc]
+# /torch/csrc/CudaIPCTypes.cpp
+# /torch/csrc/CudaIPCTypes.h
+# /torch/csrc/DataLoader.cpp
+# /torch/csrc/DataLoader.h
+# /torch/csrc/Device.cpp
+# /torch/csrc/Device.h
+# /torch/csrc/DeviceAccelerator.cpp
+# /torch/csrc/DeviceAccelerator.h
+# /torch/csrc/Dtype.cpp
+# /torch/csrc/Dtype.h
+# /torch/csrc/DynamicTypes.cpp
+# /torch/csrc/DynamicTypes.h
+# /torch/csrc/Event.cpp
+# /torch/csrc/Event.h
+# /torch/csrc/Exceptions.cpp
+# /torch/csrc/Exceptions.h
+# /torch/csrc/Export.h
+# /torch/csrc/Generator.cpp
+# /torch/csrc/Generator.h
+# /torch/csrc/Layout.cpp
+# /torch/csrc/Layout.h
+# /torch/csrc/MemoryFormat.cpp
+# /torch/csrc/MemoryFormat.h
+# /torch/csrc/Module.cpp
+# /torch/csrc/Module.h
+# /torch/csrc/PyInterpreter.cpp
+# /torch/csrc/PyInterpreter.h
+# /torch/csrc/PyInterpreterHooks.cpp
+# /torch/csrc/PyInterpreterHooks.h
+# /torch/csrc/PyObjectConversion.cpp
+# /torch/csrc/PyObjectConversion.h
+# /torch/csrc/PyObjectConversionPythonImpl.cpp
+# /torch/csrc/QScheme.cpp
+# /torch/csrc/QScheme.h
+# /torch/csrc/README.md
+# /torch/csrc/Size.cpp
+# /torch/csrc/Size.h
+# /torch/csrc/Storage.cpp
+# /torch/csrc/Storage.h
+# /torch/csrc/StorageMethods.cpp
+# /torch/csrc/StorageMethods.h
+# /torch/csrc/StorageSharing.cpp
+# /torch/csrc/StorageSharing.h
+# /torch/csrc/Stream.cpp
+# /torch/csrc/Stream.h
+# /torch/csrc/THConcat.h
+# /torch/csrc/THP.h
+# /torch/csrc/TensorIterator.cpp
+# /torch/csrc/TensorIterator.h
+# /torch/csrc/TypeInfo.cpp
+# /torch/csrc/TypeInfo.h
+# /torch/csrc/Types.h
+# /torch/csrc/acc/
+# /torch/csrc/copy_utils.h
+# /torch/csrc/cpu/
+# /torch/csrc/empty.c
+# /torch/csrc/export/
+# /torch/csrc/functionalization/
+# /torch/csrc/fx/
+# /torch/csrc/instruction_counter/
+# /torch/csrc/itt.cpp
+# /torch/csrc/itt.h
+# /torch/csrc/itt_wrapper.cpp
+# /torch/csrc/itt_wrapper.h
+# /torch/csrc/monitor/
+# /torch/csrc/mtia/
+# /torch/csrc/multiprocessing/
+# /torch/csrc/onnx/
+# /torch/csrc/python_headers.h
+# /torch/csrc/serialization.cpp
+# /torch/csrc/serialization.h
+# /torch/csrc/shim_common.cpp
+# /torch/csrc/shim_conversion_utils.h
+# /torch/csrc/shim_exception_state.cpp
+# /torch/csrc/shim_exception_state.h
+# /torch/csrc/stable/
+# /torch/csrc/stub.c
+# /torch/csrc/tensor/
+# /torch/csrc/utils.cpp
+# /torch/csrc/utils.h
+# /torch/csrc/utils/
+#
+# [core_lazy_runtime]
+# /torch/csrc/lazy/
+#
+# [core_tests]
+# /test/HowToWriteTestsUsingFileCheck.md
+# /test/allowlist_for_publicAPI.json
+# /test/backends/
+# /test/bench_mps_ops.py
+# /test/complex_tensor/
+# /test/conftest.py
+# /test/create_dummy_torchscript_model.py
+# /test/error_messages/
+# /test/expect/HasDecompTest.test_aten_core_operators.expect
+# /test/expect/HasDecompTest.test_has_decomposition.expect
+# /test/expect/TestAutograd.test_function-x_grad_desc.expect
+# /test/expect/TestAutograd.test_function-y_grad_desc.expect
+# /test/expect/TestFXAPIBackwardCompatibility.test_class_member_back_compat-fx_backcompat_class_members.expect
+# /test/expect/TestFXAPIBackwardCompatibility.test_function_back_compat-fx_backcompat_function_signatures.expect
+# /test/expect/TestJit.test_cu_escaped_number.expect
+# /test/expect/TestJit.test_import_method.expect
+# /test/expect/TestJit.test_non_ascii_string.expect
+# /test/expect/TestJit.test_pretty_printer-empty_float_list_test.expect
+# /test/expect/TestJit.test_pretty_printer-empty_int_list_test.expect
+# /test/expect/TestJit.test_pretty_printer-if_one.expect
+# /test/expect/TestJit.test_pretty_printer-if_test.expect
+# /test/expect/TestJit.test_pretty_printer-loop_use_test.expect
+# /test/expect/TestJit.test_pretty_printer-print_weird_test.expect
+# /test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_if_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_test.expect
+# /test/expect/TestPytorchExportModes.test_aten_fallback.expect
+# /test/expect/TestPytorchExportModes.test_onnx_aten.expect
+# /test/expect/TestScript.test_annot_ast_mypy_fn.expect
+# /test/expect/TestScript.test_annot_ast_mypy_method.expect
+# /test/expect/TestScript.test_annot_ast_py3_fn.expect
+# /test/expect/TestScript.test_annot_ast_py3_method.expect
+# /test/expect/TestScript.test_annot_string_mypy_fn.expect
+# /test/expect/TestScript.test_annot_string_mypy_method.expect
+# /test/expect/TestScript.test_annot_string_py3_fn.expect
+# /test/expect/TestScript.test_annot_string_py3_method.expect
+# /test/expect/TestScript.test_annotated_script_fn.expect
+# /test/expect/TestScript.test_annotated_script_method.expect
+# /test/expect/TestScript.test_format-stdout.expect
+# /test/expect/TestScript.test_listconstruct_erasure.expect
+# /test/expect/TestScript.test_parser_type_annotations.expect
+# /test/expect/TestScript.test_parser_type_annotations_comment.expect
+# /test/expect/TestScript.test_print-stdout.expect
+# /test/expect/TestScript.test_python_frontend.expect
+# /test/expect/TestScript.test_python_frontend_py2.expect
+# /test/expect/TestScript.test_python_frontend_py3.expect
+# /test/expect/TestScript.test_string_print-stdout.expect
+# /test/expect/TestScript.test_torch_dot_tensor_annotation.expect
+# /test/expect/TestTensorBoard.test_audio.expect
+# /test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
+# /test/expect/TestTensorBoard.test_caffe2_simple_model.expect
+# /test/expect/TestTensorBoard.test_histogram_auto.expect
+# /test/expect/TestTensorBoard.test_histogram_doane.expect
+# /test/expect/TestTensorBoard.test_histogram_fd.expect
+# /test/expect/TestTensorBoard.test_hparams_bool.expect
+# /test/expect/TestTensorBoard.test_hparams_number.expect
+# /test/expect/TestTensorBoard.test_hparams_string.expect
+# /test/expect/TestTensorBoard.test_image_with_3_channel_batched.expect
+# /test/expect/TestTensorBoard.test_image_with_boxes.expect
+# /test/expect/TestTensorBoard.test_image_with_one_channel.expect
+# /test/expect/TestTensorBoard.test_image_with_one_channel_batched.expect
+# /test/expect/TestTensorBoard.test_image_without_channel.expect
+# /test/expect/TestTensorBoard.test_mesh.expect
+# /test/expect/TestTensorBoard.test_nested_nn_squential.expect
+# /test/expect/TestTensorBoard.test_pr_curve.expect
+# /test/expect/TestTensorBoard.test_pr_curve_raw.expect
+# /test/expect/TestTensorBoard.test_pytorch_graph.expect
+# /test/expect/TestTensorBoard.test_scalar_new_style.expect
+# /test/expect/TestTensorBoard.test_text.expect
+# /test/expect/TestTensorBoard.test_video.expect
+# /test/expect/TestTorch.test_is_nonzero-empty.expect
+# /test/expect/TestTorch.test_is_nonzero-multiple.expect
+# /test/expect/TestTorch.test_print-non_contiguous.expect
+# /test/expect/__init__.py
+# /test/forward_backward_compatibility/
+# /test/lazy/
+# /test/linear.py
+# /test/load_torchscript_model.py
+# /test/minioptest_failures_dict.json
+# /test/mkl_verbose.py
+# /test/mkldnn_verbose.py
+# /test/pytest_shard_custom.py
+# /test/python_native/
+# /test/run_doctests.sh
+# /test/run_test.py
+# /test/simulate_nccl_errors.py
+# /test/slow_tests.json
+# /test/test_accelerator.py
+# /test/test_ao_sparsity.py
+# /test/test_appending_byte_serializer.py
+# /test/test_as_strided.py
+# /test/test_autocast.py
+# /test/test_autoload.py
+# /test/test_binary_ufuncs.py
+# /test/test_bmm_outer_product.py
+# /test/test_bundled_images.py
+# /test/test_bundled_inputs.py
+# /test/test_ci_sanity_check_fail.py
+# /test/test_comparison_utils.py
+# /test/test_compile_benchmark_util.py
+# /test/test_complex.py
+# /test/test_content_store.py
+# /test/test_custom_ops.py
+# /test/test_dataloader.py
+# /test/test_datapipe.py
+# /test/test_decomp.py
+# /test/test_determination.py
+# /test/test_dispatch.py
+# /test/test_dlpack.py
+# /test/test_dynamic_shapes.py
+# /test/test_expanded_weights.py
+# /test/test_extension_utils.py
+# /test/test_fake_tensor.py
+# /test/test_file_check.py
+# /test/test_flop_counter.py
+# /test/test_foreach.py
+# /test/test_function_schema.py
+# /test/test_functionalization.py
+# /test/test_futures.py
+# /test/test_hop_infra.py
+# /test/test_hub.py
+# /test/test_img/
+# /test/test_import_stats.py
+# /test/test_indexing.py
+# /test/test_inspect_utils.py
+# /test/test_itt.py
+# /test/test_kernel_launch_checks.py
+# /test/test_legacy_vmap.py
+# /test/test_license.py
+# /test/test_logging.py
+# /test/test_meta.py
+# /test/test_mkl_verbose.py
+# /test/test_mkldnn.py
+# /test/test_mkldnn_fusion.py
+# /test/test_mkldnn_verbose.py
+# /test/test_model_exports_to_core_aten.py
+# /test/test_module_tracker.py
+# /test/test_monitor.py
+# /test/test_multiprocessing.py
+# /test/test_multiprocessing_spawn.py
+# /test/test_namedtuple_return_api.py
+# /test/test_native_functions.py
+# /test/test_native_mha.py
+# /test/test_nestedtensor.py
+# /test/test_numa_binding.py
+# /test/test_numba_integration.py
+# /test/test_opaque_obj_v2.py
+# /test/test_openmp.py
+# /test/test_ops.py
+# /test/test_ops_fwd_gradients.py
+# /test/test_ops_gradients.py
+# /test/test_ops_jit.py
+# /test/test_ops_unbacked.py
+# /test/test_out_dtype_op.py
+# /test/test_overrides.py
+# /test/test_per_overload_api.py
+# /test/test_prims.py
+# /test/test_privateuseone_python_backend.py
+# /test/test_proxy_tensor.py
+# /test/test_pruning_op.py
+# /test/test_python_dispatch.py
+# /test/test_pytree.py
+# /test/test_reductions.py
+# /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_scatter_gather_ops.py
+# /test/test_schema_check.py
+# /test/test_segment_reductions.py
+# /test/test_set_default_mobile_cpu_allocator.py
+# /test/test_shape_ops.py
+# /test/test_show_pickle.py
+# /test/test_sort_and_select.py
+# /test/test_stateless.py
+# /test/test_stateless_rng.py
+# /test/test_static_runtime.py
+# /test/test_subclass.py
+# /test/test_sympy_utils.py
+# /test/test_tensor_creation_ops.py
+# /test/test_tensor_iterator.py
+# /test/test_tensorboard.py
+# /test/test_torch.py
+# /test/test_torch_config_hash_determinism.py
+# /test/test_torchfuzz_repros.py
+# /test/test_tsan.py
+# /test/test_type_info.py
+# /test/test_type_promotion.py
+# /test/test_unary_ufuncs.py
+# /test/test_view_ops.py
+# /test/test_weak.py
+#
+# [backend_device_runtime]
+# /test/custom_backend/
+# /torch/backends/
+#
+# [backend_cuda]
+# /aten/src/ATen/cuda/
+# /aten/src/ATen/native/cuda/
+# /c10/cuda/
+# /test/test_cuda.py
+# /test/test_cuda_compatibility.py
+# /test/test_cuda_expandable_segments.py
+# /test/test_cuda_graph_debug.py
+# /test/test_cuda_graph_utils.py
+# /test/test_cuda_multigpu.py
+# /test/test_cuda_nvml_based_avail.py
+# /test/test_cuda_primary_ctx.py
+# /test/test_cuda_sanitizer.py
+# /test/test_cuda_trace.py
+# /torch/backends/cuda/
+# /torch/backends/cudnn/
+# /torch/backends/cusparselt/
+# /torch/csrc/cuda/
+# /torch/cuda/
+#
+# [backend_mps]
+# /aten/src/ATen/metal/
+# /aten/src/ATen/mps/
+# /aten/src/ATen/native/mps/
+# /c10/metal/
+# /test/metal/
+# /test/test_metal.py
+# /test/test_mps.py
+# /torch/backends/mps/
+# /torch/csrc/mps/
+# /torch/mps/
+#
+# [backend_xpu]
+# /aten/src/ATen/xpu/
+# /c10/xpu/
+# /test/test_xpu.py
+# /test/test_xpu_expandable_segments.py
+# /test/xpu/
+# /torch/csrc/xpu/
+# /torch/xpu/
+#
+# [backend_rocm]
+# /aten/src/ATen/hip/
+# /c10/hip/
+# /torch/backends/miopen/
+#
+# [backend_vulkan]
+# /aten/src/ATen/native/vulkan/
+#
+# [python_core_api]
+# /torch/CMakeLists.txt
+# /torch/_C/
+# /torch/_C_flatbuffer/
+# /torch/_VF.py
+# /torch/__config__.py
+# /torch/__future__.py
+# /torch/__init__.py
+# /torch/_appdirs.py
+# /torch/_awaits/
+# /torch/_classes.py
+# /torch/_compile.py
+# /torch/_decomp/
+# /torch/_dispatch/
+# /torch/_environment.py
+# /torch/_guards.py
+# /torch/_jit_internal.py
+# /torch/_lazy/
+# /torch/_linalg_utils.py
+# /torch/_lobpcg.py
+# /torch/_lowrank.py
+# /torch/_meta_registrations.py
+# /torch/_native/
+# /torch/_numpy/
+# /torch/_opaque_base.py
+# /torch/_ops.py
+# /torch/_prims/
+# /torch/_prims_common/
+# /torch/_python_dispatcher.py
+# /torch/_refs/
+# /torch/_size_docs.py
+# /torch/_sources.py
+# /torch/_storage_docs.py
+# /torch/_streambase.py
+# /torch/_strobelight/
+# /torch/_subclasses/
+# /torch/_tensor.py
+# /torch/_tensor_docs.py
+# /torch/_tensor_iterator.py
+# /torch/_tensor_str.py
+# /torch/_thread_safe_fork.py
+# /torch/_torch_docs.py
+# /torch/_utils.py
+# /torch/_utils_internal.py
+# /torch/_vendor/
+# /torch/_vmap_internals.py
+# /torch/_weights_only_unpickler.py
+# /torch/accelerator/
+# /torch/amp/
+# /torch/compiler/
+# /torch/contrib/
+# /torch/cpu/
+# /torch/distributions/
+# /torch/fft/
+# /torch/functional.py
+# /torch/futures/
+# /torch/header_only_apis.txt
+# /torch/headeronly/
+# /torch/hub.py
+# /torch/legacy/
+# /torch/lib/
+# /torch/monitor/
+# /torch/mtia/
+# /torch/multiprocessing/
+# /torch/nested/
+# /torch/numa/
+# /torch/overrides.py
+# /torch/py.typed
+# /torch/quasirandom.py
+# /torch/random.py
+# /torch/return_types.py
+# /torch/script.h
+# /torch/signal/
+# /torch/special/
+# /torch/storage.py
+# /torch/torch_version.py
+# /torch/types.py
+# /torch/utils/
+#
+# [python_nn_api]
+# /torch/nn/
+#
+# [python_data_api]
+# /torch/utils/data/
+#
+# [python_specialized_api]
+# /test/test_masked.py
+# /test/test_maskedtensor.py
+# /torch/masked/
+# /torch/utils/tensorboard/
+#
+# [python_api_tests]
+# /test/autograd/
+# /test/cpython/
+# /test/distributions/
+# /test/nn/
+# /test/optim/
+# /test/test_autograd.py
+# /test/test_autograd_fallback.py
+# /test/test_modules.py
+# /test/test_nn.py
+# /test/test_nnapi.py
+# /test/test_numpy_interop.py
+# /test/test_optim.py
+# /test/test_transformers.py
+# /test/test_type_hints.py
+# /test/test_typing.py
+# /test/test_varlen_attention.py
+# /test/torch_np/
+# /test/typing/
+# /test/xpu/test_transformers.py
+#
+# [cpp_api_custom_ops]
+# /aten/src/ATen/native/native_functions.yaml
+# /aten/src/ATen/native/prim_native_functions.cpp
+# /aten/src/ATen/native/tags.yaml
+# /aten/src/ATen/native/ts_native_functions.yaml
+# /test/cpp_extensions/
+# /test/custom_operator/
+# /test/test_cpp_extensions_aot.py
+# /test/test_cpp_extensions_jit.py
+# /test/test_cpp_extensions_mtia_backend.py
+# /test/test_cpp_extensions_stream_and_event.py
+# /torch/_custom_class_base.py
+# /torch/_custom_op/
+# /torch/_custom_ops.py
+# /torch/_library/
+# /torch/csrc/api/
+# /torch/custom_class.h
+# /torch/custom_class_detail.h
+# /torch/extension.h
+# /torch/library.h
+# /torch/library.py
+# /torch/utils/_cpp_extension_versioner.py
+# /torch/utils/cpp_extension.py
+#
+# [cpp_runtime_tests]
+# /test/cpp/
+# /test/cpp_api_parity/
+# /test/test_cpp_api_parity.py
+#
+# [nativert]
+# /test/cpp/nativert/
+# /test/export/test_nativert.py
+# /torch/csrc/api/include/torch/nativert/
+# /torch/nativert/
+#
+# [distributed]
+# /benchmarks/distributed/
+# /test/distributed/
+# /torch/csrc/distributed/
+# /torch/distributed/
+#
+# [jit_torchscript]
+# /test/cpp/jit/test_jit_logging_levels.cpp
+# /test/cpp/jit/test_jit_type.cpp
+# /test/cpp/jit/test_save_load.cpp
+# /test/jit/
+# /test/jit_hooks/
+# /test/test_jit.py
+# /test/test_jit_autocast.py
+# /test/test_jit_disabled.py
+# /test/test_jit_fuser.py
+# /test/test_jit_fuser_legacy.py
+# /test/test_jit_fuser_te.py
+# /test/test_jit_legacy.py
+# /test/test_jit_llga_fuser.py
+# /test/test_jit_profiling.py
+# /test/test_jit_simple.py
+# /test/test_jit_string.py
+# /test/test_jiterator.py
+# /test/test_tensorexpr.py
+# /test/test_tensorexpr_pybind.py
+# /torch/csrc/jit/
+# /torch/jit/
+#
+# [onnx_export]
+# /test/onnx/
+# /torch/onnx/
+#
+# [serialization_package]
+# /benchmarks/serialization/
+# /test/package/
+# /test/test_package.py
+# /test/test_serialization.py
+# /torch/package/
+# /torch/serialization.py
+#
+# [quantization]
+# /aten/src/ATen/native/quantized/
+# /test/ao/
+# /test/onnx/test_models_quantized_onnxruntime.py
+# /test/quantization/
+# /test/test_quantization.py
+# /torch/ao/
+# /torch/quantization/
+#
+# [profiler]
+# /test/cpp/profiler/test_profiler_collection.cpp
+# /test/profiler/
+# /test/test_throughput_benchmark.py
+# /torch/autograd/profiler.py
+# /torch/autograd/profiler_legacy.py
+# /torch/autograd/profiler_util.py
+# /torch/csrc/autograd/profiler.h
+# /torch/csrc/autograd/profiler_kineto.cpp
+# /torch/csrc/autograd/profiler_kineto.h
+# /torch/csrc/autograd/profiler_legacy.cpp
+# /torch/csrc/autograd/profiler_legacy.h
+# /torch/csrc/autograd/profiler_python.cpp
+# /torch/csrc/autograd/profiler_python.h
+# /torch/csrc/profiler/
+# /torch/profiler/
+#
+# [mobile_runtime]
+# /test/cpp/jit/test_mobile_type_parser.cpp
+# /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
+# /test/mobile/
+# /test/test_mobile_optimizer.py
+# /torch/csrc/jit/mobile/
+#
+# [mobile_android]
+# /android/
+# /test/mobile/custom_build/
+#
+# [mobile_delegates]
+# /test/test_vulkan.py
+# /test/test_xnnpack_integration.py
+# /torch/backends/_coreml/
+# /torch/backends/_nnapi/
+# /torch/backends/xnnpack/
+# /torch/csrc/jit/backends/
+#
+# [infra_ci]
+# /.ci/
+#
+# [infra_github_automation]
+# /.github/
+#
+# [infra_build_packaging]
+# /.bc-linter.yml
+# /.ci/manywheel/
+# /.clang-format
+# /.clang-tidy
+# /.cmakelintrc
+# /.coveragerc
+# /.ctags.d/
+# /.dockerignore
+# /.editorconfig
+# /.flake8
+# /.gdbinit
+# /.git-blame-ignore-revs
+# /.gitattributes
+# /.gitignore
+# /.lintrunner.toml
+# /.lldbinit
+# /.spin/
+# /BUCK.oss
+# /CMakeLists.txt
+# /CODEOWNERS
+# /Dockerfile
+# /Makefile
+# /buckbuild.bzl
+# /build.bzl
+# /build_variables.bzl
+# /cmake/
+# /codex_setup.sh
+# /defs.bzl
+# /docker.Makefile
+# /mypy-strict.ini
+# /mypy.ini
+# /pt_ops.bzl
+# /pt_template_srcs.bzl
+# /pyproject.toml
+# /pyrefly.toml
+# /pytest.ini
+# /setup.py
+# /ubsan.supp
+# /ufunc_defs.bzl
+# /version.txt
+#
+# [infra_codegen]
+# /tools/autograd/
+# /torchgen/
+#
+# [infra_developer_tools]
+# /.devcontainer/
+# /.vscode/
+# /benchmarks/README.md
+# /benchmarks/compare.sh
+# /benchmarks/upload_scribe.py
+# /binaries/
+# /mypy_plugins/
+# /scripts/
+# /tools/
+#
+# [infra_test]
+# /test/benchmark_utils/
+# /test/scripts/
+# /test/spincli/
+# /test/strobelight/
+# /test/test_public_bindings.py
+# /test/test_testing.py
+# /test/test_utils.py
+# /test/test_utils_config_module.py
+# /test/test_utils_filelock.py
+# /tools/test/
+# /tools/testing/
+# /torch/_logging/
+# /torch/testing/
+# /torch/utils/benchmark/
+#
+# [third_party_backend_deps]
+# /third_party/NNPACK
+# /third_party/VulkanMemoryAllocator
+# /third_party/XNNPACK
+# /third_party/aiter
+# /third_party/composable_kernel
+# /third_party/cpuinfo
+# /third_party/cudnn_frontend
+# /third_party/cutlass
+# /third_party/fbgemm
+# /third_party/flash-attention
+# /third_party/gemmlowp/
+# /third_party/ideep
+# /third_party/kleidiai
+# /third_party/pthreadpool
+# /third_party/xnnpack.buck.bzl
+# /third_party/xnnpack_buck_shim.bzl
+# /third_party/xnnpack_src_defs.bzl
+# /third_party/xnnpack_wrapper_defs.bzl
+# /third_party/xpu.txt
+#
+# [third_party_core_build_deps]
+# /.gitmodules
+# /requirements-build.txt
+# /requirements.txt
+# /third_party/
+#
+# [third_party_serialization_schema]
+# /third_party/flatbuffers
+# /third_party/miniz-3.0.2/
+# /third_party/onnx
+# /third_party/protobuf
+#
+# [benchmark_compiler]
+# /benchmarks/
+#
+# [benchmark_operator_runtime]
+# /benchmarks/framework_overhead_benchmark/
+# /benchmarks/functional_autograd_benchmark/
+# /benchmarks/instruction_counts/
+# /benchmarks/operator_benchmark/
+# /benchmarks/overrides_benchmark/
+# /benchmarks/profiler_benchmark/
+# /benchmarks/record_function_benchmark/
+# /benchmarks/sparse/
+# /benchmarks/static_runtime/
+# /test/test_functional_autograd_benchmark.py
+#
+# [benchmark_models]
+# /benchmarks/compare-fastrnn-results.py
+# /benchmarks/data/
+# /benchmarks/diffusion/
+# /benchmarks/fastrnns/
+# /benchmarks/gpt_fast/
+# /benchmarks/inference/
+# /benchmarks/nested/
+# /benchmarks/transformer/
+#
+# [caffe2]
+# /caffe2/
+#
+# [ai_agent_tooling]
+# /.claude/
+# /.github/copilot-instructions.md
+# /.github/workflows/claude-autorevert-advisor.yml
+# /.github/workflows/claude-code.yml
+# /.github/workflows/claude-distributed-triage-cron.yml
+# /.github/workflows/claude-distributed-triage.yml
+# /.github/workflows/claude-issue-triage-run.yml
+# /.github/workflows/claude-issue-triage.yml
+# /AGENTS.md
+# /AI_POLICY.md
+# /CLAUDE.md
+# /torch/_dynamo/CLAUDE.md
+#
+# [docs_general]
+# /CITATION.cff
+# /CODE_OF_CONDUCT.md
+# /CONTRIBUTING.md
+# /GLOSSARY.md
+# /LICENSE
+# /NOTICE
+# /README.md
+# /RELEASE.md
+# /SECURITY.md
+# /docs/
