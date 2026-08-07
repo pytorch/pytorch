@@ -1904,6 +1904,27 @@ exclude_patterns = [
     'test/cpython/**',
 ]
 
+# Tests gated on a GPU architecture are only covered by the ciflow/h100 and
+# ciflow/b200 jobs if .ci/pytorch/test.sh selects them. Triggering those jobs
+# stays a manual label; this only ensures they cover what they should.
+[[linter]]
+code = 'GPU_ARCH_COVERAGE'
+command = [
+    'python3',
+    'tools/linter/adapters/gpu_arch_coverage_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+include_patterns = [
+    'test/**/test_*.py',
+    '.ci/pytorch/test.sh',
+]
+exclude_patterns = [
+    'test/cpython/**',
+    '**/fb/**',
+]
+is_formatter = true
+
 # 'header_only_linter' reports on properly testing header-only APIs.
 [[linter]]
 code = 'HEADER_ONLY_LINTER'
