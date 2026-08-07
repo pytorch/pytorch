@@ -55,9 +55,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_xpu import (
-    TEST_MULTIXPU,
-)
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -86,6 +83,7 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
+from torch.testing._internal.common_xpu import TEST_MULTIXPU
 from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
 from torch.utils._triton import has_triton, has_triton_tma_device
 
