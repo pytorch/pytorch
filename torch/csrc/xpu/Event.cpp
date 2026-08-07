@@ -176,7 +176,7 @@ static PyObject* THXPEvent_from_ipc_handle(
   const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
   sycl::ext::oneapi::experimental::ipc::handle_data_t handle(
       data, data + handle_string.size());
-  new (&self->xpu_event) at::xpu::XPUEvent(device.index(), &handle);
+  new (&self->xpu_event) at::xpu::XPUEvent(device.index(), handle);
 
   return (PyObject*)ptr.release();
 #else
