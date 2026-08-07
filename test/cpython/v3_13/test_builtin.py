@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     run_tests,
+    HardwareClassification,
 )
 
 # ======= END DYNAMO PATCH =======
@@ -169,6 +170,8 @@ def map_char(arg):
     return chr(ord(arg)+1)
 
 class BuiltinTest(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Helper to check picklability
     def check_iter_pickle(self, it, seq, proto):
         itorg = it
@@ -2243,6 +2246,8 @@ class BuiltinTest(CPythonTestCase):
 
 
 class TestBreakpoint(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         # These tests require a clean slate environment.  For example, if the
         # test suite is run with $PYTHONBREAKPOINT set to something else, it
@@ -2364,6 +2369,7 @@ class TestBreakpoint(CPythonTestCase):
 class PtyTests(CPythonTestCase):
     """Tests that use a pseudo terminal to guarantee stdin and stdout are
     terminals in the test environment"""
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def handle_sighup(signum, frame):
@@ -2541,6 +2547,7 @@ class PtyTests(CPythonTestCase):
         self.assertSequenceEqual(lines, expected)
 
 class TestSorted(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_basic(self):
         data = list(range(100))
@@ -2584,6 +2591,7 @@ class TestSorted(CPythonTestCase):
 
 
 class ShutdownTest(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cleanup(self):
         # Issue #19255: builtins are still available at shutdown
@@ -2619,6 +2627,7 @@ class ShutdownTest(CPythonTestCase):
 
 @cpython_only
 class ImmortalTests(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     if sys.maxsize < (1 << 32):
         IMMORTAL_REFCOUNT = (1 << 30) - 1
@@ -2647,6 +2656,8 @@ class ImmortalTests(CPythonTestCase):
 
 
 class TestType(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_new_type(self):
         A = type('A', (), {})
         self.assertEqual(A.__name__, 'A')

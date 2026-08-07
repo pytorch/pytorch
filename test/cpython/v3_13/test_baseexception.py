@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, TEST_WITH_TORCHDYNAMO
 
 # redirect import statements
 import sys
@@ -56,6 +56,7 @@ from platform import system as platform_system
 
 
 class ExceptionClassTests(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     """Tests for anything relating to exception objects themselves (e.g.,
     inheritance hierarchy)"""
@@ -195,6 +196,7 @@ class ExceptionClassTests(CPythonTestCase):
 
 
 class UsageTests(CPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     """Test usage of exceptions"""
 
