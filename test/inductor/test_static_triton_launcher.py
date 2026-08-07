@@ -61,6 +61,9 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher = object.__new__(StaticallyLaunchedXpuKernel)
         launcher.function = None
         launcher.module = None
+        launcher.device_agnostic = False
+        launcher.functions = {}
+        launcher.modules = {}
         launcher.cubin_path = "/tmp/kernel.zebin"
         launcher.cubin_raw = b"zebin"
         launcher.name = "kernel"
@@ -133,6 +136,20 @@ class TestStaticTritonLauncherUnit(TestCase):
         del fast_launcher
         gc.collect()
         self.assertIsNone(owner_ref())
+
+    def test_resolve_load_device_cpu_stays_none(self):
+        # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
+        # concrete index makes the guard call exchange_device, which CPU does not
+        # implement, breaking the triton CPU backend's _make_launchers.
+        from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+
+        self.assertIsNone(_resolve_load_device(None, "cpu"))
+        self.assertEqual(_resolve_load_device(3, "cpu"), 3)
+        # The resolved CPU value must be usable in a DeviceGuard without raising.
+        iface = get_interface_for_device("cpu")
+        with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
+            pass
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
@@ -560,6 +577,8 @@ def kernel_many_args(out_tensor, {decl}):
                 self.name = "fake_kernel"
                 self.module = 0xC0FFEE
                 self.function = 0xF00D
+                self.functions = {}
+                self.modules = {}
                 self.C_impl = FakeImpl
 
             def close(self):

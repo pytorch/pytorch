@@ -100,10 +100,21 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
 
   c10::cuda::CUDAGuard guard(local_device_idx);
-  AT_CUDA_CHECK(cudaMemcpy(
-      buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
-  AT_CUDA_CHECK(cudaMemcpy(
-      signal_pads_dev_, signal_pads_.data(), arr_size, cudaMemcpyHostToDevice));
+  // Upload on the current stream, then sync. The sync is required because
+  // callers may launch kernels that dereference these arrays on a stream other
+  // than the one the copies were issued on; same-stream consumers alone would
+  // be ordered by the async copies.
+  auto stream = at::cuda::getCurrentCUDAStream(
+      static_cast<c10::DeviceIndex>(local_device_idx));
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice, stream));
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      signal_pads_dev_,
+      signal_pads_.data(),
+      arr_size,
+      cudaMemcpyHostToDevice,
+      stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 /* Start of CUDASymmetricMemory */
@@ -422,8 +433,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
   // the CAS-based barrier() protocol; the data buffer that follows does not need
-  // zeroing.
-  AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+  // zeroing. Zero on the current stream, then sync so the signal pad is fully
+  // zeroed before rendezvous can expose it to peers.
+  auto stream = at::cuda::getCurrentCUDAStream(
+      static_cast<c10::DeviceIndex>(device_idx));
+  AT_CUDA_CHECK(cudaMemsetAsync(alloc_base, 0, buffer_offset, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 
   // Hand back the data buffer pointer, not alloc_base; the signal pad stays
   // hidden in front. Returning the data ptr (rather than the alloc ptr) is safe
