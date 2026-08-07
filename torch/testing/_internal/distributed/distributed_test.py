@@ -169,7 +169,10 @@ PROFILING_SUPPORTED_BACKENDS = [
 ]
 
 # Allowlist of distributed backends where profiling collectives with a CUDA
-# device is supported.
+# device is supported. This filters nothing today. The one branch that consults
+# it is reachable only from the three CUDA all_reduce tests, and all three skip
+# unless the backend is Gloo or NCCL, so the MPI and UCC entries below are
+# unreachable and the membership test always passes.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -2678,7 +2681,8 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
-                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Gloo and NCCL are the only backends that reach here; every other
+                # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
                 if (
