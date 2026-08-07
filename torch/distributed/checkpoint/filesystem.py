@@ -309,7 +309,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
         buckets[i % bins].append(wi)
 
     for wi in tensor_w:
-        # TODO replace with headq
+        # TODO replace with heapq
         idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)

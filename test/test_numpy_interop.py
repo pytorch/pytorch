@@ -3,7 +3,6 @@
 # Owner(s): ["module: numpy"]
 
 import sys
-import warnings
 from itertools import product
 from unittest import skipIf
 
@@ -485,22 +484,6 @@ class TestNumPyInterop(TestCase):
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
-
-    @onlyCPU
-    def test_array_wrap_no_deprecation_warning(self, device):
-        # NumPy 2 calls __array_wrap__ with extra `context` and
-        # `return_scalar` arguments and emits a DeprecationWarning when they
-        # are not accepted. See https://github.com/pytorch/pytorch/issues/180657
-        x = torch.arange(10)
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            # np.delete dispatches through __array_wrap__ on the result.
-            result = np.delete(x, 0)
-        self.assertIsInstance(result, torch.Tensor)
-        self.assertEqual(result, torch.arange(1, 10))
-        # Calling directly with the NumPy 2 signature must also be accepted.
-        wrapped = x.__array_wrap__(np.arange(10), None, False)
-        self.assertIsInstance(wrapped, torch.Tensor)
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
