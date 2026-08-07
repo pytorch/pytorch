@@ -91,34 +91,33 @@ struct XPUEvent {
 
   void record(const XPUStream& stream) {
     namespace syclex = sycl::ext::oneapi::experimental;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (!isCreated()) {
-#if SYCL_COMPILER_VERSION >= 20260200
       createEvent(stream.device_index());
-#else
-      device_index_ = stream.device_index();
-      assignEvent(stream.queue());
-#endif
-      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (!reusable_) {
+        assignEvent(stream.queue());
+      }
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
-    } else {
-      TORCH_CHECK(
-          device_index_ == stream.device_index(),
-          "Event device ",
-          device_index_,
-          " does not match recording stream's device ",
-          stream.device_index(),
-          ".");
-#if SYCL_COMPILER_VERSION < 20260200
-      reassignEvent(stream.queue());
-#endif
     }
+    TORCH_CHECK(
+        device_index_ == stream.device_index(),
+        "Event device ",
+        device_index_,
+        " does not match recording stream's device ",
+        stream.device_index(),
+        ".");
 #if SYCL_COMPILER_VERSION >= 20260200
-    syclex::enqueue_signal_event(stream.queue(), *event_);
+    if (reusable_) {
+      syclex::enqueue_signal_event(stream.queue(), *event_);
+    }
 #endif
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (!reusable_) {
+      reassignEvent(stream.queue());
+    }
+
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
           c10::kXPU,
@@ -130,13 +129,17 @@ struct XPUEvent {
   void block(const XPUStream& stream) {
     if (isCreated()) {
 #if SYCL_COMPILER_VERSION >= 20260200
-      sycl::ext::oneapi::experimental::enqueue_wait_event(
-          stream.queue(), *event_);
-#else
-      std::vector<sycl::event> event_list{event()};
-      // Make this stream wait until event_ is completed.
-      stream.queue().ext_oneapi_submit_barrier(event_list);
+      if (reusable_) {
+        sycl::ext::oneapi::experimental::enqueue_wait_event(
+            stream.queue(), *event_);
+      }
 #endif
+      if (!reusable_) {
+        std::vector<sycl::event> event_list{event()};
+        // Make this stream wait until event_ is completed.
+        stream.queue().ext_oneapi_submit_barrier(event_list);
+      }
+
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(
@@ -165,7 +168,7 @@ struct XPUEvent {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();
-    // Return the eplased time in milliseconds.
+    // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
@@ -200,7 +203,6 @@ struct XPUEvent {
 #endif
 
  private:
-#if SYCL_COMPILER_VERSION < 20260200
   void assignEvent(sycl::queue& queue) {
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
@@ -208,39 +210,49 @@ struct XPUEvent {
     } else {
       event_ = std::make_unique<sycl::event>(queue.ext_oneapi_submit_barrier());
     }
-    TORCH_CHECK(
-        !enable_ipc_, "XPUEvent IPC requires SYCL compiler 2026.2 or later.");
   }
 
   void reassignEvent(sycl::queue& queue) {
     event_.reset();
     assignEvent(queue);
   }
-#else
+
   void createEvent(c10::DeviceIndex device_index) {
-    namespace syclex = sycl::ext::oneapi::experimental;
+    device_index_ = device_index;
     TORCH_CHECK(
         !enable_ipc_ || !enable_timing_,
         "XPUEvent cannot have both IPC and timing enabled.");
-    device_index_ = device_index;
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    auto device = c10::xpu::get_raw_device(device_index_);
+
     if (enable_ipc_) {
       TORCH_CHECK(
-          c10::xpu::get_raw_device(device_index)
-              .has(sycl::aspect::ext_oneapi_ipc_event),
+          device.has(sycl::aspect::ext_oneapi_ipc_event),
           "Requires the ext_oneapi_ipc_event extension, "
           "which is not supported on this device. ",
           "Please upgrade to a newer driver.");
     }
-    event_ = std::make_unique<sycl::event>(syclex::make_event(
-        c10::xpu::get_device_context(),
-        syclex::properties{
-            syclex::enable_profiling{enable_timing_},
-            syclex::enable_ipc{enable_ipc_}}));
-  }
+    if (enable_timing_) {
+      reusable_ = device.has(sycl::aspect::ext_oneapi_per_event_profiling);
+    }
+    if (reusable_) {
+      event_ = std::make_unique<sycl::event>(syclex::make_event(
+          c10::xpu::get_device_context(),
+          syclex::properties{
+              syclex::enable_profiling{enable_timing_},
+              syclex::enable_ipc{enable_ipc_}}));
+    }
+#else
+    TORCH_CHECK(
+        !enable_ipc_, "XPUEvent IPC requires SYCL compiler 2026.2 or later.");
 #endif
+  }
 
   bool enable_timing_ = false;
   bool enable_ipc_ = false;
+  bool reusable_ = false;
+
   c10::DeviceIndex device_index_ = -1;
   // Only need to track the last event, as events in an in-order queue are
   // executed sequentially.
