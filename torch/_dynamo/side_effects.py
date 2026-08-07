@@ -517,6 +517,7 @@ class SideEffects:
         name: str,
         value: VariableTracker,
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
+        mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -545,9 +546,12 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        item_source = getattr(item, "source", None)
-        if item_source is not None:
-            self.mutated_sources.add(AttrSource(item_source, name))
+        if mutated_source is not None:
+            self.mutated_sources.add(mutated_source)
+        else:
+            item_source = getattr(item, "source", None)
+            if item_source is not None:
+                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -577,18 +581,39 @@ class SideEffects:
             raise AssertionError(f"Missing attribute mutation kind for {item}.{name}")
         return self.attr_mutation_kinds[item][name]
 
+    def _record_traced_source(
+        self, item: VariableTracker, name: str, traced_source: Source | None
+    ) -> None:
+        if traced_source is None:
+            item_source = getattr(item, "source", None)
+            if item_source is None:
+                return
+            traced_source = AttrSource(item_source, name)
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.current_tx.output.current_tracer.traced_sources.add(
+                traced_source
+            )
+
     def load_attr(
         self,
         item: VariableTracker,
         name: str,
         deleted_ok: bool = False,
         check: bool = False,
+        traced_source: Source | None = None,
     ) -> VariableTracker:
         if check:
             if not self.is_attribute_mutation(item):
                 raise AssertionError(
                     f"Expected attribute mutation for {item} in load_attr"
                 )
+        # Reads served from here bypass VariableBuilder, so record the source
+        # ourselves -- otherwise a subgraph that reads an attribute mutated
+        # before it ran has no traced source to intersect with mutated_sources
+        # and is wrongly considered reusable. Mirrors store_attr's key so the
+        # two sets line up.
+        self._record_traced_source(item, name, traced_source)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented(
@@ -622,16 +647,12 @@ class SideEffects:
             raise AssertionError(
                 f"Expected CellVariable, got {type(cellvar)} in load_cell"
             )
-        # Track the cell_contents source during subgraph tracing so that
-        # mutations (e.g. nonlocal counter = 3) are detected by the reuse
-        # mechanism via set intersection with mutated_sources.
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            cell_source = getattr(cellvar, "source", None)
-            if cell_source is not None:
-                output_graph.current_tx.output.current_tracer.traced_sources.add(
-                    AttrSource(cell_source, "cell_contents")
-                )
+        # Recorded here rather than only in load_attr because an unmutated cell
+        # returns pre_existing_contents below without going through load_attr,
+        # and a mutation landing after that read must still be detected.
+        contents = cellvar.pre_existing_contents
+        contents_source = getattr(contents, "source", None) if contents else None
+        self._record_traced_source(cellvar, "cell_contents", contents_source)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -648,7 +669,9 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
-        return self.load_attr(gvar, name)
+        # gvar's source already names the global, so override load_attr's
+        # default key for the same reason store_global does.
+        return self.load_attr(gvar, name, traced_source=GlobalSource(name))
 
     def store_global(
         self, gvar: VariableTracker, name: str, value: VariableTracker
@@ -661,7 +684,11 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
-        self.store_attr(gvar, name, value)
+        # gvar is a per-global sentinel holder whose own source already names
+        # the global, so store_attr's default AttrSource(item.source, name)
+        # would name a nonexistent `G.G`. Record the source readers actually
+        # use, so mutated_sources intersects with traced_sources.
+        self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -788,7 +815,7 @@ class SideEffects:
 
         from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
-        from .variables.user_defined import is_forbidden_context_manager
+        from .variables.user_defined import is_generic_ctx_manager_cls
 
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
@@ -797,11 +824,7 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif (
-            hasattr(user_cls, "__enter__")
-            and hasattr(user_cls, "__exit__")
-            and not is_forbidden_context_manager(user_cls)
-        ):
+        elif is_generic_ctx_manager_cls(user_cls):
             variable_cls = GenericContextWrappingVariable
         elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
