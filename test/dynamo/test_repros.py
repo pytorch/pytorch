@@ -8762,7 +8762,6 @@ SavedForBackwardsAOTOutput(idx=5)""",
         grid2 = torch.rand(2, 11, 7, 2) * 2 - 1
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
->>>>>>> upstream/main
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
