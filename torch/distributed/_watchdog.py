@@ -1,6 +1,7 @@
+# This module is experimental and subject to change.
 """
 Pure-Python watchdog for detecting hung operations in symmetric memory
-kernels, Python-based distributed backends (e.g., nccl4py), and related
+kernels, Python-based distributed backends and related
 distributed primitives.
 
 The watchdog runs an asyncio event loop on a background daemon thread,
@@ -14,7 +15,7 @@ the health watchdog takes a configurable action.
 
 Usage:
 
-    from torch.distributed._pybackend_watchdog import (
+    from torch.distributed._watchdog import (
         stream_timeout,
         cpu_timeout,
         op_timeout,
@@ -39,6 +40,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import logging
 import os
 import queue
@@ -48,6 +50,7 @@ import time
 from collections.abc import Callable, Generator  # noqa: TC003
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 import torch
 
@@ -55,12 +58,18 @@ import torch
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "get_watchdog",
+    "_get_watchdog",
     "shutdown",
     "stream_timeout",
     "cpu_timeout",
     "op_timeout",
 ]
+
+
+def _default_timeout_callback() -> None:
+    logger.error("Watchdog timeout -- dumping all thread stack traces and aborting")
+    faulthandler.dump_traceback()
+    os.abort()
 
 
 @dataclass
@@ -118,7 +127,7 @@ class _CancelHandle:
             return self._cancelled
 
 
-class _PyBackendWatchdog:
+class _Watchdog:
     """Process-wide watchdog for Python distributed backends.
 
     Manages an asyncio event loop on a daemon thread for CPU timeouts and
@@ -128,16 +137,16 @@ class _PyBackendWatchdog:
 
     def __init__(self) -> None:
         self._poll_interval = float(
-            os.environ.get("TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL", "1.0")
+            os.environ.get("TORCH_WATCHDOG_POLL_INTERVAL_SECS", "1.0")
         )
         self._health_interval = float(
-            os.environ.get("TORCH_PYBACKEND_WATCHDOG_HEALTH_INTERVAL", "30.0")
+            os.environ.get("TORCH_WATCHDOG_HEALTH_INTERVAL_SECS", "30.0")
         )
         self._stuck_action = os.environ.get(
-            "TORCH_PYBACKEND_WATCHDOG_STUCK_ACTION", "log"
+            "TORCH_WATCHDOG_STUCK_ACTION", "log"
         ).lower()
         self._timeout_action = os.environ.get(
-            "TORCH_PYBACKEND_WATCHDOG_TIMEOUT_ACTION", "log"
+            "TORCH_WATCHDOG_TIMEOUT_ACTION", "log"
         ).lower()
 
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
@@ -160,7 +169,7 @@ class _PyBackendWatchdog:
         self._health_thread.start()
 
         logger.info(
-            "PyBackend watchdog started (poll=%.1fs, health=%.1fs, "
+            "Watchdog started (poll=%.1fs, health=%.1fs, "
             "stuck_action=%s, timeout_action=%s)",
             self._poll_interval,
             self._health_interval,
@@ -173,8 +182,12 @@ class _PyBackendWatchdog:
         self._loop.run_forever()
 
     def stream_timeout(
-        self, timeout: float, callback: Callable[[], None]
+        self, timeout: float | timedelta, callback: Callable[[], None] | None = None
     ) -> _CancelHandle:
+        if callback is None:
+            callback = _default_timeout_callback
+        if isinstance(timeout, timedelta):
+            timeout = timeout.total_seconds()
         self._drain_del_queue()
         handle = _CancelHandle()
         event = torch.cuda.Event(enable_timing=False)
@@ -232,8 +245,12 @@ class _PyBackendWatchdog:
             self._schedule_poll()
 
     def cpu_timeout(
-        self, timeout: float, callback: Callable[[], None]
+        self, timeout: float | timedelta, callback: Callable[[], None] | None = None
     ) -> _CancelHandle:
+        if callback is None:
+            callback = _default_timeout_callback
+        if isinstance(timeout, timedelta):
+            timeout = timeout.total_seconds()
         handle = _CancelHandle()
         self._loop.call_soon_threadsafe(
             self._register_cpu_timeout, callback, timeout, handle
@@ -277,7 +294,7 @@ class _PyBackendWatchdog:
 
     def _handle_stuck_loop(self) -> None:
         msg = (
-            "PyBackend watchdog event loop appears stuck "
+            "Watchdog event loop appears stuck "
             f"(no response within {self._health_interval:.1f}s)"
         )
         if self._stuck_action == "abort":
@@ -290,6 +307,12 @@ class _PyBackendWatchdog:
             logger.warning(msg)
 
     def _drain_del_queue(self) -> int:
+        """Destroy retired CUDA events from the caller's thread.
+
+        CUDA events must be destroyed on the thread that owns the CUDA context.
+        Destroying them on the asyncio loop thread can block on the CUDA driver
+        and stall the event loop, so retired events are queued and deleted here.
+        """
         count = 0
         while True:
             try:
@@ -301,7 +324,7 @@ class _PyBackendWatchdog:
         return count
 
     def shutdown(self) -> None:
-        logger.info("PyBackend watchdog shutting down")
+        logger.info("Watchdog shutting down")
         self._stop_event.set()
         try:
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -311,14 +334,14 @@ class _PyBackendWatchdog:
         self._health_thread.join(timeout=5.0)
         self._loop.close()
         self._drain_del_queue()
-        logger.info("PyBackend watchdog shut down")
+        logger.info("Watchdog shut down")
 
 
-_watchdog: _PyBackendWatchdog | None = None
+_watchdog: _Watchdog | None = None
 _watchdog_lock = threading.Lock()
 
 
-def get_watchdog() -> _PyBackendWatchdog:
+def _get_watchdog() -> _Watchdog:
     """
     Get or create the process-wide watchdog singleton.
     """
@@ -327,16 +350,16 @@ def get_watchdog() -> _PyBackendWatchdog:
         return _watchdog
     with _watchdog_lock:
         if _watchdog is None:
-            _watchdog = _PyBackendWatchdog()
+            _watchdog = _Watchdog()
         return _watchdog
 
 
 def shutdown() -> None:
     """
-    Shut down the watchdog singleton. After this, get_watchdog() creates a fresh instance.
+    Shut down the watchdog singleton. After this, _get_watchdog() creates a fresh instance.
     """
     global _watchdog
-    wd: _PyBackendWatchdog | None = None
+    wd: _Watchdog | None = None
     with _watchdog_lock:
         if _watchdog is not None:
             wd = _watchdog
@@ -345,27 +368,58 @@ def shutdown() -> None:
         wd.shutdown()
 
 
-def stream_timeout(timeout: float, callback: Callable[[], None]) -> _CancelHandle:
+def stream_timeout(
+    timeout: float | timedelta, callback: Callable[[], None] | None = None
+) -> _CancelHandle:
+    """Record a CUDA event and fire callback if the stream hasn't completed by deadline.
+
+    Args:
+        timeout: Seconds (float) or timedelta until the callback fires.
+        callback: Called on timeout. Defaults to logging stack traces and aborting.
+
+    Example::
+
+        some_kernel_launch()
+        handle = stream_timeout(60.0)
+        # ... when the operation completes:
+        handle.cancel()
     """
-    Record a CUDA event and fire callback if the stream hasn't completed by deadline.
-    """
-    return get_watchdog().stream_timeout(timeout, callback)
+    return _get_watchdog().stream_timeout(timeout, callback)
 
 
-def cpu_timeout(timeout: float, callback: Callable[[], None]) -> _CancelHandle:
+def cpu_timeout(
+    timeout: float | timedelta, callback: Callable[[], None] | None = None
+) -> _CancelHandle:
+    """Schedule callback to fire after timeout unless cancelled.
+
+    Args:
+        timeout: Seconds (float) or timedelta until the callback fires.
+        callback: Called on timeout. Defaults to logging stack traces and aborting.
+
+    Example::
+
+        handle = cpu_timeout(30.0)
+        blocking_rendezvous_call()
+        handle.cancel()
     """
-    Schedule callback to fire after timeout seconds unless cancelled.
-    """
-    return get_watchdog().cpu_timeout(timeout, callback)
+    return _get_watchdog().cpu_timeout(timeout, callback)
 
 
 @contextmanager
 def op_timeout(
-    timeout: float, callback: Callable[[], None]
+    timeout: float | timedelta, callback: Callable[[], None] | None = None
 ) -> Generator[None, None, None]:
-    """Context manager: records a stream timeout on entry, cancels on exit."""
-    handle = stream_timeout(timeout, callback)
+    """CPU timeout guards the block; stream timeout monitors GPU work after exit.
+
+    Example::
+
+        with op_timeout(60.0):
+            foo()  # cpu timeout fires if this hangs
+        torch.cuda.synchronize()  # stream timeout fires if this hangs
+    """
+    cpu_handle = cpu_timeout(timeout, callback)
     try:
         yield
     finally:
-        handle.cancel()
+        cpu_handle.cancel()
+        stream_timeout(timeout, callback)

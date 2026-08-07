@@ -5,12 +5,12 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from torch.distributed._pybackend_watchdog import (
+from torch.distributed._watchdog import (
     _CancelHandle,
-    _PyBackendWatchdog,
+    _get_watchdog,
     _StreamMonitor,
+    _Watchdog,
     cpu_timeout,
-    get_watchdog,
     op_timeout,
     shutdown,
 )
@@ -59,7 +59,7 @@ class TestCancelHandle(TestCase):
         self.assertFalse(handle.is_cancelled)
 
 
-class TestPyBackendWatchdog(TestCase):
+class TestWatchdog(TestCase):
     def setUp(self) -> None:
         super().setUp()
         shutdown()
@@ -109,7 +109,7 @@ class TestPyBackendWatchdog(TestCase):
             "second callback should fire after first raised",
         )
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_stream_timeout_fires(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.return_value = False
@@ -117,17 +117,15 @@ class TestPyBackendWatchdog(TestCase):
 
         fired = threading.Event()
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
-            wd = _PyBackendWatchdog()
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            wd = _Watchdog()
             try:
                 wd.stream_timeout(0.15, fired.set)
                 self.assertTrue(fired.wait(timeout=5.0), "callback did not fire")
             finally:
                 wd.shutdown()
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_stream_timeout_no_fire_when_complete(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.return_value = True
@@ -135,10 +133,8 @@ class TestPyBackendWatchdog(TestCase):
 
         fired = threading.Event()
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
-            wd = _PyBackendWatchdog()
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            wd = _Watchdog()
             try:
                 wd.stream_timeout(0.5, fired.set)
                 time.sleep(0.3)
@@ -146,7 +142,7 @@ class TestPyBackendWatchdog(TestCase):
             finally:
                 wd.shutdown()
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_stream_timeout_handles_graph_capture(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.side_effect = [
@@ -157,10 +153,8 @@ class TestPyBackendWatchdog(TestCase):
 
         fired = threading.Event()
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
-            wd = _PyBackendWatchdog()
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            wd = _Watchdog()
             try:
                 wd.stream_timeout(2.0, fired.set)
                 time.sleep(0.3)
@@ -168,33 +162,46 @@ class TestPyBackendWatchdog(TestCase):
             finally:
                 wd.shutdown()
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
-    def test_op_timeout_cancels_on_exit(self, MockEvent: MagicMock) -> None:
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
+    def test_op_timeout_cpu_fires_during_block(self, MockEvent: MagicMock) -> None:
+        mock_event = MagicMock()
+        MockEvent.return_value = mock_event
+
+        fired = threading.Event()
+
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            shutdown()
+            with op_timeout(0.1, fired.set):
+                time.sleep(0.5)
+
+            self.assertTrue(fired.is_set(), "cpu timeout should fire during block")
+
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
+    def test_op_timeout_stream_fires_after_block(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.return_value = False
         MockEvent.return_value = mock_event
 
         fired = threading.Event()
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
             shutdown()
-            with op_timeout(10.0, fired.set):
+            with op_timeout(0.15, fired.set):
                 pass
 
-            time.sleep(0.3)
-            self.assertFalse(fired.is_set(), "callback fired despite context exit")
+            self.assertTrue(
+                fired.wait(timeout=5.0), "stream timeout should fire after block"
+            )
 
     def test_health_watchdog_detects_stuck(self) -> None:
         with patch.dict(
             "os.environ",
             {
-                "TORCH_PYBACKEND_WATCHDOG_HEALTH_INTERVAL": "0.1",
-                "TORCH_PYBACKEND_WATCHDOG_STUCK_ACTION": "log",
+                "TORCH_WATCHDOG_HEALTH_INTERVAL_SECS": "0.1",
+                "TORCH_WATCHDOG_STUCK_ACTION": "log",
             },
         ):
-            wd = _PyBackendWatchdog()
+            wd = _Watchdog()
             released = threading.Event()
             try:
                 blocked = threading.Event()
@@ -207,7 +214,7 @@ class TestPyBackendWatchdog(TestCase):
                 blocked.wait(timeout=2.0)
 
                 with self.assertLogs(
-                    "torch.distributed._pybackend_watchdog", level="WARNING"
+                    "torch.distributed._watchdog", level="WARNING"
                 ) as cm:
                     time.sleep(0.4)
 
@@ -220,25 +227,23 @@ class TestPyBackendWatchdog(TestCase):
                 wd.shutdown()
 
     def test_singleton_lifecycle(self) -> None:
-        wd1 = get_watchdog()
-        wd2 = get_watchdog()
+        wd1 = _get_watchdog()
+        wd2 = _get_watchdog()
         self.assertIs(wd1, wd2)
 
         shutdown()
 
-        wd3 = get_watchdog()
+        wd3 = _get_watchdog()
         self.assertIsNot(wd1, wd3)
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_del_queue_populated(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.return_value = True
         MockEvent.return_value = mock_event
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
-            wd = _PyBackendWatchdog()
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            wd = _Watchdog()
             try:
                 wd.stream_timeout(10.0, lambda: None)
                 time.sleep(0.2)
@@ -247,7 +252,7 @@ class TestPyBackendWatchdog(TestCase):
             finally:
                 wd.shutdown()
 
-    @patch("torch.distributed._pybackend_watchdog.torch.cuda.Event")
+    @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_stream_timeout_cancelled(self, MockEvent: MagicMock) -> None:
         mock_event = MagicMock()
         mock_event.query.return_value = False
@@ -255,10 +260,8 @@ class TestPyBackendWatchdog(TestCase):
 
         fired = threading.Event()
 
-        with patch.dict(
-            "os.environ", {"TORCH_PYBACKEND_WATCHDOG_POLL_INTERVAL": "0.05"}
-        ):
-            wd = _PyBackendWatchdog()
+        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
+            wd = _Watchdog()
             try:
                 handle = wd.stream_timeout(0.15, fired.set)
                 handle.cancel()
