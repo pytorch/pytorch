@@ -8,7 +8,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from functools import partial
 from typing import Any, Literal
 from typing_extensions import deprecated
 
@@ -18,6 +17,36 @@ import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 from torch._prims_common import make_contiguous_strides_for
+from torch.utils._triton import has_triton
+
+
+if has_triton():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def reduce_partials_first_dim_kernel(
+        partials,
+        out,
+        shard_elems: tl.constexpr,
+        group_size: tl.constexpr,
+        do_avg: tl.constexpr,
+        BLOCK: tl.constexpr,
+    ):
+        offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+        mask = offsets < shard_elems
+        acc = tl.zeros((BLOCK,), tl.float32)
+        for rank in tl.static_range(0, group_size):
+            vals = tl.load(
+                partials + rank * shard_elems + offsets,
+                mask=mask,
+                other=0.0,
+            )
+            acc += vals.to(tl.float32)
+        if do_avg:
+            acc /= group_size
+        # the accumulation stays in fp32 and is rounded exactly once, here
+        tl.store(out + offsets, acc.to(out.dtype.element_ty), mask=mask)
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -444,6 +473,72 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
+def reduce_partials(
+    partials: torch.Tensor,
+    *,
+    dim: int,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor:
+    if output_dtype in (torch.float16, torch.bfloat16):
+        normalized_dim = dim if dim >= 0 else dim + partials.dim()
+        # The common RS layout is [rank, local_M, N]. Fuse the final rank
+        # reduction into one kernel so low-precision partials accumulate in fp32
+        # and round only once when written to the output dtype.
+        if normalized_dim == 0:
+            reduced = triton_reduce_partials_first_dim(
+                partials,
+                reduce_op=reduce_op,
+                output_dtype=output_dtype,
+                group_size=group_size,
+            )
+            if reduced is not None:
+                return reduced
+        if reduce_op == "sum":
+            return torch.sum(partials, dim=dim)
+        if reduce_op == "avg":
+            return torch.mean(partials, dim=dim)
+    if reduce_op == "sum":
+        return torch.sum(partials, dim=dim)
+    if reduce_op == "avg":
+        return torch.mean(partials, dim=dim)
+    raise ValueError("reduce_op must be sum or avg")
+
+
+def triton_reduce_partials_first_dim(
+    partials: torch.Tensor,
+    *,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor | None:
+    if (
+        not has_triton()
+        or partials.device.type != "cuda"
+        or not partials.is_contiguous()
+        or partials.dim() < 2
+        or partials.shape[0] != group_size
+        or output_dtype not in (torch.float16, torch.bfloat16)
+        or partials.dtype not in (torch.float16, torch.bfloat16)
+    ):
+        return None
+
+    out = partials.new_empty(partials.shape[1:], dtype=output_dtype)
+    shard_elems = out.numel()
+    block = 1024
+    grid = (triton.cdiv(shard_elems, block),)
+    reduce_partials_first_dim_kernel[grid](
+        partials,
+        out,
+        shard_elems,
+        group_size,
+        reduce_op == "avg",
+        BLOCK=block,
+    )
+    return out
+
+
 lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
@@ -456,6 +551,16 @@ lib.define(
     "int gather_dim, str group_name, "
     "Tensor?[] biases, "
     "Tensor?[] result_scales, "
+    "ScalarType?[] out_dtypes, "
+    "bool[] use_fast_accum) -> (Tensor, Tensor[])",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
+)
+lib.define(
+    "fused_all_gather_scaled_matmul_v2("
+    "Tensor A, Tensor[] Bs, Tensor A_scale, int[] recipe_a, int[] swizzle_a, "
+    "Tensor[] B_scales, int[] recipe_b, int[] swizzle_b, "
+    "int gather_dim, str group_name, "
+    "Tensor?[] biases, "
     "ScalarType?[] out_dtypes, "
     "bool[] use_fast_accum) -> (Tensor, Tensor[])",
     tags=[torch._C.Tag.needs_fixed_stride_order],
@@ -528,6 +633,43 @@ class _ScaleMode(Enum):
     TENSOR_WISE = "tensor-wise"
     ROW_WISE_SHARDED = "row-wise-sharded"
     ROW_WISE_REPLICATED = "row-wise-replicated"
+    BLOCK_WISE_SHARDED = "block-wise-sharded"
+
+
+# The cuBLAS block-scaling layout tiles the scale matrix in 128 rows x 4 columns
+# and swizzles within each tile, so a swizzled scale is only row-concatenable
+# when every rank holds a whole number of row tiles. Otherwise each shard pads
+# up to a tile boundary independently and the gathered buffer no longer matches
+# the layout the kernel expects.
+_BLOCK_SCALE_ROW_TILE = 128
+
+
+def _verify_block_wise_scale(
+    shard: torch.Tensor, scale: torch.Tensor, gather_dim: int
+) -> None:
+    """Validate a pre-swizzled block scale for an all-gather along `gather_dim`.
+
+    The scale is opaque here -- it is already in the kernel's swizzled layout --
+    so the checks are about whether concatenating per-rank scales reproduces the
+    swizzle of the gathered scale. See _BLOCK_SCALE_ROW_TILE.
+    """
+    if gather_dim != 0:
+        raise ValueError(
+            "Block-wise fp8 all-gather only supports gather_dim=0; the swizzled "
+            f"scale is ordered by A's rows, got gather_dim={gather_dim}"
+        )
+    if scale.dim() != 1:
+        raise ValueError(
+            "Block-wise fp8 all-gather expects an already-swizzled, flat scale, "
+            f"got shape {tuple(scale.shape)}"
+        )
+    rows = math.prod(shard.shape[:-1])
+    if rows % _BLOCK_SCALE_ROW_TILE != 0:
+        raise ValueError(
+            "Block-wise fp8 all-gather requires each rank's row count to be a "
+            f"multiple of {_BLOCK_SCALE_ROW_TILE} so that swizzled scales stay "
+            f"concatenable, got {rows} rows per rank"
+        )
 
 
 def _check_and_verify_fp8_all_gather_scale_mode(
@@ -566,6 +708,7 @@ def _fused_all_gather_matmul_impl(
     gather_dim: int,
     group_name: c10d.GroupName,
     return_A: bool,
+    scale_mode: _ScaleMode | None = None,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -617,12 +760,42 @@ def _fused_all_gather_matmul_impl(
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
-    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group.size()
-    )
+    # Block-wise scales cannot be recognized from their shape (they are opaque
+    # swizzled buffers), so that mode is passed in by the caller instead.
+    if scale_mode is None:
+        scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+            shard=A_shard,
+            scale=A_scale,
+            gather_dim=gather_dim,
+            group_size=group.size(),
+        )
 
     # Computing block-wise matmul along the first dim of A
-    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+    if scale_mode == _ScaleMode.BLOCK_WISE_SHARDED:
+        if A_scale is None:
+            raise AssertionError
+        # The swizzled scale is a flat buffer whose rows tile with A's, so it
+        # rides along in the same pipelined gather as A itself.
+        A_scale_flat = A_scale.new_empty(A_scale.shape[0] * group.size())
+
+        def block_wise_sharded_consumer(shard: list[torch.Tensor], rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(
+                    shard[0],
+                    B,
+                    scale_a=[shard[1]],
+                    **kwargs,
+                    out=output_shards[idx][rank],
+                )
+
+        _pipelined_multi_all_gather_and_consume(
+            [A_shard_flat, A_scale],
+            block_wise_sharded_consumer,
+            [A_flat, A_scale_flat],
+            group_name,
+            return_A,
+        )
+    elif scale_mode == _ScaleMode.ROW_WISE_SHARDED:
         if A_scale is None:
             raise AssertionError
         A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
@@ -1257,6 +1430,171 @@ def _fused_matmul_reduce_scatter(
         )
 
 
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul_v2", "Meta")
+def _fused_all_gather_scaled_matmul_v2_fallback(
+    A_shard: torch.Tensor,
+    Bs: list[torch.Tensor],
+    A_scale: torch.Tensor,
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    B_scales: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    gather_dim: int,
+    group_name: c10d.GroupName,
+    biases: list[torch.Tensor | None],
+    out_dtypes: list[torch.dtype | None],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+    _verify_block_wise_scale(A_shard, A_scale, gather_dim)
+    group_size = c10d._get_group_size_by_name(group_name)
+
+    A = torch.ops._c10d_functional.all_gather_into_tensor(
+        A_shard.contiguous(), group_size, group_name
+    )
+    A = torch.ops._c10d_functional.wait_tensor(A)
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
+    # gather_dim is 0 here (enforced above), so concatenating the swizzled
+    # per-rank scales reproduces the swizzle of the gathered scale. NCCL has no
+    # Float8_e8m0fnu support, so the scale is gathered as raw bytes; the fused
+    # path needs no such detour because symmetric memory is dtype-agnostic.
+    A_scale_full = torch.ops._c10d_functional.all_gather_into_tensor(
+        A_scale.contiguous().view(torch.uint8), group_size, group_name
+    )
+    A_scale_full = torch.ops._c10d_functional.wait_tensor(A_scale_full).view(
+        A_scale.dtype
+    )
+
+    return A.movedim(0, gather_dim), [
+        torch.ops.aten._scaled_mm_v2(
+            A.flatten(0, -2),
+            B,
+            [A_scale_full],
+            recipe_a,
+            swizzle_a,
+            [B_scale],
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            [],
+            fast_accum,
+        )
+        .unflatten(0, A.shape[:-1])
+        .movedim(0, gather_dim)
+        for B, B_scale, bias, out_dtype, fast_accum in zip(
+            Bs, B_scales, biases, out_dtypes, use_fast_accum
+        )
+    ]
+
+
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul_v2", "CUDA")
+def _fused_all_gather_scaled_matmul_v2(
+    A_shard: torch.Tensor,
+    Bs: list[torch.Tensor],
+    A_scale: torch.Tensor,
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    B_scales: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    gather_dim: int,
+    group_name: c10d.GroupName,
+    biases: list[torch.Tensor | None],
+    out_dtypes: list[torch.dtype | None],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    """
+    Perform the following logic with micro-pipelined computation and
+    communication:
+
+        A = all_gather_single(A_shard, gather_dim, group_name)
+        A_scale_full = all_gather_single(A_scale, 0, group_name)
+        res = torch.ops.aten._scaled_mm_v2(
+            A.flatten(0, -2), B, [A_scale_full], recipe_a, swizzle_a,
+            [B_scale], recipe_b, swizzle_b, ...
+        )
+
+    This is the block-scaled counterpart of `fused_all_gather_scaled_matmul`.
+    Where that op dispatches to `aten::_scaled_mm` and so can only express
+    tensor-wise and row-wise scaling, this one dispatches to
+    `aten::_scaled_mm_v2` and can express the block-scaling recipes -- notably
+    `ScalingType.BlockWise1x32`, i.e. mxfp8.
+
+    `A_scale` must already be in the kernel's swizzled layout and flat, as
+    produced for the *local* shard. Gathering swizzled shards is valid because
+    the swizzle is local to each 128-row tile, so concatenating per-rank scales
+    reproduces the swizzle of the gathered scale exactly -- provided every rank
+    owns a whole number of tiles. `gather_dim` must be 0 and each rank's row
+    count a multiple of 128; both are checked.
+
+    Note that a plain `dist.all_gather` cannot be used for the scale, as NCCL
+    rejects `Float8_e8m0fnu`. Symmetric memory moves raw bytes, so the fused
+    path has no such restriction.
+    """
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+
+    if len(B_scales) != len(Bs):
+        raise ValueError("len(B_scales) must be the same as len(Bs)")
+    if len(biases) != len(Bs):
+        raise ValueError("len(biases) must be the same as len(Bs)")
+    if len(out_dtypes) != len(Bs):
+        raise ValueError("len(out_dtypes) must be the same as len(Bs)")
+    if len(use_fast_accum) != len(Bs):
+        raise ValueError("len(use_fast_accum) must be the same as len(Bs)")
+    _verify_block_wise_scale(A_shard, A_scale, gather_dim)
+
+    if _is_test_mode:
+        return _fused_all_gather_scaled_matmul_v2_fallback(
+            A_shard,
+            Bs,
+            A_scale,
+            recipe_a,
+            swizzle_a,
+            B_scales,
+            recipe_b,
+            swizzle_b,
+            gather_dim,
+            group_name,
+            biases,
+            out_dtypes,
+            use_fast_accum,
+        )
+
+    with torch.profiler.record_function("fused_all_gather_scaled_matmul_v2"):
+        A, res = _fused_all_gather_matmul_impl(
+            torch.ops.aten._scaled_mm_v2.out,
+            A_shard,
+            Bs,
+            A_scale,
+            [
+                {
+                    "recipe_a": recipe_a,
+                    "swizzle_a": swizzle_a,
+                    "scale_b": [B_scale],
+                    "recipe_b": recipe_b,
+                    "swizzle_b": swizzle_b,
+                    "bias": bias,
+                    "out_dtype": out_dtype,
+                    "contraction_dim": [],
+                    "use_fast_accum": fast_accum,
+                }
+                for B_scale, bias, out_dtype, fast_accum in zip(
+                    B_scales, biases, out_dtypes, use_fast_accum
+                )
+            ],
+            out_dtypes,
+            gather_dim,
+            group_name,
+            return_A=True,
+            scale_mode=_ScaleMode.BLOCK_WISE_SHARDED,
+        )
+        if A is None:
+            raise AssertionError("return_A=True must produce the gathered A")
+        return A, res
+
+
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
 def _fused_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
@@ -1286,15 +1624,12 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("Invalid gather_dim")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+    output_dtype = out_dtype or A.dtype
 
     if scatter_dim == A.ndim - 1:
         B_shards = B.chunk(group.size(), dim=B.ndim - 1)
@@ -1321,9 +1656,12 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return reduce_fn(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
+            reduce_op=reduce_op,
+            output_dtype=output_dtype,
+            group_size=group.size(),
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
@@ -1337,7 +1675,7 @@ def _fused_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=output_dtype)
 
     _pipelined_produce_and_all2all(
         chunk_producer,
@@ -1347,11 +1685,14 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
 
@@ -1485,12 +1826,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
+    output_dtype = out_dtype or A.dtype
 
     group = c10d._resolve_process_group(group_name)
 
@@ -1545,7 +1883,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=output_dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1577,7 +1915,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = reduce_fn(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
@@ -1586,6 +1924,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
     # Output shape must be scattered along original scatter dim as well.
