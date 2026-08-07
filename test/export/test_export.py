@@ -15829,10 +15829,10 @@ def forward(self, x):
             """\
 def forward(self, x, y):
     sin_default = torch.ops.aten.sin.default(y)
-    _local_scalar_dense_default = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    ge = _local_scalar_dense_default >= 3
     sum_dim_int_list = torch.ops.aten.sum.dim_IntList(sin_default, []);  sin_default = None
     add_tensor = torch.ops.aten.add.Tensor(y, sum_dim_int_list);  y = sum_dim_int_list = None
+    _local_scalar_dense_default = torch.ops.aten._local_scalar_dense.default(x);  x = None
+    ge = _local_scalar_dense_default >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge = _assert_scalar_default = None
     le = _local_scalar_dense_default <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le = _assert_scalar_default_1 = None

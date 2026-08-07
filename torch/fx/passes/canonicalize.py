@@ -10,13 +10,16 @@ Provides two passes:
 """
 
 import collections
+import functools
 import heapq
+import importlib
 import itertools
 import operator
 from collections.abc import Callable
 
 import torch
 import torch.fx as fx
+from torch.fx._compatibility import compatibility
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -40,6 +43,34 @@ _IN_PLACE_OPERATORS = frozenset(
         "ixor",
     }
 )
+
+
+# Operator namespaces whose ordering relative to surrounding compute is
+# load-bearing (comm/compute overlap, in-place collective reuse). Deliberately
+# limited to functional collectives; `symm_mem` and `_dtensor` have similar
+# concerns but are not covered yet.
+_ORDER_SENSITIVE_NAMESPACES = frozenset(
+    {"_c10d_functional", "_c10d_functional_autograd"}
+)
+
+
+@functools.lru_cache(None)
+def _version_mutating_functions() -> frozenset[object]:
+    """Functions that bump a tensor's version counter in place.
+
+    Resolved lazily: importing ``torch._library`` at module scope would create an
+    import cycle.
+    """
+    fns: list[object] = [torch.autograd.graph.increment_version]
+    for mod, attr in (
+        ("torch._C", "_increment_version"),
+        ("torch._library.custom_ops", "increment_version"),
+    ):
+        try:
+            fns.append(getattr(importlib.import_module(mod), attr))
+        except (ImportError, AttributeError):
+            pass
+    return frozenset(fns)
 
 
 def _computation_node_key(
@@ -72,7 +103,21 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     Builds on Node.is_impure() (used by DCE) with two additional checks for
     cases it doesn't cover: in-place call_method nodes and non-OpOverload
     state-changing functions detected by a no-node-arguments heuristic.
+
+    Returning False is a graph-scale decision, not a node-scale one: barriers
+    partition the graph into segments (see ``canonicalize_graph``) and pure nodes
+    are confined to their segment, so each barrier trades determinism for
+    ordering safety across the whole graph. A graph with N barriers only
+    canonicalizes within N+1 segments, which for data-dependent graphs degrades
+    toward trace order. Add barriers only where ordering is load-bearing.
     """
+    # Nodes that bind unbacked symbols (item()/_local_scalar_dense, nonzero,
+    # ...) keep their trace-order position. Reordering them changes the order
+    # the ShapeEnv resolves symbol replacements, which can blow up compile time
+    # (superlinear SymNode.expr / _find work) even though the graph is
+    # value-equivalent. Trace order is already deterministic across ranks.
+    if node.meta.get("unbacked_bindings"):
+        return False
     if node.op == "call_method":
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op == "call_module":
@@ -80,6 +125,32 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     if node.op != "call_function":
         return True
     if node.is_impure():
+        return False
+    # Functional collectives (all_reduce, wait_tensor, ...) keep their
+    # trace-order position. Reordering a collective relative to surrounding
+    # compute changes comm/compute overlap and defeats Inductor's in-place
+    # collective reuse. Trace order is already deterministic across ranks
+    # (identical SPMD code), so canonicalization loses nothing here. In Dynamo
+    # output graphs these appear as OpOverloadPackets, in aten graphs as
+    # OpOverloads, so check both. OpOverloadPacket has no public namespace
+    # accessor, hence _qualified_op_name (test_canonical_graph_is_safe_to_reorder
+    # covers both dispatch forms, so a rename there fails loudly).
+    if isinstance(node.target, torch._ops.OpOverload):
+        collective_namespace = node.target.namespace
+    elif isinstance(node.target, torch._ops.OpOverloadPacket):
+        collective_namespace = node.target._qualified_op_name.split("::", 1)[0]
+    else:
+        collective_namespace = None
+    if collective_namespace in _ORDER_SENSITIVE_NAMESPACES:
+        return False
+    # increment_version bumps a tensor's version counter in place. It takes the
+    # tensor as an FX Node arg (so the no-input heuristic below misses it) and
+    # is not an OpOverload, so is_impure() doesn't flag it. Reordering it
+    # relative to version reads (prims._tensor_version) corrupts
+    # version-counter semantics. Matched by identity, not __name__:
+    # torch._C._increment_version is exposed under a different name and is in
+    # Dynamo's in-graph allowlist (trace_rules.torch_c_binding_in_graph_functions).
+    if node.target in _version_mutating_functions():
         return False
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
@@ -110,6 +181,7 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     return True
 
 
+@compatibility(is_backward_compatible=False)
 def rename_nodes_to_canonical(
     graph: fx.Graph,
     skip_ops: frozenset[str] = frozenset(),
@@ -229,6 +301,7 @@ def _group_getitem_nodes(order: list[fx.Node]) -> None:
     order[:] = new_order
 
 
+@compatibility(is_backward_compatible=False)
 def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
