@@ -16,13 +16,14 @@ from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import largeTensorTest, skipXPUIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
 )
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton_tma_device
 
@@ -1335,10 +1336,13 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-    @skipIfXpu(
-        msg="XPU selects Flash Attention for SDPA backward; the current SYCL TLA"
-        "implementation does not guarantee precision on PVC. Re-enable once oneDNN"
-        "adds SDPA backward support. See https://github.com/intel/torch-xpu-ops/issues/4094"
+    device_type = GPU_TYPE  # required for skipXPUIf/skipCUDAIf decorators
+
+    @skipXPUIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
+        "Re-enable once oneDNN adds SDPA backward support. "
+        "See https://github.com/intel/torch-xpu-ops/issues/4094",
     )
     @inductor_config.patch(
         {
