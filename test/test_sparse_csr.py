@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_REMOTE_GPU,
     IS_WINDOWS,
+    instantiate_parametrized_tests,
     load_tests,
     parametrize,
     run_tests,
@@ -237,14 +238,13 @@ def hybrid_nonhybrid(test_name='hybrid'):
 
 
 class TestSparseCompressed(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @all_sparse_compressed_layouts()
-    @onlyCPU
     def test_layout(self, layout):
         self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
         self.assertEqual(type(layout), torch.layout)
 
-    @skipMeta
-    @onlyCPU
     @largeTensorTest("30GB", "cpu")
     def test_invalid_input_csr_large(self):
         rows = 2 ** 31
@@ -278,8 +278,6 @@ class TestSparseCompressed(TestCase):
                                 torch.arange(nnz // 2, dtype=torch.int64).repeat(2),
                                 torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
 
-    @skipMeta
-    @onlyCPU
     @all_sparse_compressed_layouts()
     def test_dim(self, layout):
         for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(layout, output_tensor=False):
@@ -4394,8 +4392,10 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
-instantiate_device_type_tests(TestSparseCSR, globals())
+instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals())
+
+instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 
 if __name__ == '__main__':
