@@ -168,7 +168,8 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.UCC,
 ]
 
-# Allowlist of distributed backends where profiling is supported with use_cuda=True
+# Allowlist of distributed backends where profiling collectives with a CUDA
+# device is supported.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -2605,7 +2606,7 @@ class DistributedTest:
                 op_calls.append(secondary_op_call)
 
             autograd_profiler_ctx = torch.autograd.profiler.profile(
-                use_cuda=profile_cuda, record_shapes=True
+                use_device="cuda" if profile_cuda else None, record_shapes=True
             )
 
             # TODO: move this test to use torch.profiler once kineto issues are
