@@ -2868,8 +2868,18 @@ def fwd_only(
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
+    from torch.compiler import config as compiler_config
+
+    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
+    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
+    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with enable_python_dispatcher(), preserve_node_meta():
+    with (
+        # pyrefly: ignore [missing-attribute]
+        compiler_config.patch(compile_on_one_rank=False),
+        enable_python_dispatcher(),
+        preserve_node_meta(),
+    ):
         gm = make_fx(fn, get_decomp_fn(), tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
@@ -2909,7 +2919,11 @@ def joint_fwd_bwd(
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    with torch._guards.tracing(None):
+    from torch.compiler import config as compiler_config
+
+    # Keep compile-on-one-rank device handling out of pattern tracing (see fwd_only).
+    # pyrefly: ignore [missing-attribute]
+    with torch._guards.tracing(None), compiler_config.patch(compile_on_one_rank=False):
         aot_function(
             fn,
             # pyrefly: ignore[bad-argument-type]
