@@ -769,6 +769,9 @@ print(torch.xpu.is_initialized())
         e6 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
         e5.synchronize()
         self.assertTrue(e6.query())
+        event_ptr = e6.sycl_event
+        e6.record()
+        self.assertEqual(event_ptr, e6.sycl_event)
 
         # ipc_handle() cannot be called on the reconstructed event;
         with self.assertRaisesRegex(
