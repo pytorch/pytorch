@@ -6,8 +6,8 @@
 #include <amd_smi/amdsmi.h>
 #include <string>
 #if ROCM_VERSION < 71400
-#include <cstdlib>
 #include <dlfcn.h>
+#include <cstdlib>
 #endif
 #endif
 
@@ -42,22 +42,18 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
 #else
   // ROCm >= 7.14: amd_smi is a build-time (DT_NEEDED) dependency, so the plain
   // amdsmi_* names used below resolve directly to the linked extern functions
-  // declared by <amd_smi/amdsmi.h>; nothing shadows them and no setup is needed.
+  // declared by <amd_smi/amdsmi.h>; nothing shadows them and no setup is
+  // needed.
 #if ROCM_VERSION < 71400
   // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
   // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
   static amdsmi_status_t (*amdsmi_init)(uint64_t) = nullptr;
   static amdsmi_status_t (*amdsmi_get_socket_handles)(
-      uint32_t*,
-      amdsmi_socket_handle*) = nullptr;
+      uint32_t*, amdsmi_socket_handle*) = nullptr;
   static amdsmi_status_t (*amdsmi_get_processor_handles)(
-      amdsmi_socket_handle,
-      uint32_t*,
-      amdsmi_processor_handle*) = nullptr;
+      amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*) = nullptr;
   static amdsmi_status_t (*amdsmi_is_P2P_accessible)(
-      amdsmi_processor_handle,
-      amdsmi_processor_handle,
-      bool*) = nullptr;
+      amdsmi_processor_handle, amdsmi_processor_handle, bool*) = nullptr;
 
   static void* amdsmi_handle = nullptr;
   static bool amdsmi_resolved = false;
@@ -129,8 +125,8 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   std::vector<amdsmi_processor_handle> processor_handles;
   for (size_t i = 0; i < socket_count; ++i) {
     uint32_t device_count = 0;
-    ret = amdsmi_get_processor_handles(
-        socket_handles[i], &device_count, nullptr);
+    ret =
+        amdsmi_get_processor_handles(socket_handles[i], &device_count, nullptr);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       LOG(ERROR)
           << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles (count) failed, ret="
