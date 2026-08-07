@@ -403,14 +403,14 @@ def ncu_analyzer(
 def collect_memory_snapshot(
     benchmark_compiled_module_fn: BenchmarkCallableType,
 ) -> None:
-    if not torch.cuda.is_available():
-        raise AssertionError("CUDA is not available")
+    if not torch.accelerator.is_available():
+        raise AssertionError("No accelerator is available")
 
-    torch.cuda.memory._record_memory_history(max_entries=100000)
+    torch.accelerator.memory._record_memory_history(max_entries=100000)
     benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
     snapshot_path = f"{tempfile.gettempdir()}/memory_snapshot.pickle"
-    torch.cuda.memory._dump_snapshot(snapshot_path)
-    torch.cuda.memory._record_memory_history(enabled=None)
+    torch.accelerator.memory._dump_snapshot(snapshot_path)
+    torch.accelerator.memory._record_memory_history(enabled=None)
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
@@ -445,13 +445,13 @@ def compiled_module_main(
         help="Whether to profile the compiled module",
     )
     parser.add_argument(
-        "--cuda-memory-snapshot",
+        "--memory-snapshot",
         action="store_true",
-        help="""
-            Whether to collect CUDA memory snapshot. Refer to
-            "https://pytorch.org/blog/understanding-gpu-memory-1/
-            for details about how to visualize the collected snapshot
-        """,
+        help=(
+            "Whether to collect an accelerator memory snapshot. Refer to "
+            "https://pytorch.org/blog/understanding-gpu-memory-1/ "
+            "for details about how to visualize the collected snapshot."
+        ),
     )
     parser.add_argument(
         "--ncu",
@@ -498,15 +498,15 @@ def compiled_module_main(
         times = args.times
         repeat = args.repeat
 
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
+        if torch.accelerator.is_available():
+            torch.accelerator.reset_peak_memory_stats()
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
-        if torch.cuda.is_available():
-            peak_mem = torch.cuda.max_memory_allocated()
+        if torch.accelerator.is_available():
+            peak_mem = torch.accelerator.max_memory_allocated()
             print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
-        if torch.cuda.is_available() and args.cuda_memory_snapshot:
+        if torch.accelerator.is_available() and args.memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)
 
         if args.profile:
