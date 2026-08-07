@@ -194,7 +194,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
       capture_dev_,
       {.mempool_id = mempool_id_,
        .capture_id = capture_id_,
-       .parent_capture_id = std::nullopt});
+       .primary_capture_stream = capture_stream_.stream(),
+       .parent_capture_id = std::nullopt,
+       .parent_dependency_stream = std::nullopt});
 
   {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -501,6 +503,7 @@ void CUDAGraph::begin_capture_to_conditional_node(
 
   TORCH_CHECK(!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::graph_capture_record_stream_reuse(), "'graph_capture_record_stream_reuse:True' allocator config does not work with conditional control flow in a cuda graph today. See issue #175001 for updates");
 
+  const CUDAStream parent_dependency_stream = getCurrentCUDAStream();
   cudaStreamCaptureStatus status{};
   cudaGraph_t currently_capturing_graph{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
@@ -545,10 +548,10 @@ void CUDAGraph::begin_capture_to_conditional_node(
   params.conditional.type = conditional_type;
   params.conditional.size = 1;
 
-  cudaGraphNode_t cond_node{};
+  cudaGraphNode_t conditional_node{};
 #if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaGraphAddNode(
-      &cond_node,
+      &conditional_node,
       currently_capturing_graph,
       dependencies,
       dependency_edges,
@@ -556,29 +559,29 @@ void CUDAGraph::begin_capture_to_conditional_node(
       &params));
 #else
   AT_CUDA_CHECK(cudaGraphAddNode_v2(
-      &cond_node,
+      &conditional_node,
       currently_capturing_graph,
       dependencies,
       dependency_edges,
       num_dependencies,
       &params));
 #endif
-  cudaGraph_t conditional_node_child_graph = params.conditional.phGraph_out[0];
+  cudaGraph_t conditional_body_graph = params.conditional.phGraph_out[0];
 
 #if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
-getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
+getCurrentCUDAStream(), &conditional_node, nullptr, 1, cudaStreamSetCaptureDependencies));
 #else
   AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies_v2(
-getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
+getCurrentCUDAStream(), &conditional_node, nullptr, 1, cudaStreamSetCaptureDependencies));
 #endif
 
-  cudaStream_t raw_child_stream{};
+  cudaStream_t raw_conditional_primary_stream{};
   AT_CUDA_CHECK(cudaStreamCreateWithFlags(
-      &raw_child_stream, cudaStreamNonBlocking));
-  CUDAStream child_stream =
-      getStreamFromExternal(raw_child_stream, capture_dev_);
-  conditional_node_raw_streams_.emplace(raw_child_stream);
+      &raw_conditional_primary_stream, cudaStreamNonBlocking));
+  CUDAStream conditional_primary_stream =
+      getStreamFromExternal(raw_conditional_primary_stream, capture_dev_);
+  conditional_node_raw_streams_.emplace(raw_conditional_primary_stream);
   conditional_graph_capture_ids_.push(0);
   conditional_node_handles_.push(handle);
 
@@ -592,24 +595,28 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   });
 
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
-      child_stream,
-      conditional_node_child_graph,
+      conditional_primary_stream,
+      conditional_body_graph,
       nullptr,
       nullptr,
       0,
       capture_mode_));
 
-  auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
-  TORCH_INTERNAL_ASSERT(child_capture_id_opt.has_value(),
-      "Child stream should be actively capturing after cudaStreamBeginCaptureToGraph");
-  conditional_graph_capture_ids_.top() = child_capture_id_opt.value();
+  auto conditional_body_capture_id =
+      c10::cuda::captureIdMayInitCtx(conditional_primary_stream);
+  TORCH_INTERNAL_ASSERT(
+      conditional_body_capture_id.has_value(),
+      "Conditional primary capture stream must be active after cudaStreamBeginCaptureToGraph");
   c10::cuda::CUDACachingAllocator::markCaptureBegin(
       capture_dev_,
       {.mempool_id = mempool_id_,
-       .capture_id = child_capture_id_opt.value(),
-       .parent_capture_id = parent_capture_id});
+       .capture_id = conditional_body_capture_id.value(),
+       .primary_capture_stream = conditional_primary_stream.stream(),
+       .parent_capture_id = parent_capture_id,
+       .parent_dependency_stream = parent_dependency_stream.stream()});
 
-  conditional_node_streams_.emplace(child_stream);
+  conditional_graph_capture_ids_.top() = conditional_body_capture_id.value();
+  conditional_node_streams_.emplace(conditional_primary_stream);
 
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
