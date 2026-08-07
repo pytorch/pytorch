@@ -195,6 +195,8 @@ struct XPUEvent {
       TORCH_CHECK(
           enable_ipc_,
           "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
+      TORCH_CHECK(
+          !enable_timing_, "XPUEvent cannot have both IPC and timing enabled.");
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
           syclex::properties{
@@ -207,8 +209,6 @@ struct XPUEvent {
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
     }
-    // TODO: Confirm with SYCL compiler team whether a paired pull() call is
-    // required to release each handle returned by ipc::event::get().
     return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
   }
 #endif
