@@ -2663,6 +2663,22 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **
         tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
         yield SampleInput(tensors)
 
+def sample_inputs_hypot(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+
+    if dtype.is_floating_point and not requires_grad:
+        # Regression case for https://github.com/pytorch/pytorch/issues/192507
+        # Extreme and infinite values make the gradient ill-defined, so this
+        # sample is only used for forward-mode testing.
+        big = torch.finfo(dtype).max
+        lhs = torch.tensor(
+            [big, 1.0, big, -big, 1.0, float('inf'), -float('inf')],
+            device=device, dtype=dtype)
+        rhs = torch.tensor(
+            [1.0, big, big, 1.0, -big, float('nan'), float('nan')],
+            device=device, dtype=dtype)
+        yield SampleInput(lhs, args=(rhs,))
+
 def error_inputs_hstack_dstack_vstack(op, device):
     make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
     tensor_shapes = (
@@ -20369,6 +20385,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     BinaryUfuncInfo('hypot',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
                     dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_hypot,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
