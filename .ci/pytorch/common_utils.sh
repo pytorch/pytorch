@@ -119,6 +119,19 @@ function pip_uninstall() {
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
+function get_pkg_versions() {
+  python3 -c "
+import importlib.metadata as metadata
+import sys
+
+for pkg in sys.argv[1:]:
+    try:
+        print(f'{pkg}=={metadata.version(pkg)}')
+    except metadata.PackageNotFoundError:
+        print(f'{pkg}==NOT_INSTALLED')
+" "$@"
+}
+
 function get_exit_code() {
   set +e
   "$@"

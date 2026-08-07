@@ -194,7 +194,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
 
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
-        getMPSProfiler().endProfileCopy(profileId, syncType);
+        getMPSProfiler().endProfileCopy(profileId, syncType, this);
       } else {
         synchronize(syncType);
       }
@@ -227,7 +227,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     if (isGraphProfilingEnabled) {
       // this function call is only relevant for interval-based Signposts
       // which exclude schedule time (only includes GPU run time)
-      profiler.beginProfileGPUInterval(mpsGraph);
+      profiler.beginProfileGPUInterval(mpsGraph, this);
     }
     // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
     [mpsGraph encodeToCommandBuffer:commandBuffer()
@@ -245,7 +245,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     // check if graph execution profiling is enabled
     if (isGraphProfilingEnabled) {
       // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
-      profiler.endProfileKernel(mpsGraph, _syncType);
+      profiler.endProfileKernel(mpsGraph, this, _syncType);
     } else {
       synchronize(_syncType);
     }
@@ -311,12 +311,14 @@ constexpr int kMPSStreamsPerPool = 32;
 std::array<MPSStream*, kMPSStreamsPerPool> stream_pool{};
 c10::once_flag stream_pool_flag;
 std::atomic<uint32_t> stream_pool_counter{0};
+std::atomic<bool> stream_pool_initialized{false};
 
 void initStreamPool() {
   // Pool ids start at 1; id 0 is reserved for the default stream.
   for (const auto i : c10::irange(kMPSStreamsPerPool)) {
     stream_pool[i] = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), i + 1));
   }
+  stream_pool_initialized.store(true, std::memory_order_release);
 }
 } // namespace
 
@@ -333,10 +335,17 @@ MPSStream* getStreamFromPool(std::optional<int64_t> stream_id_opt) {
 }
 
 void synchronizeAllMPSStreams(SyncType syncType) {
-  getDefaultMPSStream()->synchronize(syncType);
-  c10::call_once(stream_pool_flag, initStreamPool);
-  for (const auto i : c10::irange(kMPSStreamsPerPool)) {
-    stream_pool[i]->synchronize(syncType);
+  auto sync = [syncType](MPSStream* stream) {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      stream->synchronize(syncType);
+    });
+  };
+  sync(getDefaultMPSStream());
+  // don't eagerly create the pool just to synchronize it
+  if (stream_pool_initialized.load(std::memory_order_acquire)) {
+    for (auto* stream : stream_pool) {
+      sync(stream);
+    }
   }
 }
 

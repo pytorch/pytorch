@@ -164,7 +164,7 @@ TORCH_API MPSStream* getDefaultMPSStream();
 TORCH_API MPSStream* getStreamFromPool(std::optional<int64_t> stream_id_opt = std::nullopt);
 
 /**
- * Synchronize the default stream and the streams in the pool.
+ * Synchronize the default stream and any pool streams created so far.
  */
 TORCH_API void synchronizeAllMPSStreams(SyncType syncType);
 

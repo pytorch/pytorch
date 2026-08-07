@@ -18,7 +18,12 @@ class MPSEvent {
   // records an event on the stream
   void record(bool needsLock, bool syncEvent = false);
   // makes all future work submitted to the stream wait for this event.
-  bool wait(bool needsLock, bool syncEvent = false);
+  // If `stream` is null, wait on the stream this event was last recorded or
+  // reset on.
+  bool wait(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr);
   // schedules a notifyListener callback for the event.
   bool notify(bool needsLock, MTLSharedEventNotificationBlock block);
   // checks if events are already signaled.
@@ -45,6 +50,8 @@ class MPSEvent {
   // enables measuring the completion time of the notifyListener of this event
   bool m_enable_timing;
   uint64_t m_signalCounter = 0;
+  // whether `record` has been called since the last `reset`
+  bool m_was_recorded = false;
   MPSStream* m_stream = nullptr;
   MTLSharedEvent_t m_event = nullptr;
   MTLSharedEventListener* m_listener = nullptr;
@@ -57,7 +64,7 @@ class MPSEvent {
   uint64_t m_completion_time = 0;
 
   void recordLocked(bool syncEvent);
-  bool waitLocked(bool syncEvent);
+  bool waitLocked(bool syncEvent, MPSStream* stream);
   bool notifyLocked(MTLSharedEventNotificationBlock block);
   void notifyCpuSync();
   static uint64_t getTime() {
@@ -78,8 +85,10 @@ class MPSEventPool {
   // these are mainly used for MPSHooks and torch.mps.Event() bindings
   id_t acquireEvent(bool enable_timing);
   void releaseEvent(id_t event_id);
+  // rebinds an already-acquired event to `stream`
+  void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
   void recordEvent(id_t event_id, bool syncEvent);
-  void waitForEvent(id_t event_id, bool syncEvent);
+  void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);
   // returns elapsed time between two recorded events in milliseconds

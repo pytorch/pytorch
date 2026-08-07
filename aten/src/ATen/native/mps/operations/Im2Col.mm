@@ -90,7 +90,7 @@ static void im2col_out_mps_template(Tensor& output,
                                                static_cast<int32_t>(pad_height),
                                                static_cast<int32_t>(stride_width),
                                                static_cast<int32_t>(stride_height)};
-      getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
+      getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
       mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
@@ -106,7 +106,7 @@ static void im2col_out_mps_template(Tensor& output,
       });
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-      getMPSProfiler().endProfileKernel(im2colPSO);
+      getMPSProfiler().endProfileKernel(im2colPSO, stream);
     }
   });
   if (!batched_input) {

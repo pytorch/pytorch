@@ -364,14 +364,17 @@ void InputBuffer::add(
     auto& ready_event = ready_events[pos];
     auto& ready_stream = ready_streams[pos];
     TORCH_INTERNAL_ASSERT(accum_stream && ready_stream);
+    c10::Stream other_producer_stream = *ready_stream;
     // 1)
-    if (*accum_stream != *opt_producer_stream) {
+    bool waited_on_producer = *accum_stream != *opt_producer_stream;
+    bool waited_on_ready = *accum_stream != *ready_stream;
+    if (waited_on_producer) {
       auto event = c10::Event{device_type};
       event.record(*opt_producer_stream);
       accum_stream->wait(event);
       record_stream_any_impl(var, *accum_stream);
     }
-    if (*accum_stream != *ready_stream) {
+    if (waited_on_ready) {
       TORCH_INTERNAL_ASSERT(ready_event);
       accum_stream->wait(*ready_event);
       // This is redundant for case A, but needed for case C
@@ -380,6 +383,22 @@ void InputBuffer::add(
     // 2)
     c10::OptionalStreamGuard stream_guard{accum_stream};
     accumulate(buffer, pos, std::move(var));
+    if ((waited_on_producer || waited_on_ready) &&
+        device_type == c10::DeviceType::MPS) {
+      // On MPS, encoding a cross-stream wait-for-event, as done above via
+      // `accum_stream->wait()`, does not reliably order this in-place
+      // accumulate's read/write against the other producer's write. Blocking
+      // for completion on both streams has been observed to enforce the correct
+      // order.
+      // TODO: A lighter-weight fix requires understanding why the signal/wait
+      // pattern which CUDA uses isn't sufficient here.
+      auto other_producer_event = c10::Event{device_type};
+      other_producer_event.record(other_producer_stream);
+      other_producer_event.synchronize();
+      auto accum_done_event = c10::Event{device_type};
+      accum_done_event.record(*accum_stream);
+      accum_done_event.synchronize();
+    }
     // 3)
     if (*opt_consumer_stream != *accum_stream) {
       // Only the consumer stream needs to wait for this event
