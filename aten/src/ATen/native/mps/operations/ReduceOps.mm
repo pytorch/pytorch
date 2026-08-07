@@ -797,13 +797,6 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     return;
   }
 
-  // Split-K partials hold the winning value in kernel-side opmath_t
-  // precision (fp32 for half/bf16, so pass 2 compares exactly what pass 1
-  // loaded) and the winning index as int32.
-  const ScalarType partial_dtype = (in_kdtype == kHalf || in_kdtype == kBFloat16 || in_kdtype == kFloat) ? kFloat
-      : (in_kdtype == kLong)                                                                             ? kLong
-                                                                                                         : kInt;
-
   auto encode_arg_inner = [&](const Tensor& in, uint32_t num_rows, uint32_t row_len) {
     const auto kname = fmt::format("{}_reduction_inner_{}_long", op_prefix, in_str);
     const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
@@ -889,7 +882,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     getMPSProfiler().endProfileKernel(ps);
   };
   auto encode_arg_combine = [&](const Tensor& vals, const Tensor& idxs, uint32_t num_outputs, uint32_t num_segs) {
-    const auto kname = fmt::format("{}_reduction_combine_{}", op_prefix, scalarToMetalTypeString(partial_dtype));
+    const auto kname = fmt::format("{}_reduction_combine_{}", op_prefix, in_str);
     const auto num_tgs = at::ceil_div(num_outputs, INNER_TG_SIZE / c10::metal::simdgroup_size);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
@@ -903,8 +896,10 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   };
   // Shared split-K driver: allocate the [num_outputs, num_segs] (value,
   // index) partials, run the layout-specific pass 1, resolve with combine.
+  // Winning values are input elements, so the value partials keep the input
+  // dtype (no upcast needed) and the index partials are int32.
   auto run_arg_split = [&](uint32_t num_outputs, uint32_t num_segs, void (^pass1)(const Tensor&, const Tensor&)) {
-    auto val_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(partial_dtype));
+    auto val_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(in_kdtype));
     auto idx_partials = at::empty({(int64_t)num_outputs, (int64_t)num_segs}, input.options().dtype(kInt));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
