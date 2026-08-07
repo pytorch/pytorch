@@ -506,11 +506,6 @@ class DeviceTypeTestBase(TestCase):
         if required_capabilities:
             _check_capabilities(self, required_capabilities)
 
-        from torch.testing._internal.common_distributed import (
-            _check_required_world_size,
-        )
-
-        _check_required_world_size(self)
         super().setUp()
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
