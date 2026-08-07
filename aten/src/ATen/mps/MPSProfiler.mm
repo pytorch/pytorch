@@ -124,8 +124,6 @@ MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullpt
 }
 
 MPSProfiler::~MPSProfiler() {
-  // first make sure completion handlers on every stream (not just the
-  // default one) are completed
   if (hasPendingCompletionHandlers) {
     at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
   }
@@ -438,7 +436,6 @@ void MPSProfiler::addProfilerScheduledHandler(BaseInfo& info, MPSStream* stream)
   const SignpostTypes signpostType = getSignpostType(info.type);
   const os_signpost_id_t intervalSignpostId = info.intervalSignpostId;
 
-  // TODO: Should this be Current stream instead?
   MPSStream* profileStream = stream ? stream : getDefaultMPSStream();
   // NOTE: the following block isn't thread-safe
   [profileStream->commandBuffer() addScheduledHandler:^(id<MTLCommandBuffer> cb) {
