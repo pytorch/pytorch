@@ -5125,6 +5125,65 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
 
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_metadata(self, backend):
+        def fn():
+            x = torch.arange(4.0)
+            y = x.as_strided_((2, 2), (2, 1))
+            observer = torch.max(y)
+            return (
+                y,
+                x.size(),
+                x.shape,
+                x.dim(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                observer,
+            )
+
+        eager = fn()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled()
+
+        self.assertEqual(actual[0], eager[0])
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(actual[3], eager[3])
+        self.assertEqual(tuple(actual[4]), tuple(eager[4]))
+        self.assertEqual(tuple(actual[5]), tuple(eager[5]))
+        self.assertEqual(tuple(actual[6]), tuple(eager[6]))
+        self.assertEqual(actual[7], eager[7])
+
+    # https://github.com/pytorch/pytorch/issues/185888
+    @parametrize("backend", ["eager", "inductor"])
+    def test_as_strided_inplace_internal_tensor_symbolic_metadata(self, backend):
+        def fn(inp):
+            x = torch.arange(16.0)
+            n = inp.size(0)
+            y = x.as_strided_((n,), (2,))
+            return (
+                x.size(),
+                y.size(),
+                x.stride(),
+                y.stride(),
+                x.is_contiguous(),
+                y.is_contiguous(),
+            )
+
+        inp = torch.empty(5)
+        eager = fn(inp)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+        actual = compiled(inp)
+
+        self.assertEqual(tuple(actual[0]), tuple(eager[0]))
+        self.assertEqual(tuple(actual[1]), tuple(eager[1]))
+        self.assertEqual(tuple(actual[2]), tuple(eager[2]))
+        self.assertEqual(tuple(actual[3]), tuple(eager[3]))
+        self.assertEqual(actual[4], eager[4])
+        self.assertEqual(actual[5], eager[5])
+
     # Extension of https://github.com/pytorch/pytorch/issues/161010
     # in the non memory dense case
     def test_clone_not_memory_dense(self):
