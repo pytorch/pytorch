@@ -773,11 +773,8 @@ void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
     // to measure the time it takes to compile the graphs (if graph newly created),
     // and also the time potentially spent on gather/scatter of graph's input tensors
     //
-    // No MPSStream is available at this cache-lookup call site; only affects
-    // the rarely-used INCLUDE_SCHEDULE_INTERVAL option (falls back to the
-    // default stream). The actual execution's begin/end (beginProfileGPUInterval/
-    // endProfileKernel, called from MPSStream::executeMPSGraph) do use the real
-    // stream.
+    // No MPSStream is available at this cache-lookup call site, so fall back to
+    // the default stream.
     profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true, nullptr);
   }
 }
