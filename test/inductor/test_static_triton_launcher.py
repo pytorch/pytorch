@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -28,6 +29,7 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -172,6 +174,38 @@ class TestStaticTritonLauncher(TestCase):
 
         if HAS_XPU_AND_TRITON:
             JITFunction.__getitem__ = _orig_getitem
+
+    @skipIfRocm
+    @skipIfXpu
+    @unittest.skipUnless(SM90OrLater, "sm90+ static launch coverage")
+    def test_static_launch_sm90(self):
+        """Static launch of a Triton kernel, gated on sm90+.
+
+        Mirrors test_basic. The gate means it never runs unless
+        .ci/pytorch/test.sh selects this file for the ciflow/h100 job, which is
+        the situation #191133 hit.
+        """
+
+        @triton.jit
+        def sm90_add_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            offsets = tl.arange(0, BLOCK)
+            mask = offsets < n
+            tl.store(
+                out_ptr + offsets, tl.load(in_ptr + offsets, mask=mask) + 1, mask=mask
+            )
+
+        n = 128
+        src = torch.arange(n, dtype=torch.int32, device=GPU_TYPE)
+        dst = torch.zeros(n, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = sm90_add_kernel[(1,)](src, dst, n, BLOCK=n)
+
+        launcher = self._make_launcher(compiled_kernel)
+        out = torch.zeros(n, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, src, out, n)
+
+        self.assertEqual(out, src + 1)
 
     def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
         """
