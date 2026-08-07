@@ -5082,6 +5082,19 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
+    # The pooling kernels walk each window with an int32 counter that starts inside the input
+    # and advances by dilation, so inputSize - 1 + dilation has to stay representable.
+    max_dilated_index = 2**31 - 1
+    torch._check(
+        sym_and(
+            inputHeight - 1 + dilationH <= max_dilated_index,
+            inputWidth - 1 + dilationW <= max_dilated_index,
+        ),
+        lambda: "dilation should be smaller than or equal to INT_MAX - input size, but got "
+        f"dilationH: {dilationH}, dilationW: {dilationW}, "
+        f"inputHeight: {inputHeight}, inputWidth: {inputWidth}",
+    )
+
     valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
@@ -5137,6 +5150,8 @@ def pool3d_shape_check(
     fn_name: str,
     check_input_size: bool = False,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     ndim = input.ndim
 
     torch._check(
@@ -5157,6 +5172,21 @@ def pool3d_shape_check(
         lambda: (
             f"dilation should be greater than zero, but got "
             f"dilationT: {dilationT}, dilationH: {dilationH}, dilationW: {dilationW}"
+        ),
+    )
+
+    # See the matching check in pool2d_shape_check.
+    max_dilated_index = 2**31 - 1
+    torch._check(
+        sym_and(
+            itime - 1 + dilationT <= max_dilated_index,
+            iheight - 1 + dilationH <= max_dilated_index,
+            iwidth - 1 + dilationW <= max_dilated_index,
+        ),
+        lambda: (
+            f"dilation should be smaller than or equal to INT_MAX - input size, but got "
+            f"dilationT: {dilationT}, dilationH: {dilationH}, dilationW: {dilationW}, "
+            f"itime: {itime}, iheight: {iheight}, iwidth: {iwidth}"
         ),
     )
 

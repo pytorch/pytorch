@@ -3898,6 +3898,16 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
                                  kwargs={'kernel_size': 2}),
                      error_regex='Output size is too small')
 
+    # error: dilation large enough to overflow the int32 window index (see gh-189664).
+    # kernel_size must be 1 here, otherwise 'Output size is too small' fires first.
+    err_msg = 'dilation should be smaller than or equal to INT_MAX - input size'
+    yield ErrorInput(SampleInput(make_arg((1, 1, 24, 24)),
+                                 kwargs={'kernel_size': 1, 'dilation': 2147483647}),
+                     error_regex=err_msg)
+    yield ErrorInput(SampleInput(make_arg((1, 1, 24, 24)),
+                                 kwargs={'kernel_size': 1, 'dilation': (1, 2147483647)}),
+                     error_regex=err_msg)
+
 
 def error_inputs_max_pool3d(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -3934,6 +3944,16 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 4, 4)),
                                  kwargs={'kernel_size': 2}),
                      error_regex='Output size is too small')
+
+    # error: dilation large enough to overflow the int32 window index (see gh-189664).
+    # kernel_size must be 1 here, otherwise 'Output size is too small' fires first.
+    err_msg = 'dilation should be smaller than or equal to INT_MAX - input size'
+    yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
+                                 kwargs={'kernel_size': 1, 'dilation': 2147483647}),
+                     error_regex=err_msg)
+    yield ErrorInput(SampleInput(make_arg((1, 1, 8, 8, 8)),
+                                 kwargs={'kernel_size': 1, 'dilation': (1, 1, 2147483647)}),
+                     error_regex=err_msg)
 
 
 
