@@ -3831,14 +3831,18 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args and not kwargs:
+                # list.__new__ (PyType_GenericNew) ignores extra args -- only
+                # the first arg (the type) matters. Pass init_args=[] so
+                # reconstruction emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
-                    args[1:],
+                    [],
                     tx=tx,
                 )
 

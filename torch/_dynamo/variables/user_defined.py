@@ -91,6 +91,7 @@ from ..utils import (
     istype,
     list_methods,
     namedtuple_fields,
+    no_keywords,
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -5063,6 +5064,36 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         self._base_methods = list_methods
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # Route __init__ to tp_init_impl explicitly: UserDefinedObjectVariable
+        # otherwise delegates it to the underlying list VT (list.__init__ is in
+        # _base_methods), bypassing the tp_init override below.
+        if name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # list.__init__ ignores excess keyword args when the instance's type
+        # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
+        # them. See the generated list___init__ wrapper's tp_new comparison:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
+        if type(self.value).__new__ is list.__new__:
+            no_keywords(tx, "list", kwargs)
+        # The actual init delegates to the underlying list VT via
+        # UserDefinedObjectVariable.call_method's _base_methods dispatch.
+        return super().call_method(tx, "__init__", args, kwargs)
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
