@@ -67,10 +67,6 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
-# Set environment variable to disable multicast for all tests in this module
-os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
-
-
 @contextmanager
 def _enable_multicast_for_test(test_case: TestCase, device_index: int):
     old_disable_multicast = os.environ.pop("TORCH_SYMM_MEM_DISABLE_MULTICAST", None)
