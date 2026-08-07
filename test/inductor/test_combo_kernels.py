@@ -3133,6 +3133,7 @@ class _ComboIntervalFakeScheduler(Scheduler):
             on_accept(_ComboIntervalFakeCombo(candidate), candidate, num)
 
 
+@instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -3195,6 +3196,54 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         ):
             Scheduler.create_combo_kernel_nodes(scheduler)
         return scheduler
+
+    @requires_cuda_and_triton
+    @parametrize("gate_enabled", [True, False])
+    def test_peak_memory_reorder_order(self, gate_enabled):
+        from torch._inductor import memory
+
+        calls = []
+        planning_calls = 0
+        create_combo = Scheduler.create_combo_kernel_nodes
+        prepare_planning_info = memory.prepare_planning_info
+        reorder = memory.reorder_for_peak_memory
+
+        def record_combo(scheduler, *args, **kwargs):
+            calls.append("combo")
+            return create_combo(scheduler, *args, **kwargs)
+
+        def record_reorder(*args, **kwargs):
+            calls.append("reorder")
+            return reorder(*args, **kwargs)
+
+        def record_prepare_planning_info(*args, **kwargs):
+            nonlocal planning_calls
+            planning_calls += 1
+            return prepare_planning_info(*args, **kwargs)
+
+        def fn(a, b):
+            return a.sin(), b.cos()
+
+        inputs = [torch.randn(16, device=GPU_TYPE) for _ in range(2)]
+        with (
+            patch.object(Scheduler, "create_combo_kernel_nodes", record_combo),
+            patch.object(memory, "prepare_planning_info", record_prepare_planning_info),
+            patch.object(memory, "reorder_for_peak_memory", record_reorder),
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_peak_memory_pct_threshold": (
+                        0.05 if gate_enabled else None
+                    ),
+                    "combo_kernel_peak_memory_increase_gb": None,
+                    "test_configs.track_memory_lifecycle": "assert",
+                }
+            ),
+        ):
+            self.assertEqual(torch.compile(fn)(*inputs), fn(*inputs))
+
+        self.assertEqual(calls, ["reorder", "combo"])
+        self.assertEqual(planning_calls, 1)
 
     def test_overlapping_kahn_group_intervals(self):
         scheduler = self._run_interval_case(
