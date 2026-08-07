@@ -260,6 +260,14 @@ class NormalizedView:
 
 
 @dataclasses.dataclass(frozen=True)
+class NormalizedDtypeView:
+    """Canonical source and target dtype for a storage reinterpretation."""
+
+    source: torch.fx.Node
+    dtype: torch.dtype
+
+
+@dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
     """Canonical arguments for a supported FX reduction."""
 
@@ -312,13 +320,6 @@ class NormalizedSelect:
 
 
 @dataclasses.dataclass(frozen=True)
-class NormalizedNVFP4Pack:
-    """Canonical grouped source for a terminal NVFP4 pack."""
-
-    source: torch.fx.Node
-
-
-@dataclasses.dataclass(frozen=True)
 class NormalizedUnsupportedReduction:
     """Canonical source and target for an unsupported FX reduction."""
 
@@ -328,13 +329,13 @@ class NormalizedUnsupportedReduction:
 
 NormalizedNode = (
     NormalizedView
+    | NormalizedDtypeView
     | NormalizedReduction
     | NormalizedPrepareSoftmax
     | NormalizedSqueeze
     | NormalizedGetItem
     | NormalizedSplit
     | NormalizedSelect
-    | NormalizedNVFP4Pack
     | NormalizedUnsupportedReduction
 )
 
@@ -369,6 +370,13 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
     """Return canonical arguments for a selected epilogue FX node."""
     if node.op != "call_function":
         return None
+    if node.target is torch.ops.aten.view.dtype:
+        source, dtype = node.args
+        if not isinstance(source, torch.fx.Node) or not isinstance(dtype, torch.dtype):
+            raise AssertionError(
+                f"malformed GEMM epilogue dtype view: {node.format_node()}"
+            )
+        return NormalizedDtypeView(source, dtype)
     if node.target in (
         torch.ops.aten.view.default,
         torch.ops.aten.reshape.default,
@@ -386,13 +394,6 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
                 for arg in shape
             ),
         )
-    if node.target is torch.ops.flex_gemm.nvfp4_pack.default:
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed GEMM epilogue output transform: {node.format_node()}"
-            )
-        return NormalizedNVFP4Pack(source)
     if node.target in FUNCTION_REDUCTION_TYPES:
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
