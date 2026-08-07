@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -103,6 +103,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
       const std::string& params_signature, const std::string& blas_signature);
+    void ClearUntuned();
 
     void InitRealtimeAppend(
         const std::string& filename,
@@ -188,6 +189,9 @@ class TORCH_CUDA_CPP_API TuningContext {
     void SetMaxTuningIterations(int max_iter);
     int GetMaxTuningIterations() const;
 
+    void SetCublasLtRequestedAlgoCount(int count);
+    int GetCublasLtRequestedAlgoCount() const;
+
     void SetMaxWarmupDurationMs(int max_duration_ms);
     int GetMaxWarmupDurationMs() const;
 
@@ -233,6 +237,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
     int max_tuning_iterations_;
+    int cublaslt_requested_algo_count_;
     int max_warmup_duration_ms_;
     int max_warmup_iterations_;
     bool icache_flush_;
