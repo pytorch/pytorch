@@ -4,16 +4,14 @@
 
 using torch::stable::Tensor;
 
-Tensor my_permute(
-    const Tensor& self,
-    torch::headeronly::IntHeaderOnlyArrayRef dims) {
-  return torch::stable::permute(self, dims);
+Tensor my_index_select(const Tensor& self, int64_t dim, const Tensor& index) {
+  return torch::stable::index_select(self, dim, index);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
-  m.def("my_permute(Tensor self, int[] dims) -> Tensor");
+  m.def("my_index_select(Tensor self, int dim, Tensor index) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
-  m.impl("my_permute", TORCH_BOX(&my_permute));
+  m.impl("my_index_select", TORCH_BOX(&my_index_select));
 }
