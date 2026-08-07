@@ -10,7 +10,6 @@ import torch.distributed as dist
 
 if dist._is_spmd_types_available():
     import spmd_types as spmd
-    import spmd_types.checker
 
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
@@ -463,9 +462,11 @@ def _local_map_wrapped(
         _annotate_spmd_types(
             flat_local_args, in_placements, in_grad_placements, device_mesh
         )
+        from spmd_types._checker import typecheck
+
         with (
             spmd.set_current_mesh(device_mesh),
-            spmd_types.checker.typecheck(strict_mode="strict"),
+            typecheck(strict_mode="strict"),
         ):
             out = func(*local_args, **kwargs)
     else:
