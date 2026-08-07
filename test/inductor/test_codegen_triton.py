@@ -34,18 +34,22 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipPRIVATEUSE1,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
-    HAS_GPU_AND_TRITON,
+    HAS_TRITON,
 )
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
-class TestCodegenTriton(InductorTestCase):
+class TestCodegenTritonBase(InductorTestCase):
     def setUp(self):
         super().setUp()
 
@@ -63,6 +67,10 @@ class TestCodegenTriton(InductorTestCase):
         self._stack.close()
         super().tearDown()
 
+
+class TestCodegenTritonGeneric(TestCodegenTritonBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
             self.assertEqual(
@@ -74,35 +82,6 @@ class TestCodegenTriton(InductorTestCase):
                     get_triton_reduction_function(reduction_type),
                     f"triton_helpers.{reduction_type}2_strict",
                 )
-
-    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_strict_signed_zero_unrolled_reduction(self):
-        def fn(x):
-            return torch.amin(x, dim=1), torch.amax(x, dim=1)
-
-        x = torch.tensor(
-            [
-                [0.0, -0.0, -0.0, -0.0],
-                [-0.0, 0.0, 0.0, 0.0],
-                [1.0, float("nan"), -1.0, 0.0],
-            ],
-            device=GPU_TYPE,
-        )
-        expected_min, expected_max = fn(x)
-        with inductor_config.patch(strict_signed_zero=True):
-            (actual_min, actual_max), code = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x
-            )
-
-        actual_min_bits = actual_min[:2].view(torch.int32)
-        actual_max_bits = actual_max[:2].view(torch.int32)
-        expected_min_bits = expected_min[:2].view(torch.int32)
-        expected_max_bits = expected_max[:2].view(torch.int32)
-        self.assertEqual(actual_min_bits, expected_min_bits)
-        self.assertEqual(actual_max_bits, expected_max_bits)
-        self.assertTrue(torch.isnan(actual_min[2]).item())
-        self.assertTrue(torch.isnan(actual_max[2]).item())
-        self.assertIn("tl.where", " ".join(code))
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
@@ -499,19 +478,6 @@ def helper(x):
             if (0,) in config:
                 self.assertNotIn(["tt.pointer_range", 32], config[(0,)])
 
-    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
-    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_pointer_range_in_generated_code(self):
-        """Verify tt.pointer_range=32 appears in generated Triton code on HIP."""
-
-        def fn(x):
-            return x + 1
-
-        x = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
-        _, code = run_and_get_code(torch.compile(fn), x)
-        code_str = " ".join(code)
-        self.assertIn("tt.pointer_range", code_str)
-
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
         from torch.utils._sympy.functions import FloorDiv, Mod
@@ -554,7 +520,79 @@ def helper(x):
         shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
         self.assertTrue(sv.statically_known_multiple_of(s4, 8))
 
-    def test_signature_of_fp8_dtypes(self):
+    def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
+        # Regression: a backend whose import_get_raw_stream_as returns a
+        # multi-line snippet (e.g. the CPU override, which MTIA uses) must not
+        # break the textwrap.dedent of the benchmark-kernel imports. Formatting
+        # before dedenting used to leave the imports indented (IndentationError).
+        # TritonKernel and ComboKernel carry identical copies of this helper.
+        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
+
+        class FakeDeviceOps:
+            def import_get_raw_stream_as(self, name):
+                return f"def {name}(_):\n    return 0"
+
+        class FakeGraph:
+            device_ops = FakeDeviceOps()
+
+        for kernel_cls in (TritonKernel, ComboKernel):
+            with V.set_graph_handler(FakeGraph()):
+                # imports_for_benchmark_kernel does not use self.
+                imports = kernel_cls.imports_for_benchmark_kernel(None)
+            # Compiles without IndentationError and the top-level imports stay at
+            # column 0 (they would be indented if dedent ran after substitution).
+            compile(imports, "<benchmark_kernel_imports>", "exec")
+            self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
+            self.assertIn("\nimport torch\n", imports)
+
+
+class TestCodegenTritonAccel(TestCodegenTritonBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipUnless(HAS_TRITON, "requires GPU and Triton")
+    def test_strict_signed_zero_unrolled_reduction(self, device):
+        def fn(x):
+            return torch.amin(x, dim=1), torch.amax(x, dim=1)
+
+        x = torch.tensor(
+            [
+                [0.0, -0.0, -0.0, -0.0],
+                [-0.0, 0.0, 0.0, 0.0],
+                [1.0, float("nan"), -1.0, 0.0],
+            ],
+            device=device,
+        )
+        expected_min, expected_max = fn(x)
+        with inductor_config.patch(strict_signed_zero=True):
+            (actual_min, actual_max), code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+        actual_min_bits = actual_min[:2].view(torch.int32)
+        actual_max_bits = actual_max[:2].view(torch.int32)
+        expected_min_bits = expected_min[:2].view(torch.int32)
+        expected_max_bits = expected_max[:2].view(torch.int32)
+        self.assertEqual(actual_min_bits, expected_min_bits)
+        self.assertEqual(actual_max_bits, expected_max_bits)
+        self.assertTrue(torch.isnan(actual_min[2]).item())
+        self.assertTrue(torch.isnan(actual_max[2]).item())
+        self.assertIn("tl.where", " ".join(code))
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_TRITON, "requires GPU and Triton")
+    def test_pointer_range_in_generated_code(self, device):
+        """Verify tt.pointer_range=32 appears in generated Triton code on HIP."""
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(64, 64, device=device, dtype=torch.bfloat16)
+        _, code = run_and_get_code(torch.compile(fn), x)
+        code_str = " ".join(code)
+        self.assertIn("tt.pointer_range", code_str)
+
+    @skipPRIVATEUSE1
+    def test_signature_of_fp8_dtypes(self, device):
         """fp8 dtypes should produce correct Triton pointer signatures via _type_of."""
         expected = {
             torch.float8_e4m3fn: "*fp8e4nv",
@@ -569,8 +607,9 @@ def helper(x):
                 sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
             )
 
+    @skipPRIVATEUSE1
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
-    def test_fp8_dtype_support_matrix(self):
+    def test_fp8_dtype_support_matrix(self, device):
         self.assertFalse(
             is_triton_fp8_dtype_supported(
                 torch.float8_e4m3fn, triton_backend="cuda", triton_arch=80
@@ -607,7 +646,8 @@ def helper(x):
             )
         )
 
-    def test_signature_of_float8_e4m3fn_uses_uint8_on_pre_sm89_cuda_inputs(self):
+    @skipPRIVATEUSE1
+    def test_signature_of_float8_e4m3fn_uses_uint8_on_pre_sm89_cuda_inputs(self, device):
         class FakeGraph:
             mutated_buffers = set()
 
@@ -648,13 +688,13 @@ def helper(x):
                 triton_utils.signature_of(arg, size_dtype=None), "*fp8e4nv"
             )
 
-    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @unittest.skipUnless(HAS_TRITON, "requires GPU and Triton")
     @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
     @patch(
         "torch._inductor.codegen.triton_utils.device_supports_fp64",
         return_value=False,
     )
-    def test_no_fp64_in_kernel_when_device_unsupported(self, mock1, mock2):
+    def test_no_fp64_in_kernel_when_device_unsupported(self, device, mock1, mock2):
         """Compile a kernel with dynamic shape division to verify fp64 is
         downgraded to fp32 in the generated Triton kernel body when the device
         does not support fp64.
@@ -668,7 +708,7 @@ def helper(x):
         def div_by_shape(x):
             return x / x.shape[0]
 
-        x = torch.randn(16, 16, device=GPU_TYPE)
+        x = torch.randn(16, 16, device=device)
         compiled = torch.compile(div_by_shape, dynamic=True)
         _, kernels = run_and_get_kernels(compiled, x, remove_quote=True)
         # Extract only the function body (after ``def triton_...:``) to avoid
@@ -687,8 +727,8 @@ def helper(x):
         )
 
     @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
-    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_pointer_range_not_in_user_defined_triton_kernel(self):
+    @unittest.skipUnless(HAS_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_in_user_defined_triton_kernel(self, device):
         """User-defined Triton kernels should not get pointer_range_32."""
         import triton
         import triton.language as tl
@@ -712,37 +752,16 @@ def helper(x):
             add_kernel[grid](x, y, out, n, BLOCK_SIZE=128)
             return out
 
-        x = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
-        y = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(64, 64, device=device, dtype=torch.bfloat16)
+        y = torch.randn(64, 64, device=device, dtype=torch.bfloat16)
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
 
-    def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
-        # Regression: a backend whose import_get_raw_stream_as returns a
-        # multi-line snippet (e.g. the CPU override, which MTIA uses) must not
-        # break the textwrap.dedent of the benchmark-kernel imports. Formatting
-        # before dedenting used to leave the imports indented (IndentationError).
-        # TritonKernel and ComboKernel carry identical copies of this helper.
-        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
 
-        class FakeDeviceOps:
-            def import_get_raw_stream_as(self, name):
-                return f"def {name}(_):\n    return 0"
-
-        class FakeGraph:
-            device_ops = FakeDeviceOps()
-
-        for kernel_cls in (TritonKernel, ComboKernel):
-            with V.set_graph_handler(FakeGraph()):
-                # imports_for_benchmark_kernel does not use self.
-                imports = kernel_cls.imports_for_benchmark_kernel(None)
-            # Compiles without IndentationError and the top-level imports stay at
-            # column 0 (they would be indented if dedent ran after substitution).
-            compile(imports, "<benchmark_kernel_imports>", "exec")
-            self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
-            self.assertIn("\nimport torch\n", imports)
-
+instantiate_device_type_tests(TestCodegenTritonAccel, globals(), except_for="cpu",
+    allow_xpu=True, allow_mps=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
