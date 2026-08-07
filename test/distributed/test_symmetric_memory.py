@@ -23,9 +23,9 @@ from torch._inductor.utils import (
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
+    _fused_all_gather_block_scaled_matmul_fallback,
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
-    _fused_all_gather_scaled_matmul_v2_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _test_mode,
     restride_A_for_fused_matmul_reduce_scatter,
@@ -36,7 +36,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.nn.functional import ScalingType, SwizzleType
+from torch.nn.functional import ScalingType
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
     SM100OrLater,
@@ -978,7 +978,7 @@ class AsyncTPTest(MultiProcContinuousTest):
     # parametrized directly rather than deriving it from a global M.
     @parametrize("rows_per_rank", [128, 256])
     @parametrize("num_Bs", [1, 3])
-    def test_fused_all_gather_scaled_matmul_v2(
+    def test_fused_all_gather_block_scaled_matmul(
         self, rows_per_rank: int, num_Bs: int
     ) -> None:
         """Block-scaled (mxfp8) all-gather matmul matches the unfused fallback."""
@@ -997,22 +997,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         A_scale = _to_blocked(A_scale)
 
         recipe = [int(ScalingType.BlockWise1x32.value)]
-        swizzle = [int(SwizzleType.SWIZZLE_32_4_4.value)]
         kwargs = dict(
             recipe_a=recipe,
-            swizzle_a=swizzle,
             recipe_b=recipe,
-            swizzle_b=swizzle,
             gather_dim=0,
             group_name=group.group_name,
             biases=[None] * num_Bs,
             out_dtypes=[torch.bfloat16] * num_Bs,
             use_fast_accum=[False] * num_Bs,
         )
-        ag_0, mm_0 = _fused_all_gather_scaled_matmul_v2_fallback(
+        ag_0, mm_0 = _fused_all_gather_block_scaled_matmul_fallback(
             A_shard, Bs, A_scale, B_scales=B_scales, **kwargs
         )
-        ag_1, mm_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul_v2(
+        ag_1, mm_1 = torch.ops.symm_mem.fused_all_gather_block_scaled_matmul(
             A_shard, Bs, A_scale, B_scales=B_scales, **kwargs
         )
 
@@ -1031,7 +1028,7 @@ class AsyncTPTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     @skipUnless(PLATFORM_SUPPORTS_MX_GEMM, "Requires MX GEMM support (SM100+)")
-    def test_fused_all_gather_scaled_matmul_v2_rejects_bad_inputs(self) -> None:
+    def test_fused_all_gather_block_scaled_matmul_rejects_bad_inputs(self) -> None:
         """Configurations where a swizzled scale is not row-concatenable must raise.
 
         The swizzle is local to a 128-row tile, so a shard that is not a whole
@@ -1043,19 +1040,16 @@ class AsyncTPTest(MultiProcContinuousTest):
         N, K = 128, 256
         group = dist.group.WORLD
         recipe = [int(ScalingType.BlockWise1x32.value)]
-        swizzle = [int(SwizzleType.SWIZZLE_32_4_4.value)]
         Bq, B_scale = _mxfp8_quantize(torch.rand(N, K, device="cuda"))
 
         def run(A_shard, A_scale, gather_dim=0):
-            return torch.ops.symm_mem.fused_all_gather_scaled_matmul_v2(
+            return torch.ops.symm_mem.fused_all_gather_block_scaled_matmul(
                 A_shard,
                 [Bq.T],
                 A_scale,
                 recipe,
-                swizzle,
                 [_to_blocked(B_scale)],
                 recipe,
-                swizzle,
                 gather_dim,
                 group.group_name,
                 [None],
