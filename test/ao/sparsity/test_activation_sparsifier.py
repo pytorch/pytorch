@@ -245,7 +245,7 @@ class TestActivationSparsifier(TestCase):
 
         activation_sparsifier.model(data)
 
-    def _check_state_dict(self, sparsifier1):
+    def _check_state_dict(self, sparsifier1, device):
         """Checks if loading and restoring of state_dict() works as expected.
         Basically, dumps the state of the sparsifier and loads it in the other sparsifier
         and checks if all the configuration are in line.
@@ -255,7 +255,7 @@ class TestActivationSparsifier(TestCase):
         """
         state_dict = sparsifier1.state_dict()
 
-        new_model = Model()
+        new_model = Model().to(device)
 
         # create an empty new sparsifier
         sparsifier2 = ActivationSparsifier(new_model)
@@ -334,7 +334,7 @@ class TestActivationSparsifier(TestCase):
                 raise AssertionError(f"Configs for '{layer_name}' do not match")
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    def test_activation_sparsifier(self):
+    def test_activation_sparsifier(self, device):
         """Simulates the workflow of the activation sparsifier, starting from object creation
         till squash_mask().
         The idea is to check that everything works as expected while in the workflow.
@@ -370,7 +370,7 @@ class TestActivationSparsifier(TestCase):
 
         # simulate the workflow
         # STEP 1: make data and activation sparsifier object
-        model = Model()  # create model
+        model = Model().to(device)  # create model
         activation_sparsifier = ActivationSparsifier(model, **defaults, **sparse_config)
 
         # Test Constructor
@@ -425,26 +425,26 @@ class TestActivationSparsifier(TestCase):
         )
 
         # check state_dict after registering and before model forward
-        self._check_state_dict(activation_sparsifier)
+        self._check_state_dict(activation_sparsifier, device)
 
         # check if forward pre hooks actually work
         # some dummy data
         data_list = []
         num_data_points = 5
         for _ in range(num_data_points):
-            rand_data = torch.randn(16, 1, 28, 28)
+            rand_data = torch.randn(16, 1, 28, 28, device=device)
             activation_sparsifier.model(rand_data)
             data_list.append(rand_data)
 
         data_agg_actual = self._check_pre_forward_hook(activation_sparsifier, data_list)
         # check state_dict() before step()
-        self._check_state_dict(activation_sparsifier)
+        self._check_state_dict(activation_sparsifier, device)
 
         # STEP 3: sparsifier step
         activation_sparsifier.step()
 
         # check state_dict() after step() and before squash_mask()
-        self._check_state_dict(activation_sparsifier)
+        self._check_state_dict(activation_sparsifier, device)
 
         # self.check_step()
         self._check_step(activation_sparsifier, data_agg_actual)
@@ -455,7 +455,7 @@ class TestActivationSparsifier(TestCase):
         self._check_squash_mask(activation_sparsifier, data_list[0])
 
         # check state_dict() after squash_mask()
-        self._check_state_dict(activation_sparsifier)
+        self._check_state_dict(activation_sparsifier, device)
 
 
 if __name__ == "__main__":
