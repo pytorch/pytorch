@@ -601,7 +601,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
-  std::atomic<uint64_t> window_registration_counter_{0};
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
