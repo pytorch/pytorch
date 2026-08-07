@@ -10,7 +10,6 @@ XPU_ALREADY_INITIALIZED_ON_IMPORT = torch.xpu.is_initialized()
 TEST_MULTIXPU = TEST_XPU and torch.xpu.device_count() >= 2
 
 
-
 class XPUCodename(enum.Enum):
     PVC = "PVC"  # Intel® Data Center GPU Max Series
     BMG = "BMG"  # Intel® Arc™ Pro Battlemage Graphics
