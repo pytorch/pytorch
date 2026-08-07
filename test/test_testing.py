@@ -621,10 +621,12 @@ import torch.testing._internal.common_utils as common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     TestCase,
+    instantiate_parametrized_tests,
     parametrize,
     periodic,
     run_tests,
     slowTest,
+    subtest,
     suppress_warnings,
 )
 
@@ -660,6 +662,35 @@ class TestPeriodicModes(TestCase):
     def test_automatic_nonperiodic(self):
         print("RUN:automatic_nonperiodic")
 
+    @parametrize(
+        "name",
+        [
+            subtest(
+                "periodic_subtest",
+                name="periodic_subtest",
+                decorators=[periodic],
+            ),
+            subtest(
+                "slow_subtest",
+                name="slow_subtest",
+            ),
+        ],
+    )
+    @slowTest
+    def test_subtest_decorator_isolation(self, name):
+        print(f"RUN:{name}")
+
+
+class TestPeriodicSetup(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not common_utils.TEST_WITH_PERIODIC:
+            self.fail("setUp ran for a disabled periodic test")
+
+    @periodic
+    def test_setup(self):
+        print("RUN:setup")
+
 
 class TestPeriodicDevice(TestCase):
     @parametrize("value", [1, 2])
@@ -677,6 +708,7 @@ common_utils.slow_tests_dict = {
     "test_automatic_periodic (__main__.TestPeriodicModes)": None,
     "test_automatic_nonperiodic (__main__.TestPeriodicModes)": None,
 }
+instantiate_parametrized_tests(TestPeriodicModes)
 instantiate_device_type_tests(TestPeriodicDevice, globals(), only_for="cpu")
 for test_name in dir(TestPeriodicDeviceCPU):
     if test_name.startswith("test_"):
@@ -775,8 +807,10 @@ if __name__ == "__main__":
                         "device_2_cpu",
                         "device_outside_3_cpu",
                         "periodic_outside_slow",
+                        "periodic_subtest",
                         "periodic_with_intervening_decorator",
                         "plain",
+                        "setup",
                         "slow_outside_periodic",
                     },
                 ),
@@ -787,7 +821,12 @@ if __name__ == "__main__":
                     False,
                     True,
                     False,
-                    {"automatic_nonperiodic", "plain", "slow_only"},
+                    {
+                        "automatic_nonperiodic",
+                        "plain",
+                        "slow_only",
+                        "slow_subtest",
+                    },
                 ),
                 name="slow",
             ),

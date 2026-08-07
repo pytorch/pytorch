@@ -10,6 +10,7 @@ torch.testing._internal.common_cuda.py can freely initialize CUDA context when i
 import sysconfig
 import argparse
 import contextlib
+import contextvars
 import copy
 import ctypes
 import errno
@@ -2857,22 +2858,25 @@ def skipIfCachingAllocatorDisabled(fn):
     )(fn)
 
 
+_PERIODIC_TEST_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_PERIODIC_TEST_ACTIVE", default=False
+)
+
+
 def periodic(fn):
     """Marks a test to run only when periodic test mode is enabled."""
-    # Mark every wrapper so @slowTest recognizes intervening decorators.
-    wrapped = fn
-    while wrapped is not None:
-        wrapped.__dict__['periodic_test'] = True
-        wrapped = getattr(wrapped, '__wrapped__', None)
-
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not TEST_WITH_PERIODIC:
-            raise unittest.SkipTest(
-                "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
-            )
-        return fn(*args, **kwargs)
+        token = _PERIODIC_TEST_ACTIVE.set(True)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _PERIODIC_TEST_ACTIVE.reset(token)
 
+    wrapper = unittest.skipUnless(
+        TEST_WITH_PERIODIC,
+        "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test",
+    )(wrapper)
     wrapper.__dict__['periodic_test'] = True
     return wrapper
 
@@ -2880,8 +2884,9 @@ def periodic(fn):
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        periodic_enabled = TEST_WITH_PERIODIC and wrapper.__dict__.get(
-            'periodic_test', False
+        periodic_enabled = TEST_WITH_PERIODIC and (
+            _PERIODIC_TEST_ACTIVE.get()
+            or wrapper.__dict__.get('periodic_test', False)
         )
         if not TEST_WITH_SLOW and not periodic_enabled:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
