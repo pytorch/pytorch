@@ -120,6 +120,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         size: str,
         stride: str,
         op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
@@ -156,9 +157,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         # Redirect self.prefix so the base class codegen_input_symbol_assignment
         # writes into our buffer.
+        deferred_symbol_assignments = []
         with self._target_buf("prefix", code):
             for name, value in inputs:
-                self.codegen_input_symbol_assignment(name, value, bound_vars)
+                self.codegen_input_symbol_assignment(
+                    name, value, bound_vars, deferred_symbol_assignments
+                )
+            self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
@@ -248,7 +253,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     code.splice(
                         f"""
                         AtenTensorHandle {cached_output_name}_tmp;
-                        aoti_torch_clone({output}, &{cached_output_name}_tmp);
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone({output}, &{cached_output_name}_tmp));
                         {cached_output_name} = {cached_output_name}_tmp;
                         """
                     )
@@ -704,7 +709,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                             f"AtenTensorHandle {cached_output_name}_tmp;"
                         )
                         self.wrapper_call.writeline(
-                            f"aoti_torch_clone({output}, &{cached_output_name}_tmp);"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_clone({output}, &{cached_output_name}_tmp));"
                         )
                         self.wrapper_call.writeline(
                             f"{cached_output_name} = {cached_output_name}_tmp;"
@@ -721,7 +727,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     if is_constant_buffer:
                         # See NOTE(return_constant) above.
                         self.wrapper_call.writeline(
-                            f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                            "AOTI_TORCH_ERROR_CODE_CHECK("
+                            f"aoti_torch_clone({output}, &output_handles[{idx}]));"
                         )
                     else:
                         if output in output2idx:
@@ -1073,45 +1080,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_scatter_fallback(node)
 
-    def _generate_scatter_fallback(
-        self,
-        output,
-        inputs,
-        cpp_kernel_name,
-        python_kernel_name,
-        src_is_tensor,
-        reduce,
-        kwargs,
-        device,
-    ):
-        reduce = self._get_scatter_reduce_enum(reduce)
-
-        # call the ABI shim function instead of the ATen one
-        self.add_device_include(device)
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
-
-        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
-        cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-        inputs_wrapped = [
-            (f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x))
+        return [
+            f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
-        line = f"{cpp_kernel_name}(borrow_arrayref_tensor_as_tensor({output}), {','.join(inputs_wrapped)}"
-
-        if python_kernel_name.startswith("aten.scatter_reduce"):
-            line += f", {','.join(kwargs)}"
-        else:
-            if src_is_tensor:
-                if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
-            else:
-                if reduce is not None:
-                    raise AssertionError(
-                        "Expect reduce to be None for aten.scatter_ with scalar src"
-                    )
-        line += ");"
-        self.writeline(line)
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
@@ -1138,7 +1112,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         args.insert(
             0, f"borrow_arrayref_tensor_as_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
-        self.writeline(self.wrap_kernel_call(kernel, args))
+        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure surfaces instead
+        # of being silently swallowed.
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
     def generate_fallback_kernel_with_runtime_lookup(
         self,
