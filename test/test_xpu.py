@@ -718,6 +718,68 @@ print(torch.xpu.is_initialized())
         ):
             e2.wait(e2)
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+    def test_event_ipc_handle(self):
+        if int(torch.version.xpu) < 20260200:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e0.ipc_handle()
+            return
+
+        # IPC and timing cannot both be enabled; error fires at record() time.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e1 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e1.record()
+
+        # Same constraint enforced when ipc_handle() triggers lazy initialization.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e2 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e2.ipc_handle()
+
+        # ipc_handle() requires interprocess=True.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e3 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e3.ipc_handle()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e4 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e4.record()
+            e4.ipc_handle()
+
+        # Roundtrip: serialize an in-flight event to a handle and reconstruct it.
+        e5 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        stream = torch.xpu.Stream()
+        with stream:
+            torch.xpu._sleep(500_000_000)  # spin for about 500 ms at 1 GHz
+        e5.record(stream)
+        handle = e5.ipc_handle()
+        e6 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        e5.synchronize()
+        self.assertTrue(e6.query())
+        event_ptr = e6.sycl_event
+        e6.record()
+        self.assertEqual(event_ptr, e6.sycl_event)
+
+        # ipc_handle() cannot be called on the reconstructed event;
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            handle = e6.ipc_handle()
+
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
         with torch.accelerator.device_index(None):
