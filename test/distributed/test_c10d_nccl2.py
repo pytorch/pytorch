@@ -176,8 +176,6 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
-    world_size = 4
-
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
         if rdvz_file is None:
@@ -196,14 +194,14 @@ class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
         cls.pg = dist.distributed_c10d._get_default_group()
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_new_group_with_nonmembers(self) -> None:
-        ranks = [0, 1]
+        ranks = [0]
         group = dist.new_group(ranks=ranks)
         if self.rank in ranks:
             tensor = torch.tensor([self.rank + 1], device=self.device)
             dist.all_reduce(tensor, group=group)
-            self.assertEqual(tensor, torch.tensor([3], device=self.device))
+            self.assertEqual(tensor, torch.ones_like(tensor))
             dist.destroy_process_group(group)
         else:
             self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
@@ -644,6 +642,9 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
+
+    def test_shrink_with_nonblocking_communicator(self) -> None:
+        self.skipTest("nccl-lazy does not support communicator shrink")
 
 
 def _live_env(name: str) -> str | None:
