@@ -249,6 +249,8 @@ class TestCutlassBackendAccelerator(TestCase):
     def setUp(self):
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
+        if not try_import_cutlass():
+            self.skipTest("requires cutlass")
 
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
@@ -3118,7 +3120,11 @@ class TestCutlassBackendAccelerator(TestCase):
 
 
 instantiate_device_type_tests(
-    TestCutlassBackendAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestCutlassBackendAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
 )
 
 
