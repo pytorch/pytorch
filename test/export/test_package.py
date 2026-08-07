@@ -12,11 +12,17 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestPackage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x + 1
@@ -98,6 +104,8 @@ class TestPackage(TestCase):
 
 
 class TestAOTIPackageDeviceValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
         class FakeAOTIModelPackageLoader:
             @staticmethod
