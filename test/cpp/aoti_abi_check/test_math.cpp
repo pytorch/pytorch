@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <ATen/NumericUtils.h>
 #include <c10/util/generic_math.h>
 #include <torch/headeronly/util/NumericUtils.h>
 #include <cmath>
