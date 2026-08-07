@@ -1158,7 +1158,7 @@ class TestOptimRenewed(TestCase):
 
     # Test vectorization path splits for fused kernels. Ensure the scalar path
     # and vectorized path compute the same thing.
-    # See https://github.com/pytorch/pytorch/issues/165632.
+    # See https://github.com/pytorch/pytorch/issues/191763.
     # fp64 is left out so this runs on MPS; it shares the same code w/ fp32
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
