@@ -92,10 +92,10 @@ struct XPUEvent {
   void record(const XPUStream& stream) {
     namespace syclex = sycl::ext::oneapi::experimental;
     if (!isCreated()) {
-      device_index_ = stream.device_index();
 #if SYCL_COMPILER_VERSION >= 20260200
-      createEvent();
+      createEvent(stream.device_index());
 #else
+      device_index_ = stream.device_index();
       assignEvent(stream.queue());
 #endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -188,8 +188,7 @@ struct XPUEvent {
       TORCH_CHECK(
           enable_ipc_,
           "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
-      createEvent();
-      device_index_ = c10::xpu::current_device();
+      createEvent(c10::xpu::current_device());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
@@ -218,11 +217,20 @@ struct XPUEvent {
     assignEvent(queue);
   }
 #else
-  void createEvent() {
+  void createEvent(c10::DeviceIndex device_index) {
     namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
         !enable_ipc_ || !enable_timing_,
         "XPUEvent cannot have both IPC and timing enabled.");
+    device_index_ = device_index;
+    if (enable_ipc_) {
+      TORCH_CHECK(
+          c10::xpu::get_raw_device(device_index)
+              .has(sycl::aspect::ext_oneapi_ipc_event),
+          "Requires the ext_oneapi_ipc_event extension, "
+          "which is not supported on this device. ",
+          "Please upgrade to a newer driver.");
+    }
     event_ = std::make_unique<sycl::event>(syclex::make_event(
         c10::xpu::get_device_context(),
         syclex::properties{
