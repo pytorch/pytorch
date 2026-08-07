@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import collections
 import contextlib
 import dataclasses
@@ -201,6 +202,9 @@ class ComboKernelMemoryContext:
     # are evaluated independently, so a window's entry memory is the
     # precomputed baseline live-in at `region_start`.
     baseline_live_before: list[int] = dataclasses.field(default_factory=list)
+    # Accepted inclusive baseline intervals. Disjoint rewrites preserve the
+    # independent-window assumption above.
+    accepted_intervals: list[tuple[int, int]] = dataclasses.field(default_factory=list)
 
 
 def _is_gpu_triton_backend(
@@ -6537,6 +6541,41 @@ class Scheduler:
         if window:
             yield window
 
+    @staticmethod
+    def _unreserved_combo_subgroups(
+        nodes: list[BaseSchedulerNode],
+        node_to_idx: dict[BaseSchedulerNode, int],
+        reserved: list[tuple[int, int]],
+    ) -> Iterator[list[BaseSchedulerNode]]:
+        """Partition baseline-ordered nodes between reserved intervals."""
+        if not nodes:
+            return
+        first_idx = node_to_idx[nodes[0]]
+        interval_idx = max(
+            0, bisect.bisect_right(reserved, (first_idx, sys.maxsize)) - 1
+        )
+        group: list[BaseSchedulerNode] = []
+        for node in nodes:
+            idx = node_to_idx[node]
+            crossed_interval = False
+            while interval_idx < len(reserved) and reserved[interval_idx][1] < idx:
+                interval_idx += 1
+                crossed_interval = True
+            if crossed_interval and group:
+                yield group
+                group = []
+            if (
+                interval_idx < len(reserved)
+                and reserved[interval_idx][0] <= idx <= reserved[interval_idx][1]
+            ):
+                if group:
+                    yield group
+                    group = []
+                continue
+            group.append(node)
+        if group:
+            yield group
+
     def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
         """Group parallel nodes into combo kernels.
 
@@ -6581,6 +6620,12 @@ class Scheduler:
             for node in accepted:
                 fused_nodes.remove(node)
             fused_nodes.add(combo_node)
+            if mem_ctx is not None:
+                interval = (
+                    mem_ctx.node_to_idx[accepted[0]],
+                    mem_ctx.node_to_idx[accepted[-1]],
+                )
+                bisect.insort(mem_ctx.accepted_intervals, interval)
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
@@ -6614,29 +6659,41 @@ class Scheduler:
             ):
                 if num_ck_nodes is not None and count > num_ck_nodes:
                     break
-                if len(window) < 2 or not self.speedup_by_combo_kernel(window):
-                    continue
-                if memory_check:
-                    if mem_ctx is None:
-                        raise AssertionError("expected mem_ctx to be set")
-                    sim_start = time.perf_counter()
-                    self._try_combo_with_halving(
-                        window,
-                        num,
-                        mem_ctx,
-                        enable_autotune=enable_autotune,
-                        on_accept=_register_accept,
+                candidates = [window]
+                if mem_ctx is not None:
+                    candidates = list(
+                        Scheduler._unreserved_combo_subgroups(
+                            window,
+                            node_to_idx,
+                            mem_ctx.accepted_intervals,
+                        )
                     )
-                    memory_sim_time += time.perf_counter() - sim_start
-                else:
-                    combo_node = ForeachKernelSchedulerNode(
-                        window[0].scheduler,
-                        window,
-                        use_custom_partition_algo=True,
-                        enable_autotune=enable_autotune,
-                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
-                    )
-                    _register_accept(combo_node, window, num)
+                for candidate in candidates:
+                    if len(candidate) < 2:
+                        continue
+                    if not self.speedup_by_combo_kernel(candidate):
+                        continue
+                    if memory_check:
+                        if mem_ctx is None:
+                            raise AssertionError("expected mem_ctx to be set")
+                        sim_start = time.perf_counter()
+                        self._try_combo_with_halving(
+                            candidate,
+                            num,
+                            mem_ctx,
+                            enable_autotune=enable_autotune,
+                            on_accept=_register_accept,
+                        )
+                        memory_sim_time += time.perf_counter() - sim_start
+                    else:
+                        combo_node = ForeachKernelSchedulerNode(
+                            candidate[0].scheduler,
+                            candidate,
+                            use_custom_partition_algo=True,
+                            enable_autotune=enable_autotune,
+                            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+                        )
+                        _register_accept(combo_node, candidate, num)
 
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
