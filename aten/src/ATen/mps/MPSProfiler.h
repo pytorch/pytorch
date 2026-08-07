@@ -304,10 +304,9 @@ class MPSProfiler {
   // Kernels the beginProfile*() functions return a profileId which is unique
   // per graph/kernel/copy
   //
-  // `stream` should be the stream the profiled work is actually dispatched on
-  // (not necessarily the default stream); pass nullptr only when no stream is
-  // available at the call site (e.g. the MPSGraph-cache begin-side hook,
-  // which only affects the rarely-used INCLUDE_SCHEDULE_INTERVAL option).
+  // `stream` is the stream that the profiled work is dispatched on. If `stream`
+  // is nullptr, the default stream will be profiled, but most callers should
+  // specify a non-null stream.
   uint64_t beginProfileKernel(
       const void* handle,
       const std::string& strKey,
