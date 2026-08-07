@@ -50,6 +50,9 @@ def trace_dependencies(
         if module:
             modules_used.add(module)
 
+    # Save the caller's profiler, if any, so that tracing does not clobber it.
+    prior_profile = sys.getprofile()
+
     try:
         # Attach record_used_modules as the profiler function.
         sys.setprofile(record_used_modules)
@@ -59,7 +62,7 @@ def trace_dependencies(
             callable(*inp)
 
     finally:
-        # Detach the profiler function.
-        sys.setprofile(None)
+        # Restore the profiler that was installed before tracing started.
+        sys.setprofile(prior_profile)
 
     return list(modules_used)
