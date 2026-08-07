@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -594,7 +594,7 @@ class TestHFSafetensorsAcceleratorSmoke(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @requires_world_size(2)
+    @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.lib.safetensors,
         Capability.distributed.backend,
@@ -605,7 +605,7 @@ class TestHFSafetensorsAcceleratorSmoke(DTensorTestBase):
     def test_consolidate_to_one_file(self) -> None:
         _test_consolidate_to_one_file(self)
 
-    @requires_world_size(2)
+    @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.lib.safetensors,
         Capability.distributed.backend,
