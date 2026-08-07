@@ -123,7 +123,7 @@ struct XPUEvent {
 #endif
     }
 #if SYCL_COMPILER_VERSION >= 20260200
-    syclex::enqueue_signal_event(queue, *event_);
+    syclex::enqueue_signal_event(stream.queue(), *event_);
 #endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
