@@ -2185,11 +2185,27 @@ def clone_preserve_strides(x, *, base=None):
     pass its ``base``, so the clone is taken from the base and x's view re-derived
     from it -- every access then stays inside one real buffer. See how
     auto_functionalize clones mutable custom-op args via their bases.
+
+    A ``base`` must span all of x: the buffer is sized to the base's required
+    extent, and x is then re-derived from it at x's own storage_offset. Anything
+    x addresses beyond that extent is not in the clone. Eager catches this when
+    setStorage bounds-checks the re-derive, but under fake tensors it passes and
+    codegens an out-of-bounds read, so the contract is checked explicitly.
     """
     src = x if base is None else base
     needed_size = compute_required_storage_length(
         src.size(), src.stride(), src.storage_offset()
     )
+    if base is not None:
+        x_size = compute_required_storage_length(
+            x.size(), x.stride(), x.storage_offset()
+        )
+        torch._check(
+            x_size <= needed_size,
+            lambda: f"clone_preserve_strides: base spans {needed_size} elements but x "
+            f"addresses {x_size}, so cloning through the base would drop what x needs. "
+            f"Pass a base that spans x, or omit base to clone x's own storage.",
+        )
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.

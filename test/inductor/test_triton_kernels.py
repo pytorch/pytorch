@@ -1677,11 +1677,24 @@ def forward(self, x_1, output_1):
                 offs = tl.arange(0, BLOCK)
                 tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols)
 
-        n_cols, n_rows, skipped_row = 256, 2, 1
+        # The skipped row is the detector, and two things decide whether it detects
+        # anything. Its contents must be something stale memory cannot return by luck:
+        # a zeros base caught nothing at gap=1 because the over-extent read came back
+        # zeroed as well, and a uniform fill is matched whenever the read lands in
+        # another copy of that fill, so use one distinct value per element. And the
+        # row has to sit far enough from offset 0 that the read overshoots by several
+        # rows -- at skipped_row=1 it lands one row short and finds the same values it
+        # was supposed to read, which is a pass for the wrong reason.
+        n_cols, n_rows, skipped_row = 256, 8, 7
         width = n_cols * gap
 
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=GPU_TYPE
+            ).reshape(n_rows, width)
+
         def f():
-            base = torch.zeros(n_rows, width, device=GPU_TYPE)
+            base = make_base()
             for i in range(n_rows):
                 row = base[i : i + 1, ::gap]  # storage_offset = i * width
                 maybe_fill_kernel[(1,)](
@@ -1692,7 +1705,7 @@ def forward(self, x_1, output_1):
                 base[i : i + 1, ::gap] = row
             return base
 
-        expected = torch.zeros(n_rows, width, device=GPU_TYPE)
+        expected = make_base()
         for i in range(n_rows):
             if i != skipped_row:
                 expected[i, ::gap] = 1.0
@@ -1756,9 +1769,10 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @largeTensorTest("6GB", device=GPU_TYPE)
     def test_triton_kernel_mutated_offset_view_large_tensor(self):
-        # Same shape as above, but the base holds more than 2**31 elements, so
-        # Inductor has to index its own generated kernels with int64. An int32 index
-        # would wrap and corrupt the row the kernel leaves alone.
+        # The bug itself is shape-independent -- the same over-extent read is emitted
+        # at any size. What only a base past 2**31 elements covers is index width:
+        # Inductor has to promote its own generated kernels to int64, and an int32
+        # index would wrap and corrupt the row the kernel leaves alone.
         @triton.jit
         def maybe_fill_kernel(out_ptr, do_write, n_elements, BLOCK: tl.constexpr):
             if do_write != 0:
@@ -1766,10 +1780,11 @@ def forward(self, x_1, output_1):
                 tl.store(out_ptr + offs, 1, mask=offs < n_elements)
 
         n_cols, n_rows, skipped_row, block = 2**30 + 1024, 2, 1, 1024
+        fill = 7  # not zero, so stale memory reading back zeroed is still a failure
         self.assertGreater(n_rows * n_cols, torch.iinfo(torch.int32).max)
 
         def f():
-            base = torch.zeros(n_rows, n_cols, device=GPU_TYPE, dtype=torch.int8)
+            base = torch.full((n_rows, n_cols), fill, device=GPU_TYPE, dtype=torch.int8)
             for i in range(n_rows):
                 row = base[i : i + 1]
                 maybe_fill_kernel[(triton.cdiv(n_cols, block),)](
@@ -1782,7 +1797,7 @@ def forward(self, x_1, output_1):
         # min/max per row rather than a full compare, which would need another copy
         # of a multi-gigabyte tensor.
         for i in range(n_rows):
-            want = 0 if i == skipped_row else 1
+            want = fill if i == skipped_row else 1
             self.assertEqual(out[i].min().item(), want)
             self.assertEqual(out[i].max().item(), want)
 
