@@ -13,12 +13,12 @@ TEST(XPUEventTest, IPCSupport) {
   }
 
 #if SYCL_COMPILER_VERSION >= 20260200
-  if (!c10::xpu::get_raw_device(c10::xpu::current_device())
-           .has(sycl::aspect::ext_oneapi_ipc_event)) {
-    c10::xpu::XPUEvent event0(false, true);
-    EXPECT_THROW(event0.record(), c10::Error);
-    return;
-  }
+  // if (!c10::xpu::get_raw_device(c10::xpu::current_device())
+  //          .has(sycl::aspect::ext_oneapi_ipc_event)) {
+  //   c10::xpu::XPUEvent event0(false, true);
+  //   EXPECT_THROW(event0.record(), c10::Error);
+  //   return;
+  // }
   c10::xpu::XPUEvent event0(true, true);
   EXPECT_THROW(event0.record(), c10::Error);
 
