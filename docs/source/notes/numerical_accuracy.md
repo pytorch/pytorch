@@ -224,22 +224,36 @@ The following is the list of operations where MIOpen may be used:
   - `ConvBackend::MiopenDepthwise`
   - `ConvBackend::MiopenTranspose`
 
+## TensorFloat-32 (TF32) on AMD Instinct MI300 and MI355 devices
+
+On AMD Instinct GPUs, TF32 is available for matmul (through hipBLASLt) and for convolution (through MIOpen, which requires MIOpen >= 3.5.2 / ROCm >= 7.14). The controls below are the same across supported AMD hardware; the numerical behavior, however, differs by architecture as described in the following subsections.
+
+### Enabling and disabling TF32
+
+On AMD hardware, TF32 is disabled by default for both matmul and convolution, so fp32 operations run in full IEEE FP32 unless you opt in with the controls below.
+
+Operations that dispatch through hipBLASLt (matmul) or MIOpen (convolution) with TF32 enabled are affected. Matmul and convolution are controlled separately:
+
+```python
+# Matmul: full IEEE FP32 (default on AMD)
+torch.backends.cuda.matmul.fp32_precision = "ieee"
+# Matmul: enable TF32 on supported hardware
+torch.backends.cuda.matmul.fp32_precision = "tf32"
+
+# Convolution: full IEEE FP32 (default on AMD)
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+# Convolution: enable TF32 on supported hardware
+torch.backends.cudnn.conv.fp32_precision = "tf32"
+```
+
 (tf32_on_mi300)=
 
-## TensorFloat-32 (TF32) on AMD Instinct MI300 devices
+### TF32 on MI300 (gfx942, CDNA3)
 
-On AMD Instinct MI300 GPUs (gfx942, CDNA3), the `v_mfma_f32_*_xf32` matrix instructions used by hipBLASLt's TF32 path perform round-down accumulation. This is a documented property of the CDNA3 hardware. NVIDIA's TF32 implementation rounds to nearest, so a TF32 GEMM exhibits a small negative-biased error on MI300 that is absent on NVIDIA. The bias scales with `sqrt(K) * 2^-10 * |A|_inf` and reaches the low single-digit milli-units for typical random inputs; the corresponding error on NVIDIA TF32 is roughly half to a third of that.
-
-Only operations that dispatch through hipBLASLt with TF32 enabled are affected. To run a block of code in full IEEE FP32:
-
-```python
-torch.backends.cuda.matmul.fp32_precision = "ieee"
-```
-
-To enable TF32 on supported hardware:
-
-```python
-torch.backends.cuda.matmul.fp32_precision = "tf32"
-```
+On AMD Instinct MI300 GPUs, the `v_mfma_f32_*_xf32` matrix instructions used by the TF32 paths perform round-down accumulation. This is a documented property of the CDNA3 hardware. NVIDIA's TF32 implementation rounds to nearest, so a TF32 GEMM exhibits a small negative-biased error on MI300 that is absent on NVIDIA. The bias scales with `sqrt(K) * 2^-10 * |A|_inf` and reaches the low single-digit milli-units for typical random inputs; the corresponding error on NVIDIA TF32 is roughly half to a third of that.
 
 For a per-shape characterization of the MI300 vs NVIDIA-TF32 numerical gap, see https://github.com/jeffdaily/tf32_analysis.
+
+### TF32 on MI355 (gfx950, CDNA4)
+
+On AMD Instinct MI355 GPUs, TF32 is not a native hardware format; it is emulated with BF16 matrix operations accumulated in FP32. The same controls apply, but the numerics come from this emulation rather than the CDNA3 round-down accumulation, so the MI300 error characterization above does not transfer to MI355. The results are also not bit-compatible with native NVIDIA TF32.
