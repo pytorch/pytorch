@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyOn,
     skipCUDAIf,
+    skipIfXpu,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
@@ -42,6 +43,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -294,7 +296,6 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm
-    @onlyCUDA
     @parametrize(
         "src_dtype",
         (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
@@ -583,7 +584,7 @@ class TestFP8Types(TestCase):
 class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_functional_scaled_mm_fullgraph(self, device):
         M, N, K = 128, 128, 128
         x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
@@ -608,7 +609,7 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @parametrize(
         "scale_a_shape,scale_b_shape",
         [
@@ -643,7 +644,7 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_scaled_mm_rejects_high_rank_scale_b(self, device):
         M = N = K = 64
         x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
@@ -673,7 +674,7 @@ class TestFP8Lowering(TestCase):
     @parametrize(
         "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
     )
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     def test_tensorwise_scaling(
         self,
         dtype: torch.dtype,
@@ -753,7 +754,7 @@ class TestFP8Lowering(TestCase):
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     def test_scaled_mm_preserves_strides(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
@@ -850,7 +851,8 @@ class TestFP8Lowering(TestCase):
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @skipIfXpu(msg="torch-xpu-ops/issues/4852")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device() or not is_big_gpu(),
@@ -1017,7 +1019,8 @@ class TestFP8Lowering(TestCase):
         not has_triton_tma_device() or not is_big_gpu(),
         "Need device-side TMA support in Triton and max-autotune",
     )
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
+    @skipIfXpu(msg="torch-xpu-ops/issues/4852")
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
     @parametrize("use_fast_accum", (False, True))
     def test_rowwise_scaling_tma_template(
@@ -1104,7 +1107,7 @@ class TestFP8Lowering(TestCase):
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
@@ -1576,7 +1579,7 @@ class TestFP8Lowering(TestCase):
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_mxfp8_dtype_view_indexer_e2e(self, device):
         with (
             torch.library._scoped_library("test_fp8", "FRAGMENT") as lib,
