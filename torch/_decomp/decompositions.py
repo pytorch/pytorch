@@ -5937,10 +5937,19 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
     keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
-    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
-    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
-    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
-    return v * (g / norm.to(g.dtype)), norm
+    # align with kernel behavior, keep norm in 'float' when g is 'bfloat16'/'half'
+    norm_dtype = torch.float if g.dtype in (torch.bfloat16, torch.half) else None
+    if keep_dim:
+        norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    else:
+        # v is 1-D, so each slice holds a single element whose 2-norm is its
+        # magnitude. An empty dim list would make norm() reduce over every dim.
+        norm = v.abs() if norm_dtype is None else v.to(norm_dtype).abs()
+    # The kernels index g as a flat buffer of length v.size(dim), so its shape
+    # need not line up with norm's; reshape it to broadcast along dim. norm is
+    # returned with g's shape, matching how the kernels allocate it.
+    w = v * (g.reshape(norm.shape) / norm.to(g.dtype))
+    return w, norm.reshape(g.shape)
 
 
 @register_decomposition(aten.isin)

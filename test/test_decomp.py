@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import math
 import re
 import unittest
 from collections import defaultdict
@@ -34,6 +35,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1297,6 +1299,155 @@ class DecompOneOffTests(TestCase):
             torch.ops.aten._weight_norm_interface(inp, inp2),
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "v_shape,g_shape,dim",
+        [
+            ((128, 64, 3, 3), (128,), 0),
+            ((128, 64, 3, 3), (128, 1, 1, 1), 0),
+            ((8, 4, 3, 5), (5,), 3),
+            ((8, 4, 3, 5), (1, 1, 1, 5), 3),
+            ((6, 5), (6,), 0),
+            ((6, 5), (5,), 1),
+        ],
+    )
+    def test_weight_norm_interface_g_shape(self, device, v_shape, g_shape, dim):
+        # The kernels index g as a flat buffer of length v.size(dim), so any g
+        # shape with a matching numel is accepted and norm comes back with g's
+        # shape. assertEqual also covers those shapes, not just the values.
+        v = torch.randn(v_shape, device=device)
+        g = torch.randn(g_shape, device=device)
+
+        self.assertEqual(
+            torch.ops.aten._weight_norm_interface(v, g, dim),
+            torch._decomp.decompositions._weight_norm_interface(v, g, dim),
+        )
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_weight_norm_interface_reduced_dtype_norm(self, device, dtype):
+        v = torch.randn((8, 4), device=device, dtype=dtype)
+        g = torch.randn((8,), device=device, dtype=dtype)
+
+        ref = torch.ops.aten._weight_norm_interface(v, g, 0)
+        res = torch._decomp.decompositions._weight_norm_interface(v, g, 0)
+        self.assertEqual(ref[1].dtype, torch.float)
+        self.assertEqual(ref, res)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_weight_norm_interface_rank1_v(self, device):
+        # keep_dim is empty for 1-D v, and reducing over an empty dim list
+        # collapses v to its global norm instead of the per-element magnitude
+        # that the kernels compute for single-element slices.
+        v = torch.tensor([3.0, -4.0, 0.5, 2.0], device=device)
+        g = torch.tensor([2.0, 1.0, 5.0, 0.25], device=device)
+
+        w, norm = torch._decomp.decompositions._weight_norm_interface(v, g, 0)
+        self.assertEqual(norm, v.abs())
+        self.assertEqual(w, torch.sign(v) * g)
+        self.assertEqual(torch.ops.aten._weight_norm_interface(v, g, 0), (w, norm))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize("dtype", [torch.float32, torch.float64, torch.half, torch.bfloat16])
+    def test_weight_norm_interface_stress(self, device, dtype):
+        # Sweep v ranks against both fused dims and every g rank with a matching
+        # numel. Inputs stay contiguous: the kernels read v and g as flat
+        # buffers, so a non-contiguous input is outside the op's contract (the
+        # _weight_norm wrapper makes both contiguous before dispatching here).
+        v_shapes = [
+            (7,),
+            (6, 5),
+            (1, 8),
+            (8, 1),
+            (4, 3, 5),
+            (5, 1, 1),
+            (8, 4, 3, 3),
+            (2, 3, 4, 5),
+            (1, 3, 1, 7),
+            (2, 3, 2, 3, 4),
+        ]
+        # The kernels accumulate the norm and divide in float, so reduced
+        # precision lands a couple of ulps off the decomposition, not bit-exact.
+        reduced = dtype in (torch.half, torch.bfloat16)
+        tol = {"rtol": 2e-2, "atol": 1e-2} if reduced else {}
+
+        for v_shape in v_shapes:
+            rank = len(v_shape)
+            for dim in sorted({0, rank - 1}):
+                n = v_shape[dim]
+                keepdim_shape = [1] * rank
+                keepdim_shape[dim] = n
+                g_shapes = {(n,), (n, 1), (1, n), tuple(keepdim_shape)}
+                g_shapes.update(
+                    tuple(keepdim_shape[lead:])
+                    for lead in range(1, rank)
+                    if math.prod(keepdim_shape[lead:]) == n
+                )
+
+                for g_shape in sorted(g_shapes):
+                    v = torch.randn(v_shape, device=device, dtype=dtype)
+                    # keep g away from zero so w stays well conditioned
+                    g = torch.randn(g_shape, device=device, dtype=dtype).abs() + 0.5
+                    msg = f"v={v_shape} g={g_shape} dim={dim}"
+
+                    ref = torch.ops.aten._weight_norm_interface(v, g, dim)
+                    res = torch._decomp.decompositions._weight_norm_interface(v, g, dim)
+                    for expected, actual in zip(ref, res):
+                        self.assertEqual(expected.shape, actual.shape, msg=msg)
+                        self.assertEqual(expected.dtype, actual.dtype, msg=msg)
+                    self.assertEqual(ref, res, msg=msg, **tol)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize("layout", ["channels_last", "transposed", "non_contiguous_g"])
+    def test_weight_norm_interface_non_contiguous(self, device, layout):
+        # The kernels walk v and g as flat buffers, so before they took
+        # .contiguous() internally a non-contiguous input was consumed in
+        # storage order and silently gave a wrong result.
+        g = torch.randn(8, device=device).abs() + 0.5
+        if layout == "channels_last":
+            v = torch.randn(8, 4, 3, 3, device=device).to(
+                memory_format=torch.channels_last
+            )
+        elif layout == "transposed":
+            v = torch.randn(4, 8, device=device).t()
+        else:
+            v = torch.randn(8, 4, device=device)
+            g = (torch.randn(16, device=device).abs() + 0.5)[::2]
+
+        self.assertEqual(
+            torch.ops.aten._weight_norm_interface(v, g, 0),
+            torch._decomp.decompositions._weight_norm_interface(v, g, 0),
+        )
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @skipIfTorchDynamo("recursive torch.compile")
+    @parametrize(
+        "v_shape,g_shape,dim",
+        [
+            ((128, 64, 3, 3), (128,), 0),
+            ((8, 4, 3, 5), (5,), 3),
+            ((7,), (7,), 0),
+        ],
+    )
+    def test_weight_norm_interface_compile_parity(self, device, v_shape, g_shape, dim):
+        def fn(v, g):
+            return torch.ops.aten._weight_norm_interface(v, g, dim)
+
+        v = torch.randn(v_shape, device=device)
+        g = torch.randn(g_shape, device=device).abs() + 0.5
+
+        # aot_eager still traces through the decomposition as the meta kernel,
+        # which is where a rank-mismatched g used to fail, without pulling in a
+        # Triton dependency just to check shape propagation.
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        self.assertEqual(fn(v, g), compiled(v, g))
 
     @onlyCUDA
     @skipIfCrossRef
