@@ -47,7 +47,13 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -1081,6 +1087,53 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             },
             _test_multi,
         )
+
+
+class TestFrozenParamOptimStateDict(TestCase):
+    """Tests optimizer state_dict handling of frozen parameters without comms."""
+
+    def _make_model_optim(self) -> tuple[nn.Module, torch.optim.Optimizer]:
+        model = nn.Sequential(nn.Linear(2, 2, bias=False), nn.Linear(2, 2, bias=False))
+        return model, torch.optim.AdamW(model.parameters())
+
+    def test_partial_optim_state_init_with_frozen_param(self) -> None:
+        # A trained-then-frozen param with existing optimizer state must not
+        # block state initialization of the other trainable params, and its
+        # own state must not be mutated by get_optimizer_state_dict().
+        model, optim = self._make_model_optim()
+        frozen = model[0].weight
+        frozen.sum().backward()
+        optim.step()
+        optim.zero_grad()
+        frozen.requires_grad_(False)
+        orig_frozen_state = copy.deepcopy(optim.state[frozen])
+
+        osd = get_optimizer_state_dict(model, optim)
+        self.assertEqual(set(osd["state"].keys()), {"0.weight", "1.weight"})
+        self.assertEqual(optim.state[frozen], orig_frozen_state)
+
+    @parametrize("flatten_optimizer_state_dict", [True, False])
+    def test_frozen_param_optim_state_round_trip(
+        self, flatten_optimizer_state_dict: bool
+    ) -> None:
+        # Optimizer state of a param frozen after training must survive a
+        # get_optimizer_state_dict()/set_optimizer_state_dict() round trip.
+        model, optim = self._make_model_optim()
+        model(torch.rand(2)).sum().backward()
+        optim.step()
+        optim.zero_grad()
+        model[0].weight.requires_grad_(False)
+
+        options = StateDictOptions(
+            flatten_optimizer_state_dict=flatten_optimizer_state_dict
+        )
+        osd = get_optimizer_state_dict(model, optim, options=options)
+        new_optim = torch.optim.AdamW(model.parameters())
+        set_optimizer_state_dict(model, new_optim, osd, options=options)
+        self.assertEqual(new_optim.state_dict(), optim.state_dict())
+
+
+instantiate_parametrized_tests(TestFrozenParamOptimStateDict)
 
 
 class TestNoComm(MultiProcessTestCase):

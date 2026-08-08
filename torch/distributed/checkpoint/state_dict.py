@@ -630,7 +630,17 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     """
     Initialize optim states by calling the step() with zero grads.
     """
-    if optim.state:
+    # Only initialize the state of trainable parameters that do not have any
+    # state yet. Parameters that already have state (e.g., previously trained
+    # but now frozen ones) must not be stepped again as that would mutate
+    # their state.
+    uninitialized_params = [
+        param
+        for param_group in optim.param_groups
+        for param in param_group[_PARAMS]
+        if param.requires_grad and not optim.state.get(param)
+    ]
+    if not uninitialized_params:
         # The optimizer state is initialized.
         return
 
@@ -643,10 +653,8 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
             if param.grad is not None:
                 return
 
-    for param_group in optim.param_groups:
-        for param in param_group[_PARAMS]:
-            if param.requires_grad:
-                param.grad = torch.zeros_like(param)
+    for param in uninitialized_params:
+        param.grad = torch.zeros_like(param)
 
     # Some optimizers will update parameters regardless of grads due to lr, so
     # make lr to zero when calling `step()`.
@@ -859,14 +867,26 @@ def _unflatten_optim_state_dict(
                     raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
 
-                # Only add state if param requires grad
-                if not param.requires_grad:
-                    continue
+                if param.requires_grad:
+                    state_names = list(optim.state[param].keys())
+                else:
+                    # Frozen params have no local optimizer state, so recover
+                    # the saved state names from the flattened keys.
+                    state_prefix = f"{_STATE}.{fqn}."
+                    state_names = sorted(
+                        {
+                            key[len(state_prefix) :].split(".")[0]
+                            for key in state_dict
+                            if key.startswith(state_prefix)
+                        }
+                    )
+                    if not state_names:
+                        continue
 
                 # Reconstruct state for this parameter
                 # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
-                for state_name in optim.state[param]:
+                for state_name in state_names:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
                     if flattened_state_key not in state_dict:
@@ -1029,15 +1049,14 @@ def _split_optim_state_dict(
                 if not isinstance(params, list):
                     raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
-                if param.requires_grad:
-                    if fqn in cast(DictValueType, optim_state_dict[_STATE]):
-                        state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
-                    elif info.strict:
-                        raise RuntimeError(
-                            f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
-                            "The parameter requires gradients but has no saved optimizer state. "
-                            "To load anyway, use StateDictOptions(strict=False)."
-                        )
+                if fqn in cast(DictValueType, optim_state_dict[_STATE]):
+                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                elif param.requires_grad and info.strict:
+                    raise RuntimeError(
+                        f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                        "The parameter requires gradients but has no saved optimizer state. "
+                        "To load anyway, use StateDictOptions(strict=False)."
+                    )
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
