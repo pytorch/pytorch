@@ -188,8 +188,10 @@ aten = torch.ops.aten
 @dataclasses.dataclass(frozen=True)
 class ExternKernelInputRef:
     """
-    Reference an entry from ExternKernel.inputs when constructing a custom
-    positional call signature.
+    Reference a tracked ExternKernel input from a custom positional signature.
+
+    ExternKernel.call_args may interleave these references with literal values;
+    the kernel's inputs remain the complete set of tensors tracked by the IR.
     """
 
     index: int
@@ -199,13 +201,10 @@ class ExternKernelInputRef:
             raise ValueError("ExternKernelInputRef index must be non-negative")
 
 
-def extern_kernel_input(index: int) -> ExternKernelInputRef:
-    return ExternKernelInputRef(index)
-
-
 def resolve_extern_kernel_call_args(
     inputs: Sequence[_T], call_args: Sequence[Any] | None
 ) -> tuple[Any, ...]:
+    """Resolve a custom positional signature against its tracked inputs."""
     if call_args is None:
         return tuple(inputs)
 
@@ -3061,10 +3060,15 @@ class Scan(Loops):
         )
         scan_type = Scan
         if num_splits > 1:
-            supports_split = (
+            triton_supports_split = (
                 # pyrefly: ignore [unsupported-operation]
                 torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
-            ) and (len(dtypes) == 1)
+            )
+            supports_split = (
+                triton_supports_split
+                and len(dtypes) == 1
+                and not torch.are_deterministic_algorithms_enabled()
+            )
             if not supports_split:
                 if can_fallback_to_aten:
                     # Fallback to ATen
@@ -7936,22 +7940,20 @@ class ExternKernel(InputsKernel):
         else:
             return [V.graph.wrapper_code.val_to_arg_str(a) for a in self.constant_args]
 
-    def resolve_call_args(self) -> list[Any]:
-        if self.call_args is None:
-            raise AssertionError("resolve_call_args requires custom call_args")
-        return list(resolve_extern_kernel_call_args(self.inputs, self.call_args))
+    def get_call_args(self) -> list[Any]:
+        if self.call_args is not None:
+            return list(resolve_extern_kernel_call_args(self.inputs, self.call_args))
+        return [*self.inputs, *self.constant_args]
 
     def codegen_args(self) -> list[str]:
         if self.call_args is not None:
-            inputs = self.resolve_call_args()
+            inputs = self.get_call_args()
             if V.graph.cpp_wrapper and self.op_overload is not None:
                 inputs = list(self.fill_non_provided_args(inputs, self.kwargs))
             need_codegen_constant_args = False
         elif V.graph.cpp_wrapper and self.op_overload is not None:
             # cpp wrapper needs special logic to fill in missing args with default values
-            inputs = self.fill_non_provided_args(
-                [*self.inputs, *self.constant_args], self.kwargs
-            )
+            inputs = self.fill_non_provided_args(self.get_call_args(), self.kwargs)
             # fill_non_provided_args has handled constant args, so no need to codegen for that later
             need_codegen_constant_args = False
         else:

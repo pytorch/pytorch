@@ -25,7 +25,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, extern_kernel_input, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, ExternKernelInputRef, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -1046,17 +1046,22 @@ def tuned_scaled_mm_v2(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
 
-    input_nodes: list[Any]
-
-    if not bias:
-        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
-    else:
-        bias_real = realize_inputs(bias)
-        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
+    bias_real = realize_inputs(bias) if bias is not None else None
+    input_nodes: list[Any] = [mat_a, mat_b, scale_a_real, scale_b_real]
+    if bias_real is not None:
+        input_nodes.append(bias_real)
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
     kernel_inputs = MMKernelInputs(
-        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+        input_nodes,
+        scalars={
+            "has_bias": int(bias_real is not None),
+            "has_scale_result": 0,
+            "apply_scale_result": 0,
+        },
+        mat1_idx=0,
+        mat2_idx=1,
+        out_dtype=out_dtype,
     )
 
     choices: list[ChoiceCaller] = []
@@ -1094,7 +1099,7 @@ def tuned_scaled_mm_v2(
         # Don't run tma template currently if bias exist
         if (
             use_triton_tma_template(mat_a, mat_b, output_layout=layout, add_guards=True)
-            and not bias
+            and bias_real is None
         ):
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
@@ -1126,7 +1131,7 @@ def tuned_scaled_mm_v2(
             use_triton_blackwell_tma_template(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
-            and not bias
+            and bias_real is None
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
@@ -1242,8 +1247,8 @@ def tuned_scaled_mm(
     if scale_result_real is not None:
         input_nodes.append(scale_result_real)
 
-    # FP8 Triton templates must multiply by scale_result in their epilogue.
-    # Other dtypes pass scale_result through to the extern ATen kernel.
+    # For float8 output, CUDA/ROCm multiply by scale_result, CPU divides by it,
+    # and XPU currently ignores it. Other output dtypes ignore scale_result.
     apply_scale_result = (
         scale_result_real is not None
         and layout.device.type == "cuda"
@@ -1273,18 +1278,15 @@ def tuned_scaled_mm(
         call_args = None
         if scale_result_real is not None and bias_real is None:
             call_args = (
-                *(extern_kernel_input(i) for i in range(4)),
+                *(ExternKernelInputRef(i) for i in range(4)),
                 None,
-                extern_kernel_input(4),
+                ExternKernelInputRef(4),
             )
-        choices.append(
-            aten__fp8_mm.bind(
-                kernel_inputs.nodes(),
-                kernel_inputs.output_layout(),
-                call_args=call_args,
-                out_dtype=out_dtype,
-                use_fast_accum=use_fast_accum,
-            )
+        templates_to_use.append(aten__fp8_mm)
+        kwarg_overrides[aten__fp8_mm.uid] = dict(
+            call_args=call_args,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
         )
 
     _, is_nonzero = _is_static_problem(layout)
@@ -1293,6 +1295,11 @@ def tuned_scaled_mm(
         # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
+        and not (
+            scale_result_real is not None
+            and layout.device.type == "cpu"
+            and layout.dtype in _SCALED_MM_SCALE_RESULT_DTYPES
+        )
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)

@@ -9,6 +9,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
 #include <c10/util/overflows.h>
+#include <c10/util/safe_conv.h>
 
 #include <type_traits>
 
@@ -328,6 +329,20 @@ C10_HOST_DEVICE To convert(From f) {
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+    report_overflow(name);
+  }
+  return convert<To, From>(f);
+}
+
+// Range-checked conversion that PERMITS signed->unsigned two's-complement
+// wraparound (via overflows() with its default strict_unsigned=false). Retained
+// only to preserve the historical behavior of the few call sites that relied on
+// the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
+// narrowing, c10/util/safe_conv.h) or c10::checked_convert (general, above).
+template <typename To, typename From>
+To unsafe_wrapping_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
   if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
     report_overflow(name);

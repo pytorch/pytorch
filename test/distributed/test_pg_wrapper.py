@@ -447,6 +447,30 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 )
                 self.assertEqual(tensor.shape, torch.Size([1024]))
 
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_wrapper_forwards_bound_device_id(self):
+            """
+            Tests that ProcessGroupWrapper propagates bound_device_id to the
+            wrapped backend when init_process_group is called with device_id.
+            See issue #178977.
+            """
+            torch.cuda.set_device(self.rank)
+            device = torch.device(f"cuda:{self.rank}")
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(
+                backend=backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+                device_id=device,
+            )
+            pg = c10d.distributed_c10d._get_default_group()
+            pg_backend = pg._get_backend(device)
+            self.assertIsInstance(pg_backend, _ProcessGroupWrapper)
+            self.assertEqual(pg_backend.wrapped_pg.bound_device_id, device)
+
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @patch(
