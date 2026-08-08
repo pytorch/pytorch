@@ -23412,14 +23412,16 @@ python_ref_db = [
 
             # cuda implementation is off-by-one on some inputs due to precision issues
             # https://github.com/pytorch/pytorch/issues/82230
+            # uint8 is exempt: its sample inputs skip the negative endpoints that
+            # trigger the off-by-one.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
@@ -23452,8 +23454,6 @@ python_ref_db = [
 
             # cpu implementation is wrong on some integral types
             # https://github.com/pytorch/pytorch/issues/81996
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
 
