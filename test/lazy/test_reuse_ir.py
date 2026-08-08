@@ -157,5 +157,44 @@ class TestLazyReuseIr(TestCase):
         torch._lazy.ir_cache.reset()
 
 
+    def testDoubleArgReuseIsBitwise(self):
+        # CanBeReused must compare double args bitwise: a nan eps still
+        # allows node reuse (IEEE nan != nan would block it forever), while
+        # eps=0.0 and eps=-0.0 are different constants and must not share
+        # one IR node.
+        device = get_test_device()
+        x = torch.randn(2, 3, 8, 8, device=device).to(device="lazy")
+        weight = torch.randn(3, device=device).to(device="lazy")
+        bias = torch.randn(3, device=device).to(device="lazy")
+
+        for _ in range(10):
+            z, _, _ = torch.ops.aten.native_batch_norm(
+                x, weight, bias, None, None, True, 0.1, float("nan")
+            )
+            torch._lazy.mark_step()
+
+        reused = (
+            metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm") or 0
+        )
+        if reused < 7:
+            raise AssertionError(
+                f"Expected at least 7 reused nan-eps NativeBatchNorm nodes, got {reused}"
+            )
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
+
+        z1, _, _ = torch.ops.aten.native_batch_norm(
+            x, weight, bias, None, None, True, 0.1, 0.0
+        )
+        z2, _, _ = torch.ops.aten.native_batch_norm(
+            x, weight, bias, None, None, True, 0.1, -0.0
+        )
+        torch._lazy.mark_step()
+        reused = metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm")
+        self.assertFalse(reused)
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
+
+
 if __name__ == "__main__":
     run_tests()
