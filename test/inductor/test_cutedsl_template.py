@@ -7,6 +7,8 @@ from expecttest import assert_expected_inline
 import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
@@ -71,6 +73,8 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 @unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_vendored_dense_efc_kernel_configuration(self):
         from cutlass.cute.nvgpu import tcgen05
@@ -896,6 +900,9 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
     def test_can_fuse_horizontal_returns_false(self):
         sched = CuteDSLScheduling(scheduler=None)
         self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
+
+
+instantiate_device_type_tests(TestCuteDSLTemplate, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
