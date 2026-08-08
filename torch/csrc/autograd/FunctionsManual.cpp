@@ -7136,6 +7136,10 @@ Tensor gather_with_keepdimed_indices(
     int64_t dim,
     const Tensor& indices,
     bool keepdim) {
+  if (input.dim() > 0 && input.sym_size(dim) == 0) {
+    return input.new_zeros_symint(indices.sym_sizes());
+  }
+
   auto full_indices = indices;
   if (!keepdim) {
     full_indices = indices.unsqueeze(dim);

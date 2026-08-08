@@ -2295,6 +2295,11 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 // backward function for those operators; it propagates the grad to the
 // specific value locations referred to at `indices`.
 Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim, const Tensor& indices, c10::SymIntArrayRef sizes, bool keepdim) {
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(sizes.size()));
+  if (!sizes.empty() && sizes[dim] == 0) {
+    return grad.new_zeros_symint(sizes);
+  }
+
   auto inplace_scatter_if_not_tensor_subclass =
       [&](const Tensor& grad_out, const Tensor& indices_) {
         if (areAnyTensorSubclassLike({grad, indices})) {
