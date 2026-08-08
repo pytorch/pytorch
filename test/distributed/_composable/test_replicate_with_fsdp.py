@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import os
 import sys
 from copy import deepcopy
 
@@ -48,11 +49,24 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return "nccl"
+        """
+        Distributed communication backend.
+
+        Environment variable:
+            TEST_DIST_BACKEND: Distributed backend (nccl, hccl, gloo, etc.)
+        """
+        return os.environ.get("TEST_DIST_BACKEND", "nccl")
 
     @classmethod
     def device_type(cls) -> str:
-        return "cuda"
+        """
+        Device type for testing.
+
+        Environment variable:
+            TEST_DEVICE: Device type (cuda, npu, xpu, hpu, cpu)
+        """
+        _accelerator = torch.accelerator.current_accelerator()
+        return os.environ.get("TEST_DEVICE", _accelerator.type if _accelerator else "cpu")
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -66,7 +80,7 @@ class ReplicateTest(MultiProcContinuousTest):
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         replicate_size = 2
         return init_device_mesh(
-            "cuda",
+            self.device_type(),
             (replicate_size, 1, self.world_size // replicate_size),
             mesh_dim_names=("replicate", "shard", "tp"),
         )
@@ -195,7 +209,7 @@ class ReplicateTest(MultiProcContinuousTest):
         This tests that a user can pass in a device mesh to replicate a module
         """
 
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        device = torch.device(f"{self.device_type()}:{self.rank % getattr(torch, self.device_type()).device_count()}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -221,7 +235,7 @@ class ReplicateTest(MultiProcContinuousTest):
         Tests that replicate_model has the same behavior as original model when training
         """
 
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        device = torch.device(f"{self.device_type()}:{self.rank % getattr(torch, self.device_type()).device_count()}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -291,7 +305,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(self.device_type())
         replicate(ref_model, mesh=replicate_mesh)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
@@ -302,7 +316,7 @@ class ReplicateTest(MultiProcContinuousTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + replicate_pg.rank() + 1)
-        device = torch.device("cuda")
+        device = torch.device(self.device_type())
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []
