@@ -676,6 +676,7 @@ package = 'torch'
   ".spin/cmds.py:fixlint",
   ".spin/cmds.py:quicklint",
   ".spin/cmds.py:quickfix",
+  ".spin/cmds.py:gpu_coverage",
 ]
 "Regenerate" = [
   ".spin/cmds.py:regenerate_version",
