@@ -2,6 +2,7 @@
 import itertools
 import math
 import os
+import threading
 import unittest
 import warnings
 from itertools import product
@@ -4124,6 +4125,59 @@ class TestConvolutionNNCUDA(NNTestCase):
         self.assertTrue(x.grad.isfinite().all())
         self.assertTrue(conv.weight.grad.isfinite().all())
         self.assertTrue(conv.bias.grad.isfinite().all())
+
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    def test_cudnn_benchmark_plan_reuse_across_threads(self, device):
+        # See https://github.com/pytorch/pytorch/issues/191617
+        torch.manual_seed(0)
+        num_threads = 3
+        args = []
+        for dtype, memory_format, batch in product(
+            (torch.float, torch.half),
+            (torch.contiguous_format, torch.channels_last),
+            (8, 3),
+        ):
+            x = torch.randn(batch, 32, 28, 28, device=device, dtype=dtype)
+            w = torch.randn(32, 32, 3, 3, device=device, dtype=dtype)
+            x = x.to(memory_format=memory_format)
+            w = w.to(memory_format=memory_format)
+            args.append((x, w))
+        results = {}
+
+        def _run():
+            out = [torch.conv2d(x, w, None, (1, 1), (1, 1), (1, 1), 1) for x, w in args]
+            out += [
+                torch.cudnn_convolution_relu(x, w, None, (1, 1), (1, 1), (1, 1), 1)
+                for x, w in args
+            ]
+            return out
+
+        with cudnn.flags(enabled=True, benchmark=True):
+            with torch.no_grad():
+                expected = _run()
+
+                def _worker(t):
+                    try:
+                        results[t] = _run()
+                    except Exception as e:
+                        results[t] = e
+                    torch.cuda.synchronize()
+
+                threads = [
+                    threading.Thread(target=_worker, args=(t,))
+                    for t in range(num_threads)
+                ]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+        for t in range(num_threads):
+            if isinstance(results[t], Exception):
+                raise results[t]
+            self.assertEqual(results[t], expected, atol=0.0, rtol=0)
 
     @skipCUDAIfNoCudnn
     def test_cudnn_non_contiguous(self, device):
