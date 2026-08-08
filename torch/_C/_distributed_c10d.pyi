@@ -144,6 +144,9 @@ class ReduceOp:
     # pyrefly: ignore  # unknown-name
     UNUSED: RedOpType = ...
 
+    # pyrefly: ignore  # unknown-name
+    op: RedOpType
+
     # mypy error being ignored:
     # Detected enum "torch._C._distributed_c10d.ReduceOp.RedOpType" in a type
     # stub with zero members. There is a chance this is due to a recent change
