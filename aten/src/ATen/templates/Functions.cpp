@@ -55,6 +55,11 @@ Tensor TensorMaker::make_tensor() {
 
   tensor_impl->set_requires_grad(opts_.requires_grad());
 
+  // Only touch ExtraMeta when a backend meta was provided (zero-cost default).
+  if (backend_meta_) {
+    tensor_impl->set_backend_meta(std::move(backend_meta_));
+  }
+
   return tensor;
  }
 
