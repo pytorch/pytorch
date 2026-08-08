@@ -250,7 +250,7 @@ class Future(torch._C.Future, Generic[T]):
         """
         super().set_result(result)
 
-    def set_exception(self, result: T) -> None:
+    def set_exception(self, result: BaseException) -> None:
         r"""
         Set an exception for this ``Future``, which will mark this ``Future`` as
         completed with an error and trigger all attached callbacks. Note that
