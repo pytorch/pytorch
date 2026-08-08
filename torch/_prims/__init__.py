@@ -2799,7 +2799,7 @@ def _normal_meta(
         lambda: f"expected non-negative standard deviation, but got std={std}",
     )
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
     )
@@ -3016,7 +3016,7 @@ fft_c2r = _make_prim(
 
 
 def _frexp_meta(self: TensorLikeType) -> tuple[TensorLikeType, TensorLikeType]:
-    torch._check(
+    torch._check_not_implemented(
         self.dtype.is_floating_point,
         lambda: "torch.frexp() only supports floating-point dtypes",
     )
