@@ -7693,6 +7693,19 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_linalg_matrix_exp_non_contiguous(self, device, dtype):
+        # matrix_exp should handle non-view-foldable inputs such
+        # as channels-last tensors without raising on its internal batch fold.
+        expm = torch.linalg.matrix_exp
+
+        ref = make_tensor((3, 4, 8, 8), dtype=dtype, device=device)
+        x_cl = ref.to(memory_format=torch.channels_last)
+        self.assertFalse(x_cl.is_contiguous())
+        self.assertEqual(expm(x_cl), expm(ref))
+
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_matrix_exp_backward_input_validation(self, device, dtype):
 
         scalar_tensor = torch.tensor(1.0, dtype=dtype, device=device)
