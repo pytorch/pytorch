@@ -366,6 +366,8 @@ SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
     typing.List[Tensor]: "Tensor[]",  # noqa: UP006
     list[Tensor]: "Tensor[]",
+    typing.List[typing.Optional[Tensor]]: "Tensor?[]",  # noqa: UP006,UP045
+    list[typing.Optional[Tensor]]: "Tensor?[]",  # noqa: UP045
     int: "SymInt",
     float: "float",
     bool: "bool",

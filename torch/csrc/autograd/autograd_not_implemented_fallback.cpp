@@ -27,7 +27,7 @@ void _foreach_tensor(
     torch::jit::Stack* stack,
     size_t stack_start,
     size_t size) {
-  // Enumerate over tensors in a stack, including ones in TensorLists
+  // Enumerate over tensors in a stack, including ones in (Optional)TensorLists
   int idx_tensor = 0;
   for (const auto idx_arg : c10::irange(size)) {
     auto& ivalue = (*stack)[stack_start + idx_arg];
@@ -37,6 +37,15 @@ void _foreach_tensor(
       idx_tensor++;
     } else if (ivalue.isTensorList()) {
       for (const auto& iv : ivalue.toListRef()) {
+        const auto& tensor = iv.toTensor();
+        fn(idx_tensor, idx_arg, tensor);
+        idx_tensor++;
+      }
+    } else if (ivalue.isOptionalTensorList()) {
+      for (const auto& iv : ivalue.toListRef()) {
+        if (iv.isNone()) {
+          continue;
+        }
         const auto& tensor = iv.toTensor();
         fn(idx_tensor, idx_arg, tensor);
         idx_tensor++;

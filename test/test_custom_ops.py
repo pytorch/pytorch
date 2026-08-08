@@ -4387,6 +4387,90 @@ class TestCustomOpAPI(TestCase):
         result = [xi.grad for xi in xs]
         self.assertEqual(result, torch.tensor([1.0, 2, 1, 2, 3]).unbind(0))
 
+    def test_supports_tensorlist_optional_output(self):
+        # Tensor?[] output with a None hole: the present tensors must still be
+        # tracked by autograd and receive gradients.
+        @torch._library.autograd.supports_tensorlist
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                ctx.save_for_backward(*xs)
+                return [xs[0].sin(), None, xs[1].cos()]
+
+            @staticmethod
+            def backward(ctx, grads):
+                g0, gnone, g2 = grads
+                self.assertIsNone(gnone)
+                x0, x1 = ctx.saved_tensors
+                return [g0 * x0.cos(), -g2 * x1.sin()]
+
+        x0 = torch.randn([], requires_grad=True)
+        x1 = torch.randn([], requires_grad=True)
+        ys = Foo.apply([x0, x1])
+        self.assertEqual(len(ys), 3)
+        self.assertIsNone(ys[1])
+        self.assertTrue(ys[0].requires_grad)
+        self.assertTrue(ys[2].requires_grad)
+
+        g0, g1 = torch.autograd.grad(ys[0].sum() + ys[2].sum(), [x0, x1])
+        self.assertEqual(g0, x0.cos())
+        self.assertEqual(g1, -x1.sin())
+
+    def test_library_register_autograd_optional_tensorlist_output(self):
+        @torch.library.custom_op("mylib::sin_with_hole", mutates_args=())
+        def sin_with_hole(x: Tensor) -> List[Optional[Tensor]]:
+            return [x.sin(), None]
+
+        @sin_with_hole.register_fake
+        def _(x: Tensor) -> List[Optional[Tensor]]:
+            return [torch.empty_like(x), None]
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grads):
+            g0, g1 = grads
+            (x,) = ctx.saved_tensors
+            return g0 * x.cos()
+
+        torch.library.register_autograd(
+            "mylib::sin_with_hole", backward, setup_context=setup_context
+        )
+
+        x = torch.randn(3, requires_grad=True)
+        out = sin_with_hole(x)
+        self.assertIsNone(out[1])
+        self.assertTrue(out[0].requires_grad)
+        (grad_x,) = torch.autograd.grad(out[0].sum(), x)
+        self.assertEqual(grad_x, x.cos())
+
+    def test_library_register_autograd_optional_tensorlist_all_none_output(self):
+        # All-None output: no tensor to differentiate through, op must still run.
+        @torch.library.custom_op("mylib::all_none", mutates_args=())
+        def all_none(x: Tensor) -> List[Optional[Tensor]]:
+            return [None, None]
+
+        @all_none.register_fake
+        def _(x: Tensor) -> List[Optional[Tensor]]:
+            return [None, None]
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grads):
+            return torch.zeros(1)
+
+        torch.library.register_autograd(
+            "mylib::all_none", backward, setup_context=setup_context
+        )
+
+        x = torch.randn(3, requires_grad=True)
+        out = all_none(x)
+        self.assertEqual(len(out), 2)
+        self.assertIsNone(out[0])
+        self.assertIsNone(out[1])
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_default_values(self):
         defaults = []

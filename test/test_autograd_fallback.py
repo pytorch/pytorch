@@ -458,6 +458,34 @@ class TestAutogradFallback(TestCase):
                     retain_graph=True,
                 )
 
+    @parametrize("mode", ("nothing", "warn"))
+    def test_supports_optional_tensor_lists(self, mode):
+        with autograd_fallback_mode(mode):
+            lib = self.get_lib()
+            lib.define("foo(Tensor[] a) -> Tensor?[]")
+            op = self.get_op("foo")
+
+            def foo_impl(a):
+                x, y, z = a
+                with torch.no_grad():
+                    return [x + y + z, None, x * y * z]
+
+            lib.impl("foo", foo_impl, "CPU")
+            x = torch.randn(3, requires_grad=True)
+            y = torch.randn(1, requires_grad=True)
+            z = torch.randn(2, 1, requires_grad=True)
+            a, none, b = op([x, y, z])
+            self.assertIsNone(none)
+            for out in (a, b):
+                with self._check_ctx(mode, mode_nothing_raises=True):
+                    torch.autograd.grad(
+                        out,
+                        (x, y, z),
+                        torch.ones_like(out),
+                        allow_unused=True,
+                        retain_graph=True,
+                    )
+
 
 instantiate_parametrized_tests(TestAutogradFallback)
 

@@ -181,7 +181,9 @@ def supports_tensorlist(cls: Any) -> Any:
         metadata.result_is_tuple = isinstance(result, tuple)
         if not metadata.result_is_tuple:
             result = (result,)
-        flat_result, output_spec = _pytree.tree_flatten(result, not_list_of_tensor)
+        flat_result, output_spec = _pytree.tree_flatten(
+            result, not_list_of_optional_tensor
+        )
         metadata.output_spec = output_spec
 
         if hasattr(ctx, "_pt_metadata"):
@@ -237,7 +239,11 @@ def supports_tensorlist(cls: Any) -> Any:
         return tuple(flat_grad_inputs + [None])
 
     def new_apply(*args):
-        flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
+        # input_spec must use the same leaf predicate as the grad spec in
+        # new_backward, otherwise Tensor?[] inputs with None holes mismatch.
+        flat_args, input_spec = _pytree.tree_flatten(
+            args, is_leaf=not_list_of_optional_tensor
+        )
         metadata = TensorListMetadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
         if metadata.output_spec is None:
@@ -257,14 +263,6 @@ def supports_tensorlist(cls: Any) -> Any:
     cls.backward = new_backward
     cls.apply = new_apply
     return cls
-
-
-def not_list_of_tensor(tree):
-    if isinstance(tree, tuple):
-        return False
-    if isinstance(tree, list):
-        return any(not isinstance(l, Tensor) for l in tree)
-    return True
 
 
 def not_list_of_optional_tensor(tree):

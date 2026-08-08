@@ -118,6 +118,19 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
+    def test_optional_tensor_list_return(self):
+        def foo_op(x: Tensor) -> typing.List[typing.Optional[Tensor]]:  # noqa: UP006,UP045
+            return [x.clone(), None]
+
+        result = torch.library.infer_schema(foo_op, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> Tensor?[]")
+
+        def foo_op_2(x: Tensor) -> list[typing.Optional[Tensor]]:  # noqa: UP045
+            return [x.clone(), None]
+
+        result = torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> Tensor?[]")
+
     @unittest.expectedFailure
     def test_no_library_prefix(self):
         def foo_op(x: Tensor) -> Tensor:
