@@ -50,6 +50,21 @@ def _cupti_version():
 
 TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
 
+
+def _cuda_graph_tools_id_available():
+    # cudaGraphNodeGetToolsId needs cuda-bindings >= 13.1 *and* a CUDA driver
+    # >= 13.1 (or cuda-compat), which is independent of the libcupti version:
+    # a CUDA 13.0 runner can ship libcupti >= 13.3 and still lack the API.
+    # is_available() probes the driver and caches the result.
+    try:
+        from torch.cuda.graph_annotations import is_available
+        return is_available()
+    except Exception:
+        return False
+
+
+TEST_CUDA_GRAPH_TOOLS_ID = LazyVal(_cuda_graph_tools_id_available)
+
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
