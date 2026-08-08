@@ -520,6 +520,99 @@ class TestCommon(TestCase):
                 atol, rtol = 1e-3, 1e-3
             self.assertEqual(device_results, cpu_results, atol=atol, rtol=rtol)
 
+    @ops(
+        op_db,
+        allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+    )
+    def test_sign_sensitive_special_values(self, device, dtype, op):
+        """Opt-in via check_sign_sensitive_special_values=True on the OpInfo.
+        Checks isnan/isinf mask parity and signed-zero signbit parity between
+        eager and compiled outputs (torch.allclose treats +0.0 == -0.0)."""
+        if not op.check_sign_sensitive_special_values:
+            self.skipTest("check_sign_sensitive_special_values not enabled for this op")
+        if op.skip_correctness_check_compile_vs_eager:
+            self.skipTest("skip_correctness_check_compile_vs_eager is set")
+
+        def check_sign_sensitive(eager_out, compiled_out, *, label=""):
+            if isinstance(eager_out, (list, tuple)):
+                for i, (e, c) in enumerate(zip(eager_out, compiled_out)):
+                    check_sign_sensitive(e, c, label=f"{label}[{i}]")
+                return
+
+            if isinstance(eager_out, dict):
+                for k in eager_out:
+                    check_sign_sensitive(
+                        eager_out[k], compiled_out[k], label=f"{label}[{k!r}]"
+                    )
+                return
+
+            if not isinstance(eager_out, torch.Tensor):
+                return
+
+            if not (eager_out.is_floating_point() or eager_out.is_complex()):
+                return
+
+            prefix = f"{label}: " if label else ""
+
+            # isnan parity
+            eager_nan = torch.isnan(eager_out)
+            compiled_nan = torch.isnan(compiled_out)
+            if not torch.equal(eager_nan, compiled_nan):
+                mask = eager_nan != compiled_nan
+                self.fail(
+                    f"{prefix}isnan mismatch at positions {mask.nonzero(as_tuple=False).tolist()}: "
+                    f"eager={eager_out[mask].tolist()} compiled={compiled_out[mask].tolist()}"
+                )
+
+            # isinf parity
+            eager_inf = torch.isinf(eager_out)
+            compiled_inf = torch.isinf(compiled_out)
+            if not torch.equal(eager_inf, compiled_inf):
+                mask = eager_inf != compiled_inf
+                self.fail(
+                    f"{prefix}isinf mismatch at positions {mask.nonzero(as_tuple=False).tolist()}: "
+                    f"eager={eager_out[mask].tolist()} compiled={compiled_out[mask].tolist()}"
+                )
+
+            # signbit parity for +-0.0 only; infinity sign is already covered by
+            # the existing allclose-based correctness check.
+            sign_mask = (
+                ~eager_nan
+                & ~compiled_nan
+                & ~eager_inf
+                & ~compiled_inf
+                & (eager_out == 0)
+                & (compiled_out == 0)
+            )
+            if not sign_mask.any():
+                return
+
+            eager_sign = torch.signbit(eager_out)
+            compiled_sign = torch.signbit(compiled_out)
+            mismatch = (eager_sign != compiled_sign) & sign_mask
+            if mismatch.any():
+                self.fail(
+                    f"{prefix}signbit mismatch at positions {mismatch.nonzero(as_tuple=False).tolist()}: "
+                    f"eager={eager_out[mismatch].tolist()} compiled={compiled_out[mismatch].tolist()}"
+                )
+
+        inputs_fn = (
+            op.reference_inputs
+            if op.reference_inputs_func is not None
+            else op.sample_inputs
+        )
+        samples = list(inputs_fn(device, dtype, requires_grad=False))
+        if not samples:
+            self.skipTest("no inputs generated")
+
+        compiled_op = torch.compile(op.op)
+
+        for i, sample in enumerate(samples):
+            with self.subTest(i=i):
+                eager_out = op.op(sample.input, *sample.args, **sample.kwargs)
+                compiled_out = compiled_op(sample.input, *sample.args, **sample.kwargs)
+                check_sign_sensitive(eager_out, compiled_out, label=f"sample[{i}]")
+
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
