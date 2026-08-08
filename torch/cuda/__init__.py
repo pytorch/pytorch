@@ -1376,6 +1376,14 @@ def _clear_cublas_workspaces() -> None:
     if not is_initialized():
         return
 
+    # If this thread is already executing a backward pass (e.g. cudagraph
+    # trees clearing workspaces during backward warmup), the reentrant
+    # synthetic backward below would interleave the outer graph task's
+    # remaining nodes onto this thread and can deadlock. The direct clear
+    # above already covered this thread, so skip the worker-side clear.
+    if torch._C._current_graph_task_id() != -1:
+        return
+
     global _ClearCublasWorkspaces
     if _ClearCublasWorkspaces is None:
         from torch.autograd import Function
