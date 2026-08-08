@@ -1157,6 +1157,98 @@ inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
   return torch::special_modified_bessel_k1_out(result, self);
 }
 
+/// Modified Bessel function of the first kind for arbitrary order.
+///
+/// See
+/// https://pytorch.org/docs/main/special.html#torch.special.modified_bessel_i.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::rand(128, dtype=kDouble);
+/// auto nu = torch::full({128}, 2.5, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i(x, nu);
+/// ```
+inline Tensor modified_bessel_i(const Tensor& x, const Tensor& nu) {
+  return torch::special_modified_bessel_i(x, nu);
+}
+
+inline Tensor modified_bessel_i(const Scalar& x, const Tensor& nu) {
+  return torch::special_modified_bessel_i(x, nu);
+}
+
+inline Tensor modified_bessel_i(const Tensor& x, const Scalar& nu) {
+  return torch::special_modified_bessel_i(x, nu);
+}
+
+inline Tensor& modified_bessel_i_out(
+    Tensor& result,
+    const Tensor& x,
+    const Tensor& nu) {
+  return torch::special_modified_bessel_i_out(result, x, nu);
+}
+
+inline Tensor& modified_bessel_i_out(
+    Tensor& result,
+    const Scalar& x,
+    const Tensor& nu) {
+  return torch::special_modified_bessel_i_out(result, x, nu);
+}
+
+inline Tensor& modified_bessel_i_out(
+    Tensor& result,
+    const Tensor& x,
+    const Scalar& nu) {
+  return torch::special_modified_bessel_i_out(result, x, nu);
+}
+
+/// Modified Bessel function of the second kind for arbitrary order.
+///
+/// See
+/// https://pytorch.org/docs/main/special.html#torch.special.modified_bessel_k.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::rand(128, dtype=kDouble) + 0.1;
+/// auto nu = torch::full({128}, 2.5, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k(x, nu);
+/// ```
+inline Tensor modified_bessel_k(const Tensor& x, const Tensor& nu) {
+  return torch::special_modified_bessel_k(x, nu);
+}
+
+inline Tensor modified_bessel_k(const Scalar& x, const Tensor& nu) {
+  return torch::special_modified_bessel_k(x, nu);
+}
+
+inline Tensor modified_bessel_k(const Tensor& x, const Scalar& nu) {
+  return torch::special_modified_bessel_k(x, nu);
+}
+
+inline Tensor& modified_bessel_k_out(
+    Tensor& result,
+    const Tensor& x,
+    const Tensor& nu) {
+  return torch::special_modified_bessel_k_out(result, x, nu);
+}
+
+inline Tensor& modified_bessel_k_out(
+    Tensor& result,
+    const Scalar& x,
+    const Tensor& nu) {
+  return torch::special_modified_bessel_k_out(result, x, nu);
+}
+
+inline Tensor& modified_bessel_k_out(
+    Tensor& result,
+    const Tensor& x,
+    const Scalar& nu) {
+  return torch::special_modified_bessel_k_out(result, x, nu);
+}
+
 /// Scaled modified Bessel function of the second kind of order 0.
 ///
 /// See
