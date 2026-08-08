@@ -24,6 +24,7 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 import torch.distributed as dist
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinuousTest,
@@ -31,11 +32,12 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_ROCM,
 )
 
 
@@ -47,6 +49,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str:
         return "nccl"
@@ -320,7 +324,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected_val *= self.world_size
             self.assertEqual(xs.item(), expected_val)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/157896")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157896")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_nccl_watchdog_cudagraph(self):
@@ -1253,6 +1257,12 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         # Like other ReduceOps, PREMUL_SUM should have a unique integer value.
         self.assertEqual(c10d.ReduceOp.PREMUL_SUM, 8)
 
+
+instantiate_device_type_tests(
+    ProcessGroupNCCLOpTest,
+    globals(),
+    only_for=("cuda",),
+)
 
 if __name__ == "__main__":
     run_tests()
