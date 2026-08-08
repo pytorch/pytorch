@@ -7987,6 +7987,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.SCAN,
             BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GLUON_TEMPLATES,
             BackendFeature.TUPLE_REDUCTION,
         ]
     )
