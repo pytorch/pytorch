@@ -11088,6 +11088,43 @@ class TestLinalgCudaOnly(TestCase):
             torch.cuda.tunable.set_max_tuning_iterations(1)
             self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
+    @skipCUDAIfNotRocm
+    @dtypes(torch.bfloat16)
+    def test_addmm_activation_signature_tunableop(self, device, dtype):
+        # Verify that use_gelu=False and use_gelu=True produce distinct
+        # TunableOp CSV keys, confirming that activation is included in
+        # GemmAndBiasParams::Signature().
+        with self._tunableop_ctx():
+
+            M, K, N = 4, 64, 128
+            x = torch.randn(M, K, dtype=dtype, device=device)
+            W = torch.randn(N, K, dtype=dtype, device=device)
+            b = torch.zeros(N, dtype=dtype, device=device)
+            W_t = W.t().contiguous()
+
+            ref_num_results = len(torch.cuda.tunable.get_results())
+
+            torch._addmm_activation(b, x, W_t, beta=1, alpha=1, use_gelu=False)
+            torch._addmm_activation(b, x, W_t, beta=1, alpha=1, use_gelu=True)
+
+            results = torch.cuda.tunable.get_results()
+
+            # There must be 2 new results -- one per activation type.
+            # If 0: _addmm_activation is not going through TunableOp on this platform.
+            # If 1: use_gelu=False and use_gelu=True are sharing the same CSV key (fix missing).
+            self.assertEqual(
+                len(results) - ref_num_results, 2,
+                "Expected distinct CSV keys for use_gelu=False and use_gelu=True"
+            )
+
+            # Each activation type must have its own key.
+            # Verify the 2 new param signatures are distinct.
+            new_results = results[ref_num_results:]
+            param_sigs = [r[1] for r in new_results]
+            self.assertEqual(len(set(param_sigs)), 2,
+                             f"use_gelu=False and use_gelu=True must not share the same CSV key, "
+                             f"got: {param_sigs}")
+
     @onlyCUDA
     @setLinalgBackendsToDefaultFinally
     def test_preferred_linalg_library(self):
