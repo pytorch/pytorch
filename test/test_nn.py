@@ -11919,6 +11919,45 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
+    @onlyCUDA
+    def test_ctc_loss_out_of_bounds_target(self, device):
+        # Test for issue #191568
+        # Run in a different process to prevent the device-side assert from affecting other tests
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (run_tests, TestCase)
+
+class TestThatContainsCUDAAssert(TestCase):
+    def test_ctc_loss_out_of_bounds_target(self):
+        device = '{str(device)}'
+        log_probs = torch.zeros(50, 1, 10, device=device)
+        targets = torch.tensor([2147483647], dtype=torch.int64, device=device)
+        F.ctc_loss(log_probs, targets, [1], [1], reduction='none')
+        torch.cuda.synchronize()
+
+
+if __name__ == '__main__':
+    run_tests()
+        """)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = ('launch failure' in stderr
+                          or 'HSA_STATUS_ERROR_EXCEPTION' in stderr)
+        self.assertTrue(has_cuda_assert or has_hip_assert,
+                        lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
+
+    @onlyCPU
+    def test_ctc_loss_out_of_bounds_target_error(self, device):
+        # Test for issue #191568
+        log_probs = torch.zeros(50, 1, 10, device=device)
+        targets = torch.tensor([2147483647], dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"target label out of range \[0, 10\)"):
+            F.ctc_loss(log_probs, targets, [1], [1], reduction='none')
+
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)

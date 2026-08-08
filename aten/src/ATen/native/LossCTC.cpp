@@ -44,13 +44,15 @@ namespace at::native {
 
 namespace {
 
-// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1]) note that no bound-checking is done
+// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1])
 template<typename target_t>
-inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t stride, int64_t idx, int64_t BLANK) {
+inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t stride, int64_t idx, int64_t num_labels, int64_t BLANK) {
   if (idx % 2 == 0) {
     return BLANK;
   } else {
-    return target[offset + stride * (idx / 2)];
+    int64_t label = target[offset + stride * (idx / 2)];
+    TORCH_CHECK(label >= 0 && label < num_labels, "ctc_loss: target label out of range [0, ", num_labels, "), got ", label);
+    return label;
   }
 }
 
@@ -153,6 +155,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   }
 
   int64_t batch_size = log_probs.size(1);
+  int64_t num_labels = log_probs.size(2);
   auto lpp  = log_probs.permute({1,0,2});
   auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
@@ -179,12 +182,12 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
       // the first two items of alpha_t above eq (6)
       log_alpha_a[0][0] = log_probs_a[0][BLANK];
       if (target_length > 0)
-        log_alpha_a[0][1] = log_probs_a[0][get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 1, BLANK)];
+        log_alpha_a[0][1] = log_probs_a[0][get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 1, num_labels, BLANK)];
 
       // now the loop over the inputs
       for (const auto t : c10::irange(1, input_length)) {
         for (const auto s : c10::irange(2*target_length+1)) {
-          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
+          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, num_labels, BLANK);
           // this loop over s could be parallel/vectorized, too, but the required items are one index apart
           // alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)
           // for the cuda implementation, that gave a speed boost.
@@ -200,7 +203,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
           } else {
             la2 = neginf;
           }
-          if ((s > 1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s-2, BLANK) !=
+          if ((s > 1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s-2, num_labels, BLANK) !=
                           current_target_prime)) {
             la3 = log_alpha_a[t-1][s-2];
             if (la3 > lamax)
@@ -329,7 +332,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
         grad_a[input_length-1][BLANK] = log_alpha_a[input_length-1][2*target_length] + log_beta_a[input_length-1][2*target_length];
 
         if (target_length > 0) {
-          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 2*target_length-1, BLANK);
+          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 2*target_length-1, num_labels, BLANK);
           log_beta_a[input_length-1][2*target_length-1] = log_probs_a[input_length-1][current_target_prime];
 
           // the first two are a blank and a non-blank, so we know they are different and we don't need to do log+
@@ -346,7 +349,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
           scalar_t lb1 = log_beta_a[t+1][s];
           scalar_t lbmax = lb1;
           scalar_t lb2, lb3;
-          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
+          auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, num_labels, BLANK);
           if (s < 2*target_length) {
             lb2 = log_beta_a[t+1][s+1];
             if (lb2 > lbmax)
@@ -354,7 +357,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
           } else {
             lb2 = neginf;
           }
-          if ((s < 2*target_length-1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s+2, BLANK) !=
+          if ((s < 2*target_length-1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s+2, num_labels, BLANK) !=
                                           current_target_prime)) {
             lb3 = log_beta_a[t+1][s+2];
             if (lb3 > lbmax)
