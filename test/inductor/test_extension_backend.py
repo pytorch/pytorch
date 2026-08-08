@@ -8,7 +8,7 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
 from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 
 
@@ -114,7 +114,10 @@ class BaseExtensionBackendTests(TestCase):
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+@instantiate_parametrized_tests
 class ExtensionBackendTests(BaseExtensionBackendTests):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfWindows
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
@@ -196,9 +199,6 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionCppWrapperCodegen,
         )
         self.assertTrue(has_cpp_wrapper_for_device(device))
-
-
-instantiate_parametrized_tests(ExtensionBackendTests)
 
 
 if __name__ == "__main__":
