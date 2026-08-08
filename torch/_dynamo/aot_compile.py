@@ -193,6 +193,11 @@ class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
+    # Scope used ONLY to resolve guards, kept separate from _extra_globals so
+    # that supplying it cannot rewire what the compiled bytecode reads. It is
+    # held by reference, not copied, so guards track the loading process's
+    # globals as they change.
+    _guard_globals: dict[str, object] | None = None
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
         f_locals: dict[str, object] = {}
@@ -228,10 +233,20 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
+            # The guard manager keeps this dict by reference, so handing it the
+            # loading process's scope rather than a copy is what makes a global
+            # rebound after load redirect dispatch instead of silently serving
+            # whichever graph matched at load time. There is deliberately no
+            # fallback to the serialized scope: a name the loading process does
+            # not have must fail the guard, not resolve against the value baked
+            # into the artifact. The graph's own globals stay as serialized.
+            guard_scope = self._guard_globals
+            if guard_scope is None:
+                guard_scope = self.fn.__globals__
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                self.fn.__globals__,
+                guard_scope,
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -287,6 +302,7 @@ class AOTCompiledFunction:
         data: bytes,
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
+        guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
 
@@ -305,7 +321,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts, _extra_globals=f_globals)
+        return cls(artifacts, _extra_globals=f_globals, _guard_globals=guard_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -352,6 +368,14 @@ def aot_compile_fullgraph(
             def new_guard_filter_fn(
                 guard_entries: Sequence[GuardFilterEntry],
             ) -> Sequence[bool]:
+                # NB: dropping every global guard is what
+                # torch.compiler.skip_guard_on_globals_unsafe does explicitly,
+                # and the "unsafe" in that name applies here too: a dropped
+                # global guard does not fail, it silently reuses a graph traced
+                # under a different global value. Narrowing this default needs
+                # guard construction to resolve arbitrary global references
+                # first (today they can raise KeyError on G['...']), so callers
+                # who need a specific global guarded must pass guard_filter_fn.
                 return [
                     (
                         not (
@@ -490,8 +514,38 @@ class AOTCompiledModel:
         for result in self.compiled_results:
             if result.guard_check(self.model, *args, **kwargs):
                 return result(self.model, *args, **kwargs)
-        # All guards failed, just run one of them and throw the guard check error.
-        return self.compiled_results[0](self.model, *args, **kwargs)
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine for a reason the caller judges benign. A
+        # result that opted out accepts anything, but only after a real match has
+        # been looked for, so dispatch is unchanged when nobody opted out.
+        for result in self.compiled_results:
+            if not result._guard_check_enabled:
+                return result(self.model, *args, **kwargs)
+        raise RuntimeError(self._no_match_message(*args, **kwargs))
+
+    def _no_match_message(self, *args: Any, **kwargs: Any) -> str:
+        # Report why every compiled input was rejected, not just the first one,
+        # so it is clear which ModelInput is missing.
+        lines = [
+            f"No AOT compiled graph matched this call. Tried "
+            f"{len(self.compiled_results)} compiled input(s):"
+        ]
+        for i, result in enumerate(self.compiled_results):
+            guard_manager = result._artifacts.guard_manager
+            if guard_manager is None:
+                lines.append(f"  [{i}] <guards unavailable>")
+                continue
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            reason = guard_manager.check_verbose(f_locals)
+            # Report just the failing guard: GuardDebugInfo's repr is multi-line
+            # and would break the per-entry layout into an unreadable blob.
+            parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
+            lines.append(f"  [{i}] {'; '.join(str(p) for p in parts)}")
+        lines.append(
+            "Add a ModelInput covering this call, or check whether a guard that "
+            "distinguishes it was dropped by guard_filter_fn."
+        )
+        return "\n".join(lines)
 
     def serialize(self) -> bytes:
         data: list[bytes] = []
@@ -504,6 +558,17 @@ class AOTCompiledModel:
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
 
+        # Guards on globals resolve against the traced function's global scope,
+        # which is not reconstructible from the serialized bytecode alone: a
+        # global that was specialized away never appears in it.
+        #
+        # Resolve from model.forward, which is what aot_compile_module traces.
+        # Passing the model instead would go through get_traced_fn's nn.Module
+        # branch and, whenever a forward hook is registered, hand back
+        # Module._wrapped_call_impl and torch/nn/modules/module.py's namespace.
+        traced_fn, _ = convert_frame.get_traced_fn(model.forward)
+        guard_globals = traced_fn.__globals__
+
         results: list[bytes] = pickle.loads(data)
         compiled_results = []
         for result in results:
@@ -511,7 +576,9 @@ class AOTCompiledModel:
                 compile_context(CompileContext(convert_frame.get_compile_id({}))),
                 get_metrics_context(),
             ):
-                compiled_results.append(AOTCompiledFunction.deserialize(result))
+                compiled_results.append(
+                    AOTCompiledFunction.deserialize(result, guard_globals=guard_globals)
+                )
         return cls(model, compiled_results)
 
 
