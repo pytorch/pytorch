@@ -370,6 +370,7 @@ class GuardManager:
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
+        value: complex,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...

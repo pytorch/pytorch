@@ -25,6 +25,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
+#include <cstring>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -2098,9 +2099,29 @@ class EQUALS_MATCH : public LeafGuard {
       if (Py_TYPE(value) != _value_type) {
         return false;
       }
+      // Python float eq is not value-identity: -0.0 == 0.0, but a graph
+      // specialized on 0.0 must not be reused for -0.0 (e.g. copysign,
+      // 1/x). Compare float/complex bitwise. NaN constants never reach
+      // EQUALS_MATCH (they use FLOAT_IS_NAN/COMPLEX_IS_NAN guards).
+      if (PyFloat_CheckExact(value)) {
+        return bits_of(PyFloat_AS_DOUBLE(value)) ==
+            bits_of(PyFloat_AS_DOUBLE(_value.ptr()));
+      }
+      if (PyComplex_CheckExact(value)) {
+        Py_complex a = PyComplex_AsCComplex(value);
+        Py_complex b = PyComplex_AsCComplex(_value.ptr());
+        return bits_of(a.real) == bits_of(b.real) &&
+            bits_of(a.imag) == bits_of(b.imag);
+      }
       return py_equals(value, _value.ptr(), /*false_on_error=*/true);
     }
     return true;
+  }
+
+  static uint64_t bits_of(double x) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &x, sizeof(bits));
+    return bits;
   }
 
  private:
@@ -2502,25 +2523,45 @@ class FLOAT_IS_NAN : public LeafGuard {
   }
 };
 
-// Check if the float is nan
+// Check that a complex constant with a nan component matches. Each
+// component must either be nan in both the guarded value and the new value,
+// or be bitwise equal (nan == nan is false, so a single py_equals-style
+// check would always fail; but only requiring "any component is nan" would
+// wrongly match complex(7.0, nan) against a guard on complex(5.0, nan)).
 class COMPLEX_IS_NAN : public LeafGuard {
  public:
   COMPLEX_IS_NAN(
       RootGuardManager* root_guard_manager,
+      py::object value,
       py::object verbose_code_parts,
       py::object user_stack)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)) {}
+            std::move(user_stack)),
+        _value(PyComplex_AsCComplex(value.ptr())) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (!PyComplex_CheckExact(value)) {
       return false;
     }
     Py_complex c_value = PyComplex_AsCComplex(value);
-    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+    return component_matches(c_value.real, _value.real) &&
+        component_matches(c_value.imag, _value.imag);
   }
+
+ private:
+  static bool component_matches(double a, double b) {
+    if (std::isnan(a) || std::isnan(b)) {
+      return std::isnan(a) && std::isnan(b);
+    }
+    uint64_t a_bits = 0, b_bits = 0;
+    std::memcpy(&a_bits, &a, sizeof(a_bits));
+    std::memcpy(&b_bits, &b, sizeof(b_bits));
+    return a_bits == b_bits;
+  }
+
+  Py_complex _value;
 };
 
 // Check if the dual level is the same as the one in fx graph
@@ -7723,7 +7764,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &FLOAT_IS_NAN::check);
   py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
       py_m, "COMPLEX_IS_NAN")
-      .def(py::init<RootGuardManager*, py::list, py::object>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<
       DIMENSION_DYNAMIC_MARKING_GUARD,
@@ -8236,10 +8277,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "add_complex_is_nan_guard",
           [](GuardManager& self,
+             py::object value,
              py::object verbose_code_parts,
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
                 self.get_root(),
+                std::move(value),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
