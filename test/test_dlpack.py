@@ -8,6 +8,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -117,11 +118,11 @@ class TestTorchDlPack(TestCase):
         return z
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
-        stream = torch.Stream()
+        stream = torch.Stream(device=device)
         with stream:
             # Do an operation in the actual stream
             x = make_tensor((5,), dtype=dtype, device=device) + 1
@@ -129,7 +130,7 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -139,7 +140,7 @@ class TestTorchDlPack(TestCase):
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_streams_narrow_precision(self, device, dtype):
-        stream = torch.Stream()
+        stream = torch.Stream(device=device)
         with stream:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
@@ -370,7 +371,7 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=0)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
         dev0, dev1 = devices[:2]
@@ -543,7 +544,7 @@ class TestTorchDlPack(TestCase):
             self.assertNotEqual(inp.data_ptr(), out.data_ptr())
 
     @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
     def test_copy(self, device):
         # Force-copy same device tensor.
         self._test_from_dlpack(device, copy=True)
@@ -553,7 +554,7 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device="cpu", copy=True)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3077")
     def test_no_copy(self, device):
         # No copy, since tensor lives in the same device.
@@ -563,7 +564,7 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device=device, copy=False)
 
     @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
@@ -846,7 +847,7 @@ class TestTorchDlPack(TestCase):
         )
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     def test_numpy_cross_device_transfer(self, device):
         """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA/XPU).
 
@@ -897,7 +898,7 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(np_array2[0], 999)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyAccelerator
     @deviceCountAtLeast(2)
     def test_numpy_cross_device_multi_gpu(self, devices):
         """Test cross-device transfer to specific CUDA devices (cuda:0, cuda:1, etc)."""
