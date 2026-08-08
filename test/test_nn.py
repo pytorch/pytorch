@@ -8464,6 +8464,33 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32)
+    def test_normalize_zero_norm_default_eps(self, device, dtype):
+        # The previous default eps of 1e-12 rounds to 0.0 in float16, so clamp_min
+        # could not stop a zero-norm vector from evaluating 0/0.
+        x = torch.zeros(2, 4, device=device, dtype=dtype, requires_grad=True)
+        out = F.normalize(x, dim=1)
+        self.assertEqual(out, torch.zeros_like(out))
+
+        out.sum().backward()
+        self.assertTrue(torch.isfinite(x.grad).all())
+
+        out_kwarg = torch.empty_like(x)
+        F.normalize(x.detach(), dim=1, out=out_kwarg)
+        self.assertEqual(out_kwarg, torch.zeros_like(out_kwarg))
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfMPS(torch.bfloat16, torch.float32)
+    def test_normalize_default_eps_unchanged_off_half(self, device, dtype):
+        # Only float16 gains a new default; every other dtype stays bit-identical.
+        x = torch.randn(16, 8, device=device).to(dtype)
+        self.assertEqual(
+            F.normalize(x, dim=1), F.normalize(x, dim=1, eps=1e-12), atol=0, rtol=0
+        )
+
     @onlyCPU
     def test_glu_bfloat16(self, device):
         def test_dtype(fn, input, dtype):

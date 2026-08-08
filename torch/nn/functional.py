@@ -6097,7 +6097,7 @@ def normalize(
     input: Tensor,
     p: float = 2.0,
     dim: int = 1,
-    eps: float = 1e-12,
+    eps: float | None = None,
     out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
@@ -6114,7 +6114,10 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float, optional): small value to avoid division by zero. Default: ``1e-12``,
+            except when the norm is computed in ``float16``, which uses
+            ``torch.finfo(torch.float16).tiny`` because ``1e-12`` is not representable
+            in that dtype.
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6122,12 +6125,15 @@ def normalize(
         return handle_torch_function(
             normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
         )
+    denom = input.norm(p, dim, keepdim=True)
+    if eps is None:
+        # float16 rounds 1e-12 to 0.0, which silently disables the clamp below.
+        # Literal is torch.finfo(torch.float16).tiny; torch.finfo is not scriptable.
+        eps = 6.103515625e-05 if denom.dtype == torch.float16 else 1e-12
     if out is None:
-        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
-        return input / denom
+        return input / denom.clamp_min(eps).expand_as(input)
     else:
-        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
-        return torch.div(input, denom, out=out)
+        return torch.div(input, denom.clamp_min_(eps).expand_as(input), out=out)
 
 
 def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
