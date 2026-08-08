@@ -485,7 +485,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "rsqrt": {bf16, fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
         "tan": {fp32},
