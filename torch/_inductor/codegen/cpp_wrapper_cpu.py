@@ -1604,6 +1604,31 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
+        cuda_data_ptr_keepalive_device_idxs: OrderedSet[int] = OrderedSet()
+        for name in V.graph.data_ptr_keepalive_buffers:
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            device = buf.get_device()
+            if device is not None and device.type == "cuda":
+                if device.index is None:
+                    raise AssertionError(
+                        f"Expected CUDA keepalive buffer {name} to have an indexed device"
+                    )
+                cuda_data_ptr_keepalive_device_idxs.add(device.index)
+
+        if cuda_data_ptr_keepalive_device_idxs:
+            # The stable ABI wrapper has no record_stream shim for hidden
+            # data_ptr() sources, so wait before RAII handles release storage.
+            with (
+                self._preserve_device_guard_state(),
+                self.set_writeline(self.wrapper_call, self.wrapper_call.writeline),
+            ):
+                for device_idx in cuda_data_ptr_keepalive_device_idxs:
+                    self.codegen_device_guard_enter(device_idx)
+                    self.generate_debug_sync(self.wrapper_call)
+                    self.codegen_device_guard_exit()
+
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
         # RAIIAtenTensorHandle first.  This prevents situations where the code for the
         # rvalue tensor references tensor handles whose contents are modified below.
@@ -2724,6 +2749,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: add AOTI C API for event-based D2H copy synchronization
         pass
 
+    def sync_h2d_copy(self, buffer_name: str) -> None:
+        # C++ wrappers already synchronize before returning hidden CUDA data_ptr sources.
+        pass
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
@@ -3202,7 +3231,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return new_tensor_args, new_int_args
 
     @staticmethod
-    def _compatible_with_stableivalue(op: torch._ops.OpOverload) -> bool:
+    def _compatible_with_stableivalue(
+        op: torch._ops.OpOverload, *, allow_symint_returns: bool = False
+    ) -> bool:
         """Returns true if op_overload._schema only utilizes types supported by the AOT
         C-shim *internal* function to_ivalue.  to_ivalue is an implementation detail, so
         these types are not guaranteed to be supported long-term.  When generating code
@@ -3236,10 +3267,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 or repr(t) == "SymFloat"
             )
 
+        def return_supported(t: torch.JitType, real_type: torch.JitType) -> bool:
+            if not type_supported(t):
+                return False
+            if allow_symint_returns and isinstance(real_type, torch.SymIntType):
+                return True
+            return not uses_symint(real_type)
+
         return all(
             type_supported(a.type) and not uses_symint(a.real_type)
-            for a in chain(op._schema.arguments, op._schema.returns)
-        )
+            for a in op._schema.arguments
+        ) and all(return_supported(r.type, r.real_type) for r in op._schema.returns)
+
+    def _fallback_output_declaration(
+        self, output_arg: str | None, raw_output_arg: Any
+    ) -> str | None:
+        if output_arg is None or isinstance(raw_output_arg, ir.MutationOutput):
+            return None
+        if isinstance(raw_output_arg, sympy.Symbol):
+            self.unbacked_symbol_decls.add(str(raw_output_arg))
+            return f"int64_t {output_arg};"
+        return f"RAIIAtenTensorHandle {output_arg};"
 
     @staticmethod
     def _compatible_with_cpp_boxed_dispatch(op: torch._ops.OpOverload) -> bool:
@@ -3275,11 +3323,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         def return_supported(t: torch.JitType) -> bool:
             if isinstance(t, torch.OptionalType):
                 return isinstance(t.getElementType(), torch.TensorType)
-            return isinstance(t, (torch.NoneType, torch.TensorType))
+            return isinstance(t, (torch.NoneType, torch.SymIntType, torch.TensorType))
 
         return all(arg_supported(a.real_type) for a in op._schema.arguments) and all(
             return_supported(r.real_type) for r in op._schema.returns
         )
+
+    @staticmethod
+    def _stableivalue_can_return_symint_outputs(
+        op: torch._ops.OpOverload, raw_outputs: Sequence[Any]
+    ) -> bool:
+        if len(op._schema.returns) != len(raw_outputs):
+            return False
+        has_symint_return = False
+        for schema_return, raw_output in zip(op._schema.returns, raw_outputs):
+            if isinstance(schema_return.real_type, torch.SymIntType):
+                has_symint_return = True
+                if not isinstance(raw_output, sympy.Symbol):
+                    return False
+        return has_symint_return
 
     def generate_fallback_kernel_with_runtime_lookup(
         self,
@@ -3313,6 +3375,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return mutated_buf_names[0]
             if isinstance(out, (list, tuple)):
                 return [extract_output_name(o) for o in out]  # type: ignore[misc]
+            if isinstance(out, sympy.Symbol):
+                return str(out)
             if isinstance(out, int):
                 return str(out)
             raise AssertionError(f"Unexpected output: {type(out)}")
@@ -3417,7 +3481,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
         # outputs of the op can be represented with StableIValue.  This avoids the
         # overhead of calling back into Python, and covers most remaining fallback ops.
-        if self._compatible_with_stableivalue(op_overload):
+        if self._compatible_with_stableivalue(
+            op_overload,
+            allow_symint_returns=self._stableivalue_can_return_symint_outputs(
+                op_overload, outputs
+            ),
+        ):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,
@@ -3631,10 +3700,14 @@ if (!custom_op_wrapper) {
         to support more datatypes."""
         if raw_outputs:
             declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
+                decl
                 for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
+                if (
+                    decl := self._fallback_output_declaration(
+                        output_arg, raw_output_arg
+                    )
+                )
+                is not None
             ]
         else:
             declarations_before_scope = [
@@ -3717,12 +3790,29 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline(");")
 
             # assign result(s), ignoring None
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
-                dispatch_lines.writeline(
-                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
-                )
+            if raw_outputs:
+                for idx, (output_arg, raw_output_arg) in enumerate(
+                    zip(output_args, raw_outputs)
+                ):
+                    if output_arg is None or isinstance(
+                        raw_output_arg, ir.MutationOutput
+                    ):
+                        continue
+                    if isinstance(raw_output_arg, sympy.Symbol):
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::stable::detail::to<int64_t>(dispatch_vars[{idx}]);"
+                        )
+                    else:
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                        )
+            else:
+                for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
+                    dispatch_lines.writeline(
+                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())
@@ -3746,10 +3836,14 @@ if (!custom_op_wrapper) {
 
         if raw_outputs:
             declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
+                decl
                 for output_arg, raw_output_arg in zip(output_args, raw_outputs)
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
+                if (
+                    decl := self._fallback_output_declaration(
+                        output_arg, raw_output_arg
+                    )
+                )
+                is not None
             ]
         else:
             declarations_before_scope = [
@@ -3965,14 +4059,26 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
             stack_idx = 0
-            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+            for output_arg, raw_output_arg, schema_return in zip(
+                output_args, raw_outputs, op_overload._schema.returns
+            ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
                 if output_arg is not None:
-                    dispatch_lines.writeline(
-                        f"{output_arg} = torch::aot_inductor::new_tensor_handle("
-                        f"std::move({stack_var}[{stack_idx}]).toTensor());"
-                    )
+                    if isinstance(raw_output_arg, sympy.Symbol):
+                        if not isinstance(schema_return.real_type, torch.SymIntType):
+                            raise AssertionError(
+                                f"Unexpected fallback symbol output type: {schema_return.real_type}"
+                            )
+                        dispatch_lines.writeline(
+                            f"{output_arg} = std::move({stack_var}[{stack_idx}])"
+                            ".toSymInt().guard_int(__FILE__, __LINE__);"
+                        )
+                    else:
+                        dispatch_lines.writeline(
+                            f"{output_arg} = torch::aot_inductor::new_tensor_handle("
+                            f"std::move({stack_var}[{stack_idx}]).toTensor());"
+                        )
                 stack_idx += 1
 
         dispatch_lines.writeline("}")

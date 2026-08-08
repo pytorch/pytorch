@@ -9315,6 +9315,18 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 
 class TestAOTInductorConfig(TestCase):
+    def test_traced_data_ptr_rejected_before_aoti(self):
+        def f(x):
+            return torch.tensor([x.data_ptr()])
+
+        x = torch.randn(4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"data_ptr\(\) in export",
+        ):
+            torch._dynamo.export(f)(x)
+
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})

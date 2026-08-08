@@ -773,6 +773,10 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             if group.is_output:
                 group.update_usage(timestep)
+            # data_ptr() exposes the raw storage address to opaque kernels, so
+            # its source storage cannot be pooled with later allocations.
+            if any(name in V.graph.data_ptr_keepalive_buffers for name in group.names):
+                group.update_usage(timestep)
 
     def allocate_groups(self):
         """
