@@ -12,7 +12,7 @@ import unittest
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
-from functools import partial, wraps
+from functools import cache, partial, wraps
 from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
@@ -318,6 +318,40 @@ def _update_param_kwargs(param_kwargs, name, value):
     # Leave param_kwargs as-is when value is None.
 
 
+class Capability:
+    """Structured namespace of device capability identifiers.
+
+    Each constant is a ``"<category>.<name>"`` string. The inner classes group
+    them by category so tests can reference capabilities as
+    ``Capability.dtype.fp8`` instead of bare strings.
+
+    Tests declare requirements with :func:`requires_capabilities`::
+
+        @requires_capabilities(Capability.lib.triton, Capability.dtype.fp8)
+        def test_foo(self, device): ...
+
+    Device test bases declare what they support by overriding
+    :meth:`DeviceTypeTestBase._capabilities` with the same constants as keys.
+    """
+
+    class dtype:
+        """Data type capabilities (fp8, bf16, etc.)."""
+
+        fp8 = "dtype.fp8"
+        bf16 = "dtype.bf16"
+
+    class lib:
+        """Third-party library capabilities (triton, etc.)."""
+
+        triton = "lib.triton"
+
+    class attention:
+        """Attention backend capabilities."""
+
+        flash_attention = "attention.flash_attention"
+        mem_efficient_attention = "attention.mem_efficient_attention"
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -385,6 +419,25 @@ class DeviceTypeTestBase(TestCase):
     #   @ops-generated dtype variants and other parametrized arguments are
     #   ignored for now.
     test_exclusions: ClassVar[dict[str, Any] | None] = None
+
+    # Returns the capability map used by @requires_capabilities.
+    # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
+    # declare supported capabilities grouped by namespace. This method flattens
+    # the nested map, evaluates the support checks, and caches the result.
+    @classmethod
+    @cache
+    def get_capabilities(cls) -> dict[str, bool]:
+        return {
+            k: fn() for sub in cls._capabilities().values() for k, fn in sub.items()
+        }
+
+    # Returns a nested capability map grouped by namespace.
+    # Each namespace (e.g. Capability.dtype) groups related capabilities
+    # (e.g. Capability.dtype.fp8) mapped to callables that determine whether
+    # the current device supports them.
+    @classmethod
+    def _capabilities(cls) -> dict[type, dict[str, Callable[[], bool]]]:
+        return {}
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -740,6 +793,24 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        from torch.utils._triton import has_triton
+
+        return {
+            Capability.dtype: {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: False,
+            },
+            Capability.lib: {
+                Capability.lib.triton: lambda: has_triton(),
+            },
+            Capability.attention: {
+                Capability.attention.flash_attention: lambda: False,
+                Capability.attention.mem_efficient_attention: lambda: False,
+            },
+        }
+
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
@@ -752,6 +823,30 @@ class CUDATestBase(DeviceTypeTestBase):
 
     def has_cudnn(self):
         return not self.no_cudnn
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            PLATFORM_SUPPORTS_FP8,
+            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            SM80OrLater,
+        )
+        from torch.utils._triton import has_triton
+
+        return {
+            Capability.dtype: {
+                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                Capability.dtype.bf16: lambda: SM80OrLater,
+            },
+            Capability.lib: {
+                Capability.lib.triton: lambda: has_triton(),
+            },
+            Capability.attention: {
+                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            },
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -833,6 +928,24 @@ class MPSTestBase(DeviceTypeTestBase):
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.utils._triton import has_triton
+
+        return {
+            Capability.dtype: {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: False,
+            },
+            Capability.lib: {
+                Capability.lib.triton: lambda: has_triton(),
+            },
+            Capability.attention: {
+                Capability.attention.flash_attention: lambda: True,
+                Capability.attention.mem_efficient_attention: lambda: True,
+            },
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -1094,6 +1207,46 @@ def get_desired_device_type_test_bases(
 #
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
+
+
+def requires_capabilities(*caps: str):
+    """Declare that a test method requires device capabilities.
+
+    Wraps the test to call ``type(self).get_capabilities()`` at runtime
+    and skip if any required capability is missing.
+    """
+    caps_set = set(caps)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            caps = type(self).get_capabilities()
+
+            unsupported = set()
+            missing = set()
+            for c in caps_set:
+                if c in caps:
+                    if not caps[c]:
+                        unsupported.add(c)
+                else:
+                    missing.add(c)
+
+            if missing:
+                raise unittest.SkipTest(
+                    f"Missing capabilities on device '{type(self).device_type}': "
+                    f"{', '.join(sorted(missing))}"
+                )
+            if unsupported:
+                raise unittest.SkipTest(
+                    f"Unsupported capabilities: {', '.join(sorted(unsupported))}"
+                )
+            return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
