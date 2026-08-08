@@ -1154,7 +1154,57 @@ if(NOT MSVC)
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override"
                                CMAKE_CXX_FLAGS)
+  # Match Meta-internal flags. These mirror the Clang warning set Meta enables
+  # internally, so only apply them under Clang; GCC diagnoses several of them
+  # (e.g. unused-const-variable on header constexprs) far more aggressively.
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  foreach(
+    flag
+    "-Werror=address-of-packed-member"
+    "-Werror=address"
+    "-Werror=ambiguous-reversed-operator"
+    "-Werror=bitwise-instead-of-logical"
+    "-Werror=dangling"
+    "-Werror=deprecated-copy-with-user-provided-copy"
+    "-Werror=deprecated-dynamic-exception-spec"
+    "-Werror=deprecated-implementations"
+    "-Werror=deprecated-redundant-constexpr-static-def"
+    "-Werror=deprecated-this-capture"
+    "-Werror=enum-compare"
+    "-Werror=gcc-compat"
+    "-Werror=header-hygiene"
+    "-Werror=implicit-fallthrough"
+    "-Werror=implicitly-unsigned-literal"
+    "-Werror=import-preprocessor-directive-pedantic"
+    "-Werror=incompatible-function-pointer-types"
+    "-Werror=infinite-recursion"
+    "-Werror=misleading-indentation"
+    "-Werror=mismatched-tags"
+    "-Werror=missing-braces"
+    "-Werror=move"
+    "-Werror=null-conversion"
+    "-Werror=packed-non-pod"
+    "-Werror=parentheses"
+    "-Werror=pessimizing-move"
+    "-Werror=self-assign"
+    "-Werror=semicolon-before-method-body"
+    "-Werror=shift-sign-overflow"
+    "-Werror=string-conversion"
+    "-Werror=thread-safety"
+    "-Werror=undefined-var-template"
+    "-Werror=uninitialized-const-reference"
+    "-Werror=uninitialized"
+    "-Werror=unreachable-code-fallthrough"
+    "-Werror=unused-but-set-variable"
+    "-Werror=unused-const-variable"
+    "-Werror=unused-exception-parameter"
+    "-Werror=unused-label"
+    "-Werror=unused-local-typedef"
+    "-Werror=unused-value"
+    "-Werror=unused-variable"
+    "-Werror=vexing-parse")
+    append_cxx_flag_if_supported("${flag}" CMAKE_CXX_FLAGS)
+  endforeach()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
