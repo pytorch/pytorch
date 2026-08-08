@@ -3133,13 +3133,14 @@ def forward(self, add, tangents_1):
             """\
 def forward(self, arg0_1, arg1_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2)
+    copy = torch.ops.aten.copy.default(arg1_1, mul_1);  arg1_1 = mul_1 = None
     clone = torch.ops.aten.clone.default(mul)
     view = torch.ops.aten.view.default(clone, [-1]);  clone = None
-    clone_1 = torch.ops.aten.clone.default(mul_1)
+    clone_1 = torch.ops.aten.clone.default(copy)
     view_1 = torch.ops.aten.view.default(clone_1, [-1]);  clone_1 = None
     add = torch.ops.aten.add.Tensor(view, view_1);  view = view_1 = None
-    return (mul, mul_1, add)""",
+    return (mul, copy, add)""",
         )
 
         # No overlap, non-contiguous: first tensor ends before second tensor start
@@ -3233,18 +3234,42 @@ def forward(self, arg0_1, arg1_1):
             f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True
         )
 
-        # All non-overlap graphs should be the same since we detected false aliasing
-        self.assertEqual(str(fw_graph.code), str(fw_graph2.code))
-        self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
-        self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
-        self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
-        self.assertEqual(str(fw_graph.code), str(fw_graph6.code))
+        # All non-overlap graphs should avoid synthetic base logic since we
+        # detected false aliasing. Case 1 only needs to preserve the second
+        # input's storage offset; cases 2-6 preserve both input layouts.
+        non_overlap_codes = tuple(
+            str(graph.code)
+            for graph in (
+                fw_graph,
+                fw_graph2,
+                fw_graph3,
+                fw_graph4,
+                fw_graph5,
+                fw_graph6,
+            )
+        )
+        for code in non_overlap_codes:
+            self.assertIn("def forward(self, arg0_1, arg1_1):", code)
+            self.assertNotIn("as_strided_scatter", code)
+
+        self.assertNotIn(
+            "torch.ops.aten.copy.default(arg0_1, mul)", non_overlap_codes[0]
+        )
+        self.assertIn(
+            "torch.ops.aten.copy.default(arg1_1, mul_1)", non_overlap_codes[0]
+        )
+        self.assertIn("torch.ops.aten.copy.default(arg0_1, mul)", non_overlap_codes[1])
+        self.assertIn(
+            "torch.ops.aten.copy.default(arg1_1, mul_1)", non_overlap_codes[1]
+        )
+        for code in non_overlap_codes[2:]:
+            self.assertEqual(non_overlap_codes[1], code)
 
         # All overlap graphs should be the same since we detected real aliasing
         self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
         self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap2.code))
-        self.assertTrue("as_strided_scatter" in str(fw_graph_overlap1.code))
-        self.assertTrue("as_strided_scatter" in str(fw_graph_overlap2.code))
+        self.assertIn("as_strided_scatter", str(fw_graph_overlap1.code))
+        self.assertIn("as_strided_scatter", str(fw_graph_overlap2.code))
 
     def _check_merge_view_inputs_error(self, fn, make_inputs, expected_error):
         """Compile fn with aot_eager, assert the error message from merge_view_inputs."""

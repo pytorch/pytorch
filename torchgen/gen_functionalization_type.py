@@ -551,7 +551,11 @@ def return_from_mutable_noop_redispatch(
 
 
 def wrap_propagate_mutations_and_return(
-    f: NativeFunction, functional_op: NativeFunction, inner_return_var: str
+    f: NativeFunction,
+    functional_op: NativeFunction,
+    inner_return_var: str,
+    *,
+    preserve_strides: bool = True,
 ) -> str:
     mutable_arg_names = f.func.arguments.mutable_arg_names()
     (
@@ -588,10 +592,18 @@ def wrap_propagate_mutations_and_return(
     for outer_arg, inner_ret in zip(
         mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
     ):
+        if preserve_strides:
+            updated_value = f"{outer_arg}_updated"
+            maybe_preserve_strides = f"""\
+  auto {updated_value} = at::functionalization::impl::maybe_preserve_strides({outer_arg}, {outer_arg}_inner, {inner_ret});
+"""
+        else:
+            updated_value = inner_ret
+            maybe_preserve_strides = ""
         updates.append(
             f"""\
   auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
-  at::functionalization::impl::replace_({outer_arg}, {inner_ret});
+{maybe_preserve_strides}  at::functionalization::impl::replace_({outer_arg}, {updated_value});
   at::functionalization::impl::commit_update({outer_arg});
   at::functionalization::impl::sync({outer_arg});
   auto {outer_arg}_inner_updated = at::functionalization::impl::from_functional_tensor({outer_arg});
@@ -729,6 +741,11 @@ def emit_inplace_functionalization_body(
         a.type == BaseType(BaseTy.Storage) for a in f.func.arguments.flat_all
     )
 
+    # Inplace-view operators intentionally mutate tensor metadata, so their
+    # functional result's layout is part of the mutation. Generated out variants
+    # do not inherit this tag and retain normal out= layout-preserving semantics.
+    preserve_strides = "inplace_view" not in f.tags
+
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()} && !disable_meta_reference()) {{
@@ -761,7 +778,7 @@ def emit_inplace_functionalization_body(
           at::AutoDispatchSkipFunctionalize guard;
           tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({", ".join(functional_exprs)});
         }}
-        {wrap_propagate_mutations_and_return(f, g.functional, "tmp_output")}
+        {wrap_propagate_mutations_and_return(f, g.functional, "tmp_output", preserve_strides=preserve_strides)}
       }}
     }}"""
 
