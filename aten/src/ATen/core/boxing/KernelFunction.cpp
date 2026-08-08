@@ -1,6 +1,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <memory>
 #include <sstream>
 
 namespace c10 {
@@ -52,5 +53,24 @@ bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
   return boxed_kernel_func_.getFnPtr() == other.boxed_kernel_func_.getFnPtr() &&
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
+
+namespace impl {
+
+torch::jit::Stack boxedBufferToStack(IValue* begin, IValue*& end) {
+  torch::jit::Stack stack;
+  stack.reserve(static_cast<size_t>(end - begin));
+  // Everything from here on is noexcept (push_back into reserved capacity
+  // uses IValue's noexcept move constructor), so the caller's BoxedBuffer
+  // cleanup can never observe a partially drained range: either reserve
+  // throws with the buffer untouched, or end is reset after a full drain.
+  for (IValue* it = begin; it != end; ++it) {
+    stack.push_back(std::move(*it));
+    std::destroy_at(it);
+  }
+  end = begin;
+  return stack;
+}
+
+} // namespace impl
 
 } // namespace c10
