@@ -559,6 +559,11 @@ class BaseUserFunctionVariable(VariableTracker):
         # Functions have no __getattr__; reaching the fallback means the
         # attribute genuinely does not exist (CPython
         # _PyObject_GenericGetAttrWithDict step 7 raises AttributeError).
+        source = self.get_source()
+        if source is not None:
+            install_guard(
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
         raise_observed_exception(AttributeError, tx, args=[name])
 
     def call_function(
@@ -597,6 +602,13 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
             except NotImplementedError:
                 result = False
+            source = self.get_source()
+            if source is not None:
+                install_guard(
+                    source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
         return VariableTracker.build(tx, result)
 
     def closure_vars(
@@ -3082,6 +3094,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
     _nonvar_fields = {
         "original_cache_hash",
+        "value",
         *VariableTracker._nonvar_fields,
     }
 
@@ -3091,6 +3104,7 @@ class FunctoolsPartialVariable(VariableTracker):
         args: list[VariableTracker],
         keywords: dict[str, VariableTracker],
         original_cache_hash: Any = None,
+        value: functools.partial[Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -3103,6 +3117,7 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
+        self.value = value
 
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -3143,8 +3158,24 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        # functools.partial uses slots, so attributes are constant
-        return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
+        value = self.value if self.value is not None else functools.partial(identity)
+        if self.source is not None:
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+        return VariableTracker.build(tx, hasattr(value, name))
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if self.value is None or name not in self.value.__dict__:
+            return None
+        source = self.source and AttrSource(self.source, name)
+        return variables.LazyVariableTracker.create(
+            self.value.__dict__[name], source, tx=tx
+        )
 
     # func / args / keywords are read-only members on partial objects.
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_functoolsmodule.c#L295-L299
@@ -3172,9 +3203,17 @@ class FunctoolsPartialVariable(VariableTracker):
         try:
             return super().getattro_impl(tx, name)
         except NotImplementedError:
+            if self.source is not None:
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
             raise_observed_exception(AttributeError, tx, args=[name])
 
     def as_python_constant(self) -> Any:
+        if self.value is not None:
+            return self.value
         return functools.partial(
             self.func.as_python_constant(),
             *[arg.as_python_constant() for arg in self.args],
