@@ -2550,7 +2550,7 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return "not in recomputable allowlist"
         else:
-            if op_types.is_random(node):
+            if op_types.is_random(node) or is_rng_op(node):
                 return "random op"
             if op_types.is_compute_intensive(node):
                 return "compute intensive op"
@@ -3469,7 +3469,28 @@ def choose_saved_values_set(
             ban_if_not_in_allowlist=False,
         )
     if memory_budget == 0:
-        return node_info.inputs
+        # Saving only the inputs recomputes everything else in the backward,
+        # but recomputed RNG ops draw fresh randomness there (#190717): e.g.
+        # dropout would apply a different mask in fw and bw. Also save the
+        # tensor outputs of forward RNG ops.
+        saved_values = list(node_info.inputs)
+        saved_set = OrderedSet[fx.Node](saved_values)
+        for node in joint_graph.nodes:
+            if not (
+                node.op == "call_function"
+                and is_rng_op(node)
+                and node_info.is_required_fw(node)
+            ):
+                continue
+            if isinstance(node.meta.get("val"), (tuple, list)):
+                # Save every getitem projection, including bw-only ones such
+                # as dropout masks; the tuple node itself is not saveable.
+                outputs = [u for u in node.users if u.target is operator.getitem]
+            else:
+                outputs = [node]
+            saved_values.extend(o for o in outputs if o not in saved_set)
+            saved_set.update(outputs)
+        return saved_values
 
     runtime_optimized_saved_values, _ = solve_min_cut(
         joint_graph,
@@ -3537,6 +3558,8 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
+                # RNG ops stay banned: recomputing them draws fresh randomness
+                and not is_rng_op(i)
                 and (
                     get_node_storage(i) not in input_storages
                     or is_non_builtin_to_include(i)
