@@ -28,7 +28,13 @@ import multiprocessing
 import os
 import time
 from enum import IntEnum
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+from torch.utils._ordered_set import OrderedSet
 
 
 class Phase(IntEnum):
@@ -39,11 +45,14 @@ class Phase(IntEnum):
 
 
 # Per-slot layout: _FIELDS longs.
-_FIELDS = 4
+_FIELDS = 7
 _F_JOB_ID = 0
 _F_PHASE = 1
 _F_PHASE_START_NS = 2
 _F_PID = 3
+_F_JOB_START_NS = 4
+_F_MEMORY_LIMIT = 5
+_F_TIMEOUT = 6
 _EMPTY = -1  # job_id sentinel for an idle slot
 
 # Allocated in the sidecar (create) before forking; inherited by fork workers.
@@ -96,13 +105,16 @@ def init_worker_slot() -> None:
         _heartbeat[slot * _FIELDS + _F_PID] = os.getpid()
 
 
-def set_current_job(job_id: int) -> None:
+def set_current_job(job_id: int, memory_limit: int, timeout: int) -> None:
     """Worker: mark the start of a job in this worker's slot."""
     if _heartbeat is None or _slot is None:
         return
     base = _slot * _FIELDS
     _heartbeat[base + _F_PHASE] = int(Phase.RUNNING)
     _heartbeat[base + _F_PHASE_START_NS] = time.monotonic_ns()
+    _heartbeat[base + _F_JOB_START_NS] = time.monotonic_ns()
+    _heartbeat[base + _F_MEMORY_LIMIT] = memory_limit
+    _heartbeat[base + _F_TIMEOUT] = timeout
     # Written last so a concurrent reader sees a fully-populated slot or none.
     _heartbeat[base + _F_JOB_ID] = job_id
 
@@ -128,15 +140,14 @@ def enabled() -> bool:
     return _heartbeat is not None
 
 
-def read_heartbeats() -> dict[int, tuple[int, int, int]]:
-    """Sidecar: job_id -> (phase, phase_start_ns, pid) for currently-busy slots.
-
-    phase_start_ns is worker monotonic_ns; on Linux CLOCK_MONOTONIC is
+def read_heartbeats() -> dict[int, tuple[int, int, int, int, int, int]]:
+    """Sidecar: job_id -> (phase, phase_start_ns, pid, job_start_ns, memory_limit, timeout) for currently-busy slots.
+    phase_start_ns is worker monotonic_ns; job_start_ns is job start time; on Linux CLOCK_MONOTONIC is
     system-wide so the sidecar can diff it against its own monotonic_ns.
     """
     if _heartbeat is None:
         return {}
-    out: dict[int, tuple[int, int, int]] = {}
+    out: dict[int, tuple[int, int, int, int, int, int]] = {}
     for s in range(_nprocs):
         base = s * _FIELDS
         job_id = _heartbeat[base + _F_JOB_ID]
@@ -145,5 +156,72 @@ def read_heartbeats() -> dict[int, tuple[int, int, int]]:
                 _heartbeat[base + _F_PHASE],
                 _heartbeat[base + _F_PHASE_START_NS],
                 _heartbeat[base + _F_PID],
+                _heartbeat[base + _F_JOB_START_NS],
+                _heartbeat[base + _F_MEMORY_LIMIT],
+                _heartbeat[base + _F_TIMEOUT],
             )
     return out
+
+
+_PAGE_SIZE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
+
+
+def _subtree_memory_kb(
+    pid: int, visited: OrderedSet[int], read_fn: Callable[[int], int]
+) -> int:
+    if pid in visited:
+        return 0
+    total = read_fn(pid)
+    visited.add(pid)
+    try:
+        tasks = os.listdir(f"/proc/{pid}/task")
+        for task in tasks:
+            with open(f"/proc/{pid}/task/{task}/children") as f:
+                children = f.read().split()
+            for child in children:
+                total += _subtree_memory_kb(int(child), visited, read_fn)
+    except (OSError, IndexError, ValueError):
+        pass
+    return total
+
+
+def _read_rss_kb(pid: int) -> int:
+    try:
+        with open(f"/proc/{pid}/statm") as f:
+            return int(f.read().split()[1]) * _PAGE_SIZE_KB
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def _read_pss_kb(pid: int) -> int:
+    try:
+        with open(f"/proc/{pid}/smaps_rollup") as f:
+            for line in f:
+                if "Pss:" in line:
+                    return int(line.split()[1])
+    except (OSError, IndexError, ValueError):
+        pass
+    return 0
+
+
+def rss_kb(pid: int, visited: OrderedSet[int]) -> int:
+    return _subtree_memory_kb(pid, visited, _read_rss_kb)
+
+
+def pss_kb(pid: int, visited: OrderedSet[int]) -> int:
+    return _subtree_memory_kb(pid, visited, _read_pss_kb)
+
+
+def is_worker_memory_limit_exceeded(pid: int, memory_limit: int) -> bool:
+    """Worker: whether the worker's memory limit is exceeded."""
+    if _heartbeat is None:
+        return False
+    visited = OrderedSet()
+    rss = rss_kb(pid, visited)
+    if rss < memory_limit:
+        return False
+    visited = OrderedSet()
+    pss = pss_kb(pid, visited)
+    if pss > memory_limit:
+        return True
+    return False

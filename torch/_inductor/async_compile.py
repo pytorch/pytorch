@@ -325,6 +325,18 @@ class AsyncCompile:
             get_compile_threads(),
         )
 
+        enforcement = config.compile_worker_memory_enforcement
+        if enforcement not in ("auto", "cgroup", "poll", "off"):
+            raise ValueError(
+                f"Invalid compile_worker_memory_enforcement: {enforcement!r}; "
+                "expected one of: auto, cgroup, poll, off"
+            )
+        if enforcement == "cgroup":
+            raise RuntimeError(
+                "cgroup memory enforcement is not yet supported; "
+                "use compile_worker_memory_enforcement='poll' or 'auto'"
+            )
+
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
@@ -332,6 +344,17 @@ class AsyncCompile:
                 get_compile_threads(), quiesce=config.quiesce_async_compile_pool
             )
         else:
+            if (
+                config.compile_worker_memory_limit_kb > 0
+                or config.compile_worker_per_kernel_timeout > 0
+            ):
+                raise RuntimeError(
+                    "compile worker memory/time limits require "
+                    "worker_start_method='subprocess' "
+                    "(TORCHINDUCTOR_WORKER_START=subprocess); "
+                    f"got {config.worker_start_method!r}"
+                )
+
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
                 os.environ["TORCH_WARM_POOL"] = "0"
