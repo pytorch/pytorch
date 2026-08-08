@@ -137,6 +137,8 @@ from .misc import (
     CallMethodVariable,
     CellVariable,
     ContextVarVariable,
+    DatetimeNowFunctionVariable,
+    DatetimeVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
