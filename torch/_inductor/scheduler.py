@@ -3918,6 +3918,10 @@ def _fuse_epilogue(
         unfused_n_regs, fused_n_regs, fused_n_spills, num_warps, device_props
     )
 
+    # Reject fusion when the occupancy ratio is undefined.
+    if blocks_unfused <= 0:
+        return False
+
     epilogue_dominated_with_sufficient_occupancy = ms2 > 2 * ms1 and blocks_fused > 1
 
     # fuse if no major register spills
