@@ -561,6 +561,12 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
 
+    # microkernels-all (XNNPACK's non-production microkernel variants) is only
+    # consumed by XNNPACK's own tests/benchmarks, both disabled above. It is
+    # never linked into Caffe2_DEPENDENCY_LIBS (only microkernels-prod is), so
+    # building it wastes compile time for output that's discarded.
+    set(XNNPACK_BUILD_ALL_MICROKERNELS OFF CACHE BOOL "")
+
     # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
     # these new ISA features may not be supported on older compilers
     set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
@@ -598,7 +604,9 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "14")
       foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
+        if(TARGET ${xnn_tgt})
           target_compile_options(${xnn_tgt} PRIVATE -Wno-error=incompatible-pointer-types)
+        endif()
       endforeach()
     endif()
 
