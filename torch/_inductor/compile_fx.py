@@ -338,6 +338,18 @@ def _warn_tf32_disabled() -> None:
         )
 
 
+def _tensors_bitwise_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
+    # Compare bitwise (uint8 view) so identical NaN constants are recognized
+    # and -0.0 is not conflated with 0.0. Assumes dtype/shape already match.
+    # Quantized/sparse tensors don't support uint8 views (torch.equal on a
+    # uint8 view of a quantized tensor hangs), so fall back to torch.equal.
+    if a.layout != torch.strided or a.is_quantized:
+        return torch.equal(a, b)
+    a_bits = a.contiguous().flatten().view(torch.uint8)
+    b_bits = b.contiguous().flatten().view(torch.uint8)
+    return torch.equal(a_bits, b_bits)
+
+
 def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
     """
     In aot_export_module (make_fx), we create get_attr nodes with name prefix
@@ -395,7 +407,8 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
             elif (
                 gm_target.device == model_target.device
                 and gm_target.dtype == model_target.dtype
-                and torch.equal(gm_target, model_target)
+                and gm_target.shape == model_target.shape
+                and _tensors_bitwise_equal(gm_target, model_target)
             ):
                 # If tensors with same name from gm and model are indeed the same, we don't need to rename
                 # Check device first, to avoid torch.equal(wrapper_CUDA__equal) raise when different device

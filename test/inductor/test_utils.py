@@ -46,6 +46,38 @@ from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    def test_resolve_name_collision_bitwise(self):
+        # _resolve_name_collision must treat constants as "the same" only if
+        # they are bitwise identical: identical nan constants should not be
+        # renamed, while a -0.0 constant colliding with a 0.0 buffer must be.
+        from torch._inductor.compile_fx import _resolve_name_collision
+
+        def make_mod_gm(mod_value, gm_value):
+            class Mod(torch.nn.Module):
+                def __init__(self, value):
+                    super().__init__()
+                    self._tensor_constant0 = value
+
+                def forward(self, x):
+                    return x + self._tensor_constant0
+
+            def trace(m):
+                gm = torch.fx.symbolic_trace(m)
+                return gm
+
+            return Mod(mod_value), trace(Mod(gm_value))
+
+        nan = torch.tensor([float("nan")])
+        mod, gm = make_mod_gm(nan, nan.clone())
+        _resolve_name_collision(mod, gm)
+        targets = [n.target for n in gm.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(targets, ["_tensor_constant0"])
+
+        mod, gm = make_mod_gm(torch.tensor([0.0]), torch.tensor([-0.0]))
+        _resolve_name_collision(mod, gm)
+        targets = [n.target for n in gm.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(targets, ["_tensor_constant1"])
+
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
             os.path.dirname(os.path.abspath(torch.__file__))
