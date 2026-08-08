@@ -10,6 +10,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -32,6 +33,8 @@ else:
 
 @instantiate_parametrized_tests
 class TestHopPrint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -699,6 +702,8 @@ def forward(self, arg1_1):
     not torch.distributed.is_available(), "torch.distributed not available"
 )
 class TestHopPrintDTensor(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
