@@ -53,6 +53,7 @@ __all__ = [
     "set_multithreading_enabled",
     "enforce_grad_layout_policy",
     "variable",
+    "is_differentiable_type",
 ]
 
 _OptionalTensor = torch.Tensor | None
@@ -250,6 +251,15 @@ def _tensor_or_tensors_to_tuple(
     if isinstance(tensors, torch.Tensor):
         return (tensors,)
     return tuple(tensors)
+
+
+def is_differentiable_type(dtype: "torch.dtype") -> bool:
+    r"""is_differentiable_type(dtype) -> bool
+
+    Returns True if the given torch.dtype is supported by autograd
+    (i.e., it can require gradients and track operations).
+    """
+    return torch._C.is_differentiable_type(dtype)
 
 
 def backward(
