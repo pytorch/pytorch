@@ -102,6 +102,12 @@ class modules(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
+        # Order matters: module_allowlist filters first, then module_overrides adds
+        # decorators. This ensures module_overrides only applies to modules that
+        # passed the module_allowlist filter.
+        device_cls._apply_module_allowlist(self)
+        device_cls._apply_module_overrides(self)
+
         for module_info in self.module_info_list:
             dtypes = set(module_info.supported_dtypes(device_cls.device_type))
             if self.allowed_dtypes is not None:
