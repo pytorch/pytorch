@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     xfailIfTorchDynamo,
     skipIfXpu,
+    TEST_XPU,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1207,6 +1208,9 @@ class TestMeta(TestCase):
         )
         if TEST_WITH_TORCHDYNAMO and op.name in skip_op_names:
             raise unittest.SkipTest("flaky")
+        if TEST_XPU and "fft" in op.name:
+            # torch-xpu-ops/issues/4268
+            raise unittest.SkipTest("fft has knonw issue torch-xpu-ops/issue/4268 on XPU")
         # run the OpInfo sample inputs, cross-referencing them with the
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefFunctionMode
@@ -2744,7 +2748,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):

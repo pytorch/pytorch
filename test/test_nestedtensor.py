@@ -9332,9 +9332,9 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
-instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+instantiate_device_type_tests(TestNestedTensorAutograd, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestNestedTensorSubclass, globals())
-instantiate_device_type_tests(TestNestedTensorOpInfo, globals())
+instantiate_device_type_tests(TestNestedTensorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

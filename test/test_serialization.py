@@ -5460,8 +5460,8 @@ class TestSubclassSerialization(TestCase):
             torch.load(modified_buffer, weights_only=True)
 
 
-instantiate_device_type_tests(TestBothSerialization, globals())
-instantiate_device_type_tests(TestSerializationDeviceType, globals())
+instantiate_device_type_tests(TestBothSerialization, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSerializationDeviceType, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)

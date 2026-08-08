@@ -455,7 +455,7 @@ class TestComplexTensor(TestCase):
             )
 
 
-instantiate_device_type_tests(TestComplexTensor, globals())
+instantiate_device_type_tests(TestComplexTensor, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
