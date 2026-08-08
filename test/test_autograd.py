@@ -8996,6 +8996,10 @@ for shape in [(1,), ()]:
 
         self.assertEqual(called[0], 2)
 
+    def test_queue_callback_requires_callable(self):
+        with self.assertRaisesRegex(RuntimeError, "queue_callback expects a callable"):
+            Variable._execution_engine.queue_callback(123)
+
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_callback_propagates_errors_from_device_thread(self):
         def callback():
