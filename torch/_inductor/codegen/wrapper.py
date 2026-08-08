@@ -2001,6 +2001,11 @@ class PythonWrapperCodegen(CodeGen):
         for idx in inputs_to_check:
             if idx not in mutated_idxs:
                 name = V.graph.graph_input_names[idx]
+                if name in V.graph.data_ptr_keepalive_buffers:
+                    # data_ptr() exposes the input's actual address, so an
+                    # alignment clone would change observable pointer identity.
+                    V.graph._defers_input_alignment = True
+                    continue
                 self._pending_alignment_copies.add(name)
         if self._pending_alignment_copies:
             V.graph._defers_input_alignment = True
@@ -2225,7 +2230,57 @@ class PythonWrapperCodegen(CodeGen):
             raise AssertionError("CUDA MemPool contexts require Python wrapper")
         self.writeline(ExitCudaMemPoolContextLine())
 
+    def _data_ptr_keepalive_sources_for_raw_args(
+        self, raw_args: Sequence[Any] | None
+    ) -> OrderedSet[str]:
+        sources: OrderedSet[str] = OrderedSet()
+
+        def add_sources(raw_arg: Any) -> None:
+            if isinstance(raw_arg, IRNode):
+                sources.update(ir.data_ptr_keepalive_sources(raw_arg))
+            elif isinstance(raw_arg, (list, tuple)):
+                for value in raw_arg:
+                    add_sources(value)
+
+        if raw_args is not None:
+            for raw_arg in raw_args:
+                add_sources(raw_arg)
+        return sources
+
+    def generate_data_ptr_keepalive_records_for_raw_args(
+        self, raw_args: Sequence[Any] | None
+    ) -> None:
+        # This overlaps with the return-time fallback so side-stream launches
+        # retain sources on their actual consuming stream.
+        for name in self._data_ptr_keepalive_sources_for_raw_args(raw_args):
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            device = buf.get_device()
+            if device is None or device.type not in ("cuda", "xpu"):
+                continue
+            self.writeline(
+                f"{name}.record_stream(torch.accelerator.current_stream({name}.device))"
+            )
+
+    def generate_data_ptr_keepalive_records(self) -> None:
+        for name in V.graph.data_ptr_keepalive_buffers:
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            device = buf.get_device()
+            if device is None or device.type not in ("cuda", "xpu"):
+                continue
+            # Opaque kernels may dereference escaped data_ptr() addresses after
+            # wrapper locals go out of scope.  This includes caller-owned graph
+            # inputs when their raw address escapes, so record_stream may extend
+            # the caller's storage lifetime on the compute stream.
+            self.wrapper_call.writeline(
+                f"{name}.record_stream(torch.accelerator.current_stream({name}.device))"
+            )
+
     def generate_return(self, output_refs: list[str]) -> None:
+        self.generate_data_ptr_keepalive_records()
         if output_refs:
             if config.nan_asserts:
                 self.wrapper_call.writeline(
@@ -3111,6 +3166,16 @@ class PythonWrapperCodegen(CodeGen):
         event_var = f"_d2h_event_{buffer_name}"
         self.writeline(f"{event_var} = torch.Event()")
         self.writeline(f"{event_var}.record()")
+        self.writeline(f"{event_var}.synchronize()")
+
+    def sync_h2d_copy(self, buffer_name: str) -> None:
+        stream_var = f"_h2d_stream_{buffer_name}"
+        event_var = f"_h2d_event_{buffer_name}"
+        self.writeline(
+            f"{stream_var} = torch.accelerator.current_stream({buffer_name}.device)"
+        )
+        self.writeline(f"{event_var} = torch.Event()")
+        self.writeline(f"{event_var}.record({stream_var})")
         self.writeline(f"{event_var}.synchronize()")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
@@ -4285,6 +4350,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
             self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+        self.generate_data_ptr_keepalive_records_for_raw_args(raw_args)
         self.write_triton_header_once()
 
     def writeline(self, line):
@@ -4519,6 +4585,10 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
+        if name in V.graph.data_ptr_keepalive_buffers:
+            # Later opaque kernels may dereference the raw address returned by
+            # data_ptr(), so keep the backing tensor live through the call.
+            return
 
         # can be freed but not reused
         if isinstance(buffer, (ir.InputBuffer, ir.TorchBindObject)):

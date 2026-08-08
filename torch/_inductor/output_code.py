@@ -741,7 +741,11 @@ class CompiledFxGraph(OutputCode):
 
         self.cudagraph_info = cudagraph_info
         self.compile_region_name = compile_region_name
-        self.inputs_to_check = inputs_to_check
+        self.inputs_to_check = tuple(
+            idx
+            for idx in inputs_to_check
+            if idx not in graph.data_ptr_keepalive_input_idxs
+        )
         self.fx_kwargs = fx_kwargs
         self._set_compile_context_for_autotune_cache()
 

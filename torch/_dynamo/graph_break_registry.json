@@ -1328,6 +1328,17 @@
       ]
     }
   ],
+  "GB4528": [
+    {
+      "Gb_type": "data_ptr() in a higher-order operator",
+      "Context": "subgraph={tx.output.current_tracer.description}",
+      "Explanation": "Dynamo cannot preserve the lifetime of a tensor whose data_ptr() escapes from a higher-order operator subgraph.",
+      "Hints": [
+        "Move the data_ptr() call outside the higher-order operator.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0090": [
     {
       "Gb_type": "Operator does not support running with fake tensors",
@@ -4189,6 +4200,17 @@
       "Hints": [
         "Ensure the method {name} is implemented in {self.value}.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3240": [
+    {
+      "Gb_type": "data_ptr() in export",
+      "Context": "data_ptr() was materialized as a graph value",
+      "Explanation": "Export cannot preserve the lifetime of a tensor whose data_ptr() escapes as an integer.",
+      "Hints": [
+        "Wrap the pointer-consuming code in a custom operator.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
     }
   ],

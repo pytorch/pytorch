@@ -1585,7 +1585,11 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        result = DataPtrVariable(self, tx.output.data_ptr_storage_versions)
+        # Emit and cache the read here so later storage mutations cannot
+        # reorder it after the original data_ptr() call.
+        result.as_sym_node(tx)
+        return result
 
     def method_const_data_ptr(
         self,
@@ -1593,7 +1597,11 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self, method_name="const_data_ptr")
+        return DataPtrVariable(
+            self,
+            tx.output.data_ptr_storage_versions,
+            method_name="const_data_ptr",
+        )
 
     def method_record_stream(
         self,
@@ -3580,6 +3588,10 @@ class UntypedStorageVariable(VariableTracker):
             (self.from_tensor.as_proxy(), args[0].as_proxy()),
             {},
         )
+        DataPtrVariable.bump_storage_version(
+            tx.output.data_ptr_storage_versions,
+            self.from_tensor.as_proxy().node,
+        )
         return self
 
     tp_methods = {
@@ -3602,6 +3614,7 @@ class DataPtrVariable(VariableTracker):
     def __init__(
         self,
         from_tensor: TensorVariable,
+        storage_versions: dict[tuple[bool, int], int],
         method_name: str = "data_ptr",
         **kwargs: Any,
     ) -> None:
@@ -3609,9 +3622,69 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
         self.method_name = method_name
         self.tensor_version = from_tensor._get_fake_version()
+        self.storage_key = self._storage_key(from_tensor.as_proxy().node)
+        self.storage_version = self.current_storage_version(
+            storage_versions, from_tensor.as_proxy().node
+        )
+        self._sym_node: VariableTracker | None = None
 
     def python_type(self) -> type:
         return int
+
+    def as_sym_node(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.method_name != "data_ptr":
+            raise AssertionError(self.method_name)
+        if self._sym_node is not None:
+            return self._sym_node
+
+        from ..data_ptr_op import _data_ptr
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _data_ptr,
+            (self.from_tensor.as_proxy(),),
+            {},
+        )
+        self._sym_node = SymNodeVariable.create(tx, proxy)
+        return self._sym_node
+
+    def as_tensor_constructor_arg(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        if tx.output.export or torch.compiler.is_exporting():
+            unimplemented(
+                gb_type="data_ptr() in export",
+                context="data_ptr() was materialized as a graph value",
+                explanation=(
+                    "Export cannot preserve the lifetime of a tensor whose "
+                    "data_ptr() escapes as an integer."
+                ),
+                hints=[
+                    "Wrap the pointer-consuming code in a custom operator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
+        if not tx.output.is_root_tracer():
+            unimplemented(
+                gb_type="data_ptr() in a higher-order operator",
+                context=f"subgraph={tx.output.current_tracer.description}",
+                explanation=(
+                    "Dynamo cannot preserve the lifetime of a tensor whose data_ptr() "
+                    "escapes from a higher-order operator subgraph."
+                ),
+                hints=[
+                    "Move the data_ptr() call outside the higher-order operator.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # Graph inputs are owned by the caller for the duration of the compiled
+        # call. Computed sources need a hidden output so their storage stays live
+        # while an opaque consumer can dereference the materialized pointer.
+        tx.output.data_ptr_materialized = True
+        if self.from_tensor.as_proxy().node.op not in ("placeholder", "get_attr"):
+            tx.output.data_ptr_sources.add(self.from_tensor)
+        return self.as_sym_node(tx)
 
     @classmethod
     def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:
@@ -3624,11 +3697,56 @@ class DataPtrVariable(VariableTracker):
             node = node.args[0]
         return node
 
+    @classmethod
+    def _storage_key(cls, node: torch.fx.Node) -> tuple[bool, int]:
+        example_value = node.meta.get("example_value")
+        if isinstance(example_value, torch.Tensor) and torch._C._has_storage(
+            example_value
+        ):
+            # FakeTensor aliases share the underlying storage identity.
+            return (True, example_value.untyped_storage()._cdata)
+        # Tensor wrappers such as BatchedTensorImpl and functorch's TensorWrapper
+        # intentionally have no directly accessible storage. Conservatively key
+        # them by their graph identity, just like nodes without example values.
+        root = cls._strip_data_ptr_preserving_aliases(node)
+        return (False, id(root))
+
+    @classmethod
+    def current_storage_version(
+        cls,
+        storage_versions: dict[tuple[bool, int], int],
+        node: torch.fx.Node,
+    ) -> int:
+        return storage_versions.get(cls._storage_key(node), 0)
+
+    @classmethod
+    def bump_storage_version(
+        cls,
+        storage_versions: dict[tuple[bool, int], int],
+        node: torch.fx.Node,
+    ) -> None:
+        key = cls._storage_key(node)
+        storage_versions[key] = storage_versions.get(key, 0) + 1
+
+    def can_reconstruct_after_graph_break(
+        self, storage_versions: dict[tuple[bool, int], int]
+    ) -> bool:
+        node = self.from_tensor.as_proxy().node
+        return (
+            self.tensor_version is not None
+            and self.tensor_version == self.from_tensor._get_fake_version()
+            and self.storage_key == self._storage_key(node)
+            and self.storage_version
+            == self.current_storage_version(storage_versions, node)
+        )
+
     def _is_same_data_ptr(self, other: "VariableTracker") -> bool:
         if not isinstance(other, DataPtrVariable):
             return False
 
         if self.tensor_version is None or self.tensor_version != other.tensor_version:
+            return False
+        if self.storage_version != other.storage_version:
             return False
 
         self_root = self._strip_data_ptr_preserving_aliases(
@@ -3651,6 +3769,20 @@ class DataPtrVariable(VariableTracker):
         same_data_ptr = self._is_same_data_ptr(other)
         if same_data_ptr:
             return ConstantVariable.create(op == "__eq__")
+        if (
+            isinstance(other, DataPtrVariable)
+            and self.method_name == "data_ptr"
+            and other.method_name == "data_ptr"
+            and self.tensor_version is not None
+            and self.tensor_version == other.tensor_version
+            and self._strip_data_ptr_preserving_aliases(
+                self.from_tensor.as_proxy().node
+            )
+            is self._strip_data_ptr_preserving_aliases(
+                other.from_tensor.as_proxy().node
+            )
+        ):
+            return self.as_sym_node(tx).richcompare_impl(tx, other.as_sym_node(tx), op)
         unimplemented(
             gb_type="Data pointer comparison",
             context=f"richcompare_impl {self} {op} {other}",

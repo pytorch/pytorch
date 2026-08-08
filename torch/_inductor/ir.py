@@ -6755,6 +6755,33 @@ class InputsKernel(OperationBuffer):
         return r
 
 
+def data_ptr_keepalive_sources(node: IRNode) -> OrderedSet[str]:
+    if (
+        not V.graph.data_ptr_keepalive_by_symbol
+        and not V.graph.data_ptr_keepalive_by_buffer
+    ):
+        return OrderedSet()
+
+    sources: OrderedSet[str] = OrderedSet()
+    name = node.maybe_get_name()
+    if name is not None:
+        sources.update(V.graph.get_data_ptr_keepalive_sources_for_buffer(name))
+    if V.graph.data_ptr_keepalive_by_symbol:
+        sources.update(
+            V.graph.get_data_ptr_keepalive_sources_for_symbols(
+                node.get_free_symbol_uses(unbacked_only=True)
+            )
+        )
+    if V.graph.data_ptr_keepalive_by_buffer:
+        try:
+            read_names = node.get_read_names()
+        except NotImplementedError:
+            read_names = OrderedSet()
+        for read_name in read_names:
+            sources.update(V.graph.get_data_ptr_keepalive_sources_for_buffer(read_name))
+    return sources
+
+
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
         return True
@@ -6863,6 +6890,7 @@ class ConcatKernel(NopKernel):
         )
         kernel = StorageBox(concat_kernel)
         op_names = []
+        keepalive_sources: OrderedSet[str] = OrderedSet()
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
                 raise AssertionError(type(inp))
@@ -6877,6 +6905,7 @@ class ConcatKernel(NopKernel):
             if not isinstance(concat_kernel.inputs, list):
                 raise AssertionError(type(concat_kernel.inputs))
             concat_kernel.inputs.append(input_buffer)
+            keepalive_sources.update(data_ptr_keepalive_sources(input_buffer))
 
             if isinstance(inp.data, BaseView):
                 input_unwrapped = inp.data.unwrap_view()
@@ -6898,6 +6927,8 @@ class ConcatKernel(NopKernel):
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
         V.graph.register_operation(concat_kernel)
+        if keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(concat_kernel.name, keepalive_sources)
 
         return kernel
 
@@ -8801,6 +8832,23 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_device(self) -> torch.device | None:
         return self.device
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+        output_names = OrderedSet(output.get_name() for output in self.get_outputs())
+
+        def add_data_ptr_keepalive_sources(input: IRNode) -> None:
+            for name in data_ptr_keepalive_sources(input):
+                if name not in output_names:
+                    read_writes.reads.add(dependencies.StarDep(name))
+
+        for input in self.inputs:
+            if isinstance(input, Sequence):
+                for value in input:
+                    add_data_ptr_keepalive_sources(value)
+            else:
+                add_data_ptr_keepalive_sources(input)
+        return read_writes
+
 
 class InplaceBernoulliFallback(ExternKernel):
     """
@@ -9107,6 +9155,7 @@ class DeviceCopy(ExternKernelOut):
         x_device = x.get_device()
         if x_device is None:
             raise AssertionError("Expected x_device is not None")
+        keepalive_sources = data_ptr_keepalive_sources(x)
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -9139,7 +9188,7 @@ class DeviceCopy(ExternKernelOut):
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
-        return DeviceCopy(
+        result = DeviceCopy(
             FixedLayout(
                 device,
                 x.get_dtype(),
@@ -9150,19 +9199,50 @@ class DeviceCopy(ExternKernelOut):
             [cls.realize_input(x)],
             constant_args,
         )
+        if is_source_pinned and keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(result.get_name(), keepalive_sources)
+        return result
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
+        sync_h2d_data_ptr_copy = self.should_sync_h2d_data_ptr_copy()
+        non_blocking = args[1]
+        if sync_h2d_data_ptr_copy and not V.graph.cpp_wrapper:
+            # Use a host-complete H2D copy for tensors that carry escaped raw
+            # pointers.  The later opaque kernel dereferences those addresses
+            # without a normal tensor dependency edge.
+            non_blocking = False
         if self.output_view:
             wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
+                args[0], self.output_view.codegen_reference(), non_blocking
             )
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), non_blocking)
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
+        if sync_h2d_data_ptr_copy:
+            wrapper.sync_h2d_copy(self.get_name())
+
+    def should_sync_h2d_data_ptr_copy(self) -> bool:
+        if not V.graph.get_data_ptr_keepalive_sources_for_buffer(self.get_name()):
+            return False
+        if not self.constant_args or self.constant_args[0] is not True:
+            return False
+        if not isinstance(self.layout, Layout):
+            return False
+        device = self.layout.device
+        if device is None or not is_gpu(device.type):
+            return False
+        if not is_node_sequence(self.inputs):
+            return False
+        src = self.inputs[0]
+        src_device = src.get_device()
+        if src_device is None or src_device.type != "cpu":
+            return False
+        src_layout = src.maybe_get_layout()
+        return isinstance(src_layout, Layout) and src_layout.is_pinned
 
 
 class DynamicSelectStorageOffset(ExternKernel):
@@ -9407,6 +9487,21 @@ class FallbackKernel(ExternKernelAlloc):
         self.op_overload = kernel
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and self.op_overload.name() == "prims::_data_ptr"
+        ):
+            # The returned integer can escape through tensor constructors into
+            # user kernels, so preserve the source tensor's address and storage.
+            for arg in tensor_args:
+                name = arg.get_name()
+                try:
+                    idx: int | None = V.graph.graph_input_names.index(name)
+                except ValueError:
+                    idx = None
+                V.graph.mark_data_ptr_keepalive_buffer(name, idx)
+                for symbol in self.unbacked_bindings:
+                    V.graph.mark_data_ptr_keepalive_symbol(symbol, name)
         if self.python_kernel_name is None:
             raise AssertionError("Expected self.python_kernel_name is not None")
         V.graph.warn_fallback(self.python_kernel_name)
@@ -9534,10 +9629,33 @@ class FallbackKernel(ExternKernelAlloc):
         return read_writes
 
     def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
+        unbacked_bindings = getattr(self, "unbacked_bindings", None)
+        if V.graph.cpp_wrapper and unbacked_bindings:
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            if resolved is None:
+                raise AssertionError(
+                    "Expected cpp_wrapper unbacked bindings to resolve"
+                )
+            unbacked_bindings = resolved
+            direct_symbol_outputs = OrderedSet(
+                [
+                    output
+                    for output in pytree.tree_leaves(self.codegen_outputs())
+                    if isinstance(output, sympy.Symbol)
+                ]
+            )
+            if direct_symbol_outputs:
+                unbacked_bindings = {
+                    k: v
+                    for k, v in unbacked_bindings.items()
+                    if k not in direct_symbol_outputs
+                }
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(),
             self.codegen_outputs(),
-            getattr(self, "unbacked_bindings", None),
+            unbacked_bindings,
         )
 
     def codegen_outputs(self) -> Sequence[Any]:
@@ -10637,6 +10755,7 @@ class StorageBox(MutableBox):
 
         if not isinstance(self.data, (Pointwise, Reduction, Scan, Sort)):
             raise AssertionError(type(self.data))
+        keepalive_sources = data_ptr_keepalive_sources(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         device = self.data.get_device()
@@ -10660,6 +10779,8 @@ class StorageBox(MutableBox):
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
         self.data.mempool = self.data.data.mempool
+        if keepalive_sources:
+            V.graph.mark_data_ptr_tensor_buffer(self.data.name, keepalive_sources)
         return self.data.name
 
     def realize_hint(self) -> None:

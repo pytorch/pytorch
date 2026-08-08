@@ -2785,12 +2785,12 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
         class DummyModule:
             """This is empty to replace the generated triton module"""
 
-            def __init__(self) -> None:
-                pass
+            def __init__(self, num_outputs: int) -> None:
+                self.num_outputs = num_outputs
 
-            def call(self, *args: Any, **kwargs: Any) -> None:
-                # Don't do anything when called
-                pass
+            def call(self, *args: Any, **kwargs: Any) -> tuple[None, ...]:
+                # Match the generated module's output arity without running it.
+                return (None,) * self.num_outputs
 
         wrapper_code, kernel_code = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
@@ -2800,7 +2800,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
         if kernel_code:
             save_output_code(kernel_code.value)
 
-        return DummyModule()
+        return DummyModule(len(self.graph_outputs))
 
     with (
         mock.patch.object(

@@ -1123,6 +1123,33 @@ class CppWrapperGpu(CppWrapperCpu):
             f"triton debug sync is not supported with {self.device} cpp_wrapper"
         )
 
+    def generate_data_ptr_keepalive_sync_for_raw_args(self, raw_args) -> None:
+        cuda_device_idxs: OrderedSet[int] = OrderedSet()
+        for name in self._data_ptr_keepalive_sources_for_raw_args(raw_args):
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            device = buf.get_device()
+            if device is None or device.type != "cuda":
+                continue
+            if device.index is None:
+                raise AssertionError(
+                    f"Expected CUDA keepalive buffer {name} to have an indexed device"
+                )
+            cuda_device_idxs.add(device.index)
+
+        if not cuda_device_idxs:
+            return
+
+        with (
+            self._preserve_device_guard_state(),
+            self.set_writeline(self.wrapper_call, self.wrapper_call.writeline),
+        ):
+            for device_idx in cuda_device_idxs:
+                self.codegen_device_guard_enter(device_idx)
+                self.generate_debug_sync(self.wrapper_call)
+                self.codegen_device_guard_exit()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -1834,6 +1861,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         f"{wrapper_name}({', '.join(aot_call_args)}, "
                         f"kernels, this->cubin_dir_);"
                     )
+            self.generate_data_ptr_keepalive_sync_for_raw_args(raw_args)
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]

@@ -887,6 +887,10 @@ class OutputGraph(OutputGraphCommon):
         self.cleanups: list[CleanupHook] = []
         self.should_exit = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
+        # Hidden graph outputs keep raw pointer sources live through graph execution.
+        self.data_ptr_sources: OrderedSet[VariableTracker] = OrderedSet()
+        self.data_ptr_materialized = False
+        self.data_ptr_storage_versions: dict[tuple[bool, int], int] = {}
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
@@ -2010,6 +2014,11 @@ class OutputGraph(OutputGraphCommon):
         Returns stack indices and locals keys where we dropped NULLs, and where we found inactive context manager objects.
         """
 
+        if reason.graph_break and self.data_ptr_materialized:
+            raise SkipFrame(
+                "Dynamo cannot preserve traced data_ptr() lifetimes across a graph break"
+            )
+
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
 
@@ -2079,6 +2088,61 @@ class OutputGraph(OutputGraphCommon):
                 block.exit(cur_tx, is_graph_break=reason.graph_break)
 
             cur_tx = cur_tx.parent
+
+        if reason.graph_break:
+            tma_descriptors: list[variables.TMADescriptorExperimentalVariable] = []
+
+            def find_tma_descriptor(var: VariableTracker) -> None:
+                if isinstance(var, variables.TMADescriptorExperimentalVariable):
+                    tma_descriptors.append(var)
+
+            VariableTracker.visit(
+                find_tma_descriptor,
+                all_stack_values,
+                side_effects=self.side_effects,
+            )
+
+            live_data_ptr = False
+            live_tensor_storage_keys: set[tuple[bool, int]] = set()
+
+            def classify_live_value(var: VariableTracker) -> None:
+                nonlocal live_data_ptr
+                if isinstance(var, variables.DataPtrVariable):
+                    live_data_ptr = True
+                elif isinstance(var, variables.TensorVariable):
+                    live_tensor_storage_keys.add(
+                        variables.DataPtrVariable._storage_key(var.as_proxy().node)
+                    )
+
+            # Experimental TMA descriptors can cross a graph break only when their
+            # pointer owners are retained independently. Prune descriptor subtrees
+            # here so their internal tensor references do not prove their own safety.
+            VariableTracker.visit(
+                classify_live_value,
+                all_stack_values,
+                cache={id(desc): desc for desc in tma_descriptors},
+                side_effects=self.side_effects,
+            )
+
+            caller_owned_storage_keys = {
+                variables.DataPtrVariable._storage_key(node)
+                for node in self.graph.nodes
+                if node.op in ("placeholder", "get_attr")
+                and isinstance(node.meta.get("example_value"), torch.Tensor)
+            }
+            retained_storage_keys = live_tensor_storage_keys | caller_owned_storage_keys
+            unsafe_tma_descriptor = any(
+                desc.data_ptr.method_name != "data_ptr"
+                or not desc.data_ptr.can_reconstruct_after_graph_break(
+                    self.data_ptr_storage_versions
+                )
+                or desc.data_ptr.storage_key not in retained_storage_keys
+                for desc in tma_descriptors
+            )
+            if live_data_ptr or unsafe_tma_descriptor:
+                raise SkipFrame(
+                    "Dynamo cannot preserve a data_ptr() value across a graph break"
+                )
 
         # "Garbage collect the heap".
         self.side_effects.prune_dead_object_new(tx)
@@ -2180,6 +2244,7 @@ class OutputGraph(OutputGraphCommon):
             and not self.backward_state
             and not all_stack_locals_metas[-1].stack_null_idxes
             and not all_stack_locals_metas[-1].locals_null_keys
+            and not self.data_ptr_sources
         )
 
         # Generators that don't escape the frame must still have their finally
@@ -2243,6 +2308,12 @@ class OutputGraph(OutputGraphCommon):
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2, True)
+
+            # These outputs are intentionally absent from pass2's bytecode. Keeping
+            # them in graph_out prevents backends from freeing raw pointer sources
+            # before opaque consumers have run.
+            for source in self.data_ptr_sources:
+                pass2.add_graph_output(source)
 
             if (
                 torch._dynamo.config.log_graph_in_out_metadata

@@ -12,6 +12,7 @@ import textwrap
 import time
 import typing_extensions
 from collections import defaultdict
+from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import Any, cast, Literal, NoReturn, TYPE_CHECKING
 
@@ -519,6 +520,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        self.data_ptr_keepalive_buffers: OrderedSet[str] = OrderedSet()
+        self.data_ptr_keepalive_input_names: OrderedSet[str] = OrderedSet()
+        self.data_ptr_keepalive_input_idxs: OrderedSet[int] = OrderedSet()
+        self.data_ptr_keepalive_by_symbol: dict[sympy.Symbol, str] = {}
+        self.data_ptr_keepalive_by_buffer: dict[str, OrderedSet[str]] = {}
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
@@ -544,6 +550,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
         self.fx_wrapper = fx_wrapper
+        self.data_ptr_keepalive_input_names = self.find_data_ptr_keepalive_input_names(
+            gm.graph
+        )
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -947,6 +956,92 @@ class GraphLowering(torch.fx.Interpreter):
         if self.name is not None:
             return f"{self.name}_{name}"
         return name
+
+    def mark_data_ptr_keepalive_buffer(
+        self, name: str, input_idx: int | None = None
+    ) -> None:
+        if self.aot_mode:
+            raise NotImplementedError("AOTInductor does not support tracing data_ptr()")
+        buf = self.try_get_buffer(name)
+        device = buf.get_device() if buf is not None else None
+        if self.cpp_wrapper and device is not None and device.type == "xpu":
+            raise NotImplementedError(
+                "Inductor cpp_wrapper does not support tracing data_ptr() on XPU"
+            )
+        if self.disable_cudagraphs_reason is None:
+            self.disable_cudagraphs_reason = (
+                "data_ptr() exposes the caller's tensor address"
+            )
+        self.data_ptr_keepalive_buffers.add(name)
+        self.unaligned_buffers.add(name)
+        self.never_reuse_buffers.add(name)
+        if input_idx is not None:
+            self.data_ptr_keepalive_input_idxs.add(input_idx)
+
+    def mark_data_ptr_keepalive_symbol(self, symbol: sympy.Symbol, name: str) -> None:
+        self.data_ptr_keepalive_by_symbol[symbol] = name
+
+    def mark_data_ptr_tensor_buffer(self, name: str, sources: OrderedSet[str]) -> None:
+        if sources:
+            self.data_ptr_keepalive_by_buffer[name] = sources
+
+    def get_data_ptr_keepalive_sources_for_symbols(
+        self, symbols: Iterable[sympy.Symbol]
+    ) -> OrderedSet[str]:
+        sources: OrderedSet[str] = OrderedSet()
+        if not self.data_ptr_keepalive_by_symbol:
+            return sources
+
+        unbacked_renamings = self.sizevars.shape_env.unbacked_renamings
+        for symbol in symbols:
+            source = self.data_ptr_keepalive_by_symbol.get(symbol)
+            if source is not None:
+                sources.add(source)
+            renamed = unbacked_renamings.get(symbol)
+            if renamed is not None:
+                source = self.data_ptr_keepalive_by_symbol.get(renamed)
+                if source is not None:
+                    sources.add(source)
+            for original, source in self.data_ptr_keepalive_by_symbol.items():
+                if unbacked_renamings.get(original) == symbol:
+                    sources.add(source)
+        return sources
+
+    def get_data_ptr_keepalive_sources_for_buffer(self, name: str) -> OrderedSet[str]:
+        return self.data_ptr_keepalive_by_buffer.get(name, OrderedSet())
+
+    def find_data_ptr_keepalive_input_names(self, graph: Graph) -> OrderedSet[str]:
+        def is_data_ptr_target(target: object) -> bool:
+            return (
+                isinstance(target, torch._ops.OpOverload)
+                and target.name() == "prims::_data_ptr"
+            )
+
+        def alias_inputs(node: Node, seen: OrderedSet[Node]) -> OrderedSet[str]:
+            if node in seen:
+                return OrderedSet()
+            seen.add(node)
+            if node.op == "placeholder":
+                return OrderedSet([self.qualify_name(str(node.target))])
+            if (
+                node.op == "call_function"
+                and (_is_view_op(node.target) or node.target is operator.getitem)
+                and node.args
+                and isinstance(node.args[0], Node)
+            ):
+                return alias_inputs(node.args[0], seen)
+            return OrderedSet()
+
+        input_names: OrderedSet[str] = OrderedSet()
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and is_data_ptr_target(node.target)
+                and node.args
+                and isinstance(node.args[0], Node)
+            ):
+                input_names.update(alias_inputs(node.args[0], OrderedSet()))
+        return input_names
 
     def make_subgraph(
         self,
@@ -1383,6 +1478,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
+        if target in self.data_ptr_keepalive_input_names:
+            self.mark_data_ptr_keepalive_buffer(target, len(self.graph_input_names) - 1)
 
         # Note: [Input Alignment handling in Inductor]
         # Alignment matters for generating efficient code. Some operations,
@@ -3051,11 +3148,22 @@ class GraphLowering(torch.fx.Interpreter):
     save_output_code: Callable[[str], None] | None = None
 
     def compile_to_module(self) -> CompiledModule:
-        with dynamo_timed(
-            "GraphLowering.compile_to_module",
-            phase_name="code_gen",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+        # Synthetic autotune inputs cannot reproduce tensors containing data_ptr()
+        # values, and opaque kernels may dereference those values as addresses. The
+        # config is graph-wide, so this also disables autotuning for unrelated kernels.
+        autotune_context = (
+            config.patch("triton.autotune_at_compile_time", False)
+            if self.data_ptr_keepalive_buffers
+            else contextlib.nullcontext()
+        )
+        with (
+            autotune_context,
+            dynamo_timed(
+                "GraphLowering.compile_to_module",
+                phase_name="code_gen",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
+            ),
         ):
             return self._compile_to_module()
 
