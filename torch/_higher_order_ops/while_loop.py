@@ -650,7 +650,17 @@ def while_loop_func(
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
+            # Tensor closures of cond_fn and body_fn are lifted into additional_inputs,
+            # so an additional input can be the same tensor as a carried input. This is
+            # not something the subgraphs do, and while_loop only requires that they
+            # don't mutate their inputs or return aliases of them.
+            _check_alias_and_mutation(
+                fn,
+                unwrapped_inputs,
+                fn_name,
+                pre_dispatch,
+                check_input_input_alias=False,
+            )
         op_kwargs = {}
         if not stack_output and mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
