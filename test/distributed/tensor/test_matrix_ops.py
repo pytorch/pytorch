@@ -5,6 +5,7 @@ import itertools
 import math
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
@@ -30,6 +31,7 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
@@ -50,6 +52,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 funcol = torch.ops.c10d_functional
+mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 
 def scale_for_fp8(
@@ -64,6 +67,91 @@ def scale_for_fp8(
     t_fp8 = (t / scale[:, None, :, None]).to(e4m3_type)
 
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
+
+
+def _current_rank_int_for_mesh(
+    mesh,
+    value: int | torch.SymInt,  # pyrefly: ignore[bad-parameter-annotation]
+) -> int:
+    from torch.distributed.tensor._dispatch import _current_rank_int
+
+    return _current_rank_int(value, current_rank=mesh._rank)
+
+
+def _make_blockwise_scale_2d(
+    rows: int, sf_k: int, dtype: torch.dtype, device: str
+) -> torch.Tensor:
+    base = torch.tensor(
+        [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
+        device=device,
+        dtype=torch.float32,
+    )
+    idx = torch.arange(rows * sf_k, device=device).remainder(base.numel())
+    return base[idx].reshape(rows, sf_k).to(dtype)
+
+
+def _flat_blockwise_scale_slice(
+    scale_2d: torch.Tensor,
+    *,
+    row_start: int = 0,
+    row_count: int | None = None,
+    sf_k_start: int = 0,
+    sf_k_count: int | None = None,
+) -> torch.Tensor:
+    from torch._vendor.quack.blockscaled_layout_utils import (
+        pack_scale_2d_to_blocked_contig,
+        scale_blocked_for_cublas,
+    )
+
+    row_count = row_count if row_count is not None else scale_2d.shape[0] - row_start
+    sf_k_count = (
+        sf_k_count if sf_k_count is not None else scale_2d.shape[1] - sf_k_start
+    )
+    return scale_blocked_for_cublas(
+        pack_scale_2d_to_blocked_contig(
+            scale_2d[
+                row_start : row_start + row_count,
+                sf_k_start : sf_k_start + sf_k_count,
+            ]
+        ),
+        row_count,
+        sf_k_count,
+    )
+
+
+def _make_rowwise_mxfp8_tp_inputs(
+    device_mesh,
+    device_type: str,
+    *,
+    m: int,
+    n: int,
+    k: int,
+    block_size: int = 32,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    DTensor,
+    DTensor,
+    DTensor,
+    DTensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    from torch.testing._internal.common_quantized import to_blocked, to_mxfp
+
+    t1 = (
+        torch.randn(m, k, device=device_type, dtype=torch.bfloat16) * (k**-0.5)
+    ).contiguous()
+    t2 = (
+        torch.randn(n, k, device=device_type, dtype=torch.bfloat16) * (k**-0.5)
+    ).contiguous()
+    scale1, t1_fp8 = to_mxfp(t1, block_size=block_size, format="mxfp8")
+    scale2, t2_fp8 = to_mxfp(t2, block_size=block_size, format="mxfp8")
+    dist_t1_fp8 = distribute_tensor(t1_fp8, device_mesh, [Shard(1)])
+    dist_t2_fp8 = distribute_tensor(t2_fp8, device_mesh, [Shard(1)])
+    dist_scale1 = DTensor.from_local(to_blocked(scale1), device_mesh, [Replicate()])
+    dist_scale2 = DTensor.from_local(to_blocked(scale2), device_mesh, [Replicate()])
+    return t1, t2, dist_t1_fp8, dist_t2_fp8, dist_scale1, dist_scale2, scale1, scale2
 
 
 class DistMatrixOpsTest(DTensorTestBase):
@@ -542,8 +630,10 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         1D blockwise scales arise in MX (microscaling) formats where a data
         tensor [M, K] has a flattened scale of shape [M * K / block_size].
-        Shard(>=1) is invalid on a 1D tensor, so the strategy must map
-        non-contracting shards to Shard(0) and reject contracting-dim shards.
+        Shard(>=1) is invalid on a 1D tensor, so the strategy maps
+        non-contracting shards to Shard(0) and keeps contracting-dim shards
+        Replicate so dispatch can localize the K slice later. The dispatch-time
+        half of that behavior is covered separately by the localization tests.
         """
         from torch.distributed.tensor._ops._matrix_ops import _scaled_mm_scale_placement
 
@@ -566,41 +656,582 @@ class DistMatrixOpsTest(DTensorTestBase):
         result = _scaled_mm_scale_placement(
             Shard(0), torch.Size([64]), contracting_dim=1
         )
-        self.assertIsNotNone(result)
         self.assertEqual(result, Shard(0))
 
         # B_t (kn): dim 1 = n (non-contracting), dim 0 = k (contracting)
         result = _scaled_mm_scale_placement(
             Shard(1), torch.Size([64]), contracting_dim=0
         )
-        self.assertIsNotNone(result)
         self.assertEqual(result, Shard(0))
 
-        # --- 1D blockwise + contracting shard -> None (unsupported) ---
+        # --- 1D blockwise + contracting shard -> Replicate (localized later) ---
         result = _scaled_mm_scale_placement(
             Shard(1), torch.Size([64]), contracting_dim=1
         )
-        self.assertIsNone(result)
+        self.assertEqual(result, Replicate())
         result = _scaled_mm_scale_placement(
             Shard(0), torch.Size([64]), contracting_dim=0
         )
-        self.assertIsNone(result)
+        self.assertEqual(result, Replicate())
 
         # --- 1D blockwise + Replicate -> Replicate ---
         result = _scaled_mm_scale_placement(
             Replicate(), torch.Size([64]), contracting_dim=1
         )
-        self.assertIsNotNone(result)
         self.assertEqual(result, Replicate())
 
         # --- 1D blockwise + Partial -> Replicate ---
         result = _scaled_mm_scale_placement(
             Partial(), torch.Size([64]), contracting_dim=0
         )
-        self.assertIsNotNone(result)
         self.assertEqual(result, Replicate())
 
+    @skipIfRocm
     @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_blockwise_1d_scale_localization(self):
+        from torch._vendor.quack.blockscaled_layout_utils import MX_BLOCK_SIZE
+        from torch.distributed.tensor._dispatch import (
+            _localize_blockwise_scaled_mm_scale,
+        )
+        from torch.distributed.tensor._utils import (
+            compute_local_shape_and_global_offset,
+        )
+
+        device_mesh = self.build_device_mesh()
+        block_size = MX_BLOCK_SIZE
+        m, n = 128, 96
+        k = block_size * self.world_size * 2
+        sf_k = k // block_size
+        scale_a_2d = _make_blockwise_scale_2d(
+            m, sf_k, torch.float8_e8m0fnu, self.device_type
+        )
+        scale_b_2d = _make_blockwise_scale_2d(
+            n, sf_k, torch.float8_e8m0fnu, self.device_type
+        )
+        scale_a_flat = _flat_blockwise_scale_slice(scale_a_2d)
+        scale_b_flat = _flat_blockwise_scale_slice(scale_b_2d)
+
+        data_a = distribute_tensor(
+            torch.zeros(m, k, device=self.device_type, dtype=torch.float8_e4m3fn),
+            device_mesh,
+            [Shard(1)],
+        )
+        data_b = distribute_tensor(
+            torch.zeros(k, n, device=self.device_type, dtype=torch.float8_e4m3fn),
+            device_mesh,
+            [Shard(0)],
+        )
+        localized_a = _localize_blockwise_scaled_mm_scale(
+            scale_a_flat,
+            data_a._local_tensor,
+            data_a._spec,
+            contracting_dim=1,
+            non_contracting_dim=0,
+        )
+        localized_b = _localize_blockwise_scaled_mm_scale(
+            scale_b_flat,
+            data_b._local_tensor,
+            data_b._spec,
+            contracting_dim=0,
+            non_contracting_dim=1,
+        )
+
+        local_shape_a, global_offset_a = compute_local_shape_and_global_offset(
+            data_a._spec.tensor_meta.shape, data_a.device_mesh, data_a.placements
+        )
+        local_shape_a = tuple(data_a._local_tensor.shape)
+        global_offset_a = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_a
+        )
+        local_sf_k_a = local_shape_a[1] // block_size
+        start_sf_k_a = global_offset_a[1] // block_size
+        expected_a = _flat_blockwise_scale_slice(
+            scale_a_2d,
+            row_count=local_shape_a[0],
+            sf_k_start=start_sf_k_a,
+            sf_k_count=local_sf_k_a,
+        )
+        self.assertEqual(localized_a, expected_a)
+        local_shape_b, global_offset_b = compute_local_shape_and_global_offset(
+            data_b._spec.tensor_meta.shape, data_b.device_mesh, data_b.placements
+        )
+        local_shape_b = tuple(data_b._local_tensor.shape)
+        global_offset_b = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_b
+        )
+        local_sf_k_b = local_shape_b[0] // block_size
+        start_sf_k_b = global_offset_b[0] // block_size
+        expected_b = _flat_blockwise_scale_slice(
+            scale_b_2d,
+            row_count=local_shape_b[1],
+            sf_k_start=start_sf_k_b,
+            sf_k_count=local_sf_k_b,
+        )
+        self.assertEqual(localized_b, expected_b)
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_blockwise_1d_scale_localization_nvfp4(self):
+        from torch.distributed.tensor._dispatch import (
+            _localize_blockwise_scaled_mm_scale,
+        )
+        from torch.distributed.tensor._utils import (
+            compute_local_shape_and_global_offset,
+        )
+        from torch.testing._internal.common_quantized import to_blocked
+
+        device_mesh = self.build_device_mesh()
+        block_size = 16
+        m, n = 128, 96
+        logical_k = block_size * self.world_size * 2
+        packed_k = logical_k // 2
+        sf_k = logical_k // block_size
+        scale_a_2d = _make_blockwise_scale_2d(
+            m, sf_k, torch.float8_e4m3fn, self.device_type
+        )
+        scale_b_2d = _make_blockwise_scale_2d(
+            n, sf_k, torch.float8_e4m3fn, self.device_type
+        )
+        scale_a_flat = to_blocked(scale_a_2d)
+        scale_b_flat = to_blocked(scale_b_2d)
+
+        local_packed_k = packed_k // self.world_size
+        data_a = DTensor.from_local(
+            torch.empty(
+                m,
+                local_packed_k,
+                device=self.device_type,
+                dtype=torch.float4_e2m1fn_x2,
+            ),
+            device_mesh,
+            [Shard(1)],
+            shape=torch.Size([m, packed_k]),
+            stride=(packed_k, 1),
+        )
+        data_b = DTensor.from_local(
+            torch.empty(
+                local_packed_k,
+                n,
+                device=self.device_type,
+                dtype=torch.float4_e2m1fn_x2,
+            ),
+            device_mesh,
+            [Shard(0)],
+            shape=torch.Size([packed_k, n]),
+            stride=(n, 1),
+        )
+        localized_a = _localize_blockwise_scaled_mm_scale(
+            scale_a_flat,
+            data_a._local_tensor,
+            data_a._spec,
+            contracting_dim=1,
+            non_contracting_dim=0,
+        )
+        localized_b = _localize_blockwise_scaled_mm_scale(
+            scale_b_flat,
+            data_b._local_tensor,
+            data_b._spec,
+            contracting_dim=0,
+            non_contracting_dim=1,
+        )
+
+        local_shape_a, global_offset_a = compute_local_shape_and_global_offset(
+            data_a._spec.tensor_meta.shape, data_a.device_mesh, data_a.placements
+        )
+        local_shape_a = tuple(data_a._local_tensor.shape)
+        global_offset_a = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_a
+        )
+        local_sf_k_a = (local_shape_a[1] * 2) // block_size
+        start_sf_k_a = (global_offset_a[1] * 2) // block_size
+        self.assertEqual(
+            localized_a,
+            to_blocked(scale_a_2d[:, start_sf_k_a : start_sf_k_a + local_sf_k_a]),
+        )
+
+        local_shape_b, global_offset_b = compute_local_shape_and_global_offset(
+            data_b._spec.tensor_meta.shape, data_b.device_mesh, data_b.placements
+        )
+        local_shape_b = tuple(data_b._local_tensor.shape)
+        global_offset_b = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_b
+        )
+        local_sf_k_b = (local_shape_b[0] * 2) // block_size
+        start_sf_k_b = (global_offset_b[0] * 2) // block_size
+        self.assertEqual(
+            localized_b,
+            to_blocked(scale_b_2d[:, start_sf_k_b : start_sf_k_b + local_sf_k_b]),
+        )
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_blockwise_1d_scale_localization_mixed_mk(self):
+        from torch._vendor.quack.blockscaled_layout_utils import MX_BLOCK_SIZE
+        from torch.distributed.tensor._dispatch import (
+            _localize_blockwise_scaled_mm_scale,
+        )
+        from torch.distributed.tensor._utils import (
+            compute_local_shape_and_global_offset,
+        )
+
+        mesh_shape = (2, self.world_size // 2)
+        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+        block_size = MX_BLOCK_SIZE
+        m = 128 * mesh_shape[0]
+        n = 128 * mesh_shape[0]
+        k = block_size * mesh_shape[1] * 4
+        sf_k = k // block_size
+        scale_a_2d = _make_blockwise_scale_2d(
+            m, sf_k, torch.float8_e8m0fnu, self.device_type
+        )
+        scale_b_2d = _make_blockwise_scale_2d(
+            n, sf_k, torch.float8_e8m0fnu, self.device_type
+        )
+
+        data_a = distribute_tensor(
+            torch.zeros(m, k, device=self.device_type, dtype=torch.float8_e4m3fn),
+            device_mesh,
+            [Shard(0), Shard(1)],
+        )
+        local_shape_a, global_offset_a = compute_local_shape_and_global_offset(
+            data_a._spec.tensor_meta.shape, data_a.device_mesh, data_a.placements
+        )
+        local_shape_a = tuple(data_a._local_tensor.shape)
+        global_offset_a = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_a
+        )
+        m_start = global_offset_a[0]
+        scale_a_current = _flat_blockwise_scale_slice(
+            scale_a_2d,
+            row_start=m_start,
+            row_count=local_shape_a[0],
+            sf_k_count=sf_k,
+        )
+        localized_a = _localize_blockwise_scaled_mm_scale(
+            scale_a_current,
+            data_a._local_tensor,
+            data_a._spec,
+            contracting_dim=1,
+            non_contracting_dim=0,
+        )
+        local_sf_k_a = local_shape_a[1] // block_size
+        start_sf_k_a = global_offset_a[1] // block_size
+        expected_a = _flat_blockwise_scale_slice(
+            scale_a_2d,
+            row_start=m_start,
+            row_count=local_shape_a[0],
+            sf_k_start=start_sf_k_a,
+            sf_k_count=local_sf_k_a,
+        )
+        self.assertEqual(localized_a, expected_a)
+
+        data_b = distribute_tensor(
+            torch.zeros(k, n, device=self.device_type, dtype=torch.float8_e4m3fn),
+            device_mesh,
+            [Shard(1), Shard(0)],
+        )
+        local_shape_b, global_offset_b = compute_local_shape_and_global_offset(
+            data_b._spec.tensor_meta.shape, data_b.device_mesh, data_b.placements
+        )
+        local_shape_b = tuple(data_b._local_tensor.shape)
+        global_offset_b = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_b
+        )
+        n_start = global_offset_b[1]
+        scale_b_current = _flat_blockwise_scale_slice(
+            scale_b_2d,
+            row_start=n_start,
+            row_count=local_shape_b[1],
+            sf_k_count=sf_k,
+        )
+        localized_b = _localize_blockwise_scaled_mm_scale(
+            scale_b_current,
+            data_b._local_tensor,
+            data_b._spec,
+            contracting_dim=0,
+            non_contracting_dim=1,
+        )
+        local_sf_k_b = local_shape_b[0] // block_size
+        start_sf_k_b = global_offset_b[0] // block_size
+        expected_b = _flat_blockwise_scale_slice(
+            scale_b_2d,
+            row_start=n_start,
+            row_count=local_shape_b[1],
+            sf_k_start=start_sf_k_b,
+            sf_k_count=local_sf_k_b,
+        )
+        self.assertEqual(localized_b, expected_b)
+
+    @skipIfRocm
+    @skip_unless_torch_gpu
+    def test_scaled_mm_blockwise_1d_scale_localization_rejects_unaligned_offsets(self):
+        from torch._vendor.quack.blockscaled_layout_utils import (
+            pack_scale_2d_to_blocked_contig,
+            scale_blocked_for_cublas,
+        )
+        from torch.distributed.tensor._dispatch import (
+            _localize_blockwise_scaled_mm_scale_from_offsets,
+        )
+
+        rows, global_k, local_k, offset, block_size = 128, 96, 48, 48, 32
+        scale_2d = torch.ones(
+            rows,
+            global_k // block_size,
+            device=self.device_type,
+            dtype=torch.float8_e8m0fnu,
+        )
+        scale_flat = scale_blocked_for_cublas(
+            pack_scale_2d_to_blocked_contig(scale_2d),
+            rows,
+            global_k // block_size,
+        )
+        with self.assertRaisesRegex(ValueError, "block-aligned K offsets"):
+            _localize_blockwise_scaled_mm_scale_from_offsets(
+                scale_flat,
+                rows,
+                global_k,
+                local_k,
+                offset,
+                block_size,
+            )
+        with self.assertRaisesRegex(ValueError, "block-aligned local K sizes"):
+            _localize_blockwise_scaled_mm_scale_from_offsets(
+                scale_flat,
+                rows,
+                global_logical_k=128,
+                local_logical_k=48,
+                logical_k_offset=0,
+                block_size=block_size,
+            )
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_blockwise_1d_rowwise_tp(self):
+        """Exercise the DTensor rowwise MXFP8 path through sharding propagation.
+
+        This asserts the user-visible DTensor behavior this fix owns: the
+        rowwise TP inputs propagate to Partial(sum), and the handler localizes
+        the flat blockwise MX scales to the correct per-rank payloads before
+        the local tensor call. We stop short of a full local _scaled_mm kernel
+        execution here because that path is still cuBLASLt-shape-sensitive on
+        the current H200/CUDA test environment.
+        """
+        from torch.distributed.tensor._dispatch import (
+            _current_op_schema_for_local_args,
+            _maybe_localize_scaled_mm_blockwise_args,
+        )
+        from torch.distributed.tensor._utils import (
+            compute_local_shape_and_global_offset,
+        )
+
+        device_mesh = self.build_device_mesh()
+        block_size = 32
+        ws = self.world_size
+        m, n, k = 128, 128, block_size * ws * 8
+        _, _, dist_t1_fp8, dist_t2_fp8, dist_scale1, dist_scale2, scale1, scale2 = (
+            _make_rowwise_mxfp8_tp_inputs(
+                device_mesh,
+                self.device_type,
+                m=m,
+                n=n,
+                k=k,
+                block_size=block_size,
+            )
+        )
+
+        op_call = torch.ops.aten._scaled_mm.default
+        op_info = DTensor._op_dispatcher.unwrap_to_op_info(
+            op_call,
+            (
+                dist_t1_fp8,
+                dist_t2_fp8.t(),
+                dist_scale1,
+                dist_scale2,
+                None,
+                None,
+                torch.bfloat16,
+                False,
+            ),
+            {},
+        )
+        DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+        output_sharding = op_info.output_sharding
+        if output_sharding is None:
+            raise AssertionError("output sharding should not be None")
+
+        self.assertFalse(output_sharding.needs_redistribute)
+        self.assertEqual(output_sharding.output_spec.placements, (Partial(),))
+
+        current_op_schema = _current_op_schema_for_local_args(
+            op_call, op_info, output_sharding
+        )
+        local_args = cast(tuple[object, ...], tuple(op_info.local_args))
+        localized_args = _maybe_localize_scaled_mm_blockwise_args(
+            local_args, current_op_schema
+        )
+        localized_scale1 = cast(torch.Tensor, localized_args[2])
+        localized_scale2 = cast(torch.Tensor, localized_args[3])
+
+        local_shape_a, global_offset_a = compute_local_shape_and_global_offset(
+            dist_t1_fp8._spec.tensor_meta.shape,
+            dist_t1_fp8.device_mesh,
+            dist_t1_fp8.placements,
+        )
+        local_shape_a = tuple(dist_t1_fp8._local_tensor.shape)
+        global_offset_a = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_a
+        )
+        local_sf_k_a = local_shape_a[1] // block_size
+        start_sf_k_a = global_offset_a[1] // block_size
+        self.assertEqual(
+            localized_scale1,
+            _flat_blockwise_scale_slice(
+                scale1,
+                row_count=scale1.shape[0],
+                sf_k_start=start_sf_k_a,
+                sf_k_count=local_sf_k_a,
+            ),
+        )
+
+        local_shape_b, global_offset_b = compute_local_shape_and_global_offset(
+            dist_t2_fp8.t()._spec.tensor_meta.shape,
+            dist_t2_fp8.t().device_mesh,
+            dist_t2_fp8.t().placements,
+        )
+        local_shape_b = tuple(dist_t2_fp8.t()._local_tensor.shape)
+        global_offset_b = tuple(
+            _current_rank_int_for_mesh(device_mesh, offset)
+            for offset in global_offset_b
+        )
+        local_sf_k_b = local_shape_b[0] // block_size
+        start_sf_k_b = global_offset_b[0] // block_size
+        self.assertEqual(
+            localized_scale2,
+            _flat_blockwise_scale_slice(
+                scale2,
+                row_count=scale2.shape[0],
+                sf_k_start=start_sf_k_b,
+                sf_k_count=local_sf_k_b,
+            ),
+        )
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    def test_scaled_mm_blockwise_1d_rowwise_tp_e2e_mx_gemm(self):
+        device_mesh = self.build_device_mesh()
+        block_size = 32
+        ws = self.world_size
+        m = 128
+        n = 128
+        k = 128 * ws
+        t1, t2, dist_t1_fp8, dist_t2_fp8, dist_scale1, dist_scale2, _, _ = (
+            _make_rowwise_mxfp8_tp_inputs(
+                device_mesh,
+                self.device_type,
+                m=m,
+                n=n,
+                k=k,
+                block_size=block_size,
+            )
+        )
+        full_ref_res = t1 @ t2.t()
+
+        with CommDebugMode() as comm_mode:
+            dist_res = cast(
+                DTensor,
+                torch._scaled_mm(
+                    dist_t1_fp8,
+                    dist_t2_fp8.t(),
+                    scale_a=dist_scale1,
+                    scale_b=dist_scale2,
+                    out_dtype=torch.bfloat16,
+                ),
+            )
+
+        self.assertEqual(dist_res.placements, (Partial(),))
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(dist_res.full_tensor(), full_ref_res, atol=1.5, rtol=7e-2)
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_blockwise_1d_uses_custom_handler(self):
+        class ScaledMmHandlerCalled(RuntimeError):
+            pass
+
+        device_mesh = self.build_device_mesh()
+        block_size = 32
+        ws = self.world_size
+        m, n, k = 128, 128, block_size * ws * 4
+        _, _, dist_t1_fp8, dist_t2_fp8, dist_scale1, dist_scale2, _, _ = (
+            _make_rowwise_mxfp8_tp_inputs(
+                device_mesh,
+                self.device_type,
+                m=m,
+                n=n,
+                k=k,
+                block_size=block_size,
+            )
+        )
+
+        def sentinel_handler(op_call, args, kwargs):
+            raise ScaledMmHandlerCalled
+
+        with patch.dict(
+            DTensor._op_dispatcher._custom_op_handlers,
+            {torch.ops.aten._scaled_mm.default: sentinel_handler},
+            clear=False,
+        ):
+            with self.assertRaises(ScaledMmHandlerCalled):
+                torch._scaled_mm(
+                    dist_t1_fp8,
+                    dist_t2_fp8.t(),
+                    scale_a=dist_scale1,
+                    scale_b=dist_scale2,
+                    out_dtype=torch.bfloat16,
+                )
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(2)
     def test_matmul(self):
         device_mesh = self.build_device_mesh()
         dim = 128

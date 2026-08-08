@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import math
 import random
 from itertools import chain
 from unittest.mock import patch
@@ -315,6 +316,61 @@ class TestCostModel(DTensorOpTestBase):
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)
+
+    def test_scaled_mm_blockwise_1d_strategies(self):
+        mesh = self.build_device_mesh()
+        m, n, k = 128, 96, 32 * self.world_size * 2
+        sf_k = k // 32
+
+        def flat_blockwise_numel(rows: int) -> int:
+            return 128 * math.ceil(rows / 128) * 4 * math.ceil(sf_k / 4)
+
+        lhs_tensor_meta = TensorMeta(
+            shape=torch.Size([m, k]),
+            stride=(k, 1),
+            dtype=torch.float8_e4m3fn,
+        )
+        rhs_tensor_meta = TensorMeta(
+            shape=torch.Size([k, n]),
+            stride=(1, k),
+            dtype=torch.float8_e4m3fn,
+        )
+        scale_a_meta = TensorMeta(
+            shape=torch.Size([flat_blockwise_numel(m)]),
+            stride=(1,),
+            dtype=torch.float8_e8m0fnu,
+        )
+        scale_b_meta = TensorMeta(
+            shape=torch.Size([flat_blockwise_numel(n)]),
+            stride=(1,),
+            dtype=torch.float8_e8m0fnu,
+        )
+
+        lhs_spec = DTensorSpec(mesh, (Shard(1),), lhs_tensor_meta)
+        rhs_spec = DTensorSpec(mesh, (Shard(0),), rhs_tensor_meta)
+        scale_a_spec = DTensorSpec(mesh, (Replicate(),), scale_a_meta)
+        scale_b_spec = DTensorSpec(mesh, (Replicate(),), scale_b_meta)
+        op_schema = OpSchema(
+            torch.ops.aten._scaled_mm.default,
+            (
+                lhs_spec,
+                rhs_spec,
+                scale_a_spec,
+                scale_b_spec,
+                None,
+                None,
+                torch.bfloat16,
+                False,
+            ),
+            {},
+        )
+        output_sharding = (
+            DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+                op_schema
+            )
+        )
+        self.assertFalse(output_sharding.needs_redistribute)
+        self.assertEqual(output_sharding.output_spec.placements, (Partial(),))
 
     def test_t_prunes_unproven_unbacked_strided_shard_candidates(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
