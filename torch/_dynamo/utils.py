@@ -2568,6 +2568,29 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
 
+_DYNAMO_TENSOR_ATTRIBUTE_NAMES = frozenset(
+    {
+        "_dynamo_dynamic_indices",
+        "_dynamo_dynamic_range",
+        "_dynamo_hint_overrides",
+        "_dynamo_propagated_dynamic_indices",
+        "_dynamo_shape_ids",
+        "_dynamo_static_indices",
+        "_dynamo_static_input_type",
+        "_dynamo_strict_unbacked_indices",
+        "_dynamo_unbacked_bounds",
+        "_dynamo_unbacked_indices",
+        "_dynamo_weak_dynamic_indices",
+        "_has_dynamo_dim_marking",
+        "_specialize_on",
+    }
+)
+
+
+def has_user_defined_tensor_attributes(t: torch.Tensor) -> bool:
+    return any(name not in _DYNAMO_TENSOR_ATTRIBUTE_NAMES for name in t.__dict__)
+
+
 def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:
     """copy while preserving strides"""
     # TODO: this is questionable

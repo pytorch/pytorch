@@ -1475,14 +1475,13 @@ def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
 @contextmanager
 def _compiling_state_context() -> Generator[None, None, None]:
     old_compiling_flag = torch.compiler._is_compiling_flag
-    old_exporting_flag = torch.compiler._is_exporting_flag
+    exporting_token = torch.compiler._is_exporting_flag.set(True)
     try:
         torch.compiler._is_compiling_flag = True
-        torch.compiler._is_exporting_flag = True
         yield
     finally:
         torch.compiler._is_compiling_flag = old_compiling_flag
-        torch.compiler._is_exporting_flag = old_exporting_flag
+        torch.compiler._is_exporting_flag.reset(exporting_token)
 
 
 def _fakify_params_buffers(
@@ -1500,10 +1499,36 @@ def _fakify_params_buffers(
         if id(value) in memo:
             fake_tensor = memo[id(value)]
         else:
-            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            fake_tensor = _record_original_tensor_copy_metadata(
+                fake_mode.from_tensor(value, static_shapes=True), value
+            )
             memo[id(value)] = fake_tensor
         faked_params_buffers[key] = fake_tensor
     return faked_params_buffers  # type: ignore[return-value]
+
+
+def _record_original_tensor_copy_metadata(
+    fake: FakeTensor, original: torch.Tensor
+) -> FakeTensor:
+    # Keep this import local to avoid a cycle during torch initialization.
+    from torch._dynamo.utils import has_user_defined_tensor_attributes
+
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_type = type(original)
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_has_python_state = has_user_defined_tensor_attributes(
+        original
+    )
+    # FakeTensor does not retain these eager-only distinctions.
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_device_type = original.device.type
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_is_zero = original._is_zerotensor()
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_has_storage = torch._C._has_storage(original)
+    # pyrefly: ignore [missing-attribute]
+    fake._export_original_tensor_is_inference = original.is_inference()
+    return fake
 
 
 def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:

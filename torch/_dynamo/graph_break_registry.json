@@ -595,6 +595,17 @@
       ]
     }
   ],
+  "GB2191": [
+    {
+      "Gb_type": "copy.copy() on Tensor requiring grad",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "torch.export does not support copy.copy() on tensors with requires_grad=True.",
+      "Hints": [
+        "Avoid calling copy.copy() on tensors that require grad.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0042": [
     {
       "Gb_type": "Encountered non user function variable during invoke_subgraph HOP tracing",
@@ -3209,6 +3220,17 @@
       ]
     }
   ],
+  "GB3979": [
+    {
+      "Gb_type": "copy.copy() on Tensor",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "Dynamo does not support copy.copy() on tensors outside export because preserving shallow-copy tensor identity across compiled backends is not currently supported.",
+      "Hints": [
+        "Avoid calling copy.copy() on tensors inside compiled regions.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0208": [
     {
       "Gb_type": "torch.* op returned non-Tensor",
@@ -4078,6 +4100,17 @@
       "Hints": [
         "Use retain_graph=True in the first autograd.grad() call if you ",
         "need to compute gradients through the same graph multiple times."
+      ]
+    }
+  ],
+  "GB2304": [
+    {
+      "Gb_type": "copy.copy() on non-plain Tensor",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "torch.export only supports copy.copy() on plain storage-backed strided tensors without Python attributes or special tensor kinds.",
+      "Hints": [
+        "Use a plain storage-backed strided tensor without Python state.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

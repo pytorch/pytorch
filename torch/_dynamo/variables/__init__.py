@@ -72,6 +72,7 @@ from .functions import (
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
+    CopyFunctionVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,

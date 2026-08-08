@@ -80,6 +80,7 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     FrameState,
+    has_user_defined_tensor_attributes,
     identity,
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
@@ -87,6 +88,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    proxy_args_kwargs,
     unpack_iterable,
 )
 from .base import (
@@ -1131,6 +1133,128 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 collected.extend(flat)
             return collected
         return None
+
+
+class CopyFunctionVariable(UserFunctionVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        copy_arg = None
+        if len(args) == 1 and not kwargs:
+            copy_arg = args[0]
+        elif not args and set(kwargs.keys()) == {"x"}:
+            copy_arg = kwargs["x"]
+
+        if copy_arg is not None and copy_arg.is_tensor():
+            copy_tensor = cast("TensorVariable", copy_arg)
+            # Strict export v2 uses fullgraph_capture with both tx.export and
+            # the tracer export bit unset, so it uses the context-local flag.
+            if (
+                tx.export
+                or tx.output.current_tracer.is_export
+                or torch.compiler.is_exporting()
+            ):
+                if copy_tensor.requires_grad is True:
+                    unimplemented(
+                        gb_type="copy.copy() on Tensor requiring grad",
+                        context=f"copy.copy({copy_arg})",
+                        explanation="torch.export does not support copy.copy() on "
+                        "tensors with requires_grad=True.",
+                        hints=[
+                            "Avoid calling copy.copy() on tensors that require grad.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+
+                proxy_node = copy_tensor.as_proxy().node
+                example_value = proxy_node.meta.get("example_value")
+                graph_arg = proxy_node.meta.get("grapharg")
+                if copy_tensor.source is not None:
+                    original_value = eval(
+                        copy_tensor.source.name,
+                        {"L": tx.output.local_scope, "G": tx.output.global_scope},
+                    )
+                elif graph_arg is not None:
+                    original_value = graph_arg.example
+                else:
+                    original_value = next(
+                        (
+                            value
+                            for value in tx.output.side_effects.keepalive
+                            if tx.output.side_effects.id_to_variable.get(id(value))
+                            is copy_arg
+                        ),
+                        None,
+                    )
+                has_unsupported_python_semantics = (
+                    copy_tensor.class_type is not torch.Tensor
+                    or (
+                        isinstance(original_value, torch.Tensor)
+                        and (
+                            type(original_value) is not torch.Tensor
+                            or original_value.device.type == "meta"
+                            or original_value._is_zerotensor()
+                            or not torch._C._has_storage(original_value)
+                            or original_value.is_inference()
+                            or has_user_defined_tensor_attributes(original_value)
+                        )
+                    )
+                )
+                has_unsupported_tensor_metadata = (
+                    copy_tensor.layout is not torch.strided
+                    or copy_tensor.is_quantized
+                    or copy_tensor.is_nested
+                    or copy_tensor.is_sparse
+                    or (
+                        isinstance(example_value, torch.Tensor)
+                        and (
+                            example_value.device.type == "meta"
+                            or example_value._is_zerotensor()
+                            or not torch._C._has_storage(example_value)
+                            or example_value.is_inference()
+                        )
+                    )
+                )
+                if has_unsupported_python_semantics or has_unsupported_tensor_metadata:
+                    unimplemented(
+                        gb_type="copy.copy() on non-plain Tensor",
+                        context=f"copy.copy({copy_arg})",
+                        explanation="torch.export only supports copy.copy() on "
+                        "plain storage-backed strided tensors without Python attributes "
+                        "or special tensor kinds.",
+                        hints=[
+                            "Use a plain storage-backed strided tensor without Python state.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch.ops.aten.detach.default,
+                        *proxy_args_kwargs([copy_tensor], {}),
+                    ),
+                )
+
+            unimplemented(
+                gb_type="copy.copy() on Tensor",
+                context=f"copy.copy({copy_arg})",
+                explanation="Dynamo does not support copy.copy() on tensors "
+                "outside export because preserving shallow-copy tensor "
+                "identity across compiled backends is not currently supported.",
+                hints=[
+                    "Avoid calling copy.copy() on tensors inside compiled regions.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        return super().call_function(tx, args, kwargs)
 
 
 class InspectSignatureVariable(UserFunctionVariable):

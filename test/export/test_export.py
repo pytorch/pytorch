@@ -2,7 +2,9 @@
 # ruff: noqa: F841
 # flake8: noqa
 import contextlib
+import contextvars
 import copy
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -12,6 +14,7 @@ import operator
 import os
 import re
 import sys
+import threading
 import traceback
 import unittest
 import warnings
@@ -610,6 +613,301 @@ class TestExport(TestCase):
             guards_fn = _convert_guards_code_to_fn([guard], [])
 
         self.assertIsNotNone(guards_fn)
+
+    def test_export_copy_copy_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            result = ep.module()(*inp)
+            self.assertEqual(result, inp[0])
+            self.assertEqual(result.stride(), inp[0].stride())
+            self.assertEqual(result.storage_offset(), inp[0].storage_offset())
+            self.assertEqual(
+                result.untyped_storage().data_ptr(),
+                inp[0].untyped_storage().data_ptr(),
+            )
+            graph_ops = [node.op for node in ep.graph_module.graph.nodes]
+            self.assertEqual(graph_ops[0], "placeholder")
+            self.assertEqual(graph_ops[-1], "output")
+            call_function_targets = [
+                node.target
+                for node in ep.graph_module.graph.nodes
+                if node.op == "call_function"
+            ]
+            self.assertIn(torch.ops.aten.detach.default, call_function_targets)
+
+    def test_export_copy_copy_input_kwarg(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x=x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(ep.module()(*inp), inp[0])
+            graph_ops = [node.op for node in ep.graph_module.graph.nodes]
+            self.assertEqual(graph_ops[0], "placeholder")
+            self.assertEqual(graph_ops[-1], "output")
+            call_function_targets = [
+                node.target
+                for node in ep.graph_module.graph.nodes
+                if node.op == "call_function"
+            ]
+            self.assertIn(torch.ops.aten.detach.default, call_function_targets)
+
+    def test_export_copy_copy_input_alias(self):
+        shallow_copy = copy.copy
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return shallow_copy(x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(ep.module()(*inp), inp[0])
+            call_function_targets = [
+                node.target
+                for node in ep.graph_module.graph.nodes
+                if node.op == "call_function"
+            ]
+            self.assertIn(torch.ops.aten.detach.default, call_function_targets)
+
+    def test_export_copy_copy_conjugate_bit(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2, dtype=torch.complex64),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            runtime_inp = (torch.randn(2, 2, dtype=torch.complex64).conj(),)
+            result = ep.module()(*runtime_inp)
+            self.assertEqual(result, M()(*runtime_inp))
+            self.assertTrue(result.is_conj())
+
+    def test_export_copy_copy_runtime_tensor_metadata(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        example = (torch.randn(2, 3),)
+        runtime_inputs = (
+            torch.arange(6.0).reshape(3, 2).t(),
+            torch.tensor([1.0])._neg_view().expand(2, 3),
+        )
+
+        for strict in (False, True):
+            ep = export(M(), example, strict=strict)
+            for runtime_input in runtime_inputs:
+                with self.subTest(strict=strict, input=runtime_input):
+                    result = ep.module()(runtime_input)
+                    expected = M()(runtime_input)
+                    self.assertEqual(result, expected)
+                    self.assertEqual(result.stride(), expected.stride())
+                    self.assertEqual(result.is_neg(), expected.is_neg())
+                    self.assertEqual(
+                        result.untyped_storage().data_ptr(),
+                        runtime_input.untyped_storage().data_ptr(),
+                    )
+
+    def test_export_copy_copy_dynamic_shape(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x) + 1
+
+        inp = (torch.randn(3, 4),)
+        dynamic_shapes = ({0: Dim("dynamic_copy_dim", min=2, max=8)},)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict, dynamic_shapes=dynamic_shapes)
+            runtime_inp = (torch.randn(5, 4),)
+            self.assertEqual(ep.module()(*runtime_inp), M()(*runtime_inp))
+
+    def test_export_copy_copy_data_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = copy.copy(x)
+                y.add_(1)
+                return x, y
+
+        inp = (torch.tensor([2.0]),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            runtime_inp = torch.tensor([2.0])
+            eager_inp = runtime_inp.clone()
+            expected = M()(eager_inp)
+            result = ep.module()(runtime_inp)
+            self.assertEqual(result, expected)
+            self.assertEqual(runtime_inp, eager_inp)
+
+    def test_export_copy_copy_requires_grad_unsupported(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2, requires_grad=True),)
+        for strict in (False, True):
+            with self.assertRaisesRegex(
+                (torch._dynamo.exc.UserError, torch._dynamo.exc.Unsupported),
+                "copy.copy\\(\\) on tensors with requires_grad=True",
+            ):
+                export(M(), inp, strict=strict)
+
+    def test_export_copy_copy_special_tensor_unsupported(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        tensor_with_state = torch.randn(2, 2)
+        tensor_with_state.user_attribute = "preserved by eager copy"
+        tensor_with_dynamo_prefix_state = torch.randn(2, 2)
+        tensor_with_dynamo_prefix_state._dynamo_user = "not a framework marker"
+        with torch.inference_mode():
+            inference_tensor = torch.randn(2, 2)
+        unsupported_inputs = (
+            torch.nn.Parameter(torch.randn(2, 2), requires_grad=False),
+            torch.nn.Buffer(torch.randn(2, 2)),
+            tensor_with_state,
+            tensor_with_dynamo_prefix_state,
+            torch.empty(2, 2, device="meta"),
+            torch._efficientzerotensor((2, 2)),
+            inference_tensor,
+        )
+        for inp in unsupported_inputs:
+            for strict in (False, True):
+                with self.subTest(input_type=type(inp), strict=strict):
+                    with self.assertRaisesRegex(
+                        (torch._dynamo.exc.UserError, torch._dynamo.exc.Unsupported),
+                        r"only supports copy.copy\(\) on plain storage-backed strided tensors",
+                    ):
+                        export(M(), (inp,), strict=strict)
+
+    def test_export_copy_copy_buffer_with_python_state_unsupported(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                value = torch.randn(2, 2)
+                value.user_attribute = 3
+                self.register_buffer("value", value)
+
+            def forward(self, x):
+                return x + copy.copy(self.value).user_attribute
+
+        for strict in (False, True):
+            with self.assertRaisesRegex(
+                (torch._dynamo.exc.UserError, torch._dynamo.exc.Unsupported),
+                r"only supports copy.copy\(\) on plain storage-backed strided tensors",
+            ):
+                export(M(), (torch.randn(2, 2),), strict=strict)
+
+    def test_export_copy_copy_intermediate_special_unsupported(self):
+        class MetaTensorModule(torch.nn.Module):
+            def forward(self, x):
+                value = torch.empty(20, device="meta").as_strided((2, 3), (4, 1), 5)
+                return copy.copy(value)
+
+        class ZeroTensorModule(torch.nn.Module):
+            def forward(self, x):
+                value = torch._efficientzerotensor(
+                    (2, 3), dtype=x.dtype, device=x.device
+                )
+                return copy.copy(value)
+
+        for module in (MetaTensorModule(), ZeroTensorModule()):
+            for strict in (False, True):
+                with self.subTest(module=type(module), strict=strict):
+                    with self.assertRaisesRegex(
+                        (torch._dynamo.exc.UserError, torch._dynamo.exc.Unsupported),
+                        r"only supports copy.copy\(\) on plain storage-backed strided tensors",
+                    ):
+                        export(module, (torch.randn(2, 3),), strict=strict)
+
+    def test_export_copy_copy_metadata_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = copy.copy(x)
+                y.as_strided_((4,), (1,))
+                return x, y
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(
+                [out.shape for out in ep.module()(*inp)],
+                [out.shape for out in M()(*inp)],
+            )
+            call_function_targets = [
+                node.target
+                for node in ep.graph_module.graph.nodes
+                if node.op == "call_function"
+            ]
+            copy_index = call_function_targets.index(torch.ops.aten.detach.default)
+            self.assertIn(
+                call_function_targets[copy_index + 1],
+                (
+                    torch.ops.aten.as_strided_.default,
+                    torch.ops.aten.as_strided.default,
+                ),
+            )
+
+    def test_export_copy_copy_overlapping_override_contexts(self):
+        from torch._export.non_strict_utils import _override_builtin_ops
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        original_copy = FakeTensor.__dict__.get("__copy__")
+        first = _override_builtin_ops()
+        second = _override_builtin_ops()
+        first_active = False
+        second_active = False
+        try:
+            first.__enter__()
+            first_active = True
+            installed_copy = FakeTensor.__dict__.get("__copy__")
+            self.assertIsNotNone(installed_copy)
+
+            second.__enter__()
+            second_active = True
+            first.__exit__(None, None, None)
+            first_active = False
+
+            # A non-LIFO exit must not remove the hook from the still-active
+            # export context.
+            self.assertIs(FakeTensor.__dict__.get("__copy__"), installed_copy)
+        finally:
+            if first_active:
+                first.__exit__(None, None, None)
+            if second_active:
+                second.__exit__(None, None, None)
+
+        self.assertIs(FakeTensor.__dict__.get("__copy__"), original_copy)
+
+    def test_export_copy_copy_override_preserves_normal_protocol(self):
+        from torch._export.non_strict_utils import _override_builtin_ops
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        fake = FakeTensorMode().from_tensor(torch.ones(2))
+        missing = object()
+        original_reductor = copyreg.dispatch_table.get(FakeTensor, missing)
+        copyreg.dispatch_table[FakeTensor] = lambda tensor: "identity"
+        try:
+            with _override_builtin_ops():
+                installed_copy = FakeTensor.__dict__["__copy__"]
+                unrelated_context = contextvars.Context()
+                self.assertIs(unrelated_context.run(copy.copy, fake), fake)
+
+            # A thread can resolve the hook immediately before the final export
+            # context restores the class. The resolved callable must retain the
+            # normal protocol without consulting cleared global state.
+            self.assertIs(contextvars.Context().run(installed_copy, fake), fake)
+        finally:
+            if original_reductor is missing:
+                del copyreg.dispatch_table[FakeTensor]
+            else:
+                copyreg.dispatch_table[FakeTensor] = original_reductor
 
     def _check_dynamic_shapes_specs_and_shapes(
         self,
@@ -5096,6 +5394,41 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
             ep.graph_module.false_graph_0.code
         )
+
+    def test_is_exporting_is_context_local(self):
+        from torch._export.utils import _compiling_state_context
+
+        entered_context = threading.Event()
+        leave_context = threading.Event()
+        observed = []
+
+        def run_export_context():
+            with _compiling_state_context():
+                observed.append(torch.compiler.is_exporting())
+                entered_context.set()
+                leave_context.wait()
+            observed.append(torch.compiler.is_exporting())
+
+        thread = threading.Thread(target=run_export_context)
+        thread.start()
+        try:
+            self.assertTrue(entered_context.wait(timeout=10))
+            observed.append(torch.compiler.is_exporting())
+
+            # A compile in this thread must not observe the other thread's
+            # export context and lower copy.copy as an export operation.
+            def fn(x):
+                return copy.copy(x)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "copy.copy"):
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        finally:
+            leave_context.set()
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(observed, [True, False, False])
 
     def test_ends_of_bounds_oblivious(self):
         class Foo(torch.nn.Module):

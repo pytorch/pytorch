@@ -1018,7 +1018,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Read dynamically: the cached dict always has True, but
             # is_exporting() should only be True during torch.export.
             if self.value is torch.compiler.is_exporting:
-                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
+                return VariableTracker.build(
+                    tx, torch.compiler._is_exporting_flag.get()
+                )
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1562,7 +1564,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
-            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+            if (
+                tx.output.current_tracer.is_export
+                or torch.compiler._is_exporting_flag.get()
+            ):
                 unimplemented(
                     gb_type="COW tensor check during export",
                     context="torch._C._is_cow_tensor during export",

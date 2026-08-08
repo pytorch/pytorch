@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import contextvars
 import io
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
@@ -576,7 +577,9 @@ def wrap_numpy(fn):
 
 
 _is_compiling_flag: bool = False
-_is_exporting_flag: bool = False
+_is_exporting_flag: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "torch.compiler._is_exporting_flag", default=False
+)
 _is_non_strict_tracing_flag: bool = False
 
 
@@ -748,7 +751,7 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _is_exporting_flag
+    return _is_exporting_flag.get()
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:

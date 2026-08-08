@@ -1,10 +1,14 @@
 import builtins
 import contextlib
+import contextvars
+import copy as copy_module
+import copyreg
 import functools
 import inspect
 import logging
 import math
 import sys
+import threading
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
@@ -13,6 +17,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch._custom_class_base import CustomClassBase
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -22,11 +27,14 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.lift_constants_pass import ConstantAttrMap
-from torch._export.utils import _fakify_params_buffers
+from torch._export.utils import (
+    _fakify_params_buffers,
+    _record_original_tensor_copy_metadata,
+)
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -82,6 +90,14 @@ _RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR = (
     "Wrap the kernel in a torch.library.triton_op and call it through "
     "torch.library.wrap_triton (or torch._library.capture_triton) so export "
     "records a stable custom operator instead of tracing into Triton's runtime."
+)
+
+
+_BUILTIN_OVERRIDE_LOCK = threading.Lock()
+_builtin_override_count = 0
+_builtin_override_originals: tuple[Any, Any, Any, Any] | None = None
+_FAKE_TENSOR_COPY_EXPORT_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "torch._export.fake_tensor_copy_export_depth", default=0
 )
 
 
@@ -249,7 +265,9 @@ def fakify(
         t, source, t_constraints, sources, mode
     )
 
-    fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
+    fake = _record_original_tensor_copy_metadata(
+        mode.from_tensor(t, source=source, symbolic_context=symbolic_context), t
+    )
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
 
@@ -415,30 +433,138 @@ def _tensor_min_max(
     return real_callable(*args, **kwargs)
 
 
+def _copy_fake_tensor_for_export(t: FakeTensor) -> torch.Tensor:
+    if t.requires_grad:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "torch.export does not support copy.copy() on tensors with "
+            "requires_grad=True.",
+        )
+    if (
+        getattr(t, "_export_original_tensor_type", torch.Tensor) is not torch.Tensor
+        or getattr(t, "_export_original_tensor_has_python_state", False)
+        or getattr(t, "_export_original_tensor_device_type", None) == "meta"
+        or getattr(t, "_export_original_tensor_is_zero", False)
+        or not getattr(t, "_export_original_tensor_has_storage", True)
+        or getattr(t, "_export_original_tensor_is_inference", False)
+        or t.device.type == "meta"
+        or t._is_zerotensor()
+        or not torch._C._has_storage(t)
+        or t.is_inference()
+        or getattr(t, "_is_param", False)
+        or getattr(t, "_is_buffer", False)
+        or t.layout is not torch.strided
+        or t.is_quantized
+        or t.is_nested
+        or t.is_sparse
+    ):
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "torch.export only supports copy.copy() on plain storage-backed strided "
+            "tensors without Python attributes or special tensor kinds.",
+        )
+    return torch.ops.aten.detach.default(t)
+
+
+def _copy_fake_tensor_normally(
+    t: FakeTensor, original_copy: Callable[[FakeTensor], object] | None
+) -> torch.Tensor:
+    """Run the portion of copy.copy's protocol hidden by our class hook."""
+    if original_copy is not None:
+        return cast(torch.Tensor, original_copy(t))
+
+    reductor = copyreg.dispatch_table.get(type(t))
+    if reductor is not None:
+        reduced = reductor(t)
+    else:
+        reduce_ex = getattr(t, "__reduce_ex__", None)
+        if reduce_ex is not None:
+            reduced = reduce_ex(4)
+        else:
+            reduce = getattr(t, "__reduce__", None)
+            if reduce is None:
+                raise copy_module.Error(f"un(shallow)copyable object of type {type(t)}")
+            reduced = reduce()
+
+    if isinstance(reduced, str):
+        return t
+    return cast(
+        torch.Tensor,
+        copy_module._reconstruct(t, None, *reduced),  # type: ignore[attr-defined]
+    )
+
+
 @contextmanager
 def _override_builtin_ops() -> Generator[None, None, None]:
-    original_max = builtins.max
-    original_min = builtins.min
-    original_pow = math.pow
+    global _builtin_override_count, _builtin_override_originals
+    copy_export_depth = _FAKE_TENSOR_COPY_EXPORT_DEPTH.get()
+    _FAKE_TENSOR_COPY_EXPORT_DEPTH.set(copy_export_depth + 1)
+    with _BUILTIN_OVERRIDE_LOCK:
+        if _builtin_override_count == 0:
+            original_max = builtins.max
+            original_min = builtins.min
+            original_pow = math.pow
+            original_fake_tensor_copy = FakeTensor.__dict__.get("__copy__")
+            _builtin_override_originals = (
+                original_max,
+                original_min,
+                original_pow,
+                original_fake_tensor_copy,
+            )
 
-    # pyrefly: ignore [bad-assignment]
-    builtins.max = functools.partial(
-        _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
-    )
+            def fake_tensor_copy(t: FakeTensor) -> torch.Tensor:
+                if _FAKE_TENSOR_COPY_EXPORT_DEPTH.get() > 0:
+                    return _copy_fake_tensor_for_export(t)
+                return _copy_fake_tensor_normally(t, original_fake_tensor_copy)
 
-    # pyrefly: ignore [bad-assignment]
-    builtins.min = functools.partial(
-        _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
-    )
+            # pyrefly: ignore [bad-assignment]
+            builtins.max = functools.partial(
+                _tensor_min_max,
+                real_callable=original_max,
+                tensor_callable=torch.maximum,
+            )
 
-    math.pow = lambda x, y: x**y  # type: ignore[operator]
+            # pyrefly: ignore [bad-assignment]
+            builtins.min = functools.partial(
+                _tensor_min_max,
+                real_callable=original_min,
+                tensor_callable=torch.minimum,
+            )
+
+            math.pow = lambda x, y: x**y  # type: ignore[operator]
+            FakeTensor.__copy__ = fake_tensor_copy  # type: ignore[attr-defined]
+        _builtin_override_count += 1
 
     try:
         yield
     finally:
-        builtins.max = original_max
-        builtins.min = original_min
-        math.pow = original_pow
+        try:
+            with _BUILTIN_OVERRIDE_LOCK:
+                _builtin_override_count -= 1
+                if _builtin_override_count < 0:
+                    raise AssertionError("unbalanced builtin override context")
+                if _builtin_override_count == 0:
+                    if _builtin_override_originals is None:
+                        raise AssertionError("missing builtin override originals")
+                    (
+                        original_max,
+                        original_min,
+                        original_pow,
+                        original_fake_tensor_copy,
+                    ) = _builtin_override_originals
+                    builtins.max = original_max
+                    builtins.min = original_min
+                    math.pow = original_pow
+                    if original_fake_tensor_copy is None:
+                        del FakeTensor.__copy__  # type: ignore[attr-defined]
+                    else:
+                        FakeTensor.__copy__ = original_fake_tensor_copy  # type: ignore[attr-defined]
+                    _builtin_override_originals = None
+        finally:
+            remaining_depth = _FAKE_TENSOR_COPY_EXPORT_DEPTH.get() - 1
+            if remaining_depth < 0:
+                raise AssertionError("unbalanced FakeTensor copy override context")
+            _FAKE_TENSOR_COPY_EXPORT_DEPTH.set(remaining_depth)
 
 
 def _make_fake_inputs_with_spec(
@@ -473,10 +599,15 @@ def _make_fake_inputs_with_spec(
         """Fakify a single flat input leaf against its (already-bound) spec."""
         if isinstance(x, torch.Tensor):
             if leaf_spec is None:
-                return fake_mode.from_tensor(x, static_shapes=True, source=source)
+                return _record_original_tensor_copy_metadata(
+                    fake_mode.from_tensor(x, static_shapes=True, source=source), x
+                )
             ctx = _symbolic_context_from_shapes_spec(x, source, leaf_spec, None, {})
-            fake_x = fake_mode.from_tensor(
-                x, static_shapes=False, source=source, symbolic_context=ctx
+            fake_x = _record_original_tensor_copy_metadata(
+                fake_mode.from_tensor(
+                    x, static_shapes=False, source=source, symbolic_context=ctx
+                ),
+                x,
             )
             _wire_tensor_spec_dims(leaf_spec, fake_x)
             return fake_x
