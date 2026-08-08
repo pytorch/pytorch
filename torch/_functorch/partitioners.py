@@ -1370,6 +1370,15 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Record which primals have static addresses (params/buffers/
+    # mark_static_address inputs). Saved primals that are plain user inputs
+    # get a fresh tensor every call, and the backward compiler must not
+    # bake in address-derived properties (e.g. alignment) for them. The
+    # meta dict is shared with the extracted fwd/bwd placeholder nodes, so
+    # this is visible on bw_module's placeholders.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
