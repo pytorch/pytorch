@@ -910,6 +910,16 @@ def optim_inputs_func_muon(device, dtype=None):
             kwargs={"adjust_lr_fn": "spectral_unclamped"},
             desc="spectral_unclamped lr adjustment",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"extra_scale_factor": 5.0},
+            desc="non-default extra_scale_factor",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "match_rms_adamw", "extra_scale_factor": 5.0},
+            desc="extra_scale_factor on top of match_rms_adamw",
+        ),
     ]
 
 
@@ -940,6 +950,16 @@ def optim_error_inputs_func_muon(device, dtype):
             ),
             error_type=ValueError,
             error_regex="Adjust learning rate function arbitrary is not supported",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"extra_scale_factor": -1.0},
+                desc="negative extra_scale_factor",
+            ),
+            error_type=ValueError,
+            error_regex="extra_scale_factor should be >= 0 but is: -1.0",
             error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
         ),
         ErrorOptimizerInput(
