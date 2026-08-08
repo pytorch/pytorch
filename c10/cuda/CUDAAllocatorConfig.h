@@ -18,19 +18,6 @@ enum class Expandable_Segments_Handle_Type : int {
 // Environment config parser
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::max_split_size() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size() instead.")
-  static size_t max_split_size() {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size();
-  }
-
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::garbage_collection_threshold() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::garbage_collection_threshold() instead.")
-  static double garbage_collection_threshold() {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        garbage_collection_threshold();
-  }
-
   static bool expandable_segments() {
     bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
         use_expandable_segments();
@@ -82,13 +69,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_pinned_num_register_threads;
   }
 
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_background_threads() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_use_background_threads() instead.")
-  static bool pinned_use_background_threads() {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        pinned_use_background_threads();
-  }
-
   static size_t pinned_reserve_segment_size_mb() {
     return instance().m_pinned_reserve_segment_size_mb;
   }
@@ -104,29 +84,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_pinned_free_catch_all;
   }
 
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::roundup_power2_divisions() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::roundup_power2_divisions() instead.")
-  static size_t roundup_power2_divisions(size_t size) {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        roundup_power2_divisions(size);
-  }
-
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::roundup_power2_divisions() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::roundup_power2_divisions() instead.")
-  static std::vector<size_t> roundup_power2_divisions() {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        roundup_power2_divisions();
-  }
-
   static size_t max_non_split_rounding_size() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         max_non_split_rounding_size();
-  }
-
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::last_allocator_settings() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::last_allocator_settings() instead.")
-  static std::string last_allocator_settings() {
-    return c10::CachingAllocator::getAllocatorSettings();
   }
 
   static CUDAAllocatorConfig& instance() {
