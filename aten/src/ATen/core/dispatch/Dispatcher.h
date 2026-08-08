@@ -10,6 +10,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
+#include <atomic>
 #include <condition_variable>
 #include <list>
 #include <mutex>
@@ -299,6 +300,34 @@ class TORCH_API Dispatcher final {
       std::string debug);
 
   /**
+   * Opt the PrivateUse1 backend out of CompositeExplicitAutograd (CEA) and
+   * CompositeExplicitAutogradNonFunctional (CEANF) decompositions.
+   *
+   * By default the dispatch table resolves CEA kernels before the backend
+   * fallback, so a PrivateUse1 backend that registers a catch-all fallback
+   * never sees composite ops — it only receives the decomposed primitives
+   * (e.g. softmax -> _softmax).  Calling this function causes the dispatcher
+   * to skip the CEA/CEANF alias lookup for PrivateUse1 and route directly to
+   * the registered backend fallback instead.
+   *
+   * Direct PrivateUse1 kernel registrations are unaffected and always take
+   * priority over both CEA and the fallback.
+   *
+   * Returns a RAII handle.  The opt-out is active for as long as the handle
+   * is alive; destroying it restores the previous behavior and refreshes the
+   * PrivateUse1 dispatch table entries for all operators.
+   *
+   * Only one opt-out may be active at a time; attempting to register a second
+   * one before releasing the first raises an error.
+   */
+  TORCH_API RegistrationHandleRAII setPrivateUse1SkipCEA();
+
+  // Returns true if PrivateUse1 is currently opted out of CEA decompositions.
+  bool privateuse1SkipCEA() const {
+    return privateuse1_skip_cea_.load(std::memory_order_relaxed);
+  }
+
+  /**
    * Use to register whenever we had a TORCH_LIBRARY declaration in the frontend
    * API.  These invocations are only permitted once per program, so we raise
    * an error if this is called again for the same namespace.
@@ -413,6 +442,16 @@ class TORCH_API Dispatcher final {
 
   std::array<impl::AnnotatedKernel, num_runtime_entries>
       backendFallbackKernels_;
+
+  // When true, the CEA and CEANF alias lookup steps are skipped for
+  // PrivateUse1 during dispatch table computation, allowing ops to fall
+  // through to the registered backend fallback instead.
+  // Written under guard_->mutex alongside the dispatch table refresh loop.
+  // Read via relaxed atomic load — both inside
+  // computeDispatchTableEntryWithDebug() (called under the mutex during table
+  // rebuilds) and from the public privateuse1SkipCEA() getter (called without
+  // the mutex).
+  std::atomic<bool> privateuse1_skip_cea_{false};
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 

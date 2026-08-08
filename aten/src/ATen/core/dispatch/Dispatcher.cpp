@@ -479,6 +479,27 @@ void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   }
 }
 
+RegistrationHandleRAII Dispatcher::setPrivateUse1SkipCEA() {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  TORCH_CHECK(
+      !privateuse1_skip_cea_.load(std::memory_order_relaxed),
+      "Attempted to register PrivateUse1 CEA skip, but one is already active. "
+      "Release the existing handle before registering a new one.");
+  privateuse1_skip_cea_.store(true, std::memory_order_relaxed);
+  for (auto& op : operators_) {
+    op.op.updateFallback(*this, DispatchKey::PrivateUse1);
+  }
+  return RegistrationHandleRAII([guard = this->guard_, this] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    privateuse1_skip_cea_.store(false, std::memory_order_relaxed);
+    for (auto& op : operators_) {
+      op.op.updateFallback(*this, DispatchKey::PrivateUse1);
+    }
+  });
+}
 
 RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(guard_->mutex);

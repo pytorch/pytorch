@@ -5,10 +5,13 @@ import os
 import re
 from collections import namedtuple
 
+import torch
 import torch._C as C
+import torch.utils
 import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.library import _scoped_library
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
@@ -1149,6 +1152,173 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
             "Could not run 'aten::bmm.out' with arguments from the 'QuantizedCPU' backend.",
             lambda: torch.bmm(qx, qy),
         )
+
+
+def _privateuse1_has_backend_fallback() -> bool:
+    handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+    try:
+        dump = torch._C._dispatch_dump_table("aten::convolution")
+        for line in dump.splitlines():
+            if line.strip().startswith("PrivateUse1:"):
+                return "[backend fallback]" in line
+        return False
+    finally:
+        del handle
+
+
+@skipIfTorchDynamo("RAII handle release via del is not reliable under Dynamo")
+class TestPrivateUse1SkipCEAFlag(TestCase):
+    """Tests for the skip_cea_decomposition_for_privateuse1() RAII API."""
+
+    def test_flag_is_false_by_default(self):
+        self.assertFalse(torch._C._dispatch_privateuse1_skip_cea_enabled())
+
+    def test_handle_activates_flag(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            self.assertTrue(torch._C._dispatch_privateuse1_skip_cea_enabled())
+        finally:
+            del handle
+
+    def test_handle_restores_flag_on_delete(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        del handle
+        self.assertFalse(torch._C._dispatch_privateuse1_skip_cea_enabled())
+
+    def test_handle_restores_flag_after_exception(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            raise RuntimeError("simulated error")
+        except RuntimeError:
+            pass
+        finally:
+            del handle
+        self.assertFalse(torch._C._dispatch_privateuse1_skip_cea_enabled())
+
+    def test_double_registration_raises(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "already active"):
+                torch.utils.skip_cea_decomposition_for_privateuse1()
+        finally:
+            del handle
+
+    def test_flag_can_be_re_enabled_after_release(self):
+        handle1 = torch.utils.skip_cea_decomposition_for_privateuse1()
+        del handle1
+        handle2 = torch.utils.skip_cea_decomposition_for_privateuse1()
+        self.assertTrue(torch._C._dispatch_privateuse1_skip_cea_enabled())
+        del handle2
+        self.assertFalse(torch._C._dispatch_privateuse1_skip_cea_enabled())
+
+
+@skipIfTorchDynamo("RAII handle release via del is not reliable under Dynamo")
+class TestPrivateUse1SkipCEATableInspection(TestCase):
+    """Tests that skip_cea changes dispatch table entries for CEA ops only."""
+
+    _pu1_fallback_ctx = None
+
+    @classmethod
+    def setUpClass(cls):
+        if _privateuse1_has_backend_fallback():
+            cls._pu1_fallback_ctx = None
+        else:
+            cls._pu1_fallback_ctx = _scoped_library("_", "IMPL", "PrivateUse1")
+            lib = cls._pu1_fallback_ctx.__enter__()
+
+            def _privateuse1_test_fallback(op, *args, **kwargs):
+                raise NotImplementedError(f"PrivateUse1 test fallback for {op.name()}")
+
+            lib.fallback(_privateuse1_test_fallback, "PrivateUse1")
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._pu1_fallback_ctx is not None:
+            cls._pu1_fallback_ctx.__exit__(None, None, None)
+            cls._pu1_fallback_ctx = None
+
+    def _pu1_entry(self, op_name: str) -> str:
+        dump = torch._C._dispatch_dump_table(op_name)
+        for line in dump.splitlines():
+            if line.strip().startswith("PrivateUse1:"):
+                return line.strip()
+        self.fail(f"PrivateUse1 entry not found in dispatch table for {op_name!r}")
+
+    def test_cea_op_shows_default_backend_kernel_without_skip(self):
+        entry = self._pu1_entry("aten::convolution")
+        self.assertIn(
+            "[default backend kernel]",
+            entry,
+            f"Expected CEA ([default backend kernel]) for convolution; got: {entry!r}",
+        )
+
+    def test_cea_op_shows_backend_fallback_with_skip(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            entry = self._pu1_entry("aten::convolution")
+            self.assertIn(
+                "[backend fallback]",
+                entry,
+                f"Expected [backend fallback] for convolution with skip; got: {entry!r}",
+            )
+        finally:
+            del handle
+
+    def test_cea_table_entry_restored_after_handle_released(self):
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        del handle
+        entry = self._pu1_entry("aten::convolution")
+        self.assertIn(
+            "[default backend kernel]",
+            entry,
+            f"Expected CEA restored after del handle; got: {entry!r}",
+        )
+
+    def test_cia_op_table_entry_unchanged_by_skip(self):
+        entry_before = self._pu1_entry("aten::softmax.int")
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            entry_after = self._pu1_entry("aten::softmax.int")
+            self.assertIn("[math kernel]", entry_before)
+            self.assertEqual(
+                entry_before,
+                entry_after,
+                "softmax.int (CIA) dispatch table entry must not change with skip_cea",
+            )
+        finally:
+            del handle
+
+    def _backend_entry(self, op_name: str, key: str) -> str:
+        dump = torch._C._dispatch_dump_table(op_name)
+        for line in dump.splitlines():
+            if line.strip().startswith(key):
+                return line.strip()
+        self.fail(f"{key} entry not found in dispatch table for {op_name!r}")
+
+    def test_cpu_cuda_slots_unaffected_by_skip(self):
+        cpu_before = self._backend_entry("aten::convolution", "CPU:")
+        cuda_before = (
+            self._backend_entry("aten::convolution", "CUDA:")
+            if torch.cuda.is_available()
+            else None
+        )
+        handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        try:
+            cpu_after = self._backend_entry("aten::convolution", "CPU:")
+            self.assertEqual(
+                cpu_before,
+                cpu_after,
+                "CPU dispatch table entry for convolution must not change with skip_cea",
+            )
+            if cuda_before is not None:
+                cuda_after = self._backend_entry("aten::convolution", "CUDA:")
+                self.assertEqual(
+                    cuda_before,
+                    cuda_after,
+                    "CUDA dispatch table entry for convolution must not change with skip_cea",
+                )
+        finally:
+            del handle
 
 
 if __name__ == "__main__":

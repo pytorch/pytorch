@@ -8,6 +8,7 @@ from torch.overrides import handle_torch_function, has_torch_function_unary
 __all__ = [
     "rename_privateuse1_backend",
     "generate_methods_for_privateuse1_backend",
+    "skip_cea_decomposition_for_privateuse1",
 ]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
@@ -501,6 +502,40 @@ def _get_custom_mod_func(func_name: str):
         message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
         raise RuntimeError(message)
     return function
+
+
+def skip_cea_decomposition_for_privateuse1():
+    r"""Opt the PrivateUse1 backend out of CompositeExplicitAutograd decompositions.
+
+    By default, PyTorch resolves CompositeExplicitAutograd (CEA) kernels
+    *before* the backend fallback in the dispatch table.  A PrivateUse1 backend
+    that registers a single catch-all fallback therefore never sees composite
+    ops — it only receives the already-decomposed primitives (e.g. ``softmax``
+    becomes ``_softmax``).
+
+    Calling this function tells the dispatcher to skip the CEA and
+    CompositeExplicitAutogradNonFunctional alias lookups for PrivateUse1 so
+    that ops with only a CEA kernel fall through to the registered backend
+    fallback instead.  Ops that have a direct PrivateUse1 kernel registered
+    are unaffected (direct registrations always take priority).
+
+    Returns an opaque handle.  The opt-out is active for as long as the handle
+    is alive.  Releasing it (``del handle``) restores the previous behavior and
+    refreshes all affected dispatch table entries automatically.
+
+    Only one opt-out may be active at a time.  Calling this function again
+    before releasing the existing handle raises :class:`RuntimeError`.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires PrivateUse1 backend registration")
+        >>> handle = torch.utils.skip_cea_decomposition_for_privateuse1()
+        >>> # CEA-covered ops (softmax, conv, layer_norm, …) now route to
+        >>> # the PrivateUse1 fallback unchanged.
+        >>> del handle  # restore previous behavior
+
+    """
+    return torch._C._dispatch_set_privateuse1_skip_cea()  # type: ignore[attr-defined]
 
 
 class _DummyBackendModule:

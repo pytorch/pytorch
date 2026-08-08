@@ -29,6 +29,7 @@
 
     generate_methods_for_privateuse1_backend
     rename_privateuse1_backend
+    skip_cea_decomposition_for_privateuse1
 ```
 
 # torch.utils.hooks

@@ -920,6 +920,34 @@ static PyObject* THModule_get_privateuse1_backend_name(
   END_HANDLE_TH_ERRORS
 }
 
+// Opt the PrivateUse1 backend out of CEA/CEANF decompositions.
+// Returns a PyCapsule holding the RAII handle; destroying it restores the
+// previous behavior.
+static PyObject* THModule_set_privateuse1_skip_cea(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto handle = new c10::RegistrationHandleRAII(
+      c10::Dispatcher::singleton().setPrivateUse1SkipCEA());
+  return PyCapsule_New(handle, "PrivateUse1SkipCEAHandle", [](PyObject* cap) {
+    delete static_cast<c10::RegistrationHandleRAII*>(
+        PyCapsule_GetPointer(cap, "PrivateUse1SkipCEAHandle"));
+  });
+  END_HANDLE_TH_ERRORS
+}
+
+// Returns True if PrivateUse1 is currently opted out of CEA decompositions.
+static PyObject* THModule_privateuse1_skip_cea_enabled(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (c10::Dispatcher::singleton().privateuse1SkipCEA()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2295,6 +2323,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_get_privateuse1_backend_name",
      THModule_get_privateuse1_backend_name,
+     METH_NOARGS,
+     nullptr},
+    {"_dispatch_set_privateuse1_skip_cea",
+     THModule_set_privateuse1_skip_cea,
+     METH_NOARGS,
+     nullptr},
+    {"_dispatch_privateuse1_skip_cea_enabled",
+     THModule_privateuse1_skip_cea_enabled,
      METH_NOARGS,
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
