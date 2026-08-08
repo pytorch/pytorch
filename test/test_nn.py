@@ -18,7 +18,7 @@ from copy import deepcopy
 from itertools import product
 from functools import partial
 from collections import OrderedDict
-from unittest import SkipTest
+from unittest import mock, SkipTest
 
 import torch
 from torch import inf, nan
@@ -16215,6 +16215,16 @@ class TestFusedRMSNormOverrideRouting(TestCase):
     covered by test/python_native/.
     """
 
+    def test_sm12x_supported(self):
+        from torch._native.ops.norm.rmsnorm_impl import _is_supported
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        for capability in ((12, 0), (12, 1)):
+            with mock.patch(
+                "torch.cuda.get_device_capability", return_value=capability
+            ):
+                self.assertTrue(_is_supported(x))
+
     def test_fwd_cond_fires_supported_fp16(self):
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
 
@@ -16327,23 +16337,26 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         self.assertFalse(_fused_rms_norm_cond(x, [n], None, 1e-5))
 
     def test_fwd_cond_smem_boundary(self):
-        # bf16 fwd: 2^20 fits the smem budget (verified to launch), 2^21
-        # overflows it (verified launch failure without the cond guard).
+        # SM12x has a smaller cluster and smem budget than SM90/SM100.
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
 
-        x = torch.empty(1, 1 << 20, dtype=torch.bfloat16, device="cuda")
-        self.assertTrue(_fused_rms_norm_cond(x, [1 << 20], None, 1e-5))
-        x = torch.empty(1, 1 << 21, dtype=torch.bfloat16, device="cuda")
-        self.assertFalse(_fused_rms_norm_cond(x, [1 << 21], None, 1e-5))
+        major, _ = torch.cuda.get_device_capability()
+        fit_n, overflow_n = (1 << 18, 1 << 19) if major == 12 else (1 << 20, 1 << 21)
+        x = torch.empty(1, fit_n, dtype=torch.bfloat16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [fit_n], None, 1e-5))
+        x = torch.empty(1, overflow_n, dtype=torch.bfloat16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [overflow_n], None, 1e-5))
 
     def test_bwd_cond_false_on_huge_normalized_dim(self):
         # The bwd smem footprint is smem_stages * (x + dout) tiles, so its
-        # bound is tighter than the fwd's: bf16 2^18 fits, 2^19 does not.
+        # bound is tighter than the fwd's and tighter again on SM12x.
         from torch._native.ops.norm.rmsnorm_impl import (
             _fused_rms_norm_backward_cond,
         )
 
-        for n, expected in ((1 << 18, True), (1 << 19, False)):
+        major, _ = torch.cuda.get_device_capability()
+        cases = ((1 << 16, True), (1 << 17, False)) if major == 12 else ((1 << 18, True), (1 << 19, False))
+        for n, expected in cases:
             x = torch.empty(1, n, dtype=torch.bfloat16, device="cuda")
             gout = torch.empty(1, n, dtype=torch.bfloat16, device="cuda")
             rstd = torch.empty(1, 1, dtype=torch.float32, device="cuda")
