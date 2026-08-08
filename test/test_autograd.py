@@ -4501,6 +4501,134 @@ class TestAutograd(TestCase):
         self.assertEqual(ReturnInput.seen_grad_dtype, torch.float32)
         self.assertEqual(x.grad.dtype, torch.float64)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_input_grad_dtype(self):
+        class QueryInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, scale, x, flag, y):
+                QueryInput.ctx = ctx
+                QueryInput.forward_seen = ctx.get_input_grad_dtype()
+                return x * scale + y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                QueryInput.backward_seen = ctx.get_input_grad_dtype()
+                return None, grad_output, None, None
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x.grad_dtype = torch.float16
+        y = torch.tensor([3.0, 4.0])
+        output = QueryInput.apply(scale=2.0, x=x, flag=True, y=y)
+        expected = (None, torch.float16, None, None)
+        self.assertEqual(QueryInput.forward_seen, expected)
+        self.assertEqual(QueryInput.ctx.get_input_grad_dtype(), expected)
+        output.sum().backward()
+        self.assertEqual(QueryInput.backward_seen, expected)
+        self.assertEqual(QueryInput.ctx.get_input_grad_dtype(), expected)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x.grad_dtype = None
+        QueryInput.apply(2.0, x, True, y)
+        self.assertEqual(QueryInput.forward_seen, (None, None, None, None))
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_input_grad_dtype_live_read(self):
+        class QueryLive(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                before = ctx.get_input_grad_dtype()
+                x.grad_dtype = torch.float64
+                after = ctx.get_input_grad_dtype()
+                QueryLive.seen = (before, after)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        QueryLive.apply(x)
+        self.assertEqual(QueryLive.seen, ((torch.float32,), (torch.float64,)))
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_input_grad_dtype_repeated_input(self):
+        class SameTensorTwice(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                SameTensorTwice.seen = ctx.get_input_grad_dtype()
+                return x + y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x.grad_dtype = torch.float16
+        SameTensorTwice.apply(x, x)
+        self.assertEqual(SameTensorTwice.seen, (torch.float16, torch.float16))
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_input_grad_dtype_from_output_declaration(self):
+        class DeclareOutputDtypes(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                first = x.to(torch.bfloat16)
+                second = x.to(torch.float16)
+                ctx.set_output_grad_dtype(torch.float64, None)
+                return first, second
+
+            @staticmethod
+            def backward(ctx, first_grad, second_grad):
+                return first_grad.to(torch.float32) + second_grad.to(torch.float32)
+
+        class QueryInputs(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, first, second):
+                QueryInputs.seen = ctx.get_input_grad_dtype()
+                return first.to(torch.float32) + second.to(torch.float32)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output.to(torch.float64), grad_output
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        first, second = DeclareOutputDtypes.apply(x)
+        QueryInputs.apply(first, second)
+        self.assertEqual(QueryInputs.seen, (torch.float64, None))
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_input_grad_dtype_setup_context_and_jvp(self):
+        import torch.autograd.forward_ad as fwAD
+
+        class QuerySetupContext(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                QuerySetupContext.setup_seen = ctx.get_input_grad_dtype()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def jvp(ctx, grad_input):
+                QuerySetupContext.jvp_seen = ctx.get_input_grad_dtype()
+                return grad_input
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x.grad_dtype = torch.float16
+        QuerySetupContext.apply(x)
+        self.assertEqual(QuerySetupContext.setup_seen, (torch.float16,))
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, torch.ones_like(x))
+            QuerySetupContext.apply(dual)
+
+        self.assertEqual(QuerySetupContext.setup_seen, (torch.float32,))
+        self.assertEqual(QuerySetupContext.jvp_seen, (torch.float32,))
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,

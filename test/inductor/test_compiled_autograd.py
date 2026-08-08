@@ -5704,7 +5704,7 @@ test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
 # setattr-ing on the Function class, which dynamo cannot trace once compiled
 # autograd inlines the backward.
 for name in dir(test_autograd.TestAutograd):
-    if name.startswith("test_ctx_output_grad_dtype"):
+    if name.startswith(("test_ctx_input_grad_dtype", "test_ctx_output_grad_dtype")):
         skipped_tests.add(name)
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)

@@ -1705,6 +1705,41 @@ static PyObject* resolve_kwargs_to_positional(
   return result.release();
 }
 
+static PyObject* THPFunction_input_grad_dtype(PyObject* self_, PyObject*) {
+  HANDLE_TH_ERRORS
+  auto* self = reinterpret_cast<THPFunction*>(self_);
+  const auto& next_edges = self->cdata->next_edges();
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(self->is_variable_input.size())));
+  if (!result) {
+    return nullptr;
+  }
+
+  size_t variable_index = 0;
+  for (const auto i : c10::irange(self->is_variable_input.size())) {
+    PyObject* dtype = Py_None;
+    if (self->is_variable_input[i]) {
+      if (variable_index < next_edges.size()) {
+        const auto& edge = next_edges[variable_index];
+        if (edge.function) {
+          const auto& metadata = edge.function->input_metadata(edge.input_nr);
+          if (!metadata.was_default_constructed()) {
+            const auto grad_dtype = metadata.grad_dtype();
+            if (grad_dtype.has_value()) {
+              dtype = reinterpret_cast<PyObject*>(
+                  torch::getTHPDtype(grad_dtype.value()));
+            }
+          }
+        }
+      }
+      variable_index++;
+    }
+    PyTuple_SET_ITEM(result.get(), i, Py_NewRef(dtype));
+  }
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static bool are_functorch_transforms_active() {
   auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
   return include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
@@ -2333,6 +2368,10 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
     {(char*)"_get_compiled_autograd_symints",
      THPFunction_get_compiled_autograd_symints,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"_input_grad_dtype",
+     THPFunction_input_grad_dtype,
      METH_NOARGS,
      nullptr},
     {nullptr}};

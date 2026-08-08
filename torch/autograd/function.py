@@ -273,6 +273,32 @@ class FunctionCtx:
             raise RuntimeError("set_output_grad_dtype can only be called once")
         self.output_grad_dtypes = dtypes
 
+    def get_input_grad_dtype(self) -> "tuple[torch.dtype | None, ...]":
+        r"""Return the expected gradient dtype for each of this Function's inputs.
+
+        This method may be called from any Function method. The returned tuple
+        has one entry for each input passed to :meth:`forward`, and each entry
+        corresponds positionally to the gradient returned by :meth:`backward`.
+
+        For each input, a :class:`torch.dtype` is the dtype that
+        :meth:`backward` should use for its gradient. ``None`` means that any
+        dtype is accepted. Non-Tensor and non-differentiable inputs also have
+        ``None`` because they do not receive gradients.
+
+        For example::
+
+            >>> # xdoctest: +SKIP
+            >>> @staticmethod
+            >>> def forward(ctx, x, y, indices, scale):
+            >>>     # x and y are differentiable Tensors.
+            >>>     # x.grad_dtype is torch.float16; y.grad_dtype is None.
+            >>>     # indices is a non-differentiable Tensor; scale is not a Tensor.
+            >>>     input_grad_dtypes = ctx.get_input_grad_dtype()
+            >>>     # input_grad_dtypes is (torch.float16, None, None, None).
+            >>>     return (x + y) * scale
+        """
+        return self._input_grad_dtype()  # pyrefly: ignore[missing-attribute]
+
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
 
