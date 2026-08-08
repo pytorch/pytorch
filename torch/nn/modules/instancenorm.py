@@ -142,14 +142,24 @@ class InstanceNorm1d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,t)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,t})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,t})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,t})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,t})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -261,14 +271,24 @@ class InstanceNorm2d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,h,w})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,h,w})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,h,w})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,h,w})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -381,14 +401,24 @@ class InstanceNorm3d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,d,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,d,h,w})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,d,h,w})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,d,h,w})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,d,h,w})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
