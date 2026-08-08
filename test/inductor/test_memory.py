@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import random
+import types
 import unittest
 from unittest import mock
 
@@ -553,6 +555,59 @@ class TestOperatorReorderForPeakMemory(TestCase):
                     f"because different ranks may execute collectives in different orders."
                 ),
             )
+
+
+class TestLpmfReadyQueue(TestCase):
+    """Unit tests for the segment-tree node selector used by topological_sort_lpmf.
+
+    These do not require a GPU or Triton: they check that select() returns the
+    exact argmin of the greedy key that the previous linear scan computed.
+    """
+
+    class _Node:
+        def __init__(self, index, size):
+            self.mpi_node = types.SimpleNamespace(index=index, size=size)
+
+    @staticmethod
+    def _argmin(active, mtf, gap):
+        return min(
+            active,
+            key=lambda n: (
+                n.mpi_node.size if n.mpi_node.size > gap else 0,
+                n.mpi_node.size - mtf[n],
+                n.mpi_node.index,
+            ),
+        )
+
+    def test_select_matches_linear_scan(self):
+        rng = random.Random(0)
+        for _ in range(300):
+            n = rng.randint(1, 40)
+            nodes = [self._Node(i, rng.randint(1, 50)) for i in range(n)]
+            q = memory._LpmfReadyQueue(nodes)
+            mtf, active = {}, set()
+            for nd in nodes:
+                if rng.random() < 0.7:
+                    mtf[nd] = rng.randint(0, 50)
+                    q.add(nd, mtf[nd])
+                    active.add(nd)
+            if not active:
+                mtf[nodes[0]] = 0
+                q.add(nodes[0], 0)
+                active.add(nodes[0])
+            for _ in range(30):
+                gap = rng.randint(0, 60)
+                self.assertIs(q.select(gap), self._argmin(active, mtf, gap))
+                r = rng.random()
+                if r < 0.3 and len(active) > 1:
+                    victim = rng.choice(list(active))
+                    q.remove(victim)
+                    active.discard(victim)
+                elif r < 0.7:
+                    nd = rng.choice(nodes)
+                    mtf[nd] = rng.randint(0, 50)
+                    q.add(nd, mtf[nd])
+                    active.add(nd)
 
 
 if __name__ == "__main__":
