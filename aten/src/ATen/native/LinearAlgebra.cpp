@@ -2125,6 +2125,31 @@ static Tensor _matmul_impl(
     auto output_shape = infer_size_symdimvector(batch_tensor1, batch_tensor2);
     const c10::SymInt expand_batch_product = c10::multiply_integers(output_shape);
 
+    // expand_symint allocates a new TensorImpl and incurs a dispatch even when
+    // the requested shape already equals the input shape (a no-op broadcast),
+    // which is the common case for the full-batch operand in a broadcasted
+    // batched matmul. Skip it in that case and reshape the input directly; the
+    // result is identical because expand with matching sizes returns an
+    // equivalent view. When equality cannot be proven (symbolic shapes) we fall
+    // back to expand, preserving the original behavior.
+    const auto maybe_expand_symint =
+        [](const Tensor& t, c10::SymIntArrayRef expand_size) -> Tensor {
+      const auto sizes = t.sym_sizes();
+      if (sizes.size() == expand_size.size()) {
+        bool same = true;
+        for (size_t i = 0; i < sizes.size(); ++i) {
+          if (!TORCH_GUARD_OR_FALSE(sizes[i].sym_eq(expand_size[i]))) {
+            same = false;
+            break;
+          }
+        }
+        if (same) {
+          return t;
+        }
+      }
+      return t.expand_symint(expand_size);
+    };
+
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{
       c10::SymDimVector ret;
@@ -2133,9 +2158,9 @@ static Tensor _matmul_impl(
       ret.append({n, m1});
       return ret;
     }();
-    const auto tensor1_expanded = tensor1
-                                      .expand_symint(tensor1_expand_size)
-                                      .reshape_symint({expand_batch_product, n, m1});
+    const auto tensor1_expanded =
+        maybe_expand_symint(tensor1, tensor1_expand_size)
+            .reshape_symint({expand_batch_product, n, m1});
     // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
@@ -2150,7 +2175,7 @@ static Tensor _matmul_impl(
       }
       return ret;
     }();
-    auto tensor2_expanded = tensor2.expand_symint(tensor2_expand_size);
+    auto tensor2_expanded = maybe_expand_symint(tensor2, tensor2_expand_size);
     if (vector_rhs) {
       tensor2_expanded = tensor2_expanded
                              .reshape_symint({expand_batch_product, m2})
