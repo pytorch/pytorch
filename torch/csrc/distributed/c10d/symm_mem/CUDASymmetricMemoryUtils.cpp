@@ -259,7 +259,7 @@ std::string IpcChannel::get_socket_name(int pid) {
   }
   std::ostringstream oss;
   oss << tmp_dir << "/symm_mem-" << pid;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void map_block(
@@ -285,12 +285,6 @@ void map_block(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
-  C10_CUDA_CHECK(hipMemMap(
-      *ptr,
-      size,
-      0,
-      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
-      0ULL));
   C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,

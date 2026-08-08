@@ -16,6 +16,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <torch/csrc/mps/Stream.h>
 #endif
 
 namespace torch::mps {
@@ -228,6 +229,21 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_MPS
+static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
+  HANDLE_TH_ERRORS
+  at::mps::MPSStream* mps_stream = nullptr;
+  if (stream != Py_None) {
+    TORCH_CHECK(
+        THPMPSStream_Check(stream), "invalid stream argument to setStream");
+    mps_stream = reinterpret_cast<THPMPSStream*>(stream)->mps_stream;
+  }
+  at::mps::setCurrentMPSStream(mps_stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+#endif /* USE_MPS */
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -277,6 +293,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
      nullptr},
+#ifdef USE_MPS
+    {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+#endif /* USE_MPS */
     {nullptr}};
 
 PyMethodDef* python_functions() {
@@ -545,7 +564,12 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_stopCapture", []() {
+    // See MPSModule_deviceSynchronize: stopCapture drains the stream, so the
+    // GIL must be released while waiting on GPU work
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSProfiler().stopCapture();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
