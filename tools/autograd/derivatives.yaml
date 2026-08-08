@@ -659,7 +659,7 @@
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
-  self: grad * (result.conj() + 1)
+  self: grad * self.exp().conj()
   result: auto_element_wise
 
 # TODO: this derivative is not SymInt safe, need sum_to support
