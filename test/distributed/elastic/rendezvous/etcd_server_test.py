@@ -58,3 +58,36 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+    def test_find_free_port_handles_socket_creation_failure(self):
+        """
+        Test that find_free_port does not raise UnboundLocalError
+        when socket creation fails on the first attempt.
+        """
+        call_count = [0]
+        original_socket = __import__('socket').socket
+        def failing_socket(family, type, proto=__import__('socket').SOCK_STREAM):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise OSError("Simulated socket creation failure")
+            return original_socket(family, type, proto)
+
+        with patch('socket.socket', side_effect=failing_socket):
+            # This should NOT raise UnboundLocalError
+            # It should either succeed on a later address or raise RuntimeError
+            try:
+                sock = find_free_port()
+                # If we got here, socket was created successfully
+                try:
+                    port = sock.getsockname()[1]
+                    self.assertGreater(port, 0)
+                finally:
+                    sock.close()
+            except UnboundLocalError:
+                self.fail("find_free_port raised UnboundLocalError - bug not fixed!")
+            except OSError:
+                # Expected if all socket creations fail
+                pass
+            except RuntimeError:
+                # Also expected if all socket creations fail
+                pass
