@@ -659,6 +659,25 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
         init_device_reg()
     return device_interfaces.items()
 
+def register_interface_for_privateuse1() -> None:
+    backend = torch._C._get_privateuse1_backend_name()
+    necessary_funcs = ["get_pu1_interface"]
+    if hasattr(torch, backend):
+        custom_device_mod = getattr(torch, backend)
+        all_funcs_exist = True
+        for func_name in necessary_funcs:
+            if not hasattr(custom_device_mod, func_name):
+                all_funcs_exist = False
+                break
+        if all_funcs_exist:
+            interface = custom_device_mod.get_pu1_interface()
+            if interface:
+                register_interface_for_device(backend, interface)
+                module = getattr(torch, backend, None)
+                if module and hasattr(module, "device_count"):
+                    for i in range(module.device_count()):
+                        register_interface_for_device(f"{backend}:{i}", interface)
+
 
 def init_device_reg() -> None:
     global _device_initialized
@@ -677,5 +696,7 @@ def init_device_reg() -> None:
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)
+
+    register_interface_for_privateuse1()
 
     _device_initialized = True
