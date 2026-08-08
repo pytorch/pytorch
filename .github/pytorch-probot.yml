@@ -9,7 +9,6 @@ ciflow_push_tags:
 - ciflow/binaries_wheel
 - ciflow/docker
 - ciflow/dtensor
-- ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
 - ciflow/h100-distributed
@@ -39,6 +38,7 @@ ciflow_push_tags:
 - ciflow/rocm-mi300
 - ciflow/rocm-navi31
 - ciflow/rocm-nightly
+- ciflow/rocm-preview
 - ciflow/s390
 - ciflow/slow
 - ciflow/slow-rocm-mi200
@@ -47,7 +47,6 @@ ciflow_push_tags:
 - ciflow/trunk
 - ciflow/tsan
 - ciflow/unstable
-- ciflow/vllm
 - ciflow/win-arm64
 - ciflow/xpu
 retryable_workflows:

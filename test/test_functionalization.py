@@ -208,6 +208,35 @@ class TestFunctionalization(TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(x_ref, x_test)
 
+    def test_foreach_inplace_mixed_base_and_view_preserves_strides(self):
+        def f(x, y):
+            y_view = y[::2]
+            torch._foreach_add_([x, y_view], 1)
+            return torch.as_strided_copy(x, (3,), (2,)), y
+
+        x_ref = torch.arange(10)[1::2]
+        y_ref = torch.arange(10)
+        x_test = torch.arange(10)[1::2]
+        y_test = torch.arange(10)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(
+            x_test, y_test
+        )
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+        self.assertEqual(y_ref, y_test)
+
+        traced_f = make_fx(_functionalize(f, reapply_views=True, crossref=False))(
+            torch.arange(10)[1::2], torch.arange(10)
+        )
+        copy_count = sum(
+            node.target == torch.ops.aten.copy.default for node in traced_f.graph.nodes
+        )
+        # Preserve the strided base input, but do not copy the transient view.
+        self.assertEqual(copy_count, 1)
+
     @skipIfTorchDynamo("Test directly exercises torch.compile")
     def test_compile_dynamic_inplace_on_strided_input_preserves_stride_for_as_strided(
         self,
@@ -240,6 +269,65 @@ class TestFunctionalization(TestCase):
         # but fixing it for Storage() objects is annoying.
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), "cpu")
+
+    def test_metadata_mutating_resize_as_does_not_preserve_strides(self):
+        def f(x):
+            template = torch.empty(x.shape)
+            x.resize_as_(template, memory_format=torch.contiguous_format)
+            return x
+
+        shape = (2, 3, 4, 5)
+        x_ref = torch.empty(shape, memory_format=torch.channels_last)
+        x_test = torch.empty(shape, memory_format=torch.channels_last)
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(x_test)
+
+        self.assertEqual(out_ref.stride(), out_test.stride())
+
+    def test_resize_as_out_preserves_existing_strides(self):
+        def f(out):
+            x = torch.arange(120).reshape(2, 3, 4, 5)
+            template = torch.empty(x.shape)
+            torch.ops.aten.resize_as.out(
+                x,
+                template,
+                memory_format=torch.contiguous_format,
+                out=out,
+            )
+            return out
+
+        shape = (2, 3, 4, 5)
+        out_ref = torch.empty(
+            shape, memory_format=torch.channels_last, dtype=torch.long
+        )
+        out_test = torch.empty(
+            shape, memory_format=torch.channels_last, dtype=torch.long
+        )
+
+        result_ref = f(out_ref)
+        # FakeTensor's reference for this generated out variant does not accept
+        # the out= argument, so this regression exercises functionalization only.
+        result_test = _functionalize(f, reapply_views=True, crossref=False)(out_test)
+
+        self.assertEqual(result_ref, result_test)
+        self.assertEqual(result_ref.stride(), result_test.stride())
+
+    def test_metadata_mutating_set_does_not_preserve_strides(self):
+        source = torch.arange(6)
+
+        def f(x):
+            x.set_(source.untyped_storage(), 0, (2, 3), (1, 2))
+            return x
+
+        x_ref = torch.empty(2, 3)
+        x_test = torch.empty(2, 3)
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=False)(x_test)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref.stride(), out_test.stride())
 
     def test_advanced_indexing(self):
         def f():
@@ -405,6 +493,31 @@ def forward(self, arg0_1):
     return mul
     """,
         )
+
+    def test_out_variant_unbacked_size_resize(self):
+        def f(x):
+            out = torch.empty((0, 1), dtype=torch.long)
+            torch.nonzero(x, out=out)
+            return out
+
+        functional_f = _functionalize(f, reapply_views=True, crossref=False)
+        traced_f = make_fx(functional_f, tracing_mode="symbolic")(
+            torch.tensor([0, 1, 1])
+        )
+        nonzero = next(
+            node
+            for node in traced_f.graph.nodes
+            if node.target == torch.ops.aten.nonzero.default
+        )
+
+        self.assertIsInstance(nonzero.meta["val"].shape[0], torch.SymInt)
+        self.assertTrue(nonzero.meta.get("unbacked_bindings"))
+        self.assertNotIn(
+            torch.ops.aten.copy.default,
+            {node.target for node in traced_f.graph.nodes},
+        )
+        x = torch.tensor([0, 1, 1])
+        self.assertEqual(traced_f(x), f(x))
 
     def test_multi_out(self):
         def f(x):
@@ -637,9 +750,8 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     as_strided = torch.ops.aten.as_strided.default(arg0_1, [2], [2], 1)
-    add = torch.ops.aten.add.Tensor(as_strided, 1)
-    copy = torch.ops.aten.copy.default(as_strided, add);  as_strided = add = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, copy, [2], [2], 1);  copy = None
+    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
     as_strided_1 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [2], 1);  as_strided_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = copy_ = None
     return as_strided_scatter
@@ -745,8 +857,7 @@ def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone = torch.ops.aten.clone.default(arg0_1)
     diagonal = torch.ops.aten.diagonal.default(clone)
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
-    copy = torch.ops.aten.copy_.default(diagonal, add);  diagonal = add = copy = None
+    add = torch.ops.aten.add_.Tensor(diagonal, ones);  diagonal = ones = add = None
     diagonal_1 = torch.ops.aten.diagonal.default(clone);  clone = diagonal_1 = None
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return mul
@@ -794,9 +905,8 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(arg0_1)
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
-    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, copy);  copy = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, add);  add = None
     diagonal_1 = torch.ops.aten.diagonal.default(diagonal_scatter);  diagonal_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = copy_ = None
     return diagonal_scatter
@@ -878,12 +988,11 @@ def forward(self, arg0_1):
     getitem = split[0];  getitem = None
     getitem_1 = split[1];  split = None
     diagonal = torch.ops.aten.diagonal.default(getitem_1);  getitem_1 = None
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
-    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
     split_1 = torch.ops.aten.split.Tensor(arg0_1, 2)
     getitem_2 = split_1[0];  getitem_2 = None
     getitem_3 = split_1[1];  split_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, copy);  getitem_3 = copy = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
     split_2 = torch.ops.aten.split.Tensor(slice_scatter, 2)
     getitem_4 = split_2[0];  getitem_4 = None
@@ -951,12 +1060,11 @@ def forward(self, arg0_1):
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1];  split_with_sizes = getitem_1 = None
     diagonal = torch.ops.aten.diagonal.default(getitem);  getitem = None
-    add = torch.ops.aten.add.Tensor(diagonal, ones);  ones = None
-    copy = torch.ops.aten.copy.default(diagonal, add);  diagonal = add = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
     split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
     getitem_2 = split_with_sizes_1[0]
     getitem_3 = split_with_sizes_1[1];  split_with_sizes_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, copy);  getitem_2 = copy = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
     split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(slice_scatter, [2, 2])
     getitem_4 = split_with_sizes_2[0]
@@ -1070,10 +1178,9 @@ def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose = torch.ops.aten.transpose.int(arg0_1, 1, 0)
     select = torch.ops.aten.select.int(transpose, 0, 0);  transpose = None
-    add = torch.ops.aten.add.Tensor(select, ones);  ones = None
-    copy = torch.ops.aten.copy.default(select, add);  select = add = None
+    add = torch.ops.aten.add.Tensor(select, ones);  select = ones = None
     transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
-    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, copy, 0, 0);  transpose_1 = copy = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
     transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
     transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
     select_1 = torch.ops.aten.select.int(transpose_3, 0, 0);  transpose_3 = select_1 = None
@@ -1134,10 +1241,9 @@ def forward(self, arg0_1):
     unbind = torch.ops.aten.unbind.int(transpose);  transpose = None
     getitem = unbind[0]
     getitem_1 = unbind[1];  unbind = getitem_1 = None
-    add = torch.ops.aten.add.Tensor(getitem, ones);  ones = None
-    copy = torch.ops.aten.copy.default(getitem, add);  getitem = add = None
+    add = torch.ops.aten.add.Tensor(getitem, ones);  getitem = ones = None
     transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
-    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, copy, 0, 0);  transpose_1 = copy = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
     transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
     transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
     unbind_1 = torch.ops.aten.unbind.int(transpose_3);  transpose_3 = None
@@ -1384,8 +1490,7 @@ def forward(self, arg0_1):
     split = torch.ops.aten.split.Tensor(squeeze, 2);  squeeze = None
     getitem = split[0]
     getitem_1 = split[1];  split = getitem_1 = None
-    add_1 = torch.ops.aten.add.Tensor(getitem, ones);  ones = None
-    copy = torch.ops.aten.copy_.default(getitem, add_1);  getitem = add_1 = copy = None
+    add_1 = torch.ops.aten.add_.Tensor(getitem, ones);  getitem = ones = add_1 = None
     view_2 = torch.ops.aten.view.default(add, [8]);  add = None
     view_3 = torch.ops.aten.view.default(view_2, [2, 4]);  view_2 = None
     transpose_1 = torch.ops.aten.transpose.int(view_3, 1, 0);  view_3 = None
@@ -1512,8 +1617,7 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
-    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
+    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1555,8 +1659,7 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
-    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
+    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1598,8 +1701,7 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
-    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
+    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1641,8 +1743,7 @@ def forward(self, arg0_1):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
     diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add.Tensor(diagonal_1, arg0_1);  arg0_1 = None
-    copy_1 = torch.ops.aten.copy_.default(diagonal_1, add);  diagonal_1 = add = copy_1 = None
+    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
@@ -1705,8 +1806,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     diagonal = torch.ops.aten.diagonal.default(add)
-    fill = torch.ops.aten.fill.Scalar(diagonal, 0)
-    copy = torch.ops.aten.copy_.default(diagonal, fill);  diagonal = fill = copy = None
+    fill = torch.ops.aten.fill_.Scalar(diagonal, 0);  diagonal = fill = None
     diagonal_1 = torch.ops.aten.diagonal.default(add);  diagonal_1 = None
     return add
     """,
@@ -1952,8 +2052,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select = torch.ops.aten.select.int(zeros, 0, 5)
-    fill = torch.ops.aten.fill.Scalar(select, 1)
-    copy = torch.ops.aten.copy_.default(select, fill);  select = fill = copy = None
+    fill = torch.ops.aten.fill_.Scalar(select, 1);  select = fill = None
     select_1 = torch.ops.aten.select.int(zeros, 0, 5);  select_1 = None
     return zeros
     """,
@@ -2212,6 +2311,29 @@ def forward(self, x_1):
             )
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_to_dense(self):
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        inputs = [torch.randn(2, 3).to_sparse()]
+        if torch.backends.mkldnn.is_available():
+            inputs.append(torch.randn(2, 3).to_mkldnn())
+
+        for x in inputs:
+            for use_op in (False, True):
+                with maybe_disable, FunctionalTensorMode():
+                    x_wrapped = FunctionalTensor.to_functional(x)
+                    if use_op:
+                        out_wrapped = torch.ops.aten.to_dense.default(x_wrapped)
+                    else:
+                        out_wrapped = x_wrapped.to_dense()
+
+                out_unwrapped = out_wrapped.elem
+                torch._sync(out_unwrapped)
+                out = torch._from_functional_tensor(out_unwrapped)
+                self.assertEqual(out.layout, torch.strided)
+                self.assertEqual(out, x.to_dense())
 
     def test_python_functionalization_is_conj(self):
         def f(x):

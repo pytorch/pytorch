@@ -638,9 +638,19 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   }
 }
 
-Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) {
-  // In-place ops preserve size/stride/storage_offset, but their functional
-  // variants often allocate contiguous outputs.
+Tensor maybe_preserve_strides(
+    const Tensor& functional_tensor,
+    const Tensor& old_value,
+    const Tensor& new_value) {
+  // Data-only mutations preserve size/stride/storage_offset, but their
+  // functional variants often allocate contiguous outputs.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  // View mutations are propagated to their base by commit_update()/sync(),
+  // which regenerates the view metadata. Preserving the transient view value's
+  // layout would only add a copy that is discarded during regeneration.
+  if (!isBaseTensor(functional_tensor)) {
+    return new_value;
+  }
   if (!old_value.defined() || !new_value.defined()) {
     return new_value;
   }
@@ -656,7 +666,8 @@ Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) 
     return new_value;
   }
   for (const auto dim : c10::irange(old_sizes.size())) {
-    if (TORCH_STATICALLY_KNOWN_TRUE(sym_ne(old_sizes[dim], new_sizes[dim]))) {
+    if (!TORCH_STATICALLY_KNOWN_TRUE(
+            sym_eq(old_sizes[dim], new_sizes[dim]))) {
       return new_value;
     }
   }
@@ -690,16 +701,20 @@ Tensor maybe_preserve_strides(const Tensor& old_value, const Tensor& new_value) 
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<Tensor> maybe_preserve_strides(
+    ITensorListRef functional_tensors,
     ITensorListRef old_values,
     ITensorListRef new_values) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(old_values.size() == new_values.size());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      functional_tensors.size() == old_values.size() &&
+      old_values.size() == new_values.size());
   std::vector<Tensor> outputs;
   outputs.reserve(old_values.size());
+  auto functional_tensors_it = functional_tensors.begin();
   auto old_values_it = old_values.begin();
   auto new_values_it = new_values.begin();
   for ([[maybe_unused]] const auto i : c10::irange(old_values.size())) {
-    outputs.push_back(
-        maybe_preserve_strides(*old_values_it++, *new_values_it++));
+    outputs.push_back(maybe_preserve_strides(
+        *functional_tensors_it++, *old_values_it++, *new_values_it++));
   }
   return outputs;
 }

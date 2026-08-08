@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
      IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
+     precisionOverride, toleranceOverride, tol, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -1071,6 +1071,18 @@ class TestSparseCSR(TestCase):
             a.is_contiguous()
 
     @onlyCPU
+    def test_malformed_bsr_to_dense_fpe(self, device):
+        # Regression test for FPE (Division by Zero) in sparse_compressed_to_dense
+        # when block size contains a zero dimension
+        crow = torch.tensor([0, 1, 1], dtype=torch.int64, device=device)
+        col = torch.tensor([0], dtype=torch.int64, device=device)
+        values = torch.empty((0, 0, 3, 2, 1), dtype=torch.int64, device=device)
+        t = torch.sparse_bsr_tensor(crow, col, values, check_invariants=False)
+
+        with self.assertRaisesRegex(RuntimeError, "expected block sizes to be strictly positive"):
+            t.to_dense()
+
+    @onlyCPU
     @largeTensorTest("20GB", "cpu")
     def test_csr_nnz(self):
         # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
@@ -1405,6 +1417,11 @@ class TestSparseCSR(TestCase):
             torch._convert_indices_from_coo_to_csr(
                 torch.randint(100, (5, 5), device=device),
                 size=100)
+
+        with self.assertRaisesRegex(RuntimeError, "size must be non-negative"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.tensor([1, 2, 3], device=device),
+                size=-1)
 
         size = (5, 5)
         sparse_dim = 2
@@ -2430,9 +2447,16 @@ class TestSparseCSR(TestCase):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
+    @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1.6e-2)})
     def test_sampled_addmm(self, device, dtype):
+        if dtype in (torch.half, torch.bfloat16) and torch.cuda.is_available() and \
+                torch.cuda.get_device_capability()[0] < 8:
+            self.skipTest("cuSPARSE SDDMM fp16/bf16 requires compute capability >= 8.0")
+
         def run_test(c, a, b, op_a, op_b, *, alpha=None, beta=None):
             if dtype.is_complex:
                 alpha = random.random() + 0.3j if alpha is None else alpha
@@ -2480,7 +2504,16 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, b, op_a, op_b)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1.6e-2)})
     def test_sampled_addmm_autograd(self, device, dtype):
+        if dtype in (torch.half, torch.bfloat16) and torch.cuda.is_available() and \
+                torch.cuda.get_device_capability()[0] < 8:
+            self.skipTest("cuSPARSE SDDMM fp16/bf16 requires compute capability >= 8.0")
+
         from torch.testing._internal.common_methods_invocations import sample_inputs_sparse_sampled_addmm
 
         samples = list(sample_inputs_sparse_sampled_addmm(None, device, dtype, requires_grad=True))
@@ -2700,12 +2733,12 @@ class TestSparseCSR(TestCase):
                 (output_zero, expected_zero),
                 (output_explicit_zeros, expected_explicit_zeros)
         ]:
-            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+            self.assertEqual(output, expected, lambda msg: f"{msg}\nThis operator ({op.name}) should not be supported for "
                              "Sparse CSR as it breaks 0->0 correspondence.")
 
         for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
             self.assertEqual(op(inp).values().numel(), inp.values().numel(),
-                             f"{op.name} fails to preserve sparsity pattern.")
+                             lambda msg: f"{msg}\n{op.name} fails to preserve sparsity pattern.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
