@@ -3285,6 +3285,19 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
         for bins in [1, 3, 10]:
             yield SampleInput(make_arg(size), bins=bins, min=min, max=max)
 
+    # Exercises implementations that switch algorithms for large bin counts.
+    yield SampleInput(make_arg((S,)), bins=8193, min=0, max=10)
+
+    if dtype.is_floating_point:
+        # Values just outside a narrow range must not produce an invalid bin.
+        narrow_range = torch.tensor(
+            [0.0, 5e-6, 1e-5, 1.2e-5],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        yield SampleInput(narrow_range, bins=1000, min=0.0, max=1e-5)
+
 def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
