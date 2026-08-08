@@ -7,7 +7,10 @@ import uuid
 import torch
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.associative_scan import (
+    _fake_associative_scan,
+    associative_scan,
+)
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
@@ -1796,6 +1799,54 @@ class AssociativeScanTests(TestCase):
 
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
+
+    @requires_gpu
+    @parametrize("autograd", [False, True])
+    def test_associative_scan_non_pointwise_generic(self, autograd):
+        device = GPU_TYPE
+
+        def matmul_combine(x, y):
+            return x @ y
+
+        torch.compiler.reset()
+        compiled_scan = torch.compile(
+            associative_scan, backend="inductor", fullgraph=True
+        )
+
+        eye = torch.eye(2, device=device).unsqueeze(0)
+        x = eye.repeat(4, 1, 1).requires_grad_(autograd)
+
+        result = compiled_scan(matmul_combine, x, 0, combine_mode="generic")
+        result_ref = _fake_associative_scan(matmul_combine, x, 0)
+
+        self.assertEqual(result, result_ref)
+
+        if autograd:
+            grads = torch.autograd.grad(result.sum(), x)
+            grads_ref = torch.autograd.grad(result_ref.sum(), x)
+            self.assertEqual(grads, grads_ref)
+
+    @requires_gpu
+    def test_associative_scan_pointwise_autograd(self):
+        device = GPU_TYPE
+
+        def fct(x, y):
+            return x + y
+
+        torch.compiler.reset()
+        compiled_scan = torch.compile(
+            associative_scan, backend="inductor", fullgraph=True
+        )
+
+        x = torch.randn(16, 4, device=device, requires_grad=True)
+
+        result = compiled_scan(fct, x, 0, combine_mode="pointwise")
+        result_ref = _fake_associative_scan(fct, x, 0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), x)
+        grads_ref = torch.autograd.grad(result_ref.sum(), x)
+        self.assertEqual(grads, grads_ref)
 
 
 class ScanModels:
