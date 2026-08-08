@@ -1520,7 +1520,7 @@
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
-  src: grad.gather(dim, index)
+  src: scatter_src_backward(grad, dim, index, src.sym_sizes())
   result: self_t.scatter(dim, index, src_t)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -1531,7 +1531,7 @@
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   self: grad
   index: non_differentiable
-  src: grad.gather(dim, index)
+  src: scatter_src_backward(grad, dim, index, src.sym_sizes())
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
