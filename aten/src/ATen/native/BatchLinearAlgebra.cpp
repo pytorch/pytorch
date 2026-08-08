@@ -2198,6 +2198,17 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
                      LU.is_complex() ? TransposeType::ConjTranspose
                                      : TransposeType::Transpose;
 
+  // Validate pivots for all backends before dispatch: the LAPACK/cuSOLVER
+  // kernels read out of bounds for out-of-range pivots, which is a clean error
+  // on CPU but an illegal memory access on CUDA.
+  // See https://github.com/pytorch/pytorch/issues/189669
+  TORCH_CHECK(pivots.gt(0).all().item<bool>(),
+              "Pivots given to lu_solve must all be greater or equal to 1. "
+              "Did you properly pass the result of lu_factor?");
+  TORCH_CHECK(pivots.le(LU.size(-2)).all().item<bool>(),
+              "Pivots given to lu_solve must all be smaller or equal to LU.size(-2). "
+              "Did you properly pass the result of lu_factor?");
+
   lu_solve_stub(LU_->device().type(), *LU_, *pivots_, result, trans);
 
   // Conj-transpose back in-place
