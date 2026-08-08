@@ -273,8 +273,8 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   at::Half hbeta;
   uint32_t mask = -1;
 #endif
-  void * alpha_ptr = &alpha;
-  void * beta_ptr = &beta;
+  const void* alpha_ptr = &alpha;
+  const void* beta_ptr = &beta;
   if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
     if (computeType == CUBLAS_COMPUTE_16F) {
@@ -550,8 +550,8 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
   at::Half hbeta;
   auto compute_type = CUDA_R_32F;
 #endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
+  const void* alpha_ptr = &falpha;
+  const void* beta_ptr = &fbeta;
 #ifdef USE_ROCM
   int flag = 0;
   rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
@@ -569,7 +569,7 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, flag)));
 #else
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
     halpha = alpha;
     hbeta = beta;
@@ -937,7 +937,7 @@ void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)
 template <>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
   #ifndef USE_ROCM
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
       TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
@@ -1018,8 +1018,8 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   at::Half hbeta;
   auto compute_type = CUDA_R_32F;
 #endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
+  const void* alpha_ptr = &falpha;
+  const void* beta_ptr = &fbeta;
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
@@ -1055,7 +1055,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
       0,
       flag)));
 #else
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
     compute_type = CUDA_R_16F;
     halpha = alpha;
@@ -1482,7 +1482,7 @@ void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) 
 template <>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
   #ifndef USE_ROCM
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
       TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
@@ -1530,8 +1530,8 @@ bool gemm_and_bias(
   const cublasComputeType_t computeType = type_info.compute_type;
   const cudaDataType_t scaleType = type_info.scale_type;
   CuBlasLtMatmulPreference preference;
-  void * alpha_ptr = &alpha_val;
-  void * beta_ptr = &beta_val;
+  const void* alpha_ptr = &alpha_val;
+  const void* beta_ptr = &beta_val;
 #ifndef USE_ROCM
   at::Half halpha_val;
   at::Half hbeta_val;

@@ -35,7 +35,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
               mkldnn_tensor.scalar_type() == ScalarType::Char ||
               mkldnn_tensor.scalar_type() == ScalarType::Float8_e4m3fn,
               "mkldnn_to_dense expects float, bfloat16, half, uint8, int8, float8_e4m3fn tensor input");
-  ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
+  const ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte ||
