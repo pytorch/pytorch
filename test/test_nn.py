@@ -6763,6 +6763,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
+    def test_max_pool1d_int_overflow(self):
+        x = torch.randn(1, 1, 4)
+        too_large = 2**63 - 1
+
+        cases = (
+            {"kernel_size": too_large},
+            {"kernel_size": 1, "stride": too_large},
+            {"kernel_size": 1, "padding": too_large},
+            {"kernel_size": 1, "dilation": too_large},
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    F.max_pool1d(x, **kwargs)
+
     def test_lp_pool_inf_norm_type(self):
         cases = [
             (
