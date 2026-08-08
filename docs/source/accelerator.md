@@ -52,6 +52,7 @@ per-backend modules, the following APIs are delegated to each backend:
     get_device_capability
     set_stream
     current_stream
+    default_stream
     synchronize
     device_index
 ```
