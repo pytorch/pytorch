@@ -85,6 +85,14 @@ void mkldnn_matmul_i8i8i32(
   TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
+// Supports outdtype float32 or bfloat16
+void mkldnn_matmul_i8i8_dtype(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
+}
+
 bool use_mkldnn_tf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
@@ -623,6 +631,97 @@ void mkldnn_matmul_i8i8i32(
     _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }
 }
+
+template <typename dst_t>
+static void _mkldnn_matmul_i8i8_dtype_with_primitive(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+
+  auto engine = ideep::engine::cpu_engine();
+  auto stream = ideep::stream::default_stream();
+
+  ideep::tensor::data_type dst_dtype;
+  if constexpr (std::is_same_v<dst_t, float>) {
+    dst_dtype = ideep::tensor::data_type::f32;
+  } else if constexpr (std::is_same_v<dst_t, at::BFloat16>) {
+    dst_dtype = ideep::tensor::data_type::bf16;
+  } else {
+    static_assert(
+        std::is_same_v<dst_t, float> ||
+        std::is_same_v<dst_t, at::BFloat16>,
+        "unsupported dst_t");
+  }
+
+  ideep::tensor src(
+      {mat1.sizes().vec(),
+       mat1.scalar_type() == at::kByte
+           ? ideep::tensor::data_type::u8
+           : ideep::tensor::data_type::s8,
+       mat1.strides().vec()},
+      mat1.data_ptr());
+
+  ideep::tensor wei(
+      {mat2.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat2.strides().vec()},
+      mat2.data_ptr());
+
+  ideep::tensor dst(
+      {result.sizes().vec(),
+       dst_dtype,
+       result.strides().vec()},
+      result.data_ptr());
+
+  ideep::attr_t op_attr;
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+  auto src_md = dnnl::memory::desc(src.get_dims(), src.get_data_type(), dnnl::memory::format_tag::any);
+  auto wei_md = dnnl::memory::desc(wei.get_dims(), wei.get_data_type(), dnnl::memory::format_tag::any);
+  auto dst_md = dnnl::memory::desc(dst.get_dims(), dst.get_data_type(), dnnl::memory::format_tag::any);
+
+  auto pd = dnnl::matmul::primitive_desc(engine, src_md, wei_md, dst_md, op_attr);
+  auto primitive = dnnl::matmul(pd);
+
+  ideep::tensor src_opt = src;
+  if (pd.src_desc() != src.get_desc()) {
+    src_opt = ideep::tensor(pd.src_desc());
+    dnnl::reorder(src, src_opt).execute(stream, src, src_opt);
+  }
+
+  ideep::tensor wei_opt = wei;
+  if (pd.weights_desc() != wei.get_desc()) {
+    wei_opt = ideep::tensor(pd.weights_desc());
+    dnnl::reorder(wei, wei_opt).execute(stream, wei, wei_opt);
+  }
+
+  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src_opt});
+  args.insert({DNNL_ARG_WEIGHTS, wei_opt});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  primitive.execute(stream, args);
+}
+
+void mkldnn_matmul_i8i8_dtype(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+// x: u8 or s8 * w:s8 -> y:f32 or y:bf16
+  if (result.scalar_type() == at::kFloat) {
+    _mkldnn_matmul_i8i8_dtype_with_primitive<float>(
+        mat1, mat2, result);
+  } else if (result.scalar_type() == at::kBFloat16) {
+    _mkldnn_matmul_i8i8_dtype_with_primitive<at::BFloat16>(
+        mat1, mat2, result);
+  } else {
+    TORCH_CHECK(
+        false,
+        "mkldnn_matmul_i8i8_dtype: only float32 and bfloat16 are supported for result");
+  }
+}
+
 
 } // namespace at
 
