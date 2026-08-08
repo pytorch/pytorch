@@ -2,9 +2,14 @@
 # mypy: allow-untyped-defs
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
+from functools import partial
 
 import torch.distributed as dist
-from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
+from torch.distributed.checkpoint._async_executor import (
+    _AsyncCheckpointExecutor,
+    _OwnedStateDictFuture,
+    _STAGING_INPUT,
+)
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlanner
 from torch.distributed.checkpoint.storage import StorageWriter
@@ -46,7 +51,7 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        staging_future_or_state_dict: _STAGING_INPUT,
         *,
         checkpoint_id: str | os.PathLike | None = None,
         storage_writer: StorageWriter | None = None,
@@ -55,9 +60,8 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Future:
-        f: Future = self._executor.submit(
+        save_fn = partial(
             save_wrapper,
-            staging_future_or_state_dict=staging_future_or_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
@@ -65,6 +69,14 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             no_dist=no_dist,
             use_collectives=use_collectives,
         )
-        f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
-
-        return f
+        if isinstance(staging_future_or_state_dict, _OwnedStateDictFuture):
+            future = staging_future_or_state_dict
+            work = self._executor.submit(future.run, save_fn)
+        else:
+            future = self._executor.submit(
+                save_fn,
+                staging_future_or_state_dict=staging_future_or_state_dict,
+            )
+            work = future
+        work.add_done_callback(lambda _: self._executor.shutdown(wait=False))
+        return future
