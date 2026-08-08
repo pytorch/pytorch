@@ -1542,6 +1542,7 @@ _allowed_config_patches = (
     "rewrite_assert_with_torch_assert",
     "capture_scalar_outputs",
     "allow_unspec_int_on_nn_module",
+    "prepare_freezing",
     "skip_torchrec",
     "dont_skip_tracing",
     "nested_graph_breaks",
