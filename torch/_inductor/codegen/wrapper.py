@@ -3568,7 +3568,8 @@ class PythonWrapperCodegen(CodeGen):
         }
         if backend_option_candidates:
             get_interface_for_device(device).raise_if_triton_unavailable(device)
-            assert GPUTarget is not None  # noqa: S101
+            if GPUTarget is None:
+                raise AssertionError("expected GPUTarget to be not None")
             target = GPUTarget(
                 device_props.type,
                 device_props.cc,
