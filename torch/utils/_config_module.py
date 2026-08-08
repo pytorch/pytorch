@@ -871,6 +871,42 @@ class ConfigModule(ModuleType):
 
                 warn_once(f"key {k} with value {v} is not understood by this config")
 
+    def add_config(
+        self, name: str, config: "_Config", *, compile_ignored: bool = True
+    ) -> None:
+        """Register a config key post-install.
+
+        For out-of-tree backends to expose custom knobs through an installed
+        ConfigModule. The key flows through the normal __getattr__ / patch /
+        get_config_copy / get_hash paths.
+
+        By default ``compile_ignored=True`` excludes the key from ``get_hash()``,
+        which is only safe for knobs that do NOT affect compiled output. Any knob
+        whose value changes generated artifacts (e.g. a backend selector) must
+        pass ``compile_ignored=False`` -- otherwise the compile cache may serve
+        stale code keyed on the old value.
+
+        Must be called at backend import time, before any compilation:
+        structural registration is not synchronized with concurrent hash or
+        cache reads in other threads.
+
+        Raises AssertionError if ``name`` is already registered or is not a
+        valid Python identifier.
+        """
+        if not name.isidentifier() or keyword.iskeyword(name):
+            raise AssertionError(
+                f"invalid config name {name!r}: must be a valid Python identifier"
+            )
+        if name in self._config:
+            raise AssertionError(f"config {self.__name__}.{name} already exists")
+        self._config[name] = _ConfigEntry(config, name)
+        if compile_ignored:
+            self._compile_ignored_keys.add(name)
+        # A new key changes the exported key set, so fully invalidate the
+        # current context's hash and _get_dict caches.
+        self._hash_dirty_var.set(True)
+        self._get_dict_dirty_keys_var.set(None)
+
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 

@@ -496,6 +496,81 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         revert()
         self.assertTrue(config.e_bool)
 
+    def _remove_added_config(self, name: str) -> None:
+        # add_config mutates _config / _compile_ignored_keys; undo so the shared
+        # fixture stays clean for the exact-dict tests in this file.
+        config._config.pop(name, None)
+        config._compile_ignored_keys.discard(name)
+        config._hash_dirty_var.set(True)
+        config._get_dict_dirty_keys_var.set(None)
+        config._get_dict_cache_var.set(None)
+
+    def test_add_config(self):
+        self.assertNotIn("ac_str", config.get_config_copy())
+        try:
+            config.add_config("ac_str", Config(default="x", value_type=str))
+            # readable / settable
+            self.assertEqual(config.ac_str, "x")
+            config.ac_str = "y"
+            self.assertEqual(config.ac_str, "y")
+            # surfaces in get_config_copy
+            self.assertIn("ac_str", config.get_config_copy())
+            # usable through config.patch (the compile_fx config_patches path)
+            with config.patch({"ac_str": "z"}):
+                self.assertEqual(config.ac_str, "z")
+            self.assertEqual(config.ac_str, "y")
+        finally:
+            self._remove_added_config("ac_str")
+
+    def test_add_config_compile_ignored_default(self):
+        # Default compile_ignored=True: registered key excluded from get_hash.
+        try:
+            config.add_config("ac_ignored", Config(default=False))
+            h0 = config.get_hash()
+            config.ac_ignored = True
+            self.assertEqual(config.get_hash(), h0)
+        finally:
+            self._remove_added_config("ac_ignored")
+
+    def test_add_config_hash_participation(self):
+        # compile_ignored=False: registered key participates in get_hash.
+        try:
+            config.add_config(
+                "ac_hashed", Config(default=0, value_type=int), compile_ignored=False
+            )
+            h0 = config.get_hash()
+            config.ac_hashed = 1
+            self.assertNotEqual(config.get_hash(), h0)
+        finally:
+            self._remove_added_config("ac_hashed")
+
+    def test_add_config_invalidates_readonly_cache(self):
+        # A cached _get_dict result must reflect a key registered afterwards.
+        d0 = config._get_dict(readonly_values=True)
+        self.assertNotIn("ac_cached", d0)
+        try:
+            config.add_config("ac_cached", Config(default="x", value_type=str))
+            d1 = config._get_dict(readonly_values=True)
+            self.assertIn("ac_cached", d1)
+        finally:
+            self._remove_added_config("ac_cached")
+
+    def test_add_config_duplicate_raises(self):
+        try:
+            config.add_config("ac_dup", Config(default=False))
+            with self.assertRaises(AssertionError):
+                config.add_config("ac_dup", Config(default=True))
+        finally:
+            self._remove_added_config("ac_dup")
+
+    def test_add_config_invalid_name(self):
+        # Dotted names collide with SubConfigProxy nesting; non-identifier
+        # names are unreachable via attribute access.
+        for bad in ("ac.dotted", "1leading_digit", "with space", "for"):
+            with self.assertRaises(AssertionError):
+                config.add_config(bad, Config(default=False))
+            self.assertNotIn(bad, config._config)
+
     def test_unittest_patch(self):
         with patch("torch.testing._internal.fake_config_module.e_bool", False):
             with patch("torch.testing._internal.fake_config_module.e_bool", False):
