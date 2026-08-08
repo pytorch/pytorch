@@ -2720,6 +2720,36 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(y_refake.storage_offset(), y.storage_offset())
         self.assertEqual(y_refake.real_tensor, y)
 
+    @parametrize("use_view", (False, True))
+    def test_functional_tensor_reuses_symbolic_storage_size(self, use_view):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(4, 8),
+            source=LocalSource("x", is_input=True),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                constraint_sizes=[None, None],
+            ),
+        )
+
+        if use_view:
+            with fake_mode:
+                x = aten.slice.Tensor(x, 1, 2, 6)
+
+        with FunctionalTensorMode():
+            functional = FunctionalTensor.to_functional(x)
+
+        outer_storage_size = functional.untyped_storage().nbytes()
+        inner_storage_size = functional.elem.untyped_storage().nbytes()
+        self.assertEqual(outer_storage_size, inner_storage_size)
+        self.assertIs(outer_storage_size.node, inner_storage_size.node)
+
     def test_refake_unbacked_storage_static_shapes(self):
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False):
             shape_env = ShapeEnv()
@@ -2866,6 +2896,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(g_eager.dtype, g_traced.dtype)
 
 
+instantiate_parametrized_tests(FakeTensorConverterTest)
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
 
 
