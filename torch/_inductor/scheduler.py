@@ -29,9 +29,9 @@ from typing import (
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import ParamSpec
 
 from .ir import ComputedBuffer, Pointwise
 
@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
-
 import torch
 import torch._inductor.async_compile
 import torch.utils._pytree as pytree
@@ -62,7 +61,15 @@ from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, config_comms, dependencies, ir, metrics
+from . import (
+    comms,
+    config,
+    config_comms,
+    cudagraph_partition,
+    dependencies,
+    ir,
+    metrics,
+)
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import (
@@ -4453,6 +4460,12 @@ class Scheduler:
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
+
+        # AOTI cuda graph: reorder so each single-symbol convex cluster is
+        # contiguous (agglomerative convex merge). Must run before
+        # compute_last_usage so buffer-free liveness matches the emitted order.
+        if config.aot_inductor.enable_cuda_graph:
+            self.nodes = self._cudagraph_cluster_reorder(self.nodes)
 
         self.compute_last_usage()
 
@@ -9348,7 +9361,42 @@ class Scheduler:
             if get_scheduler_node_symbol_uses(node):
                 return "dynamic shape ops"
 
+        if config.aot_inductor.enable_cuda_graph:
+            if reason := cudagraph_partition._is_batch_dim_transition(node):
+                return reason
+            if cudagraph_partition._node_uses_rng(node):
+                return "RNG ops (philox seed/offset frozen under AOTI cuda graph)"
+            if cudagraph_partition._node_uses_broadcast_gather(node):
+                return "index_select/gather (ROCS broadcast not cuda-graph-safe)"
+            if cudagraph_partition._node_touches_shared_storage(
+                node, self._cudagraph_shared_storage_names()
+            ):
+                # A node touching a buffer whose storage is shared with another
+                # buffer is unsafe to capture: the partitioner can place the
+                # buffer's writers/readers on opposite sides of a capture boundary,
+                # so the partition allocates a fresh output buffer and the slices
+                # written in the eager region are lost (wrong numerics) AND the
+                # buffer gets declared twice in the generated C++
+                # (RAIIAtenTensorHandle redefinition -> CppCompileError). This
+                # covers BOTH alias directions: a view/ReinterpretView (e.g. a
+                # concat slice) and the base buffer that other views point into
+                # (e.g. a concat/chunk base feeding a bmm, whose own output has no
+                # aliases so node.has_aliasing_or_mutation() alone misses it). Keep
+                # these eager so shared-storage buffers are never split.
+                return "shared storage buffer (concat/slice/alias unsafe to split)"
+
         return None
+
+    def _cudagraph_shared_storage_names(self) -> OrderedSet[str]:
+        """Cache the shared-storage name set (see
+        cudagraph_partition._cudagraph_shared_storage_names) on the scheduler so
+        should_partition computes it once over self.nodes."""
+        cached = getattr(self, "_cg_shared_storage_names", None)
+        if cached is not None:
+            return cached
+        names = cudagraph_partition._cudagraph_shared_storage_names(self.nodes)
+        self._cg_shared_storage_names = names
+        return names
 
     @cache_on_self
     def _get_cudagraph_unsafe_unbacked_symints(self) -> OrderedSet[sympy.Symbol]:
@@ -9633,9 +9681,25 @@ class Scheduler:
                 for name in returned_output_names
             )
 
+            # Expand MultiOutputLayout buffers to their MultiOutput children.
+            # MultiOutputLayout is the parent ExternKernel (e.g. SDPA) which has
+            # no C++ tensor variable -- only its MultiOutput children do.
+            expanded_output_names: OrderedSet[str] = OrderedSet()
+            for name in returned_output_names:
+                buf = self.name_to_buf.get(name, None)
+                if buf is not None and isinstance(buf.node.layout, MultiOutputLayout):
+                    for out_buf in buf.defining_op.outputs:
+                        child_name = out_buf.get_name()
+                        if not isinstance(
+                            out_buf.node.layout, (NoneLayout, MultiOutputLayout)
+                        ):
+                            expanded_output_names.add(child_name)
+                else:
+                    expanded_output_names.add(name)
+
             output_nodes = [
                 name_to_node[name]
-                for name in returned_output_names
+                for name in expanded_output_names
                 if not is_unallocated_buffer(name)
             ]
 
@@ -9833,6 +9897,122 @@ class Scheduler:
 
         return front + middle + back
 
+    def _cudagraph_cluster_reorder(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """Spec-based partitioning reorder for AOTI regional cuda graph. Builds the
+        dependency graph, classifies nodes (op-eligible AND <=1 dynamic shape),
+        agglomeratively merges eligible neighbor subgraphs keeping each cluster
+        single-symbol and convex, then linearizes clusters and returns the new
+        node order (each convex cluster contiguous). Stores per-node cluster id and
+        eligibility (aligned to the returned order) for graph_partition. MUST run
+        before compute_last_usage so buffer-free liveness matches the final order."""
+        n = len(nodes)
+        node_to_index = {node: i for i, node in enumerate(nodes)}
+
+        def idx_of_op(name: str) -> int | None:
+            fused = self.name_to_fused_node.get(name)
+            return node_to_index.get(fused) if fused is not None else None
+
+        succ: list[list[int]] = [[] for _ in range(n)]
+        succ_seen: list[OrderedSet[int]] = [OrderedSet() for _ in range(n)]
+        ancestors: list[set[int]] = [set() for _ in range(n)]
+        eligible: list[bool] = [False] * n
+        sym: list[str | None] = [None] * n
+        for i, node in enumerate(nodes):
+            for aname in node.ancestors:
+                j = idx_of_op(aname)
+                if j is not None and j != i:
+                    ancestors[i].add(j)
+            for dep in node.unmet_dependencies:
+                buf = self.name_to_buf.get(dep.name)
+                if buf is None:
+                    continue
+                j = idx_of_op(buf.defining_op_name())
+                if j is not None and j != i and i not in succ_seen[j]:
+                    succ_seen[j].add(i)
+                    succ[j].append(i)
+            # Input-aware: union(input_syms, output_syms) so a node reading
+            # [s13, s14] and writing [s13] is correctly counted as 2-symbol.
+            # Output-only would let it through (output={s13}) and a second
+            # dynamic symbol would leak into the captured partition via a
+            # non-dim0 input -> wrong replay.
+            syms = cudagraph_partition._partition_io_dynamic_symbols(
+                node, self.name_to_buf
+            )
+            is_eligible = self.should_partition(node) is None and len(syms) <= 1
+            if is_eligible:
+                eligible[i] = True
+                sym[i] = next(iter(syms)).name if syms else None
+
+        cluster = cudagraph_partition._agglomerative_convex_clusters(
+            n, succ, ancestors, eligible, sym
+        )
+        order = cudagraph_partition._linearize_clusters(n, cluster, succ)
+        # Safety: the contiguous-cluster order must remain a valid topological
+        # order (every transitive ancestor precedes). A failure means a cluster
+        # was not convex (emitting it contiguously moved a node out of dep order).
+        pos = [0] * n
+        for k, i in enumerate(order):
+            pos[i] = k
+        for i in range(n):
+            for a in ancestors[i]:
+                assert pos[a] < pos[i], (
+                    f"cudagraph cluster reorder broke topo order: ancestor {a} "
+                    f"(cluster {cluster[a]}) not before {i} (cluster {cluster[i]})"
+                )
+        # Store cluster id + eligibility per node, aligned to the returned order,
+        # so graph_partition can build partitions without reordering again.
+        self._cg_cluster_ids = [cluster[i] for i in order]
+        self._cg_node_eligible = [eligible[i] for i in order]
+        return [nodes[i] for i in order]
+
+    def _cudagraph_partitions_from_clusters(
+        self,
+    ) -> tuple[list[PartitionType], list[bool]]:
+        """Build partitions from the cluster assignment computed by
+        _cudagraph_cluster_reorder (self.nodes is already in cluster-contiguous
+        order): consecutive ineligible nodes -> one skip partition; each eligible
+        cluster -> its own partition."""
+        cluster_ids = getattr(self, "_cg_cluster_ids", None)
+        eligible = getattr(self, "_cg_node_eligible", None)
+        assert (
+            cluster_ids is not None
+            and eligible is not None
+            and len(cluster_ids) == len(self.nodes)
+        ), "cuda graph cluster assignment missing or misaligned with self.nodes"
+        # Demote eligible clusters below the size threshold to skip (eager):
+        # capturing a tiny partition as its own cuda graph costs per-replay
+        # staging + launch overhead that outweighs the kernel-launch saving when
+        # there are only a few kernels to amortize it over.
+        min_cg_size = cudagraph_partition.MIN_CG_SIZE
+        cluster_size: dict[object, int] = {}
+        for k in range(len(self.nodes)):
+            if eligible[k]:
+                cid = cluster_ids[k]
+                cluster_size[cid] = cluster_size.get(cid, 0) + 1
+        partitions: list[PartitionType] = []
+        skip_cudagraphs: list[bool] = []
+        cur: PartitionType = []
+        cur_key: object = None
+        cur_skip = True
+        for k, node in enumerate(self.nodes):
+            skip = (not eligible[k]) or cluster_size.get(
+                cluster_ids[k], 0
+            ) < min_cg_size
+            key: object = "skip" if skip else ("cluster", cluster_ids[k])
+            if cur and key != cur_key:
+                partitions.append(cur)
+                skip_cudagraphs.append(cur_skip)
+                cur = []
+            cur.append(node)
+            cur_key = key
+            cur_skip = skip
+        if cur:
+            partitions.append(cur)
+            skip_cudagraphs.append(cur_skip)
+        return partitions, skip_cudagraphs
+
     def graph_partition(
         self,
     ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
@@ -9840,23 +10020,40 @@ class Scheduler:
         Given a list of BaseSchedulerNodes, split into a list of
         graph partitions and compute partition input/output signatures.
         """
-        partitions: list[PartitionType] = []
-        skip_cudagraph = True
-        cur_partition: PartitionType = []
-        skip_cudagraphs = []
-        for node in self.nodes:
-            node_should_partition = self.should_partition(node) is not None
-            if cur_partition and skip_cudagraph != node_should_partition:
+        partitions: list[PartitionType]
+        skip_cudagraphs: list[bool]
+        if config.aot_inductor.enable_cuda_graph:
+            # Spec-based partitioning: partitions from the agglomerative convex
+            # cluster assignment computed in __init__ (cluster-contiguous order,
+            # before compute_last_usage so liveness matches the emitted order).
+            partitions, skip_cudagraphs = self._cudagraph_partitions_from_clusters()
+        else:
+            partitions = []
+            skip_cudagraph = True
+            cur_partition: PartitionType = []
+            skip_cudagraphs = []
+            for node in self.nodes:
+                node_should_partition = self.should_partition(node) is not None
+                if cur_partition and skip_cudagraph != node_should_partition:
+                    partitions.append(cur_partition)
+                    skip_cudagraphs.append(skip_cudagraph)
+                    cur_partition = []
+
+                skip_cudagraph = node_should_partition
+                cur_partition.append(node)
+
+            if cur_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
-                cur_partition = []
 
-            skip_cudagraph = node_should_partition
-            cur_partition.append(node)
-
-        if cur_partition:
-            partitions.append(cur_partition)
-            skip_cudagraphs.append(skip_cudagraph)
+        n_eligible = sum(1 for s in skip_cudagraphs if not s)
+        n_skip = sum(1 for s in skip_cudagraphs if s)
+        cudagraphs_log.debug(
+            "graph_partition: %d partitions, %d eligible, %d non-eligible",
+            len(partitions),
+            n_eligible,
+            n_skip,
+        )
 
         # Apply minimum partition size threshold: if a cudagraph-eligible partition
         # has fewer kernels than the threshold, mark it as non-cudagraphable
@@ -9877,6 +10074,43 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
+
+        if config.aot_inductor.enable_cuda_graph:
+            min_cg_size = cudagraph_partition.MIN_CG_SIZE
+            new_sigs = []
+            for partition, sig in zip(partitions, signatures):
+                # Demote a captured partition to eager (skip) when either:
+                #   * it is below the size threshold (per-replay staging + launch
+                #     overhead is not amortized over enough kernels), or
+                #   * its signature requires more than one dynamic symbol. The
+                #     runtime shape_key in codegen_partition_call keys the captured
+                #     graph on a SINGLE symbol, so a multi-symbol partition cannot
+                #     be replayed and codegen rejects it.
+                #
+                # Node-level eligibility (_cudagraph_cluster_reorder) and the
+                # cluster-merge guard count symbols via _partition_io_dynamic_symbols,
+                # which only inspects buffer SIZE dims. The codegen invariant is
+                # enforced on sig.symbol_inputs (get_graph_partition_symbol_inputs),
+                # a strictly wider set: it also pulls symbols from strides/offsets,
+                # node indexing exprs (get_free_symbol_uses), and partition INPUT
+                # node layouts. A cluster whose nodes each carry <=1 size-dim symbol
+                # can therefore still produce a 2-symbol signature. This pass closes
+                # that gap by demoting on the exact set the invariant checks.
+                multi_symbol = len(sig.symbol_inputs) > 1
+                if not sig.skip_cudagraph and (
+                    len(partition) < min_cg_size or multi_symbol
+                ):
+                    sig = GraphPartitionSignature(
+                        sig.symbol_inputs,
+                        sig.input_nodes,
+                        sig.output_nodes,
+                        sig.input_deallocation,
+                        True,
+                        sig.constant_names,
+                    )
+                new_sigs.append(sig)
+            signatures = new_sigs
+
         self.compute_graph_partition_maps(signatures)
 
         self._log_graph_partitions(partitions, signatures)
@@ -9888,9 +10122,6 @@ class Scheduler:
         partitions: list[PartitionType],
         signatures: list[GraphPartitionSignature],
     ) -> None:
-        if not cudagraphs_log.isEnabledFor(logging.DEBUG):
-            return
-
         # Don't log partition reasons for CPU-only graphs since cudagraph
         # partitioning is not relevant when there are no GPU devices
         has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
@@ -9899,55 +10130,42 @@ class Scheduler:
 
         cudagraphable_count = sum(1 for s in signatures if not s.skip_cudagraph)
         non_cudagraphable_count = len(signatures) - cudagraphable_count
-        cudagraphs_log.debug(
-            "Created %d graph partitions: %d cudagraphable, %d non-cudagraphable",
+        cudagraphs_log.warning(
+            "graph_partition: %d partitions, %d cudagraphable, %d non-cudagraphable",
             len(partitions),
             cudagraphable_count,
             non_cudagraphable_count,
         )
         for i, (partition, signature) in enumerate(zip(partitions, signatures)):
-            cudagraphs_log.debug(
-                "  Partition %d: %d nodes, %s, inputs=%d, outputs=%d",
+            sym_names = [s.name for s in signature.symbol_inputs]
+            cudagraphs_log.warning(
+                "  Partition %d: %d nodes, %s, inputs=%d, outputs=%d, symbols=%s",
                 i,
                 len(partition),
-                "non-cudagraphable" if signature.skip_cudagraph else "cudagraphable",
+                "ELIGIBLE" if not signature.skip_cudagraph else "SKIP",
                 len(signature.input_nodes),
                 len(signature.output_nodes),
+                sym_names,
             )
-            if signature.skip_cudagraph:
-                # Log details for each non-cudagraphable node
+            if signature.skip_cudagraph and len(partition) <= 3:
                 for node in partition:
-                    self._log_non_cudagraphable_node(node)
-
-    def _log_non_cudagraphable_node(self, node: BaseSchedulerNode) -> None:
-        """Log details for a non-cudagraphable node."""
-        reason = self.should_partition(node)
-        if not reason:
-            return
-
-        node_name = node.get_name()
-        fx_node = node.node.get_origin_node() if node.node is not None else None
-        parts = [f"reason={reason}"]
-        ir_type = type(node.node).__name__
-        parts.append(f"ir={ir_type}")
-        if fx_node is not None:
-            fx_str = f"{fx_node.target}({', '.join(str(a) for a in fx_node.args)})"
-            parts.append(f"fx={fx_str}")
-
-        cudagraphs_log.debug("    %s: %s", node_name, ", ".join(parts))
-
-        # Log full stack trace if available
-        if fx_node is not None:
-            stack_trace = fx_node.meta.get("stack_trace", None)
-            if stack_trace:
-                for line in stack_trace.strip().split("\n"):
-                    cudagraphs_log.debug("         %s", line)
+                    ir_type = type(node.node).__name__ if node.node else "?"
+                    fx_node = (
+                        node.node.get_origin_node() if node.node is not None else None
+                    )
+                    fx_target = str(fx_node.target) if fx_node is not None else "?"
+                    cudagraphs_log.warning(
+                        "    node %s: ir=%s, fx=%s",
+                        node.get_name(),
+                        ir_type,
+                        fx_target,
+                    )
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition
+                if config.graph_partition and not V.graph.is_const_graph
                 else self._codegen(self.nodes)
             )
 
@@ -9983,7 +10201,16 @@ class Scheduler:
             # and recorded in V.graph.removed_buffers. So we cleanup signature and write
             # prefix (i.e., generating call function and return outputs) after we have
             # codegen the partition.
-            if not isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen):
+            # AOTI cuda-graph emits each partition body through the C++ wrapper
+            # (a CppWrapperGpu subgraph), which carries partition_signatures and
+            # subgraph_name but is not a SubgraphPythonWrapperCodegen. Accept both.
+            if not (
+                isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
+                or (
+                    hasattr(V.graph.wrapper_code, "partition_signatures")
+                    and hasattr(V.graph.wrapper_code, "subgraph_name")
+                )
+            ):
                 raise AssertionError(
                     "expected wrapper_code to be a SubgraphPythonWrapperCodegen"
                 )
@@ -9997,6 +10224,11 @@ class Scheduler:
             V.graph.wrapper_code.write_prefix()
 
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
+            # Do not pop codegened_graph_stack here. init_wrapper_code above made a
+            # fresh subgraph wrapper whose stack is empty, and partition codegen
+            # never pushes onto it (only GraphLowering.codegen and HOO
+            # EnterSubgraphLine push, neither of which runs for a partition body).
+            # A pop here pops an empty stack -> IndexError.
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
@@ -10090,6 +10322,149 @@ class Scheduler:
         if len(partitions) > 1:
             counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
+        num_cg_partitions = sum(1 for sig in signatures if not sig.skip_cudagraph)
+        V.graph.wrapper_code.set_all_partition_names(num_cg_partitions)
+
+        # [AOTI cuda graph] Compile-time liveness for the cuda-graph runtime
+        # (cudagraph_tree.h). Captured partitions are indexed in execution
+        # order (== graph_partition_id). For each captured output we precompute:
+        #   * _cudagraph_escape_outs[cpid]: output indices that leave the captured
+        #     region (model outputs or consumed by an eager partition) -> kept.
+        #   * _cudagraph_real_producer_pid[name]: earliest captured cpid that
+        #     truly allocates `name` (per-edge chained-input classifier).
+        if config.aot_inductor.enable_cuda_graph:
+            captured = [sig for sig in signatures if not sig.skip_cudagraph]
+            model_outs = OrderedSet(V.graph.get_output_names())
+            cap_out_names: list[list[str]] = [
+                [n.get_name() for n in sig.output_nodes] for sig in captured
+            ]
+            cap_in_names: list[OrderedSet[str]] = [
+                OrderedSet(sig.input_nodes.keys()) for sig in captured
+            ]
+            eager_in_names: OrderedSet[str] = OrderedSet()
+            for sig in signatures:
+                if sig.skip_cudagraph:
+                    eager_in_names.update(sig.input_nodes.keys())
+            escape_outs: dict[int, list[int]] = {}
+            for cpid, names in enumerate(cap_out_names):
+                for idx, name in enumerate(names):
+                    consumers = [
+                        c
+                        for c in range(len(captured))
+                        if c != cpid and name in cap_in_names[c]
+                    ]
+                    if name in model_outs or name in eager_in_names or not consumers:
+                        escape_outs.setdefault(cpid, []).append(idx)
+            V.graph._cudagraph_escape_outs = escape_outs
+            # real_producer_pid[name] = the EARLIEST captured-partition cpid
+            # that truly ALLOCATES `name` (i.e. name is in cap_out_names[cpid]
+            # AND NOT in cap_in_names[cpid] -- so it is NOT a passthrough re-
+            # export). The codegen consumer in cpp_wrapper_gpu.py uses this
+            # for the chained-input classifier: an input is chained iff its
+            # real producer is captured AND ran earlier in the path. Passthrough
+            # re-exports are excluded because their real allocator is an EAGER
+            # partition that reallocates at a fresh address each forward, so a
+            # captured downstream kernel chaining off one would bake a stale
+            # address. mutation_real_name is already applied to both partition
+            # input names and returned output names, so post-rename names are
+            # consistent on both sides; no extra rename lookup is needed here.
+            real_producer_pid: dict[str, int] = {}
+            for cpid, names in enumerate(cap_out_names):
+                for name in names:
+                    if name not in cap_in_names[cpid]:
+                        if name not in real_producer_pid:
+                            real_producer_pid[name] = cpid
+            V.graph._cudagraph_real_producer_pid = real_producer_pid
+            # Slab-stability exclusion for eager->CG chaining: buffers produced
+            # by extern kernels (ExternKernelAlloc/FallbackKernel) are NOT pooled
+            # by memory_planning -> not slab-stable -> a captured consumer must
+            # copy_in, not chain. Computed HERE (before codegen) so the classifier
+            # sees the COMPLETE set; the per-scope memory_planning recording
+            # finishes too late (the outer wrapper's pool is recorded only after
+            # all chain decisions have already been emitted).
+            extern_output_names: set[str] = set()
+            for _snode in self.nodes:
+                if isinstance(_snode, ExternKernelSchedulerNode):
+                    extern_output_names.update(_snode.get_buffer_names())
+            V.graph._cudagraph_extern_output_names = extern_output_names
+            # Cross-cg-boundary buffers (captured partition inputs + outputs):
+            # their slab offset must persist until the captured partition replays,
+            # so cg-aware reuse must NOT share their offset. Intra-scope buffers
+            # (not in this set) reuse safely. Union over all captured partitions.
+            boundary_names: set[str] = set()
+            for _names in cap_in_names:
+                boundary_names.update(_names)
+            for _names in cap_out_names:
+                boundary_names.update(_names)
+            V.graph._cudagraph_boundary_names = boundary_names
+            # passthrough_producer_pid[name] = earliest captured cpid that
+            # re-emits `name` as a passthrough (name in BOTH cap_in_names[cpid]
+            # and cap_out_names[cpid]) and is NOT real-producer-allocated.
+            # Drives passthrough chaining in cpp_wrapper_gpu.py: the earliest
+            # such emitter A reassigns outer-scope `name` to A's stable
+            # static_inputs[i] view (refreshed per replay by A's copy_in), and
+            # downstream captured consumers chain from there instead of issuing
+            # their own copy_in -- one eager->CG copy at A, rest chain.
+            passthrough_producer_pid: dict[str, int] = {}
+            for cpid, names in enumerate(cap_out_names):
+                for name in names:
+                    if name in cap_in_names[cpid] and name not in real_producer_pid:
+                        if name not in passthrough_producer_pid:
+                            passthrough_producer_pid[name] = cpid
+            V.graph._cudagraph_passthrough_producer_pid = passthrough_producer_pid
+            # Cross-partition handoff liveness for slab placement.
+            #
+            # handoff_liveness[name] = (first_producer_pid, last_consumer_pid):
+            #   a captured-partition output that is REAL-allocated by a captured
+            #   partition (first_producer_pid) and whose LAST captured consumer
+            #   is last_consumer_pid (first_producer_pid < last_consumer_pid).
+            # These are exactly the buffers the cuda-graph runtime hands off
+            # between two captured partitions; they are placed in the
+            # memory_planning slab, so the memory_planning handoff planner needs
+            # both:
+            #   (a) the SET of names to slab-place == handoff_liveness.keys()
+            #   (b) the producer->last-consumer partition-id range == the value
+            # so the slab offset can persist over [producer .. last_consumer]
+            # rather than the whole program (the conservative full-overlap that
+            # _cudagraph_boundary_names forces today).
+            #
+            # EXCLUSIONS (must stay copy_in, NOT slab-placed):
+            #   * extern_output_names: produced by ExternKernelAlloc/
+            #     FallbackKernel, not pooled by memory_planning -> not
+            #     slab-stable, so a captured consumer must copy_in.
+            #   * passthrough re-exports (name not in real_producer_pid): the
+            #     real allocator is an eager partition that reallocates at a
+            #     fresh address each forward -> not slab-stable. Restricting the
+            #     producer to real_producer_pid drops these.
+            #   * model outputs / eager-partition inputs / no captured consumer:
+            #     these ESCAPE the captured region and are kept by the runtime
+            #     (see escape_outs); they are not cross-partition handoffs.
+            handoff_liveness: dict[str, tuple[int, int]] = {}
+            for name, producer_pid in real_producer_pid.items():
+                if name in model_outs or name in eager_in_names:
+                    continue
+                if name in extern_output_names:
+                    continue
+                consumers = [
+                    c
+                    for c in range(len(captured))
+                    if c != producer_pid and name in cap_in_names[c]
+                ]
+                if not consumers:
+                    continue
+                handoff_liveness[name] = (producer_pid, max(consumers))
+            V.graph._cudagraph_handoff_liveness = handoff_liveness
+            # Plan the cross-partition handoff slab HERE, in the
+            # scheduler pre-pass, right after _cudagraph_handoff_liveness is
+            # populated and BEFORE the partition codegen loop below. Both readers
+            # of the dicts it publishes -- the per-partition body's
+            # AllocFromPoolLine redirect (_cudagraph_boundary_offsets) and the
+            # outer codegen_partition_call (_cudagraph_handoff_pools) -- run
+            # during this same Scheduler.codegen (Phase 1), which strictly
+            # precedes the outer wrapper's MemoryPlanner.plan (Phase 2). Planning
+            # in Phase 2 would be a silent no-op.
+            cudagraph_partition.plan_cudagraph_handoff_slab()
+
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):
                 if len(partition) < 1:
@@ -10103,7 +10478,7 @@ class Scheduler:
                     self._codegen_partition_wrapper(partition, signature)
 
         num_partitions = next(self._graph_partition_counter)
-        V.graph.wrapper_code.set_all_partition_names(num_partitions)
+        assert num_partitions == num_cg_partitions
 
         # See [Note: Graph Partition Map for CUDAGraph]
         if num_partitions > 0:

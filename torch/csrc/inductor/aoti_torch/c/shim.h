@@ -620,6 +620,84 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
+struct AOTICudaGraphOpaque;
+using AOTICudaGraphHandle = AOTICudaGraphOpaque*;
+
+// Create/destroy a per-manager (per-AOTInductorModel) graph pool handle: an
+// opaque owner of one PRIVATE graph mempool + capture stream. Each tree manager
+// creates one in its constructor and destroys it in its destructor, so concurrent
+// model instances in a model_container are fully isolated (no shared pool/stream).
+// destroy_handle also reclaims the pool (releasePool) and clears the stream's
+// cuBLAS workspace. The cuda-graph functions below operate on this handle's pool.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_pool_create(int32_t device_index, void** ret_handle);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_pool_destroy_handle(void* pool_handle);
+
+// Process-global capture lock: the tree runtime serializes record_node across
+// concurrent model instances (cuda-graph capture is unsafe to interleave on a
+// device). Replay (the hot path) never takes it.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_lock();
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_unlock();
+// Shared (read) lock for replay + output reconstruction (concurrent across
+// instances; excluded only while some instance holds the exclusive capture lock).
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_replay_lock();
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_replay_unlock();
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_create(
+    AOTICudaGraphHandle* ret_handle,
+    void* pool_handle);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_begin_capture(
+    AOTICudaGraphHandle handle);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_end_capture(
+    AOTICudaGraphHandle handle);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_replay(
+    AOTICudaGraphHandle handle);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_get_stream(
+    AOTICudaGraphHandle handle,
+    void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_destroy(
+    AOTICudaGraphHandle handle);
+
+// Materialize the (empty) private graph pool so releasePool at teardown has a
+// real pool to release even when no partition is ever captured, and so the
+// manager's matching pool use ref balances the destructor's drop. Operates on
+// the caller's per-manager pool handle (aoti_torch_cuda_graph_pool_create).
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_pool_ensure_created(
+    void* pool_handle);
+
+// Synchronize the device and order the shared capture stream after the caller's
+// stream before recording a partition (mirrors cudagraph_trees' pre-record
+// synchronize + wait_stream). Required because all partitions share one capture
+// stream and one cuBLAS workspace slot.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_sync_before_record(int32_t device_index);
+
+// Clear cuBLAS's per-(handle,stream) workspace cache. cuBLAS workspaces are
+// caching-allocator allocations that land in the graph pool during capture; the
+// runtime clears them after each capture (mirroring cudagraph_trees'
+// clear_cublas_manager) so teardown does not double-free a block the cuBLAS
+// workspace map still references.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_clear_cublas_workspaces(void* pool_handle);
+
+// Debug instrumentation: total in-use GPU bytes (total - free) on the device.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_device_used_bytes(int32_t device_index, int64_t* ret_bytes);
+
+// Neutralize a tensor's storage deleter so destroying the handle does NOT free
+// the underlying graph-pool block (the captured graph still references that
+// address). The pool is freed wholesale via aoti_torch_cuda_graph_pool_destroy_handle
+// at teardown. This is the AOTI analog of cudagraph_trees' removeStorageDeleterFns.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_storage_set_noop_deleter(
+    AtenTensorHandle tensor);
+
 #endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
