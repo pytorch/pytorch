@@ -225,3 +225,6 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/cuda/AtomicAdd.h
+fastAtomicAdd
