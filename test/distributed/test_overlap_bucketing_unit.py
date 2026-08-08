@@ -52,7 +52,7 @@ import torch._dynamo.test_case
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 def build_collective_info(graph, hiding_annotations):
     """
     Build CollectiveInfo dict from manual hiding annotations.
@@ -116,7 +116,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1129,7 +1129,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestCrossPGOverlap(InductorTestCase):
     """
@@ -1143,7 +1143,7 @@ class TestCrossPGOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
         # Create two separate process groups for cross-PG testing
         cls.pg1 = dist.new_group(ranks=[0, 1])
@@ -1379,7 +1379,7 @@ class TestCrossPGOverlap(InductorTestCase):
         )
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
 class TestFusibleNodeOverlap(InductorTestCase):
@@ -1392,7 +1392,7 @@ class TestFusibleNodeOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1548,7 +1548,7 @@ class TestFusibleNodeOverlap(InductorTestCase):
         self.assertEqual(len(scheduler.collective_info), 1)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestOverlapSchedulingFixes(InductorTestCase):
     """
@@ -1563,7 +1563,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=16, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1803,6 +1803,9 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         )
 
     def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        if device_type != "cuda":
+            self.skipTest("CUDA-specific test: requires torch.cuda.default_generators")
+
         from torch._inductor.fx_passes.control_dependencies import control_deps
         from torch._inductor.fx_passes.overlap_scheduling import (
             schedule_overlap_bucketing,
@@ -1865,6 +1868,11 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.device = device_type
+
     @unittest.skipIf(not HAS_GPU, "Requires GPU")
     def test_foreach_groups_correctness(self):
         """Test that foreach grouping computes correct groups and copies data correctly."""
@@ -1874,9 +1882,9 @@ class TestForeachGroupsUnit(InductorTestCase):
             _pre_bucket_all_gather,
         )
 
-        t1 = torch.randn(10, device="cuda")
-        t2 = torch.randn(20, device="cuda", dtype=torch.float16)
-        t3 = torch.randn(10, device="cuda")
+        t1 = torch.randn(10, device=self.device)
+        t2 = torch.randn(20, device=self.device, dtype=torch.float16)
+        t3 = torch.randn(10, device=self.device)
         ag_ins = [t1, t2, t3]
         out_dtypes = [torch.float32, torch.float16, torch.float32]
         out_dtype_ints = [_ALL_DTYPES.index(d) for d in out_dtypes]
@@ -2147,8 +2155,7 @@ class TestProfileGuidedEstimation(TestCase):
                 os.unlink(trace_path)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestCoalescedCollectiveOverlap(InductorTestCase):
     """
@@ -2167,7 +2174,7 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=8, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -2314,7 +2321,7 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
         self.assertGreater(size, 0)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl", "hccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestProfileGuidedEstimatorIntegration(InductorTestCase):
     """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
@@ -2326,7 +2333,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -2412,7 +2419,7 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=64, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
