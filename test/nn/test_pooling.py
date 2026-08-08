@@ -1102,10 +1102,10 @@ torch.cuda.synchronize()
         expected = inp.unfold(-2, 2, 2).unfold(-2, 2, 2).amax(dim=(-2, -1))
         self.assertEqual(out, expected)
 
-    @expectedFailureMPS  # TODO: fixme
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(
             n,
