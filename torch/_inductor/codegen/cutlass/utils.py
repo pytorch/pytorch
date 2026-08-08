@@ -101,11 +101,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
+    cutlass_dir = config.cutlass.cutlass_dir
     cutlass_python_path = path_join(cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(

@@ -6,12 +6,7 @@ from typing import Any, cast, Literal, TYPE_CHECKING
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import (
-    Config,
-    get_tristate_env,
-    inherit_fields_from,
-    install_config_module,
-)
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 if TYPE_CHECKING:
@@ -2612,8 +2607,11 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
-class cuda(cutlass):
+class cuda:
+    # Undefined attributes fall back to the cutlass config (resolved dynamically,
+    # so later changes to cutlass.* are reflected here).
+    __fallback__ = "cutlass"
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -2639,8 +2637,11 @@ class cuda(cutlass):
     enable_ptxas_info = False
 
 
-@inherit_fields_from(cutlass)
-class xpu(cutlass):
+class xpu:
+    # Undefined attributes fall back to the cutlass config (resolved dynamically,
+    # so later changes to cutlass.* are reflected here).
+    __fallback__ = "cutlass"
+
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
     arch: str | None = None
@@ -2650,8 +2651,6 @@ class xpu(cutlass):
 
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
-
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
 
 
 class rocm:
@@ -2956,9 +2955,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",

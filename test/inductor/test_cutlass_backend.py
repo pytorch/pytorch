@@ -273,6 +273,31 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
         self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
 
+    @parametrize("sub", ("cuda", "xpu"))
+    def test_config_fallback_to_cutlass(self, sub):
+        # The cuda/xpu subconfigs do not inherit cutlass fields statically;
+        # attributes they don't define fall back to cutlass dynamically.
+        subconfig = getattr(config, sub)
+
+        # An attribute not defined on the subconfig falls back to cutlass.
+        self.assertEqual(subconfig.compile_opt_level, config.cutlass.compile_opt_level)
+
+        # Updating cutlass is reflected immediately through the fallback.
+        with config.patch({"cutlass.compile_opt_level": "-O3"}):
+            self.assertEqual(subconfig.compile_opt_level, "-O3")
+
+        # Patching through the subconfig name writes to the cutlass fallback.
+        with config.patch({f"{sub}.use_fast_math": True}):
+            self.assertTrue(subconfig.use_fast_math)
+            self.assertTrue(config.cutlass.use_fast_math)
+
+        # Attributes defined directly on the subconfig are independent: they are
+        # real config keys and cutlass has no such attribute to fall back to.
+        self.assertIn(f"{sub}.arch", config._config)
+        self.assertNotIn("cutlass.arch", config._config)
+        with config.patch({f"{sub}.arch": "sm_test"}):
+            self.assertEqual(subconfig.arch, "sm_test")
+
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
