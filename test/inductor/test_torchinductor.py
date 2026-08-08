@@ -7356,6 +7356,30 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
+    def test_as_strided_past_input_extent(self):
+        # A graph input aliasing a larger storage may legitimately be
+        # as_strided'd past its own extent: Inductor rebases the storage-relative
+        # offset onto the input pointer, so the read stays in bounds at runtime.
+        # The extent check on realized buffers must not reject this.
+        def fn(x):
+            return torch.as_strided(x, (12,), (1,), 0) + 1.0
+
+        # Not self.common: its host-to-device input copy compacts the view and
+        # drops the aliased storage this test is about.
+        base = torch.arange(12, dtype=torch.float32, device=self.device)
+        self.assertEqual(torch.compile(fn)(base[6:9]), fn(base[6:9]))
+
+    def test_as_strided_past_realized_buffer_raises(self):
+        # An intermediate is allocated to exactly its layout, so an as_strided past
+        # that extent has no data to read. Inductor must fail loudly rather than
+        # reinterpret unallocated memory into an unmasked load.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (2 * y.numel(),), (1,), 0)
+
+        with self.assertRaisesRegex(torch._inductor.exc.InductorError, "holds only"):
+            torch.compile(fn, fullgraph=True)(torch.randn(64, device=self.device))
+
     def test_repeat_interleave(self):
         def fn(x):
             return (

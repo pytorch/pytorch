@@ -1796,6 +1796,24 @@ def as_strided(
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset),
     )
+    # aten.as_strided offsets are storage-relative, but a realized buffer is
+    # allocated to exactly its own layout: whatever else the original tensor aliased
+    # is simply not there, so reinterpreting past the buffer would codegen an
+    # unmasked out-of-bounds read. InputBuffers are exempt -- their real storage may
+    # legitimately extend past the layout, and the adjustment above has already
+    # rebased the offset onto the incoming pointer.
+    needed, allocated = new_layout.storage_size(), old_layout.storage_size()
+    if not isinstance(storage_data, ir.InputBuffer):
+        if V.graph.sizevars.statically_known_gt(needed, allocated):
+            raise NotImplementedError(
+                f"as_strided({size}, {stride}, {storage_offset}) requires {needed} "
+                f"elements but {storage_data.get_name()} holds only {allocated}. This "
+                f"happens when a tensor aliasing a larger storage is realized as its own "
+                f"buffer; clone the base and re-derive the view instead."
+            )
+        # Symbolic extents are not always statically comparable, so guard rather
+        # than assume: an unprovable case must fail loudly, not silently read OOB.
+        V.graph.sizevars.check_leq(needed, allocated)
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
