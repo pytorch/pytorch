@@ -555,7 +555,7 @@ def wrap_propagate_mutations_and_return(
     functional_op: NativeFunction,
     inner_return_var: str,
     *,
-    preserve_strides: bool,
+    preserve_strides: bool = True,
 ) -> str:
     mutable_arg_names = f.func.arguments.mutable_arg_names()
     (
