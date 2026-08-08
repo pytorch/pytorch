@@ -1,5 +1,6 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
@@ -243,14 +244,20 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // PyObjects stored in them.
   if (!Py_IsInitialized())
     return;
-  pybind11::gil_scoped_acquire gil;
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
+  }
   Py_DECREF(pyobj);
 }
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
   if (!Py_IsInitialized())
     return;
-  pybind11::gil_scoped_acquire gil;
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
+  }
   Py_INCREF(pyobj);
 }
 
@@ -258,7 +265,10 @@ bool ConcretePyInterpreterVTable::try_incref(
     const c10::impl::PyObjectSlot& pyobj_slot) const {
   if (!Py_IsInitialized())
     return false;
-  pybind11::gil_scoped_acquire gil;
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return false;
+  }
   PyObject* pyobj = pyobj_slot.load_pyobj();
   if (!pyobj) {
     return false;
@@ -269,7 +279,10 @@ bool ConcretePyInterpreterVTable::try_incref(
 size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
   if (!Py_IsInitialized() || pyobj == nullptr)
     return 0;
-  pybind11::gil_scoped_acquire gil;
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return 0;
+  }
   return Py_REFCNT(pyobj);
 }
 
