@@ -288,7 +288,7 @@ command = [
     'python3',
     'tools/linter/adapters/clangtidy_linter.py',
     '--binary=.lintbin/clang-tidy',
-    '--build_dir=./build',
+    '--build_dir=./build_lint',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -340,7 +340,7 @@ command = [
     'python3',
     'tools/linter/adapters/clangtidy_linter.py',
     '--binary=.lintbin/clang-tidy',
-    '--build_dir=./build',
+    '--build_dir=./build_lint',
     '--std=c++17',
     '--',
     '@{{PATHSFILE}}'
