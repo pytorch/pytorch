@@ -1817,6 +1817,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    @parametrize_test("dtype", [torch.float, torch.bfloat16, torch.float16])
+    def test_weight_norm_empty_input(self, dtype):
+        # Regression test for #181510. The fused CPU kernel reduced over an
+        # empty v, which handed a null data pointer to the vectorized load and
+        # left the saved norm at zero, so the g gradient came back nan.
+        m = torch.nn.utils.weight_norm(nn.Linear(0, 1).to(dtype=dtype))
+        out = m(torch.empty((1, 0), dtype=dtype))
+        self.assertEqual(out.shape, torch.Size([1, 1]))
+
+        out.sum().backward()
+        self.assertEqual(m.weight_g.grad, torch.zeros_like(m.weight_g))
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
