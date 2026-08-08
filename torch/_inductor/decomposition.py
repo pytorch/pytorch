@@ -160,6 +160,22 @@ def register_decomposition(
     return decomp.register_decomposition(ops, decompositions)
 
 
+@register_decomposition([aten.special_log_ndtr])
+def special_log_ndtr(a: torch.Tensor) -> torch.Tensor:
+    # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
+    # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
+    # We wrap the base decomposition result with copysign to force the sign bit,
+    # since log_ndtr is always non-positive.
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
+    res = torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-torch.erfc(t) / 2),
+    )
+    return torch.copysign(res, -1.0)
+
+
 if torch.distributed.is_available():
 
     @register_decomposition([torch.ops._dtensor.shard_dim_alltoall.default])
