@@ -126,6 +126,80 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(out.expr, sympy.Integer(2048))
 
 
+class TestPerChoiceInputs(TestCase):
+    class FakeNode:
+        def __init__(self, name, size, stride):
+            self.name = name
+            self.size = size
+            self.stride = stride
+
+        def get_name(self):
+            return self.name
+
+        def get_size(self):
+            return self.size
+
+        def get_stride(self):
+            return self.stride
+
+        def get_dtype(self):
+            return torch.bfloat16
+
+        def get_device(self):
+            return "cuda"
+
+    class FakeChoice:
+        def __init__(self, name, input_nodes):
+            self.name = name
+            self.input_nodes = input_nodes
+
+    def test_divergent_extern_materializes_only_its_own_choice(self):
+        global_nodes = [self.FakeNode("bias_2d", (32, 64), (0, 1))]
+        first = self.FakeChoice(
+            "addmm", [self.FakeNode("bias_1d", (64,), (1,))]
+        )
+        second = self.FakeChoice(
+            "other_extern", [self.FakeNode("other_bias", (32,), (1,))]
+        )
+        template = self.FakeChoice("triton", global_nodes)
+        calls = []
+
+        def materialize(
+            _cls,
+            choices,
+            input_nodes,
+            _layout,
+            _input_gen_fns,
+            _hint_override=None,
+        ):
+            calls.append((list(input_nodes), list(choices)))
+            inputs = [torch.empty(0) for _ in input_nodes]
+            return inputs, inputs, torch.empty(0), torch.empty(0)
+
+        with patch.object(
+            select_algorithm.AlgorithmSelectorCache,
+            "_materialize_inputs",
+            classmethod(materialize),
+        ), patch.object(
+            select_algorithm.AlgorithmSelectorCache,
+            "_is_extern",
+            staticmethod(lambda choice: choice in (first, second)),
+        ), patch.object(select_algorithm, "VERIFY", {}):
+            result = select_algorithm.AlgorithmSelectorCache.get_inputs(
+                choices=[first, second, template],
+                input_nodes=global_nodes,
+                layout=None,
+                input_gen_fns=None,
+            )
+
+        self.assertEqual(calls[0][1], [first, second, template])
+        self.assertEqual(calls[1][1], [first])
+        self.assertEqual(calls[2][1], [second])
+        self.assertIn(id(first), result.per_choice)
+        self.assertIn(id(second), result.per_choice)
+        self.assertNotIn(id(template), result.per_choice)
+
+
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()

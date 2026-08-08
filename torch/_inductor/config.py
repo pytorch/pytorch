@@ -2060,6 +2060,25 @@ class triton:
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
+
+    # When True, the inductor autotune harness pushes a per-op
+    # `torch.cuda.tunable.dynamic_dims_mask` whenever a GEMM input dim
+    # is symbolic (sympy free-symbol). The mask is read by the C++
+    # producer (`launchTunableGemmAndBias`, `launchTunableScaledGemm`,
+    # `bgemm_tunable`), translated to BLAS frame via
+    # `cublasCommonArgs::swapped_mn`, and stamped onto
+    # `params.dynamic_dims_mask`. With a non-empty mask,
+    # `TunableOp::operator()` persists BOTH the concrete and the
+    # wildcard kernel-map entries (cases 2/4 of the dispatch matrix);
+    # at runtime, `LookupWildcardFallback` lets concrete-miss queries
+    # dispatch via the wildcard entry.
+    #
+    # Set to False to stop producing new wildcard entries. Existing wildcard
+    # rows in a loaded persistence file can still satisfy runtime lookups.
+    #
+    # The runtime scan is a no-op when no wildcards exist in the file.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
+
     # Tune the generated Triton kernels at compile time instead of first time they run
     # Setting to None means uninitialized
     autotune_at_compile_time: bool | None = autotune_at_compile_time_default()
