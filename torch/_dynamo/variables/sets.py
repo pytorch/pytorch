@@ -26,7 +26,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, is_constant_source, is_from_local_source
+from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
@@ -37,7 +37,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import Member, Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -45,7 +45,6 @@ from .hashable import HashableTracker, is_hashable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._dynamo.variables.builtin import BuiltinVariable
 
 
 # [Adding a new supported class within the keys of SetVariable]
@@ -216,11 +215,6 @@ class SetVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
-        return super().getattro_impl(tx, name)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -320,245 +314,287 @@ class SetVariable(VariableTracker):
         contains = item in self
         return VariableTracker.build(tx, contains)
 
-    def call_method(
+    def _try_fast_set_method(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> "VariableTracker | None":
         from ..utils import check_constant_args
-        from .builder import SourcelessBuilder
         from .dicts import ConstDictVariable
 
+        # Constant, exact-builtin fast path: materialize and call the real
+        # method. Set/dict operands take the slow VT path below so their keys
+        # are not re-hashed (CPython's do-not-rehash-dict-keys fast path);
+        # OrderedSet is excluded because as_python_constant() loses insertion
+        # order (it routes through the unordered set_items).
         if (
-            name
-            in (
-                "isdisjoint",
-                "union",
-                "intersection",
-                "difference",
-                "symmetric_difference",
-            )
-            # Set/dict operands route to the VT-level branches below, which reuse
-            # the operand's HashableTracker keys without re-hashing (CPython's
-            # do-not-rehash-dict-keys fast path).  Materializing them via
-            # as_python_constant() here would rebuild a real set/dict and re-hash
-            # every key, diverging from CPython for side-effecting __hash__.
-            and not any(isinstance(a, (SetVariable, ConstDictVariable)) for a in args)
+            not any(isinstance(a, (SetVariable, ConstDictVariable)) for a in args)
             and check_constant_args(args, kwargs)
-            # Exact builtin types only: a subclass may override these methods,
-            # and OrderedSet is excluded because as_python_constant() loses
-            # insertion order (it routes through the unordered set_items).
             and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
+        return None
 
-        if name == "add":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            # Convert add to __setitem__ with None value
-            tx.output.side_effects.mutation(self)
-            self.items[HashableTracker(args[0])] = SetVariable._default_value()
-            return ConstantVariable.create(None)
-        elif name == "pop":
-            if kwargs or args:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            # Choose an item at random and pop it
-            try:
-                result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
-            except KeyError as e:
-                raise_observed_exception(KeyError, tx, args=list(e.args))
+    def add(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Convert add to __setitem__ with None value
+        tx.output.side_effects.mutation(self)
+        self.items[HashableTracker(args[0])] = SetVariable._default_value()
+        return ConstantVariable.create(None)
+
+    def pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Choose an item at random and pop it
+        try:
+            result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
+        except KeyError as e:
+            raise_observed_exception(KeyError, tx, args=list(e.args))
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        self.items.pop(HashableTracker(result))
+        return result
+
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fast = self._try_fast_set_method(tx, "isdisjoint", args, kwargs)
+        if fast is not None:
+            return fast
+        for key in self._iter_operand_keys(tx, args[0]):
+            if key in self.items:
+                return ConstantVariable.create(False)
+        return ConstantVariable.create(True)
+
+    def intersection(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fast = self._try_fast_set_method(tx, "intersection", args, kwargs)
+        if fast is not None:
+            return fast
+        out_items = dict(self.items)
+        for other in args:
+            other_keys = set(self._operand_keys(tx, other))
+            out_items = {k: v for k, v in out_items.items() if k in other_keys}
+        return self._new_set(out_items)
+
+    def intersection_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        kept = dict(self.items)
+        for other in args:
+            other_keys = set(self._operand_keys(tx, other))
+            kept = {k: v for k, v in kept.items() if k in other_keys}
+        tx.output.side_effects.mutation(self)
+        self.should_reconstruct_all = True
+        self.items.clear()
+        self.items.update(kept)
+        return ConstantVariable.create(None)
+
+    def union(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fast = self._try_fast_set_method(tx, "union", args, kwargs)
+        if fast is not None:
+            return fast
+        out_items = dict(self.items)
+        for other in args:
+            for key in self._operand_keys(tx, other):
+                out_items.setdefault(key, SetVariable._default_value())
+        return self._new_set(out_items)
+
+    def difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fast = self._try_fast_set_method(tx, "difference", args, kwargs)
+        if fast is not None:
+            return fast
+        out_items = dict(self.items)
+        for other in args:
+            for key in self._operand_keys(tx, other):
+                out_items.pop(key, None)
+        return self._new_set(out_items)
+
+    def difference_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        tx.output.side_effects.mutation(self)
+        self.should_reconstruct_all = True
+        for other in args:
+            for key in self._operand_keys(tx, other):
+                self.items.pop(key, None)
+        return ConstantVariable.create(None)
+
+    def symmetric_difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fast = self._try_fast_set_method(tx, "symmetric_difference", args, kwargs)
+        if fast is not None:
+            return fast
+        other = dict.fromkeys(
+            self._operand_keys(tx, args[0]), SetVariable._default_value()
+        )
+        out_items = {k: v for k, v in self.items.items() if k not in other}
+        out_items.update({k: v for k, v in other.items() if k not in self.items})
+        return self._new_set(out_items)
+
+    def symmetric_difference_update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        other = dict.fromkeys(
+            self._operand_keys(tx, args[0]), SetVariable._default_value()
+        )
+        new_items = {k: v for k, v in self.items.items() if k not in other}
+        new_items.update({k: v for k, v in other.items() if k not in self.items})
+        tx.output.side_effects.mutation(self)
+        self.should_reconstruct_all = True
+        self.items.clear()
+        self.items.update(new_items)
+        return ConstantVariable.create(None)
+
+    def update(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not self.is_mutable():
+            return None
+        tx.output.side_effects.mutation(self)
+        for other in args:
+            for key in self._operand_keys(tx, other):
+                self.items.setdefault(key, SetVariable._default_value())
+        return ConstantVariable.create(None)
+
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not self.sq_contains(tx, args[0]).as_python_constant():
+            raise_observed_exception(KeyError, tx, args=[args[0]])
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        # sq_contains validated/normalized args[0]; a set key was coerced to
+        # a frozenset, so pop that same normalized key.
+        key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+        self.items.pop(HashableTracker(key))
+        return ConstantVariable.create(None)
+
+    def discard(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.sq_contains(tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.pop(HashableTracker(result))
-            return result
-        elif name == "isdisjoint":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            for key in self._iter_operand_keys(tx, args[0]):
-                if key in self.items:
-                    return ConstantVariable.create(False)
-            return ConstantVariable.create(True)
-        elif name == "intersection":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            out_items = dict(self.items)
-            for other in args:
-                other_keys = set(self._operand_keys(tx, other))
-                out_items = {k: v for k, v in out_items.items() if k in other_keys}
-            return self._new_set(out_items)
-        elif name == "intersection_update":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            kept = dict(self.items)
-            for other in args:
-                other_keys = set(self._operand_keys(tx, other))
-                kept = {k: v for k, v in kept.items() if k in other_keys}
-            tx.output.side_effects.mutation(self)
-            self.should_reconstruct_all = True
-            self.items.clear()
-            self.items.update(kept)
-            return ConstantVariable.create(None)
-        elif name == "union":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            out_items = dict(self.items)
-            for other in args:
-                for key in self._operand_keys(tx, other):
-                    out_items.setdefault(key, SetVariable._default_value())
-            return self._new_set(out_items)
-        elif name == "difference":
-            if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
-            out_items = dict(self.items)
-            for other in args:
-                for key in self._operand_keys(tx, other):
-                    out_items.pop(key, None)
-            return self._new_set(out_items)
-        elif name == "difference_update":
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            tx.output.side_effects.mutation(self)
-            self.should_reconstruct_all = True
-            for other in args:
-                for key in self._operand_keys(tx, other):
-                    self.items.pop(key, None)
-            return ConstantVariable.create(None)
-        elif name == "symmetric_difference":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            other = dict.fromkeys(
-                self._operand_keys(tx, args[0]), SetVariable._default_value()
+            # sq_contains validated/normalized args[0]; a set key was coerced
+            # to a frozenset, so pop that same normalized key.
+            key = (
+                args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
             )
-            out_items = {k: v for k, v in self.items.items() if k not in other}
-            out_items.update({k: v for k, v in other.items() if k not in self.items})
-            return self._new_set(out_items)
-        elif name == "symmetric_difference_update":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            other = dict.fromkeys(
-                self._operand_keys(tx, args[0]), SetVariable._default_value()
-            )
-            new_items = {k: v for k, v in self.items.items() if k not in other}
-            new_items.update({k: v for k, v in other.items() if k not in self.items})
-            tx.output.side_effects.mutation(self)
-            self.should_reconstruct_all = True
-            self.items.clear()
-            self.items.update(new_items)
-            return ConstantVariable.create(None)
-        elif name == "update" and self.is_mutable():
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            tx.output.side_effects.mutation(self)
-            for other in args:
-                for key in self._operand_keys(tx, other):
-                    self.items.setdefault(key, SetVariable._default_value())
-            return ConstantVariable.create(None)
-        elif name == "remove":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            if not self.sq_contains(tx, args[0]).as_python_constant():
-                raise_observed_exception(KeyError, tx, args=[args[0]])
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-            # sq_contains validated/normalized args[0]; a set key was coerced to
-            # a frozenset, so pop that same normalized key.
-            key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
             self.items.pop(HashableTracker(key))
-            return ConstantVariable.create(None)
-        elif name == "discard":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            if self.sq_contains(tx, args[0]).as_python_constant():
-                self.should_reconstruct_all = True
-                tx.output.side_effects.mutation(self)
-                # sq_contains validated/normalized args[0]; a set key was coerced
-                # to a frozenset, so pop that same normalized key.
-                key = (
-                    args[0]
-                    if is_hashable(args[0])
-                    else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
-                )
-                self.items.pop(HashableTracker(key))
-            return ConstantVariable.create(None)
-        elif name in ("issubset", "issuperset"):
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+        return ConstantVariable.create(None)
 
-            op = {
-                "issubset": operator.le,
-                "issuperset": operator.ge,
-            }
-            other = args[0].realize()
-            if not istype(other, SetVariable):
-                other = SourcelessBuilder.create(tx, set).call_function(tx, [other], {})
-            return SourcelessBuilder.create(tx, op.get(name)).call_function(
-                tx, [self, other], {}
-            )
-        elif name == "copy":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return set_copy(self)
-        elif name == "clear":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            return ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
+    def _ordering_test(self, tx, args, op):
+        from .builder import SourcelessBuilder
 
-    def python_type_var(self) -> "BuiltinVariable":
-        return variables.BuiltinVariable(set)
+        other = args[0].realize()
+        if not istype(other, SetVariable):
+            other = SourcelessBuilder.create(tx, set).call_function(tx, [other], {})
+        return SourcelessBuilder.create(tx, op).call_function(tx, [self, other], {})
+
+    def issubset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._ordering_test(tx, args, operator.le)
+
+    def issuperset(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._ordering_test(tx, args, operator.ge)
+
+    def copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return set_copy(self)
+
+    def clear(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        self.items.clear()
+        return ConstantVariable.create(None)
+
+    tp_methods = {
+        "add": Method(add),
+        "pop": Method(pop),
+        "isdisjoint": Method(isdisjoint),
+        "intersection": Method(intersection),
+        "intersection_update": Method(intersection_update),
+        "union": Method(union),
+        "difference": Method(difference),
+        "difference_update": Method(difference_update),
+        "symmetric_difference": Method(symmetric_difference),
+        "symmetric_difference_update": Method(symmetric_difference_update),
+        "update": Method(update),
+        "remove": Method(remove),
+        "discard": Method(discard),
+        "issubset": Method(issubset),
+        "issuperset": Method(issuperset),
+        "copy": Method(copy),
+        "clear": Method(clear),
+    }
 
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -743,22 +779,6 @@ class OrderedSetClassVariable(VariableTracker):
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__new__":
-            from .misc import GetAttrVariable
-
-            if self.source:
-                attr_source = AttrSource(self.source, name)
-            else:
-                attr_source = None
-            return GetAttrVariable(
-                self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
-            )
-        else:
-            return super().getattro_impl(tx, name)
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -806,6 +826,23 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    _cpython_type = OrderedSet
+
+    def method_flags_type(self) -> type:
+        # OrderedSet is pure-Python (no C ml_flags); its named methods mirror
+        # set's arities, so derive MethodFlags from set to enforce them.
+        return set
+
+    def _get_internal_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # OrderedSet is backed by a dict (self._dict). Expose it so inlined
+        # OrderedSet methods (e.g. __contains__ -> `elem in self._dict`) trace
+        # natively instead of graph-breaking on an unmodeled attribute.
+        from .dicts import ConstDictVariable
+
+        return ConstDictVariable(self.items, mutation_type=ValueMutationNew())  # type: ignore[bad-argument-type]
+
+    tp_members = {"_dict": Member(_get_internal_dict, None)}
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -825,10 +862,6 @@ class OrderedSetVariable(SetVariable):
 
     def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
-
-    # pyrefly: ignore[bad-override]
-    def python_type_var(self) -> OrderedSetClassVariable:
-        return OrderedSetClassVariable()
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -908,9 +941,6 @@ class FrozensetVariable(SetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def python_type_var(self) -> "BuiltinVariable":
-        return variables.BuiltinVariable(frozenset)
-
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
@@ -937,34 +967,49 @@ class FrozensetVariable(SetVariable):
             ]
         )
 
-    def call_method(
+    def copy(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
-            raise RuntimeError(f"Illegal call_method {name} on a frozenset")
-        elif name == "copy":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            if type(self) is FrozensetVariable:
-                return self
-            return super().call_method(tx, name, args, kwargs)
-        elif name in (
-            "difference",
-            "intersection",
-            "symmetric_difference",
-        ):
-            r = super().call_method(tx, name, args, kwargs)
-            return FrozensetVariable(r.items)  # type: ignore[attr-defined]
-        return super().call_method(tx, name, args, kwargs)
+        if type(self) is FrozensetVariable:
+            return self
+        return SetVariable.copy(self, tx, args, kwargs)
+
+    def difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        r = SetVariable.difference(self, tx, args, kwargs)
+        return FrozensetVariable(r.items)  # type: ignore[attr-defined]
+
+    def intersection(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        r = SetVariable.intersection(self, tx, args, kwargs)
+        return FrozensetVariable(r.items)  # type: ignore[attr-defined]
+
+    def symmetric_difference(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        r = SetVariable.symmetric_difference(self, tx, args, kwargs)
+        return FrozensetVariable(r.items)  # type: ignore[attr-defined]
+
+    tp_methods = {
+        "copy": Method(copy),
+        "difference": Method(difference),
+        "intersection": Method(intersection),
+        "symmetric_difference": Method(symmetric_difference),
+    }
 
     def tp_init_impl(
         self,
@@ -1025,14 +1070,3 @@ class DictKeySetVariable(SetVariable):
         return dict.fromkeys(
             {k.vt.as_python_constant() for k in self.set_items}, None
         ).keys()
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
-            raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
-        return super().call_method(tx, name, args, kwargs)

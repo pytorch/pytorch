@@ -1051,13 +1051,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     def generate_c_shim_extern_kernel_call(
         self,
+        extern_kernel: ir.ExternKernel,
         kernel: str,
         args: list[str],
         device: str,
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
-        disable_autograd: bool = False,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -1079,12 +1079,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
+            extern_kernel,
             kernel,
             wrapped_args,
             device,
             debug_args=debug_args if debug_args is not None else args,
             stack_traces=stack_traces,
-            disable_autograd=disable_autograd,
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
@@ -1092,49 +1092,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
         super().generate_scatter_fallback(node)
 
-    def _generate_scatter_fallback(
-        self,
-        output,
-        inputs,
-        cpp_kernel_name,
-        python_kernel_name,
-        src_is_tensor,
-        reduce,
-        kwargs,
-        device,
-    ):
-        reduce = self._get_scatter_reduce_enum(reduce)
-
-        # call the ABI shim function instead of the ATen one
-        self.add_device_include(device)
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
-
-        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
-        cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-        inputs_wrapped = [
-            (f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x))
+        return [
+            f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
-        # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure (e.g. setStorage on
-        # an empty self) surfaces instead of being silently swallowed.
-        line = f"{cpp_kernel_name}(borrow_arrayref_tensor_as_tensor({output}), {','.join(inputs_wrapped)}"
-
-        if python_kernel_name.startswith("aten.scatter_reduce"):
-            line += f", {','.join(kwargs)}"
-        else:
-            if src_is_tensor:
-                if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
-            else:
-                if reduce is not None:
-                    raise AssertionError(
-                        "Expect reduce to be None for aten.scatter_ with scalar src"
-                    )
-        line += ")"
-        self.writelines(
-            self.wrap_fallback_dispatch_cpp([f"AOTI_TORCH_ERROR_CODE_CHECK({line});"])
-        )
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

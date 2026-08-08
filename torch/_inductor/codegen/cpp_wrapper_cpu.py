@@ -25,7 +25,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, cpp_builder, ir
+from .. import config, ir
 from ..ir import ExternKernel
 from ..utils import (
     _align,
@@ -406,12 +406,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if force_mutable or c_type.endswith("*"):
             return f"{array_expr}.data()"
 
-        # MSVC does not support implicitly converting a const iterator to a const
-        # pointer, so use data() and cast to keep const qualification.
-        if cpp_builder.is_msvc_cl():
-            return f"static_cast<const {c_type}*>({array_expr}.data())"
-
-        return f"{array_expr}.cbegin()"
+        return f"static_cast<const {c_type}*>({array_expr}.data())"
 
     def _generate_kernel_call_helper(
         self,
@@ -910,7 +905,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         self.prefix.writeline_aot(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
                         )
-                        device_type_str = str(tensor_device.type)
+                        device_type_str = tensor_device.type
                         self.prefix.splice_aot(f"""
                                 int32_t {name}_expected_device_type = {expected_device_type};
                                 if ({name}_expected_device_type != {name}_device_type) {{
@@ -1888,13 +1883,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_c_shim_extern_kernel_call(
         self,
+        extern_kernel: ir.ExternKernel,
         kernel: str,
         args: list[str],
         device: str,
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
-        disable_autograd: bool = False,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1938,7 +1933,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         "}",
                     ]
                 )
-            if disable_autograd:
+            if isinstance(extern_kernel, (ir.FallbackKernel, ir.FallbackKernelOut)):
                 shim_fn_codes = self.wrap_fallback_dispatch_cpp(shim_fn_codes)
             self.writelines(shim_fn_codes)
 
@@ -1973,10 +1968,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
         self.generate_c_shim_extern_kernel_call(
+            extern_kernel,
             extern_kernel.get_kernel_name(),
             args,
             device,
-            disable_autograd=isinstance(extern_kernel, ir.FallbackKernel),
         )
 
         if extern_kernel.python_kernel_name in (
@@ -2036,23 +2031,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device = d.type if (d := fallback_kernel.get_device()) else self.device
 
         self.generate_c_shim_extern_kernel_call(
+            fallback_kernel,
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
-            disable_autograd=True,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
     def _generate_extern_kernel_out_helper(
         self,
+        extern_kernel: ir.ExternKernelOut,
         kernel: str,
         out: str,
         out_view: str | None,
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
-        disable_autograd: bool = False,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -2062,11 +2057,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
+            extern_kernel,
             kernel,
             args,
             device,
             stack_traces=stack_traces,
-            disable_autograd=disable_autograd,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -2076,6 +2071,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             reduce = get_operator_enum[reduce]
 
         return reduce
+
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
+        return [str(x) for x in inputs]
 
     def _generate_scatter_fallback(
         self,
@@ -2095,22 +2093,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
-        inputs_wrapped = [str(x) for x in inputs]
+        # str(output) ensures that CppWrapperCpuArrayRef borrows the output tensor
+        args_wrapped = self._generate_scatter_fallback_args((str(output), *inputs))
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
         # surfaces instead of being silently swallowed.
-        line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
+        line = f"{cpp_kernel_name}({','.join(args_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
             line += f", {','.join(kwargs)}"
-        else:
-            if src_is_tensor:
-                if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
-            else:
-                if reduce is not None:
-                    raise AssertionError(
-                        "Expect reduce to be None for aten.scatter_ with scalar src"
-                    )
+        elif src_is_tensor:
+            if reduce:
+                line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
+        elif reduce is not None:
+            raise AssertionError(
+                "Expect reduce to be None for aten.scatter_ with scalar src"
+            )
         line += ")"
         self.writelines(
             self.wrap_fallback_dispatch_cpp([f"AOTI_TORCH_ERROR_CODE_CHECK({line});"])
@@ -2413,7 +2410,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
         device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
         self.used_cached_devices.add(device_str)
-        return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
+        return f"cached_torch_device_type_{device_str}, {device.index or 0}"
 
     def codegen_device_idx(self, device, device_id):
         device_id = device_id.strip()

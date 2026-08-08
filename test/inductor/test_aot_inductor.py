@@ -4824,6 +4824,110 @@ class AOTInductorTestsTemplate:
                 r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_\w*index_put"
             ).run(code)
 
+    def test_common_fallback_shims_run_below_autograd(self):
+        if self.device != "cpu" or self.allow_stack_allocation:
+            raise unittest.SkipTest("normal CPU ABI-only dispatch check")
+
+        from torch._inductor import ir
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class Model(torch.nn.Module):
+            def forward(self, self_tensor, index, src, values):
+                return (
+                    torch.scatter(self_tensor, 0, index, src),
+                    torch.scatter_reduce(
+                        self_tensor, 0, index, src, "sum", include_self=True
+                    ),
+                    torch.index_put(self_tensor, (index,), values, accumulate=True),
+                    self_tensor.to(torch.complex64),
+                )
+
+        inputs = (
+            torch.zeros(4),
+            torch.tensor([0, 1, 2, 3]),
+            torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            torch.tensor([5.0, 6.0, 7.0, 8.0]),
+        )
+        expected = Model()(*inputs)
+
+        # Current generated backend shims bypass the dispatcher. Force the
+        # retained, BC-compatible common shims so their internal guards remain
+        # covered even though new artifacts normally do not call them.
+        original_set_cpp_kernel_name = ir.ScatterFallback.set_cpp_kernel_name
+
+        def use_common_scatter_shim(node, cpp_kernel_name=None):
+            if node.op_overload is torch.ops.aten.scatter_.src:
+                cpp_kernel_name = "aoti_torch_scatter"
+            elif node.op_overload is torch.ops.aten.scatter_reduce_.two:
+                cpp_kernel_name = "aoti_torch_scatter_reduce"
+            return original_set_cpp_kernel_name(node, cpp_kernel_name)
+
+        with (
+            DeterministicGuard(True),
+            patch.object(
+                ir.ScatterFallback,
+                "set_cpp_kernel_name",
+                use_common_scatter_shim,
+            ),
+            config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": (
+                        self.use_minimal_arrayref_interface
+                    ),
+                }
+            ),
+        ):
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), inputs
+            )
+        compiled = torch._inductor.aoti_load_package(package_path)
+
+        target_ops = {
+            torch.ops.aten.scatter.src_out,
+            torch.ops.aten.scatter_reduce.two_out,
+            torch.ops.aten.index_put.out,
+            torch.ops.aten.copy_.default,
+        }
+        for shim in (
+            "aoti_torch_scatter_out(",
+            "aoti_torch_scatter_reduce_out(",
+            "aoti_torch_index_put_out(",
+            "aoti_torch_copy_below_autograd_",
+        ):
+            self.assertIn(shim, code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
+        guarded_keys = (
+            torch._C.DispatchKey.AutogradFunctionality,
+            torch._C.DispatchKey.AutogradOther,
+            torch._C.DispatchKey.AutogradNestedTensor,
+            torch._C.DispatchKey.ADInplaceOrView,
+        )
+        observed = {op: [] for op in target_ops}
+
+        class RecordShimDispatch(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func in observed:
+                    # Python dispatch temporarily masks lower keys. Restore the
+                    # entry snapshot to inspect the state established by the C
+                    # shim, then leave that state before redispatching.
+                    with torch._C._RestorePythonTLSSnapshot():
+                        observed[func].append(
+                            tuple(
+                                torch._C._dispatch_tls_is_dispatch_key_excluded(key)
+                                for key in guarded_keys
+                            )
+                        )
+                return func(*args, **(kwargs or {}))
+
+        with RecordShimDispatch():
+            actual = compiled(*inputs)
+
+        torch.testing.assert_close(actual, expected)
+        for op, states in observed.items():
+            self.assertEqual(states, [(True,) * len(guarded_keys)], msg=str(op))
+
     def test_special_fallback_guard_stays_out_of_aoti_codegen(self):
         if self.device != "cpu":
             raise unittest.SkipTest("CPU-only ABI codegen check")
