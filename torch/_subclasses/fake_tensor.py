@@ -7,6 +7,7 @@ import functools
 import logging
 import math
 import os
+import struct
 import threading
 import traceback
 import types
@@ -2068,6 +2069,14 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(hash(arg))
                 id_hashed_objects.append(arg.orig_callable)
+            elif type(arg) is float:
+                # hash(nan) is id-based in CPython so distinct nan objects
+                # never cache-hit; key floats by bit pattern instead.
+                result.append(float)
+                result.append(struct.pack("<d", arg))
+            elif type(arg) is complex:
+                result.append(complex)
+                result.append(struct.pack("<dd", arg.real, arg.imag))
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the

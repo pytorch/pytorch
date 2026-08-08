@@ -3650,6 +3650,41 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
             )
 
+    def test_cache_hit_nan_scalar(self):
+        """
+        Distinct nan float objects must produce the same cache key
+        (hash(nan) is id-based in CPython, so raw float keys never hit).
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+            res1 = torch.ops.aten.mul.Scalar(x, float("nan"))
+            self.assertHitsMisses(0, 1)
+            res2 = torch.ops.aten.mul.Scalar(x, float("nan"))
+            self.assertHitsMisses(1, 1)
+
+            self.assertEqual(
+                extract_tensor_metadata(res1),
+                extract_tensor_metadata(res2),
+            )
+
+    def test_cache_neg_zero_scalar_distinct(self):
+        """
+        -0.0 and 0.0 must not share a cache key (they are == and hash
+        equal in Python but are different constants bitwise).
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+            torch.ops.aten.mul.Scalar(x, 0.0)
+            self.assertHitsMisses(0, 1)
+            torch.ops.aten.mul.Scalar(x, -0.0)
+            self.assertHitsMisses(0, 2)
+
     def test_cache_bypass_prims_as_strided(self):
         x = torch.empty(0, 8)
         y = torch.empty(0, 8)
