@@ -4836,6 +4836,13 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_linalg_inv_large_batch(self, device, dtype):
+        a = torch.eye(3, device=device, dtype=dtype).repeat(65536, 1, 1)
+        res = torch.linalg.inv(a)
+        self.assertEqual(res.sum().item(), 3.0 * 65536)
+
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
