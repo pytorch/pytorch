@@ -20,6 +20,8 @@ from typing import TypeVar
 from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
+import sympy
+
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
@@ -83,7 +85,12 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    HAS_MPS,
+    running_on_tdm_device,
+)
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
@@ -587,6 +594,163 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
             torch.tensor(b),
             target_seq_len[b],
         )
+
+
+# These host-side tests validate ROCm-specific TDM logic; TDM hardware is not required.
+@unittest.skipUnless(
+    TEST_WITH_ROCM,
+    "ROCm-specific TDM host-side test; no TDM-capable device required",
+)
+class TestFlexAttentionTDMOptions(InductorTestCase):
+    def test_flex_tdm_gate_checks_layout_and_offset(self):
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+
+        class FakeSizeVars:
+            @staticmethod
+            def statically_known_equals(expr, val):
+                return expr == val
+
+            @staticmethod
+            def statically_known_multiple_of(expr, val):
+                return expr % val == 0
+
+        def make_qkv(name, stride, offset=0):
+            mat = mock.Mock()
+            mat.get_device.return_value = torch.device("cuda")
+            mat.get_dtype.return_value = torch.float16
+            mat.get_size.return_value = [2, 4, 128, 64]
+            mat.get_stride.return_value = stride
+            mat.get_name.return_value = name
+            mat.get_layout.return_value = mock.Mock(offset=offset)
+            return mat
+
+        good = make_qkv("good", [32768, 8192, 64, 1])
+        bad_head = make_qkv("bad_head", [32768, 8192, 128, 2])
+        bad_outer = make_qkv("bad_outer", [32768, 8192, 65, 1])
+        bad_offset = make_qkv("bad_offset", [32768, 8192, 64, 1], offset=1)
+        semantic_offset = make_qkv("semantic_offset", [32768, 8192, 64, 1], offset=8)
+        good_block_shapes = [(128, 64), (128, 64), (128, 64)]
+        bad_block_shapes = [(128, 64), (128, 64), (128, 96)]
+        graph = mock.Mock(sizevars=FakeSizeVars(), unaligned_buffers=set())
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            self.assertTrue(use_flex_tdm_descriptor(good, good, good))
+            self.assertFalse(use_flex_tdm_descriptor(good, good, bad_head))
+            self.assertFalse(use_flex_tdm_descriptor(good, good, bad_outer))
+            self.assertFalse(use_flex_tdm_descriptor(good, good, bad_offset))
+            self.assertTrue(use_flex_tdm_descriptor(good, good, semantic_offset))
+            self.assertTrue(
+                use_flex_tdm_descriptor(
+                    good, good, good, block_shapes=good_block_shapes
+                )
+            )
+            self.assertFalse(
+                use_flex_tdm_descriptor(good, good, good, block_shapes=bad_block_shapes)
+            )
+
+    def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.ir import Buffer, FixedLayout
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        def make_qkv(name, seq_len):
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size=(2, 4, seq_len, 64),
+                    stride=(256 * seq_len, 64 * seq_len, 64, 1),
+                ),
+            )
+
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+        q_len = graph.sizevars.shape_env.create_symbol(
+            128,
+            source=ConstantSource("q_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        kv_len = graph.sizevars.shape_env.create_symbol(
+            256,
+            source=ConstantSource("kv_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        v_len = graph.sizevars.shape_env.create_symbol(
+            384,
+            source=ConstantSource("v_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        query = make_qkv("query", q_len)
+        key = make_qkv("key", kv_len)
+        value = make_qkv("value", v_len)
+
+        graph.unaligned_buffers.add("value")
+        guards_before = len(graph.sizevars.shape_env.guards)
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            self.assertFalse(use_flex_tdm_descriptor(query, key, value))
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before + 2)
+            graph.unaligned_buffers.remove("value")
+            self.assertTrue(use_flex_tdm_descriptor(query, key, value))
+
+        new_guards = graph.sizevars.shape_env.guards[guards_before:]
+        int32_max = torch.iinfo(torch.int32).max
+        self.assertEqual(len(new_guards), 3)
+        self.assertEqual(
+            {guard[0] for guard in new_guards},
+            {
+                sympy.Le(q_len, int32_max),
+                sympy.Le(kv_len, int32_max),
+                sympy.Le(v_len, int32_max),
+            },
+        )
+
+    def test_flex_templates_gate_descriptors_on_tma_or_tdm(self):
+        from torch._inductor.kernel.flex.common import load_flex_template
+
+        for name in ("flex_attention", "flex_decode", "common"):
+            self.assertIn("USE_TMA or USE_TDM", load_flex_template(name))
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+class TestFlexAttentionTDMEndToEnd(InductorTestCase):
+    def _compile_and_get_code(self, fn, *args):
+        with config.patch({"triton.enable_tdm": True}):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    def test_tdm_flex_forward_correctness_and_selection(self):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        k = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        v = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self.assertIn("load_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(q, k, v), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_flex_decode_correctness_and_selection(self):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = torch.randn(2, 4, 1, 64, device=GPU_TYPE, dtype=torch.float16)
+        k = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        v = torch.randn(2, 4, 512, 64, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self.assertIn("load_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(q, k, v), atol=2e-2, rtol=2e-2)
 
 
 @large_tensor_test_class("2GB", device=test_device[0])

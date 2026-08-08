@@ -114,6 +114,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    running_on_tdm_device,
 )
 
 
@@ -5722,6 +5723,441 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         run_and_get_code(compiled_f, a, b)
 
 
+# These host-side tests validate ROCm-specific TDM logic; TDM hardware is not required.
+@unittest.skipUnless(
+    TEST_WITH_ROCM,
+    "ROCm-specific TDM host-side test; no TDM-capable device required",
+)
+@instantiate_parametrized_tests
+class TestTDMConfigDenseAndGeneric(TestCase):
+    def test_tdm_arch_gate_accepts_only_gfx1250(self):
+        from torch._inductor.utils import is_gfx1250_arch
+
+        self.assertTrue(is_gfx1250_arch("gfx1250"))
+        self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
+        self.assertFalse(is_gfx1250_arch("gfx1251"))
+        self.assertFalse(is_gfx1250_arch("gfx0000"))
+        self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
+
+    def test_tdm_device_gate_uses_runtime_floor_and_backend_probe(self):
+        from torch._inductor.utils import _gfx1250_tdm_enabled, _rocm_version_at_least
+
+        props = mock.Mock(gcnArchName="gfx1250:sramecc+:xnack-")
+        device = torch.device("cuda")
+
+        # _rocm_version_at_least memoizes a value that is fixed for a real
+        # process; this test patches torch.version.hip, so drop the cache
+        # between scenarios.
+        self.addCleanup(_rocm_version_at_least.cache_clear)
+
+        _rocm_version_at_least.cache_clear()
+        with (
+            config.patch({"triton.enable_tdm": True}),
+            mock.patch("torch.version.hip", "7.14"),
+            mock.patch("torch.cuda.get_device_properties", return_value=props),
+            mock.patch(
+                "torch.utils._triton.has_triton_amd_tdm_device",
+                return_value=False,
+            ) as supports_tdm,
+        ):
+            self.assertFalse(_gfx1250_tdm_enabled(device))
+            supports_tdm.assert_called_once_with("gfx1250:sramecc+:xnack-")
+
+        _rocm_version_at_least.cache_clear()
+        with (
+            config.patch({"triton.enable_tdm": True}),
+            mock.patch("torch.version.hip", "7.14"),
+            mock.patch("torch.cuda.get_device_properties", return_value=props),
+            mock.patch(
+                "torch.utils._triton.has_triton_amd_tdm_device",
+                return_value=True,
+            ),
+        ):
+            self.assertTrue(_gfx1250_tdm_enabled(device))
+
+        _rocm_version_at_least.cache_clear()
+        with (
+            config.patch({"triton.enable_tdm": True}),
+            mock.patch("torch.version.hip", "7.13"),
+            mock.patch("torch.cuda.get_device_properties", return_value=props),
+        ):
+            self.assertFalse(_gfx1250_tdm_enabled(device))
+
+    def test_tdm_template_rejects_descriptor_shapes_exceeding_int32(self):
+        from torch._inductor.utils import use_triton_tdm_template
+
+        int32_max = torch.iinfo(torch.int32).max
+        mat1 = mock.Mock()
+        mat1.get_device.return_value = torch.device("cuda")
+        mat1.get_size.return_value = [128, int32_max + 1]
+        mat2 = mock.Mock()
+        mat2.get_size.return_value = [int32_max + 1, 128]
+
+        with mock.patch(
+            "torch._inductor.utils._gfx1250_tdm_enabled", return_value=True
+        ):
+            self.assertFalse(use_triton_tdm_template(mat1, mat2))
+
+    def test_tdm_template_checks_alignment_and_offset(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import use_triton_tdm_template
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+        graph.unaligned_buffers.add("A")
+
+        def make_mat(name, offset=0, size=(128, 128), stride=(128, 1)):
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size,
+                    stride,
+                    offset,
+                ),
+            )
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            self.assertFalse(use_triton_tdm_template(make_mat("A"), make_mat("B")))
+            self.assertFalse(
+                use_triton_tdm_template(make_mat("C", offset=1), make_mat("B"))
+            )
+            self.assertTrue(
+                use_triton_tdm_template(make_mat("C", offset=8), make_mat("B"))
+            )
+            self.assertFalse(
+                use_triton_tdm_template(make_mat("C", stride=(65, 1)), make_mat("B"))
+            )
+            self.assertTrue(use_triton_tdm_template(make_mat("C"), make_mat("B")))
+
+            aligned_dim = graph.sizevars.shape_env.create_symbol(
+                128,
+                source=ConstantSource("aligned_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            unaligned_dim = graph.sizevars.shape_env.create_symbol(
+                65,
+                source=ConstantSource("unaligned_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            guards_before = len(graph.sizevars.shape_env.guards)
+            self.assertTrue(
+                use_triton_tdm_template(
+                    make_mat(
+                        "dynamic_aligned",
+                        size=(128, aligned_dim),
+                        stride=(aligned_dim, 1),
+                    ),
+                    make_mat("B"),
+                    add_guards=True,
+                )
+            )
+            self.assertGreater(len(graph.sizevars.shape_env.guards), guards_before)
+            self.assertFalse(
+                use_triton_tdm_template(
+                    make_mat(
+                        "dynamic_unaligned",
+                        size=(128, unaligned_dim),
+                        stride=(unaligned_dim, 1),
+                    ),
+                    make_mat("B"),
+                    add_guards=True,
+                )
+            )
+
+    def test_tdm_rejected_operands_do_not_specialize_dynamic_shapes(self):
+        # Admission is list-wide: no operand may be specialized until every
+        # operand has been admitted. Order the accepted operand first, so the
+        # test fails unless the guard-free pass covers the whole list -- a
+        # per-operand implementation would already have specialized the
+        # accepted one by the time the second is rejected.
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import use_triton_tdm_template
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        def make_mat(name, size, stride, offset=0):
+            return Buffer(
+                name=name,
+                layout=FixedLayout(
+                    torch.device("cuda"),
+                    torch.float16,
+                    size,
+                    stride,
+                    offset,
+                ),
+            )
+
+        with (
+            V.set_graph_handler(graph),
+            mock.patch("torch._inductor.utils._gfx1250_tdm_enabled", return_value=True),
+        ):
+            accepted_dim = graph.sizevars.shape_env.create_symbol(
+                128,
+                source=ConstantSource("accepted_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            rejected_dim = graph.sizevars.shape_env.create_symbol(
+                65,
+                source=ConstantSource("rejected_dim"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            accepted = make_mat(
+                "accepted",
+                size=(128, accepted_dim),
+                stride=(accepted_dim, 1),
+            )
+            rejected = make_mat(
+                "rejected",
+                size=(128, rejected_dim),
+                stride=(rejected_dim, 1),
+            )
+
+            guards_before = len(graph.sizevars.shape_env.guards)
+            self.assertFalse(
+                use_triton_tdm_template(accepted, rejected, add_guards=True)
+            )
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+
+            # The reverse order must hold too: rejecting the first operand
+            # cannot specialize it either.
+            self.assertFalse(
+                use_triton_tdm_template(rejected, accepted, add_guards=True)
+            )
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+
+    def test_tdm_descriptor_orientation_uses_unit_stride_dimension(self):
+        from torch._inductor.utils import tdm_descriptor_row_major
+
+        class FakeSizeVars:
+            @staticmethod
+            def replace_backed_symbols_with_hints(expr):
+                return expr
+
+            @staticmethod
+            def statically_known_equals(expr, val):
+                return expr == val
+
+        def make_mat(strides):
+            mat = mock.Mock()
+            mat.get_stride.return_value = strides
+            return mat
+
+        with V.set_graph_handler(mock.Mock(sizevars=FakeSizeVars())):
+            self.assertIs(tdm_descriptor_row_major(make_mat([128, 1])), True)
+            self.assertIs(tdm_descriptor_row_major(make_mat([1, 128])), False)
+            self.assertIsNone(tdm_descriptor_row_major(make_mat([128, 4])))
+            self.assertIsNone(tdm_descriptor_row_major(make_mat([1, 1])))
+
+    def test_tdm_descriptor_block_filter_is_orientation_aware(self):
+        from torch._inductor.heuristics.template.triton import (
+            _filter_tdm_descriptor_block_configs,
+            ROCmGemmConfig,
+        )
+
+        configs = [
+            ROCmGemmConfig(32, 64, 64, 1, 4, group_m=8),
+            ROCmGemmConfig(64, 32, 64, 1, 4, group_m=8),
+            ROCmGemmConfig(64, 64, 64, 1, 4, group_m=8),
+        ]
+        self.assertEqual(
+            [
+                (config.block_m, config.block_n, config.block_k)
+                for config in _filter_tdm_descriptor_block_configs(
+                    configs,
+                    2,
+                    a_row_major=False,
+                    b_row_major=True,
+                )
+            ],
+            [(64, 64, 64)],
+        )
+
+    def test_tdm_template_reuses_shared_persistent_descriptor_source(self):
+        from torch._inductor.kernel.mm import (
+            persistent_tdm_mm_template,
+            persistent_tma_mm_template,
+        )
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        self.assertEqual(persistent_tdm_mm_template.name, "mm_persistent_tdm")
+        self.assertEqual(
+            persistent_tdm_mm_template.src_hash,
+            persistent_tma_mm_template.src_hash,
+        )
+        source = load_kernel_template("triton_persistent_tma_mm")
+        self.assertIn("make_tensor_descriptor", source)
+        self.assertIn("load_tensor_descriptor", source)
+
+    def test_tdm_config_policy_uses_backend_stage_policy(self):
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            ROCmPersistentTDMTemplateConfigHeuristic,
+        )
+
+        heuristic_cls = ROCmPersistentTDMTemplateConfigHeuristic
+        try:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+            with mock.patch(
+                "torch._inductor.heuristics.template.triton.get_backend_num_stages",
+                return_value=2,
+            ):
+                heuristic = heuristic_cls()
+            self.assertTrue(heuristic.uses_tdm_configs)
+            # The dense TDM heuristic tunes over the persistent pool, matching
+            # every other persistent heuristic including its own scaled sibling.
+            self.assertIs(heuristic.mm_configs, heuristic.persistent_mm_configs)
+            # That pool is authored with the CUDA stage counts; ROCm's
+            # _filter_configs is what normalizes them to the backend policy, so
+            # that is where the stage invariant has to hold.
+            for configs in (heuristic.mm_configs, heuristic.exhaustive_configs):
+                filtered_configs = heuristic._filter_configs(configs)
+                self.assertTrue(filtered_configs)
+                self.assertTrue(
+                    all(config.num_stages == 2 for config in filtered_configs)
+                )
+        finally:
+            BaseHeuristicSingleton._instances.pop(heuristic_cls, None)
+
+    def test_tdm_addmm_heuristic_composes_current_addmm_mixin(self):
+        from torch._inductor.heuristics.template.triton import (
+            ROCmAddMMPersistentTDMTemplateConfigHeuristic,
+        )
+        from torch._inductor.heuristics.template.triton_addmm import AddMMConfigMixin
+
+        self.assertTrue(
+            issubclass(ROCmAddMMPersistentTDMTemplateConfigHeuristic, AddMMConfigMixin)
+        )
+
+    def test_tdm_generic_descriptor_gate_composes_optins(self):
+        from torch._inductor.utils import use_gfx1250_descriptor_codegen
+
+        device = torch.device("cuda")
+        base = {
+            "triton.enable_tdm": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+        with mock.patch(
+            "torch._inductor.utils._gfx1250_device_prereqs", return_value=True
+        ):
+            with config.patch(base):
+                self.assertTrue(use_gfx1250_descriptor_codegen(device))
+            for option in base:
+                with config.patch({**base, option: False}):
+                    self.assertFalse(use_gfx1250_descriptor_codegen(device))
+
+    def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
+        from torch._inductor.codegen.triton import TMACompatibilityChecker
+
+        kernel = mock.Mock(no_x_dim=False)
+        graph = mock.Mock()
+        graph.get_current_device_or_throw.return_value = mock.Mock(type="cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+        ):
+            self.assertTrue(
+                TMACompatibilityChecker(
+                    kernel, torch.float16, for_store=False, force=False
+                ).can_use_tma()
+            )
+            self.assertFalse(
+                TMACompatibilityChecker(
+                    kernel, torch.float8_e4m3fn, for_store=False, force=False
+                ).can_use_tma()
+            )
+
+    def test_tdm_generic_descriptor_checker_enforces_shape_bounds(self):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+        )
+
+        class FakeSizeVars:
+            @staticmethod
+            def statically_known_true(expr):
+                return bool(expr)
+
+        kernel = mock.Mock(no_x_dim=False)
+        graph = mock.Mock(sizevars=FakeSizeVars())
+        graph.get_current_device_or_throw.return_value = mock.Mock(type="cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+        ):
+            checker = TMACompatibilityChecker(
+                kernel, torch.float16, for_store=False, force=False
+            )
+            self.assertTrue(checker.can_use_tma())
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[128] * 6)
+                )
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
+                )
+            )
+
+    def test_tdm_generic_descriptor_checker_force_path_enforces_shape_bounds(self):
+        from torch._inductor.codegen.triton import (
+            BlockParameters,
+            TMACompatibilityChecker,
+        )
+
+        class FakeSizeVars:
+            @staticmethod
+            def replace_backed_symbols_with_hints(expr):
+                return expr
+
+            @staticmethod
+            def statically_known_true(expr):
+                return bool(expr)
+
+        kernel = mock.Mock(no_x_dim=False)
+        graph = mock.Mock(sizevars=FakeSizeVars())
+        graph.get_current_device_or_throw.return_value = mock.Mock(type="cuda")
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(
+                "torch._inductor.codegen.triton.use_gfx1250_descriptor_codegen",
+                return_value=True,
+            ),
+            mock.patch("torch._inductor.codegen.triton.log.debug") as log_debug,
+        ):
+            checker = TMACompatibilityChecker(
+                kernel, torch.float16, for_store=False, force=True
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[128] * 6)
+                )
+            )
+            self.assertFalse(
+                checker.are_block_parameters_compatible(
+                    BlockParameters(shape=[torch.iinfo(torch.int32).max + 1])
+                )
+            )
+            self.assertEqual(log_debug.call_count, 2)
+            self.assertIn("rank between 1 and 5", log_debug.call_args_list[0].args[0])
+            self.assertIn("fit in int32", log_debug.call_args_list[1].args[0])
+
+
 def simple_fn():
     return 42
 
@@ -5938,6 +6374,76 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
         with mock.patch.object(AsyncAutotuner, "start", mock_start):
             test_aten_chosen()
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+class TestTDMEndToEnd(TestCase):
+    def _compile_and_get_code(self, fn, *args):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_tdm": True,
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tdm",
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    def _compile_generic_and_get_code(self, fn, *args):
+        with config.patch(
+            {
+                "triton.enable_tdm": True,
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    def test_tdm_dense_mm_correctness_and_selection(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, a, b)
+        joined = "\n".join(code)
+        self.assertIn("make_tensor_descriptor", joined)
+        self.assertIn("load_tensor_descriptor", joined)
+        torch.testing.assert_close(result, fn(a, b), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_addmm_bias_correctness_and_selection(self):
+        def fn(bias, a, b):
+            return torch.addmm(bias, a, b)
+
+        bias = torch.randn(256, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_and_get_code(fn, bias, a, b)
+        joined = "\n".join(code)
+        self.assertIn("make_tensor_descriptor", joined)
+        self.assertIn("load_tensor_descriptor", joined)
+        torch.testing.assert_close(result, fn(bias, a, b), atol=2e-2, rtol=2e-2)
+
+    def test_tdm_generic_pointwise_correctness_and_selection(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
+        result, code = self._compile_generic_and_get_code(fn, x, y)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x, y), atol=1e-3, rtol=1e-3)
+
+    def test_tdm_generic_reduction_correctness_and_selection(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.float32)
+        result, code = self._compile_generic_and_get_code(fn, x)
+        self.assertIn("make_tensor_descriptor", "\n".join(code))
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
 
 
 if __name__ == "__main__":

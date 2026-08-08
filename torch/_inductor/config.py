@@ -2236,6 +2236,12 @@ class triton:
     # assume_aligned_inputs to also be enabled (no effect otherwise).
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
+    # Enable AMD Tensor Data Mover descriptor paths (gfx1250 MM templates,
+    # generic descriptor codegen, and flex) via Triton's stable
+    # tl.make_tensor_descriptor API. Device, dtype, and layout checks in
+    # torch/_inductor/utils.py still apply.
+    enable_tdm = os.environ.get("TORCHINDUCTOR_ENABLE_TDM", "0") == "1"
+
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
     # (no-op on archs/Triton builds without meta-WS).
     enable_template_autows = os.environ.get("ENABLE_TEMPLATE_AUTOWS", "0") == "1"

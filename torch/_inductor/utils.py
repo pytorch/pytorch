@@ -170,6 +170,17 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+# TDM tensor descriptors share Triton's 16-byte semantic base-alignment contract.
+# This stricter value is only a preferred request/block/row pattern; external input
+# pointers are not assumed to have 128-byte base alignment.
+_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES = 128
+_TDM_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.float16, torch.bfloat16, torch.float32]
+)
+_TDM_SCALED_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.float8_e4m3fn, torch.float8_e5m2]
+)
+
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
 #      triton/_internal_testing.py (tma_dtypes test list)
@@ -2091,6 +2102,300 @@ def _descriptor_shape_fits_in_int32(
         V.graph.sizevars.guard_or_false(condition)
         if add_guards
         else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
+def is_gfx1250_arch(arch: str) -> bool:
+    """Return True only for gfx1250, including feature-suffixed GCN names."""
+    return arch.split(":", 1)[0] == "gfx1250"
+
+
+# `torch.version.hip` is process-constant, so the parse only has to happen once.
+@functools.cache
+def _rocm_version_at_least(major: int, minor: int) -> bool:
+    version = torch.version.hip
+    if not version:
+        return False
+    match = re.match(r"(\d+)\.(\d+)", version)
+    if match is None:
+        return False
+    return (int(match.group(1)), int(match.group(2))) >= (major, minor)
+
+
+def _gfx1250_device_prereqs(device: torch.device | None) -> bool:
+    """Check the runtime and compiler prerequisites shared by TDM paths.
+
+    Not memoized: the device-property probe can fail transiently during
+    initialization, and caching that failure would disable TDM process-wide.
+    """
+    from torch.utils._triton import has_triton_amd_tdm_device
+
+    if not _rocm_version_at_least(7, 14):
+        return False
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        props = torch.cuda.get_device_properties(device)
+        arch = getattr(props, "gcnArchName", "")
+    except Exception:
+        return False
+    return is_gfx1250_arch(arch) and has_triton_amd_tdm_device(arch)
+
+
+def _gfx1250_tdm_enabled(device: torch.device | None) -> bool:
+    return config.triton.enable_tdm and _gfx1250_device_prereqs(device)
+
+
+def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool | None:
+    """Classify an already-resolved 2D stride pair by its unit-stride dimension.
+
+    Split out of ``tdm_descriptor_row_major`` so callers that already resolved
+    the strides do not resolve (or re-specialize) them twice.
+    """
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, stride in enumerate(strides_i)
+        if V.graph.sizevars.statically_known_equals(stride, 1)
+    ]
+    if len(inner) != 1:
+        return None
+    return inner[0] == 1
+
+
+def tdm_descriptor_row_major(mat: IRNode, add_guards: bool = False) -> bool | None:
+    """Classify a 2D operand by its single statically unit-stride dimension."""
+    from .virtualized import V
+
+    strides = mat.get_stride()
+    if len(strides) != 2:
+        return None
+    if add_guards:
+        strides_i = V.graph.sizevars.guard_int_seq(strides)
+    else:
+        strides_i = [
+            V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
+        ]
+    return _tdm_row_major_from_strides(strides_i)
+
+
+def _tdm_operand_compatible(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+    add_guards: bool,
+) -> bool:
+    """Check descriptor semantics and the preferred TDM request layout.
+
+    ``add_guards`` specializes this operand, so only ``_tdm_operands_compatible``
+    passes it, and only once the whole list is admitted.
+    """
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    sizes = mat.get_size()
+    strides = mat.get_stride()
+    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
+        return False
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return False
+
+    if add_guards:
+        sizes_i = V.graph.sizevars.guard_int_seq(sizes)
+        strides_i = V.graph.sizevars.guard_int_seq(strides)
+        offset = V.graph.sizevars.guard_int(mat.get_layout().offset)
+    else:
+        sizes_i = [
+            V.graph.sizevars.replace_backed_symbols_with_hints(size) for size in sizes
+        ]
+        strides_i = [
+            V.graph.sizevars.replace_backed_symbols_with_hints(stride)
+            for stride in strides
+        ]
+        offset = V.graph.sizevars.replace_backed_symbols_with_hints(
+            mat.get_layout().offset
+        )
+
+    # Reuse the strides resolved above; tdm_descriptor_row_major would resolve
+    # them again, and under add_guards re-specialize them.
+    row_major = _tdm_row_major_from_strides(strides_i)
+    if row_major is None:
+        return False
+    inner_idx = 1 if row_major else 0
+    outer_idx = 1 - inner_idx
+    itemsize = dtype.itemsize
+
+    def aligned(expr: sympy.Expr, alignment: int) -> bool:
+        return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
+
+    # Triton's tensor descriptor semantic contract.
+    if not aligned(offset * itemsize, TMA_ALIGNMENT):
+        return False
+    if not aligned(strides_i[outer_idx] * itemsize, TMA_ALIGNMENT):
+        return False
+    if not aligned(sizes_i[inner_idx] * itemsize, TMA_ALIGNMENT):
+        return False
+
+    # Prefer rows that preserve the 128B request pattern. The allocation base itself
+    # remains governed by Triton's 16B semantic contract above.
+    return aligned(
+        strides_i[outer_idx] * itemsize,
+        _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
+    )
+
+
+def _tdm_operands_compatible(
+    matrices: Sequence[IRNode],
+    accepted_dtypes: OrderedSet[torch.dtype],
+    add_guards: bool,
+) -> bool:
+    """Admit a full operand list for TDM, specializing only once it is admitted.
+
+    Rejecting an operand must not leave the graph specialized on its shape, so
+    the decision is made guard-free before any ``guard_int`` pins a hint.
+    """
+    if not all(
+        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=False)
+        for mat in matrices
+    ):
+        return False
+
+    # Bounds only; unlike specialization, this does not pin a dynamic dim.
+    if not all(
+        _descriptor_shape_fits_in_int32(mat.get_size(), add_guards=add_guards)
+        for mat in matrices
+    ):
+        return False
+
+    if not add_guards:
+        return True
+
+    # Admitted: pin the values the descriptor is built from. Same predicates,
+    # same hints, so this cannot change the answer -- assert in case it ever does.
+    if not all(
+        _tdm_operand_compatible(mat, accepted_dtypes, add_guards=True)
+        for mat in matrices
+    ):
+        raise AssertionError(
+            "TDM operand admission changed under specialization; the guard-free "
+            "and guarded checks must agree"
+        )
+    return True
+
+
+def use_triton_tdm_template(
+    *matrices: IRNode,
+    add_guards: bool = False,
+) -> bool:
+    """Return whether dense MM operands may use the gfx1250 TDM template."""
+    if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
+        return False
+    return _tdm_operands_compatible(matrices, _TDM_SUPPORTED_DTYPES, add_guards)
+
+
+def use_triton_tdm_scaled_template(
+    *matrices: IRNode,
+    add_guards: bool = False,
+) -> bool:
+    """Return whether scaled FP8 MM operands may use gfx1250 TDM descriptors."""
+    if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
+        return False
+    return _tdm_operands_compatible(matrices, _TDM_SCALED_SUPPORTED_DTYPES, add_guards)
+
+
+def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
+    """Return whether generic tensor descriptor codegen may target AMD TDM."""
+    return (
+        config.triton.enable_tdm
+        and config.triton.use_tensor_descriptor
+        and config.assume_aligned_inputs
+        and _gfx1250_device_prereqs(device)
+    )
+
+
+def use_flex_tdm_descriptor(
+    *matrices: IRNode,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]] | None = None,
+) -> bool:
+    """Return whether flex operands satisfy TDM descriptor and request constraints."""
+    from .virtualized import V
+
+    if not matrices or not _gfx1250_tdm_enabled(matrices[0].get_device()):
+        return False
+
+    if block_shapes is None:
+        block_shapes = [()] * len(matrices)
+    elif len(block_shapes) != len(matrices):
+        raise AssertionError("Expected one block shape per flex descriptor operand")
+
+    def operand_compatible(
+        mat: IRNode, block_shape: Sequence[sympy.Expr | int]
+    ) -> bool:
+        def reject(reason: str) -> bool:
+            log.debug("Flex TDM descriptor rejected for %s: %s", mat.get_name(), reason)
+            return False
+
+        if mat.get_dtype() not in _TDM_SUPPORTED_DTYPES:
+            return reject(f"unsupported dtype {mat.get_dtype()}")
+        sizes = mat.get_size()
+        strides = mat.get_stride()
+        if len(sizes) != 4 or len(strides) != 4:
+            return reject("expected four-dimensional sizes and strides")
+        if mat.get_name() in V.graph.unaligned_buffers:
+            return reject("buffer is marked unaligned")
+
+        # Keep alignment expressions symbolic so they can be proven without
+        # specializing dynamic sequence lengths. Unprovable alignment
+        # conservatively disables TDM.
+        offset = mat.get_layout().offset
+        itemsize = mat.get_dtype().itemsize
+
+        def aligned(expr: sympy.Expr | int, alignment: int) -> bool:
+            return V.graph.sizevars.statically_known_multiple_of(expr, alignment)
+
+        # Only the allocation base uses Triton's shared 16-byte descriptor
+        # contract; request dimensions below require 128-byte alignment.
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return reject("innermost stride is not statically known to be one")
+        if not aligned(offset * itemsize, TMA_ALIGNMENT):
+            return reject(f"offset is not {TMA_ALIGNMENT}-byte aligned")
+
+        if block_shape:
+            if len(block_shape) != 2:
+                return reject("expected a two-dimensional block shape")
+            if not aligned(
+                block_shape[-1] * itemsize,
+                _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES,
+            ):
+                return reject(
+                    "block width does not preserve the preferred "
+                    f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+                )
+
+        if not aligned(sizes[-1] * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES):
+            return reject(
+                "innermost dimension does not preserve the preferred "
+                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+            )
+        if not all(
+            aligned(stride * itemsize, _TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES)
+            for stride in strides[:-1]
+        ):
+            return reject(
+                "outer strides do not preserve the preferred "
+                f"{_TDM_PREFERRED_REQUEST_ALIGNMENT_BYTES}-byte request alignment"
+            )
+
+        # Install bounds only after this operand passes its guard-free checks.
+        # These range guards do not pin dynamic sequence lengths to their
+        # current values.
+        if not _descriptor_shape_fits_in_int32(sizes, add_guards=True):
+            return reject("descriptor shape does not fit in int32")
+        return True
+
+    return all(
+        operand_compatible(mat, block_shape)
+        for mat, block_shape in zip(matrices, block_shapes)
     )
 
 

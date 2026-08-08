@@ -24,7 +24,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -468,12 +468,6 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
@@ -485,6 +479,36 @@ def flex_attention(
             block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("BLOCK_M", block_m)
         cur_kernel_options.setdefault("BLOCK_N", block_n)
+
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        # TDM is not user-selectable; derive it only from the eligibility gate below.
+        cur_kernel_options["USE_TDM"] = False
+
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
+
+        if not cur_kernel_options["USE_TMA"]:
+            cur_kernel_options["USE_TDM"] = use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
