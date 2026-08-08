@@ -3327,16 +3327,13 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
 def _find_names(obj):
     import gc
-    import inspect
 
-    frame = inspect.currentframe()
-    while frame is not None:
-        # On CPython <= 3.12 this access materializes the frame's locals
-        # dict so gc.get_referrers below can find obj inside it. On 3.13+
-        # f_locals is a fresh write-through proxy (PEP 667) and this loop
-        # is a no-op, so function-local names are not discoverable there.
-        _ = frame.f_locals
-        frame = frame.f_back
+    # Only namespace dicts are searched. Wrapper codegen binds kernels in the
+    # generated module's globals, so that is where the real name comes from.
+    # Walking the stack to expose frame locals as well only adds incidental
+    # binding names (`obj` here, `self` in the caller), never the codegen name,
+    # and it kept an unbound kernel from falling back to
+    # inductor_meta["kernel_name"].
     obj_names = []
     for referrer in gc.get_referrers(obj):
         if isinstance(referrer, dict):
