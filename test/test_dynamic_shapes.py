@@ -6931,6 +6931,12 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         # All free symbols are owned by local_env.
         for sym in result_expr.free_symbols:
             self.assertTrue(local_env.is_unbacked_symint(sym))
+        # Do not partially seed resolvable leaves when the whole expression
+        # requires the opaque fallback.
+        self.assertNotIn(
+            (id(foreign_env), u0.node.expr),
+            local_env.foreign_unbacked_symbol_cache,
+        )
 
     def test_transfer_is_self_short_circuit(self):
         """When the SymInt already belongs to this ShapeEnv,
@@ -6976,8 +6982,10 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertIn(raw, local_env.size_like)
 
     def test_foreign_unbacked_transfer_preserves_derived_tensor_expr(self):
-        """Derived tensor dims are minted as opaque symbols; raw SymInt with
-        the same expression reuses that symbol via the (env, expr) cache."""
+        """Derived tensor dims (e.g. u0 // 2) encountered before their base
+        unbacked symbol are resolved by seeding the base symbol first; the
+        composite is then a derived expression (not an opaque fresh symbol),
+        and its raw-SymInt counterpart shares the transferred base symbol."""
         foreign_env = ShapeEnv()
         global_tokens = foreign_env.create_unbacked_symint()
         hidden = foreign_env.create_unbacked_symint()
@@ -6998,11 +7006,16 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
 
         self.assertEqual(raw_derived_tokens.node.expr, new_sizes[0].node.expr)
         self.assertEqual(new_strides[0].node.expr, new_sizes[1].node.expr)
-        self.assertEqual(len(raw_derived_tokens.node.expr.free_symbols), 1)
-        derived_token_sym = next(iter(raw_derived_tokens.node.expr.free_symbols))
-        # `derived_tokens` (= global_tokens // 2) is minted as one fresh
-        # opaque symbol; its hint is the foreign expression's hint (64 // 2).
-        self.assertEqual(local_env.var_to_hint_override[derived_token_sym], 32)
+        # The transferred expression is derived (floor division of a fresh
+        # local unbacked symbol by 2), not a single opaque symbol.
+        self.assertFalse(isinstance(new_sizes[0].node.expr, sympy.Symbol))
+        self.assertEqual(len(new_sizes[0].node.expr.free_symbols), 1)
+        derived_token_sym = next(iter(new_sizes[0].node.expr.free_symbols))
+        # The base symbol (transferred global_tokens) retains its foreign
+        # hint override (64); the derived expression simplifies to
+        # floor(derived_token_sym / 2) rather than being collapsed to a
+        # single opaque symbol with a precomputed 64//2 hint.
+        self.assertEqual(local_env.var_to_hint_override[derived_token_sym], 64)
         self.assertEqual(local_env.var_to_hint_override[new_sizes[1].node.expr], 128)
 
     def test_foreign_unbacked_transfer_preserves_shared_token_grid(self):
@@ -7062,6 +7075,79 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
             raw_seq_plus_hidden.node.expr,
             token_grid_sizes[1].node.expr + derived_sizes[2].node.expr,
         )
+
+    def test_composite_unbacked_transferred_before_leaves_preserves_relation(self):
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        u1 = foreign_env.create_unbacked_symint()
+
+        local_env = ShapeEnv()
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0 + u1, u0, u1),
+            (1, 1, 1),
+            0,
+            source=self._make_source("regression_188723"),
+        )
+        self.assertEqual(
+            new_sizes[0].node.expr,
+            new_sizes[1].node.expr + new_sizes[2].node.expr,
+        )
+        self.assertNotIsInstance(new_sizes[0].node.expr, sympy.Symbol)
+        self.assertIsInstance(new_sizes[1].node.expr, sympy.Symbol)
+        self.assertIsInstance(new_sizes[2].node.expr, sympy.Symbol)
+
+        raw_sum = self._transfer_symint(
+            local_env, u0 + u1, source=self._make_source("raw_sum_188723")
+        )
+        self.assertEqual(raw_sum.node.expr, new_sizes[0].node.expr)
+        raw_u0 = self._transfer_symint(
+            local_env, u0, source=self._make_source("raw_u0_188723")
+        )
+        self.assertEqual(raw_u0.node.expr, new_sizes[1].node.expr)
+        raw_u1 = self._transfer_symint(
+            local_env, u1, source=self._make_source("raw_u1_188723")
+        )
+        self.assertEqual(raw_u1.node.expr, new_sizes[2].node.expr)
+
+    def test_composite_size_does_not_constrain_individual_leaves(self):
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        u1 = foreign_env.create_unbacked_symint()
+
+        local_env = ShapeEnv()
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0 - u1,),
+            (1,),
+            0,
+            source=self._make_source("composite_size"),
+        )
+
+        self.assertEqual(len(new_sizes[0].node.expr.free_symbols), 2)
+        for sym in new_sizes[0].node.expr.free_symbols:
+            self.assertNotIn(sym, local_env.size_like)
+
+    def test_same_named_symbols_from_distinct_live_foreign_envs(self):
+        foreign_env1 = ShapeEnv()
+        foreign_u0 = foreign_env1.create_unbacked_symint()
+        foreign_env2 = ShapeEnv()
+        other_foreign_u0 = foreign_env2.create_unbacked_symint()
+        self.assertEqual(foreign_u0.node.expr.name, other_foreign_u0.node.expr.name)
+
+        local_env = ShapeEnv()
+        transferred1, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (foreign_u0,),
+            (1,),
+            0,
+            source=self._make_source("foreign_env1"),
+        )
+        transferred2, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (other_foreign_u0,),
+            (1,),
+            0,
+            source=self._make_source("foreign_env2"),
+        )
+
+        self.assertNotEqual(transferred1[0].node.expr, transferred2[0].node.expr)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_flex_attention_foreign_fake_e2e(self):

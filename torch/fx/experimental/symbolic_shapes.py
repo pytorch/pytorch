@@ -4929,24 +4929,10 @@ class ShapeEnv:
     ) -> sympy.Expr:
         """Transfer a foreign SymInt expression into this ShapeEnv.
 
-        Algorithm (used uniformly for tensor sizes, strides, storage offsets,
-        and raw SymInt inputs):
-        1. Replace any foreign symbols in ``value.expr`` that are already in
-           the per-symbol cache (cache-only; no minting yet).
-        2. If every free symbol got replaced, return the resulting (possibly
-           derived) expression as-is.
-        3. Otherwise mint ONE fresh local unbacked symbol for the whole
-           foreign expression, attach the caller's ``source`` to it, register
-           its value range / hint from the foreign env, and cache
-           ``(foreign_env, foreign_expr) -> new_symbol`` so a future call
-           with the same expression reuses the symbol.
-
-        Note: this loses fine-grained relationships when a derived expression
-        is minted before its base symbols are seen individually (e.g. minting
-        a symbol for ``u0 + u1`` before any tensor dim carries ``u0`` or
-        ``u1`` alone; later occurrences of those bare symbols cannot share
-        with the minted derived symbol).  This is consistent with the
-        pre-refactor behavior."""
+        Resolve each free symbol from the per-symbol cache or by minting a
+        fresh local unbacked symbol, then rebuild the expression once.  If any
+        free symbol cannot be resolved this way, preserve the old behavior of
+        minting one opaque symbol for the whole expression."""
         src_shape_env = value.node.shape_env
         if src_shape_env is self:
             # SymInt already belongs to this ShapeEnv; nothing to transfer.
@@ -4960,50 +4946,70 @@ class ShapeEnv:
                 f"to a foreign ShapeEnv, got {value!r} with shape_env=None"
             )
         expr = value.node.expr
+        env_id = id(src_shape_env)
+        # free_symbols are the leaves that need local replacements; no recursion
+        # into the expression is necessary.
+        foreign_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
+        cache = self.foreign_unbacked_symbol_cache
+        hint_sources = (
+            src_shape_env.backed_var_to_val.keys()
+            | src_shape_env.var_to_hint_override.keys()
+        )
 
-        # Step 1: cache-only replacement.
-        cache_map = {
-            sym: self.foreign_unbacked_symbol_cache[(id(src_shape_env), sym)]
-            for sym in expr.free_symbols
-            if (id(src_shape_env), sym) in self.foreign_unbacked_symbol_cache
-        }
-        new_expr = expr.xreplace(cache_map) if cache_map else expr
+        can_transfer_structurally = all(
+            (env_id, sym) in cache or src_shape_env.is_unbacked_symint(sym)
+            for sym in foreign_symbols
+        )
+        if can_transfer_structurally:
+            from torch._dynamo.source import EphemeralSource
 
-        # Step 2: all symbols resolved from cache; use the derived expression.
-        if not (new_expr.free_symbols - set(cache_map.values())):
+            replacements = {}
+            for foreign_sym in foreign_symbols:
+                key = (env_id, foreign_sym)
+                local_sym = cache.get(key)
+                if local_sym is None:
+                    leaf_source = EphemeralSource(
+                        f"foreign_leaf:{self.unbacked_symint_counter}"
+                    )
+                    with self.ignore_fresh_unbacked_symbols():
+                        local_symint = self.create_unbacked_symint(leaf_source)
+                    local_sym = local_symint.node.expr
+                    cache[key] = local_sym
+                    optimization_hint = (
+                        src_shape_env.optimization_hint(foreign_sym)
+                        if foreign_sym in hint_sources
+                        else None
+                    )
+                    self._register_unbacked_symbol_as_input(
+                        local_sym,
+                        source=leaf_source,
+                        value_range=src_shape_env.bound_sympy(foreign_sym),
+                        optimization_hint=optimization_hint,
+                    )
+                replacements[foreign_sym] = local_sym
+
+            new_expr = expr.xreplace(replacements)
             if is_size:
                 if isinstance(new_expr, sympy.Symbol):
                     self._constrain_range_for_size(new_expr)
                 else:
-                    # Derived expr (e.g. u0+u1): constrain the whole sum to be
-                    # a valid size via a deferred runtime assert, not each
-                    # individual base symbol.
                     torch._check(
                         self.create_symintnode(new_expr, hint=None, source=source) >= 0
                     )
             return new_expr
 
-        # Step 3: at least one symbol could not be resolved.  Mint one fresh
-        # symbol for the whole foreign expression and cache by expression.
-        # TODO we can do better here: we lose all structural info about the
-        # foreign expression (e.g. that it was u0 + u1) by collapsing it to a
-        # single opaque local symbol.
-        expr_key = (id(src_shape_env), expr)
-        cached = self.foreign_unbacked_symbol_cache.get(expr_key)
+        expr_key = (env_id, expr)
+        cached = cache.get(expr_key)
         if cached is None:
             with self.ignore_fresh_unbacked_symbols():
                 new_symint = self.create_unbacked_symint(source)
             cached = new_symint.node.expr
-            self.foreign_unbacked_symbol_cache[expr_key] = cached
+            cache[expr_key] = cached
             # Only carry the foreign optimization hint forward when every
             # free symbol in expr has an explicit backed value or hint
             # override; otherwise optimization_hint would return a generic
             # heuristic fallback that shouldn't be recorded as user
             # provenance.
-            hint_sources = (
-                src_shape_env.backed_var_to_val.keys()
-                | src_shape_env.var_to_hint_override.keys()
-            )
             optimization_hint = (
                 src_shape_env.optimization_hint(expr)
                 if not expr.free_symbols - hint_sources
