@@ -320,6 +320,43 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 # succ nodes should be forwarded to pre mutation buffer
                 self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
+    @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
+    def test_inplace_buffer_reuse_peak_memory_estimate(self):
+        def f(x, weight, bias):
+            return torch.relu(torch.nn.functional.linear(x, weight, bias))
+
+        n, k = 64, 8
+        x = torch.randn(n, k, device=GPU_TYPE)
+        weight = torch.randn(n, k, device=GPU_TYPE)
+        bias = torch.randn(n, device=GPU_TYPE)
+        buffer_size = n * n * torch.float32.itemsize
+        original_estimate = memory.estimate_peak_memory
+        cases = ((True, buffer_size), (False, 2 * buffer_size))
+
+        for inplace_buffers, expected_peak in cases:
+            estimates = []
+
+            def record_estimate(*args, **kwargs):
+                result = original_estimate(*args, **kwargs)
+                estimates.append(result[0])
+                return result
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    inplace_buffers=inplace_buffers,
+                    combo_kernels=False,
+                    force_disable_caches=True,
+                ),
+                mock.patch.object(memory, "estimate_peak_memory", record_estimate),
+            ):
+                code = run_and_get_triton_code(
+                    torch.compile(f, fullgraph=True), x, weight, bias
+                )
+
+            self.assertEqual(estimates[-1], expected_peak)
+            self.assertEqual("# reuse" in code, inplace_buffers)
+
     def test_fusing_reductions_increase_peak_memory(self):
         @torch.compile
         def f(a, b, c):
