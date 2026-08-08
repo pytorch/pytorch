@@ -919,6 +919,15 @@ class FileSystemReader(StorageReader):
                             raise AssertionError(
                                 f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
                             )
+                        if target_tensor.dtype != tensor.dtype:
+                            allow_unsafe = getattr(planner, "allow_unsafe_types", True)
+                            # check if the target tensor can be safely cast to the tensor dtype without precision loss
+                            if not allow_unsafe and torch.promote_types(tensor.dtype, target_tensor.dtype) != target_tensor.dtype:
+                                raise RuntimeError(
+                                    f"req {req.storage_index} dtype mismatch: template has {target_tensor.dtype}, "
+                                    f"but checkpoint has {tensor.dtype}. Silent casting is not allowed to prevent precision loss. "
+                                    f"Set `allow_unsafe_types=True` in DefaultLoadPlanner to override."
+                                )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 

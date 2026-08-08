@@ -104,6 +104,14 @@ def load(
     .. note:
         Rank 0 is assumed to be the coordinator rank.
 
+    .. note:
+        When loading state dicts, if the dtype of the saved tensor differs from the
+        dtype of the template tensor in the state_dict, DCP will default to casting
+        the saved tensor to the template's dtype. This can cause silent precision loss
+        (e.g., loading an fp32 checkpoint into a bf16 template). 
+        To strictly enforce safe dtype casting (preventing narrowing casts),
+        pass a `DefaultLoadPlanner` with `allow_unsafe_types=False` to the `planner` argument.
+
     Args:
         state_dict (Dict[str, Any]): The state_dict to load the checkpoint into.
         checkpoint_id (Union[str, os.PathLike, None]):
