@@ -1418,6 +1418,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
 
+  // Streams for nested CUDA graph captures. When NCCL is used inside both a
+  // parent capture and a nested capture (e.g. a conditional-node body), the
+  // default ncclStream is already bound to the parent capture graph. Reusing
+  // it in the child capture would cause cudaErrorStreamCaptureMerge.  This
+  // map holds per-(device-key, capture-id) streams that are safe to use
+  // inside the nested capture. Entries are pruned lazily in getNCCLStream
+  // once their capture is no longer active.
+  std::unordered_map<std::string, at::cuda::CUDAStream> ncclCaptureStreams_;
+
+  // Returns the NCCL stream for the given device key, creating a
+  // capture-specific stream when the current stream and the default NCCL
+  // stream belong to different CUDA graph captures.
+  at::cuda::CUDAStream getNCCLStream(
+      const std::string& key,
+      const at::Device& device);
+
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
 

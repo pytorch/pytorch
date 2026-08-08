@@ -3639,7 +3639,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  auto ncclStream = ncclStreams_.at(key);
+  auto ncclStream = getNCCLStream(key, device);
   auto opProfilerTitle = optype != OpType::COALESCED
       ? "nccl:" + opTypeToString(optype) + "_coalesced"
       : "nccl:coalesced";
@@ -3798,7 +3798,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+  auto ncclStream = asyncOp ? getNCCLStream(key, device)
                             : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
@@ -3996,7 +3996,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+  auto ncclStream = asyncOp ? getNCCLStream(key, device)
                             : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
@@ -4255,7 +4255,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream = ncclStreams_.at(key);
+  auto ncclStream = getNCCLStream(key, device);
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
@@ -6175,6 +6175,44 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
 }
 
 #endif // NCCL_HAS_COMM_SHRINK
+
+at::cuda::CUDAStream ProcessGroupNCCL::getNCCLStream(
+    const std::string& key,
+    const at::Device& device) {
+  auto& defaultStream = ncclStreams_.at(key);
+  auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
+  auto curInfo = c10::cuda::captureInfoMayInitCtx(currentStream.stream());
+  if (curInfo.status != c10::cuda::CaptureStatus::Active) {
+    return defaultStream;
+  }
+  auto ncclInfo = c10::cuda::captureInfoMayInitCtx(defaultStream.stream());
+  if (ncclInfo.status != c10::cuda::CaptureStatus::Active ||
+      ncclInfo.id == curInfo.id) {
+    return defaultStream;
+  }
+  auto captureKey = key + "_" + std::to_string(curInfo.id);
+  auto it = ncclCaptureStreams_.find(captureKey);
+  if (it != ncclCaptureStreams_.end()) {
+    return it->second;
+  }
+  // Capture ids are unique per capture, so entries can never be looked up
+  // again once their capture ends. Prune them here (only on the miss path)
+  // to keep the map bounded by the number of concurrently active captures.
+  for (auto mapIt = ncclCaptureStreams_.begin();
+       mapIt != ncclCaptureStreams_.end();) {
+    auto info = c10::cuda::captureInfoMayInitCtx(mapIt->second.stream());
+    if (info.status != c10::cuda::CaptureStatus::Active) {
+      mapIt = ncclCaptureStreams_.erase(mapIt);
+    } else {
+      ++mapIt;
+    }
+  }
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto stream = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high, device.index());
+  ncclCaptureStreams_.emplace(captureKey, stream);
+  return stream;
+}
 
 void ProcessGroupNCCL::initializeDeviceStateForComm(
     const at::Device& device,

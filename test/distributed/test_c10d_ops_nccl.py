@@ -379,6 +379,53 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         self.assertEqual(static_output.sum().item(), expected_sum)
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/157896")
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_nccl_cudagraph_nested_capture(self):
+        """NCCL in a parent capture followed by NCCL in a nested child capture
+        must not hit cudaErrorStreamCaptureMerge."""
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        rank = self.rank_to_GPU[self.rank][0]
+        torch.cuda.set_device(rank)
+        group_name = self.pg.group_name
+
+        def all_reduce(tensor):
+            result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
+            return torch.ops._c10d_functional.wait_tensor(result)
+
+        def true_branch(tensor):
+            return all_reduce(tensor + 1)
+
+        def false_branch(tensor):
+            return tensor - 1
+
+        tensor = torch.full((4,), self.rank + 1, dtype=torch.float32, device=rank)
+        predicate = torch.tensor(True, device=rank)
+        capture_stream = torch.cuda.Stream(device=rank)
+
+        with torch.cuda.stream(capture_stream):
+            all_reduce(tensor)
+            true_branch(tensor)
+            false_branch(tensor)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with (
+            torch.cuda.graph(graph, stream=capture_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            t = all_reduce(tensor)
+            torch.cond(predicate, true_branch, false_branch, (t,))
+
+        # The graph is intentionally not instantiated: conditional-node bodies
+        # do not support the event nodes NCCL stream syncing records, which is
+        # a separate limitation from the capture-time merge error tested here.
+        graph.reset()
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_reduce_ops(self):
