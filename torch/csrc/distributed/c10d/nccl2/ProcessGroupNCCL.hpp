@@ -251,6 +251,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const c10::intrusive_ptr<::c10d::Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<::c10d::Backend::Options>& opts) override;
+  void performNocolorSplit(at::Device device);
   c10::intrusive_ptr<::c10d::Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
       int shrink_flags = 0,

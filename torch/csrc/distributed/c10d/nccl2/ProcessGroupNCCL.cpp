@@ -306,6 +306,14 @@ void ProcessGroupNCCL::initFromComm(
                      << rank_;
 }
 
+void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
+  ensureInitialized(device);
+  auto opts = Options::create(options_c10d_->is_high_priority_stream);
+  opts->timeout = options_c10d_->timeout;
+  opts->config = cloneNcclConfig(options_c10d_->config);
+  split(store_, {}, opts);
+}
+
 c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     const c10::intrusive_ptr<::c10d::Store>& store,
     const std::vector<int>& ranks,
