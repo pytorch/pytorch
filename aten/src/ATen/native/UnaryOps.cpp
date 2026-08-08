@@ -944,7 +944,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
                                        Tensor& mantissa, Tensor& exponent) {
   // torch.frexp is implemented for floating-point dtypes for now,
   // should add support for integral dtypes in the future.
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()),
               "torch.frexp() only supports floating-point dtypes");
 
   TORCH_CHECK(mantissa.dtype() == self.dtype(),
