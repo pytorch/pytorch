@@ -647,6 +647,8 @@ def add(
     def _requires_fallback(tensor: torch.Tensor) -> bool:
         if tensor.ndim == 0:
             return False
+        if tensor.numel() == 0:
+            return True
         # Viewing complex tensors as their real dtype requires the last stride to be 1.
         return tensor.stride()[-1] != 1
 
