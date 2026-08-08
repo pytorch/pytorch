@@ -1202,10 +1202,12 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
         # XPU and CPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
+        # On CUDA a bf16 bias with fp32 output is only supported for rowwise scaling with a fp32 bias;
+        # here the scaling is tensorwise, so it still errors.
         if "xpu" not in device and "cpu" not in device:
             self.assertRaisesRegex(
                 ValueError if torch.cuda.is_available() else RuntimeError,
-                "Bias is not supported when out_dtype is set to Float32",
+                "Bias with Float32 output",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
 
@@ -1482,12 +1484,15 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("wrap_v2", [True, False])
-    def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
-        # fp32 output combined with a bias is not supported on the row-wise path.
+    @with_tf32_off
+    def test_scaled_mm_row_wise_fp32_out_with_bias(self, wrap_v2, device):
+        # A Float32 bias fuses into the row-wise CUTLASS epilogue with fp32
+        # output; other bias dtypes are still rejected for fp32 output.
         if torch.version.hip:
             raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
 
-        M, K, N = 16, 32, 48
+        M, K, N = 256, 512, 768
+        torch.manual_seed(42)
         input_dtype = e4m3_type
         x = random_matrix_with_scaled_reduction_dim(M, K, dtype=torch.float32, device=device, reduction_dim=-1)
         y = random_matrix_with_scaled_reduction_dim(N, K, dtype=torch.float32, device=device, reduction_dim=-1).t()
@@ -1495,11 +1500,30 @@ class TestFP8Matmul(TestCase):
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
         x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
         y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
-        bias = torch.randn((N,), device=device, dtype=torch.bfloat16)
+        bias = torch.randn((N,), device=device, dtype=torch.float32)
 
+        out = scaled_mm_wrap(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scales.reciprocal(),
+            scale_b=y_scales.reciprocal(),
+            out_dtype=torch.float32,
+            bias=bias,
+            wrap_v2=wrap_v2,
+        )
+        out_emulated = mm_float8_emulated(
+            x_fp8, x_scales, y_fp8, y_scales, torch.float32, bias
+        )
+        self.assertEqual(out.dtype, torch.float32)
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            out.flatten().float(), out_emulated.flatten().float(), dim=0
+        )
+        self.assertGreaterEqual(float(cosine_sim), 0.999)
+
+        # A non-Float32 bias with fp32 output remains unsupported.
         with self.assertRaisesRegex(
             (ValueError, RuntimeError),
-            "Bias is not supported when out_dtype is set to Float32",
+            "Bias with Float32 output",
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -1507,7 +1531,7 @@ class TestFP8Matmul(TestCase):
                 scale_a=x_scales.reciprocal(),
                 scale_b=y_scales.reciprocal(),
                 out_dtype=torch.float32,
-                bias=bias,
+                bias=bias.bfloat16(),
                 wrap_v2=wrap_v2,
             )
 

@@ -1106,7 +1106,8 @@ void check_inputs(
     TORCH_CHECK(bias->dim() == 1);
     TORCH_CHECK(bias->size(0) == b.size(1));
     TORCH_CHECK(bias->stride(0) == 1);
-    TORCH_CHECK(out.dtype() != at::kFloat, "Bias is not supported when out_dtype is set to Float32");
+    TORCH_CHECK(out.dtype() != at::kFloat || bias->dtype() == at::kFloat,
+        "Bias must be Float32 when out_dtype is Float32, but got ", bias->dtype());
   }
 
   TORCH_CHECK(out.device() == a.device());

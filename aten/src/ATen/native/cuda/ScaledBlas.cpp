@@ -538,23 +538,29 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #endif
   if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat,
-        "Bias is not supported when out_dtype is set to Float32");
+    if (out.scalar_type() == kFloat) {
+      // Float32 output with a bias is only supported by the rowwise CUTLASS
+      // kernel, which fuses a Float32 bias directly into its Float32 epilogue.
+      const bool rowwise = scaling_choice_a == ScalingType::RowWise &&
+          scaling_choice_b == ScalingType::RowWise;
+      TORCH_CHECK(rowwise && bias->scalar_type() == kFloat,
+          "Bias with Float32 output is only supported for rowwise scaling with "
+          "a Float32 bias, but got bias ", bias->scalar_type());
+    } else {
+      TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
+                  bias->scalar_type() == ScalarType::Half,
+          "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
 
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
-                bias->scalar_type() == ScalarType::Half,
-        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
+      TORCH_CHECK(out.scalar_type() != ScalarType::BFloat16 ||
+                  bias->scalar_type() == ScalarType::BFloat16,
+          "Bias must be BFloat16 to compute ", out.scalar_type(),
+          " output, but got ", bias->scalar_type());
 
-    TORCH_CHECK((out.scalar_type() != kFloat &&
-                 out.scalar_type() != ScalarType::BFloat16) ||
-                bias->scalar_type() == ScalarType::BFloat16,
-        "Bias must be BFloat16 to compute ", out.scalar_type(),
-        " output, but got ", bias->scalar_type());
-
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
-                bias->scalar_type() == ScalarType::Half,
-        "Bias must be Float16 to compute ", out.scalar_type(),
-        " output, but got ", bias->scalar_type());
+      TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
+                  bias->scalar_type() == ScalarType::Half,
+          "Bias must be Float16 to compute ", out.scalar_type(),
+          " output, but got ", bias->scalar_type());
+    }
   }
   {
     auto bias_ = bias.value_or(Tensor());
@@ -590,9 +596,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
 #ifndef USE_ROCM
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
+    // cuBLAS FP8 only accepts a BFloat16/Half bias, so a fused Float32 bias with
+    // Float32 output must go through CUTLASS, which supports it on every arch.
+    const bool bias_needs_cutlass = bias.has_value() && out.dtype() == kFloat;
+    if (bias_needs_cutlass ||
+        ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-        ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
+        ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
       TORCH_CHECK_VALUE(
           out.dtype() == kBFloat16 || out.dtype() == kHalf ||
               out.dtype() == kFloat,
@@ -740,7 +750,12 @@ _scaled_rowwise_rowwise(
 #ifndef USE_ROCM
   // We are doing row-wise scaling
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
+  // cuBLAS FP8 only accepts a BFloat16/Half bias, so a fused Float32 bias with
+  // Float32 output must go through CUTLASS, which supports it on every arch.
+  const bool bias_needs_cutlass =
+      bias.has_value() && out.dtype() == kFloat;
+  if (bias_needs_cutlass ||
+      ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
     TORCH_CHECK_VALUE(
@@ -1372,23 +1387,27 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
   }
 #endif
   if (bias.has_value()) {
-    TORCH_CHECK_VALUE(out.scalar_type() != kFloat,
-        "Bias is not supported when out_dtype is set to Float32");
+    if (out.scalar_type() == kFloat) {
+      // Float32 output with a bias is only supported by the rowwise CUTLASS
+      // kernel; the scaling-type gate below enforces that once it is known.
+      TORCH_CHECK_VALUE(bias->scalar_type() == kFloat,
+          "Bias with Float32 output must be Float32, but got ",
+          bias->scalar_type());
+    } else {
+      TORCH_CHECK_VALUE(bias->scalar_type() == ScalarType::BFloat16 ||
+                  bias->scalar_type() == ScalarType::Half,
+          "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
 
-    TORCH_CHECK_VALUE(bias->scalar_type() == ScalarType::BFloat16 ||
-                bias->scalar_type() == ScalarType::Half,
-        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
+      TORCH_CHECK_VALUE(out.scalar_type() != ScalarType::BFloat16 ||
+                  bias->scalar_type() == ScalarType::BFloat16,
+          "Bias must be BFloat16 to compute ", out.scalar_type(),
+          " output, but got ", bias->scalar_type());
 
-    TORCH_CHECK_VALUE((out.scalar_type() != kFloat &&
-                 out.scalar_type() != ScalarType::BFloat16) ||
-                bias->scalar_type() == ScalarType::BFloat16,
-        "Bias must be BFloat16 to compute ", out.scalar_type(),
-        " output, but got ", bias->scalar_type());
-
-    TORCH_CHECK_VALUE(out.scalar_type() != ScalarType::Half ||
-                bias->scalar_type() == ScalarType::Half,
-        "Bias must be Float16 to compute ", out.scalar_type(),
-        " output, but got ", bias->scalar_type());
+      TORCH_CHECK_VALUE(out.scalar_type() != ScalarType::Half ||
+                  bias->scalar_type() == ScalarType::Half,
+          "Bias must be Float16 to compute ", out.scalar_type(),
+          " output, but got ", bias->scalar_type());
+    }
   }
   {
     auto bias_ = bias.has_value() ? *bias : Tensor();
@@ -1441,6 +1460,12 @@ TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
   );
 
   check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
+
+  if (bias.has_value() && out.scalar_type() == kFloat) {
+    TORCH_CHECK_VALUE(
+        gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE,
+        "Bias with Float32 output is only supported for rowwise scaling");
+  }
 
   // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
