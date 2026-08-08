@@ -82,6 +82,11 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
   auto sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
   const Tensor& sorter = *sorter_maybe_owned;
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !c10::isComplexType(self.scalar_type()) && !c10::isComplexType(sorted_sequence.scalar_type()),
+      "searchsorted is not supported for complex on MPS");
+
   resize_output(result, self.sizes());
 
   // we have two inputs to set right, pre_check checks that they aren't set to opposites
