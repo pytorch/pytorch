@@ -437,6 +437,63 @@ def register_backend_for_device(
     custom_backend_codegen_configs[device] = device_custom_config
 
 
+# Third-party (vendor) inductor backends, imported on first codegen for the device.
+_device_backend_loaders: dict[str, Callable[[], None]] = {}
+_loaded_device_backends: OrderedSet[str] = OrderedSet()
+
+
+def register_device_backend_loader(device: str, loader: Callable[[], None]) -> None:
+    """Register ``loader`` to run the first time inductor codegens for ``device``;
+    the loader must call ``register_backend_for_device`` itself."""
+    _device_backend_loaders[device] = loader
+
+
+@functools.cache
+def _discover_device_backend_entrypoints() -> None:
+    # Vendor packages declare loaders via the "torch.inductor.device_backends"
+    # entry-point group (mirrors dynamo's "torch_dynamo_backends").
+    from importlib.metadata import entry_points
+
+    for ep in entry_points(group="torch.inductor.device_backends"):
+        _device_backend_loaders.setdefault(ep.name, _make_entrypoint_loader(ep))
+
+
+def _make_entrypoint_loader(ep: Any) -> Callable[[], None]:
+    # ep.load() returns the vendor's loader callable; defer it to first use.
+    def _load() -> None:
+        ep.load()()
+
+    return _load
+
+
+def _load_device_backend(device: str) -> None:
+    """Load the vendor backend for ``device`` on first use. The device is claimed
+    before invoking the loader to short-circuit re-entrant queries (its import
+    may itself trigger scheduling lookups); the claim is released on failure so
+    a later resolve can retry."""
+    if device in device_codegens or device in _loaded_device_backends:
+        return
+    _loaded_device_backends.add(device)
+    _discover_device_backend_entrypoints()
+    loader = _device_backend_loaders.get(device)
+    if loader is None:
+        return
+    try:
+        loader()
+    except Exception:
+        _loaded_device_backends.discard(device)
+        log.warning(
+            "inductor device backend loader for %r raised", device, exc_info=True
+        )
+        raise
+    if device not in device_codegens:
+        log.warning(
+            "inductor device backend loader for %r returned without registering "
+            "the device via register_backend_for_device",
+            device,
+        )
+
+
 class BackendFeature(Enum):
     FOREACH = auto()
     BUCKETIZE = auto()
@@ -480,12 +537,14 @@ def has_backend_feature(
 
 
 def get_scheduling_for_device(device: str) -> SchedulingConstructor | None:
+    _load_device_backend(device)
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
 def get_wrapper_codegen_for_device(
     device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
 ) -> WrapperConstructor | None:
+    _load_device_backend(device)
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         if fx_wrapper:
