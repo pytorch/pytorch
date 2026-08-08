@@ -17,6 +17,7 @@ from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing_extensions import override
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -1326,6 +1327,7 @@ class TritonOverrides(OpOverrides):
 
     _LOG_2_E = math.log2(math.e)
 
+    @override
     @staticmethod
     def to_dtype(
         x,
@@ -1401,6 +1403,13 @@ class TritonOverrides(OpOverrides):
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
+
+        if (
+            isinstance(x, CSEVariable)
+            and x.dtype is not None
+            and triton_type(x.dtype) == out_dtype
+        ):
+            return x
 
         return f"{x}.to({out_dtype})"
 
