@@ -60,6 +60,7 @@ from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F
 instantiate_device_type_tests(TestSaliencyPruner, globals())
 instantiate_device_type_tests(TestBaseStructuredSparsifier, globals())
 instantiate_device_type_tests(TestFPGMPruner, globals())
+instantiate_device_type_tests(TestActivationSparsifier, globals())
 
 
 if __name__ == "__main__":
