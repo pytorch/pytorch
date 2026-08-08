@@ -975,7 +975,7 @@
   result: auto_element_wise
 
 - name: log10(Tensor self) -> Tensor
-  self: grad / (self.conj() * 2.3025850929940456)
+  self: grad / (self.conj() * M_LN10)
   result: auto_element_wise
 
 - name: log1p(Tensor self) -> Tensor
@@ -983,7 +983,7 @@
   result: auto_element_wise
 
 - name: log2(Tensor self) -> Tensor
-  self: grad / (self.conj() * 0.6931471805599453)
+  self: grad / (self.conj() * M_LN2)
   result: auto_element_wise
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
