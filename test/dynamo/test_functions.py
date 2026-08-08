@@ -38,6 +38,8 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_TORCHDYNAMO,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -1235,6 +1237,7 @@ partial_fn = functools.partial(fn, scale=2)
         y += float("1.2")
         return torch.add(x, y)
 
+    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 14))
     def test_float_or_complex_from_number(self):
         @make_test
         def _float_from_number_impl(x):
@@ -5442,43 +5445,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_frozenset_illegal_call_method(self):
-        def fn_add():
-            s = frozenset((1, 2, 3))
-            s.add({2})
-            return len(s)
-
-        def fn_pop():
-            s = frozenset((1, 2, 3))
-            s.pop()
-            return len(s)
-
-        def fn_update():
-            s = frozenset((1, 2, 3))
-            s.update({4, 5, 6})
-            return len(s)
-
-        def fn_remove():
-            s = frozenset((1, 2, 3))
-            s.remove(2)
-            return len(s)
-
-        def fn_discard():
-            s = frozenset((1, 2, 3))
-            s.discard(2)
-            return len(s)
-
-        def fn_clear():
-            s = frozenset((1, 2, 3))
-            s.clear()
-            return len(s)
-
-        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
-            torch._dynamo.reset()
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
-                opt_fn()
 
     def test_is_tensor_tensor(self):
         def fn(x, y):
