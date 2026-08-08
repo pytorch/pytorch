@@ -1211,7 +1211,8 @@ class TestMemoryProfilerE2E(TestCase):
             create                     ACTIVATION                   7(v0)         2048 kB
             create                     ACTIVATION                   8(v0)         2048 kB
             destroy                    ACTIVATION                   7(v0)         2048 kB
-            create                     ACTIVATION                   9(v0)         2048 kB
+            create                     TEMPORARY                    9(v0)         2048 kB
+            destroy                    TEMPORARY                    9(v0)         2048 kB
             create                     TEMPORARY                   10(v0)         2048 kB
             destroy                    TEMPORARY                   10(v0)         2048 kB
             create                     AUTOGRAD_DETAIL             11(v0)         2048 kB
