@@ -1817,6 +1817,13 @@ def _optimize(
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
             See AOTAutogradMemoryEfficientFusionWithContext for the usage.
+            Backends can also run eager one-time initialization by defining a
+            ``_dynamo_backend_init`` attribute (a no-arg callable); it is called
+            once the backend is resolved, before backend_ctx_ctor. It is invoked
+            once per ``torch.compile()`` / ``torch._dynamo.optimize()`` call, so
+            a backend reused across multiple compiled functions is initialized
+            once per site and should be idempotent. Backends forced via
+            ``torch.compiler.set_stance(force_backend=...)`` bypass this hook.
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
@@ -1873,6 +1880,12 @@ def _optimize(
         )
 
     backend = get_compiler_fn(backend)
+
+    # Allow backends to perform eager initialization (e.g., load native
+    # libraries, initialize device contexts) before the first invocation.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        backend_init()
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
@@ -2817,6 +2830,12 @@ def _optimize_assert(
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
+
+    # Allow backends to perform eager initialization (e.g., load native
+    # libraries, initialize device contexts) before the first invocation.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        backend_init()
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
