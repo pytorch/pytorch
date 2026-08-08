@@ -10782,6 +10782,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y)
 
+    def test_mark_dynamic_with_half_bounded_range(self):
+        def my_dyn_fn(x):
+            return x.sin()
+
+        y = torch.randn([8, 3, 3])
+        torch._dynamo.mark_dynamic(y, 0, min=0)
+
+        torch.compile(my_dyn_fn, backend="eager")(y)
+
     def test_mark_static(self):
         counter = CompileCounter()
 

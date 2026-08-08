@@ -115,6 +115,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -4807,7 +4808,14 @@ def _automatic_dynamic(
                         )
 
                         constraint_size = StrictMinMaxConstraint(
-                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
+                            vr=ValueRanges(
+                                lower=dim_range.min
+                                if dim_range.min is not None
+                                else -int_oo,
+                                upper=dim_range.max
+                                if dim_range.max is not None
+                                else int_oo,
+                            ),
                             warn_only=False,
                         )
                 else:
