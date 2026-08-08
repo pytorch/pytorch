@@ -20,6 +20,7 @@ from torchgen.api.types import (
     Binding,
     deviceT,
     DispatcherSignature,
+    doubleT,
     kernel_signature,
     NativeSignature,
     OptionalCType,
@@ -380,7 +381,18 @@ class GenTSLazyIR(GenLazyIR):
             else:
                 value_comparison.append(f"operand(i++) == {arg.name}")
         for arg in itertools.chain(schema.positional_scalars, schema.keyword_scalars):
-            if isinstance(arg.lazy_type, OptionalCType):
+            # BitwiseEqual for floating-point scalars, not ==: IEEE eq never
+            # matches NaN (node would never be reused) and conflates -0.0
+            # with 0.0 (wrong reuse), inconsistent with the bitwise node hash.
+            is_double = arg.lazy_type == BaseCType(doubleT) or (
+                isinstance(arg.lazy_type, OptionalCType)
+                and arg.lazy_type.elem == BaseCType(doubleT)
+            )
+            if is_double:
+                value_comparison.append(
+                    f"torch::lazy::BitwiseEqual(this->{arg.name}, {arg.name})"
+                )
+            elif isinstance(arg.lazy_type, OptionalCType):
                 value_comparison.append(
                     f"((!this->{arg.name}&&!{arg.name}) || (this->{arg.name}&&{arg.name} && *(this->{arg.name}) == *{arg.name}))"
                 )

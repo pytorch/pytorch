@@ -9,6 +9,7 @@
 #include <c10/util/int128.h>
 #include <torch/csrc/Export.h>
 #include <cstring>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -63,6 +64,44 @@ static inline hash_t StringHash(const char* data) {
 template <typename T, std::enable_if_t<std::is_arithmetic_v<T>>* = nullptr>
 hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
+}
+
+// Value-identity comparison consistent with the bitwise Hash above: IEEE eq
+// would never match NaN args (so nodes with a NaN scalar are never reused)
+// and would conflate -0.0 with 0.0 (wrong node reuse).
+template <typename T, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr>
+bool BitwiseEqual(const T& lhs, const T& rhs) {
+  return std::memcmp(&lhs, &rhs, sizeof(T)) == 0;
+}
+
+template <
+    typename T,
+    std::enable_if_t<!std::is_floating_point_v<T>>* = nullptr>
+bool BitwiseEqual(const T& lhs, const T& rhs) {
+  return lhs == rhs;
+}
+
+template <typename T>
+bool BitwiseEqual(
+    const std::optional<T>& lhs,
+    const std::optional<T>& rhs) {
+  if (lhs.has_value() != rhs.has_value()) {
+    return false;
+  }
+  return !lhs.has_value() || BitwiseEqual(*lhs, *rhs);
+}
+
+template <typename T>
+bool BitwiseEqual(const std::vector<T>& lhs, const std::vector<T>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (!BitwiseEqual(lhs[i], rhs[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // added because on macos builds the vector<bool> specialization
