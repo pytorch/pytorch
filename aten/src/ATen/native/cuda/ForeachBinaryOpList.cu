@@ -25,7 +25,7 @@
 namespace at::native {
 
 template <typename T, template <class> class Op>
-std::vector<Tensor> foreach_tensor_list_op(
+static std::vector<Tensor> foreach_tensor_list_op(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -55,7 +55,7 @@ std::vector<Tensor> foreach_tensor_list_op(
 }
 
 template <typename T, template <class> class Op>
-void foreach_tensor_list_op_(
+static void foreach_tensor_list_op_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -77,7 +77,7 @@ void foreach_tensor_list_op_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_bool_half_bfloat16(
+static std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -93,7 +93,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_bool_half_bfloat16_(
+static void all_types_complex_bool_half_bfloat16_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -109,7 +109,7 @@ void all_types_complex_bool_half_bfloat16_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_half_bfloat16(
+static std::vector<Tensor> all_types_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -124,7 +124,7 @@ std::vector<Tensor> all_types_half_bfloat16(
 }
 
 template <template <class> class Op>
-void all_types_complex_half_bfloat16_(
+static void all_types_complex_half_bfloat16_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -139,7 +139,7 @@ void all_types_complex_half_bfloat16_(
 }
 
 template <template <class> class Op>
-void all_types_half_bfloat16_(
+static void all_types_half_bfloat16_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
@@ -154,7 +154,7 @@ void all_types_half_bfloat16_(
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_half_bfloat16(
+static std::vector<Tensor> all_types_complex_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha = 1) {
