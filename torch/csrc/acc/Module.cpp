@@ -165,6 +165,21 @@ at::Tensor createEmptyTensor(
   tensor.unsafeGetTensorImpl()->set_sizes_and_strides(shape, strides, 0);
   return tensor;
 }
+
+at::Tensor createViewTensor(
+    const at::Tensor& source,
+    const std::vector<int64_t>& size,
+    const std::vector<int64_t>& stride,
+    int64_t storage_offset) {
+  at::Tensor tensor = at::detail::make_tensor<at::TensorImpl>(
+      at::TensorImpl::VIEW,
+      c10::Storage(source.storage()),
+      source.key_set(),
+      source.dtype());
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+      size, stride, storage_offset);
+  return tensor;
+}
 } // namespace
 
 void initModule(PyObject* module) {
@@ -192,6 +207,7 @@ void initModule(PyObject* module) {
       "register_python_privateuseone_device_guard",
       &registerPythonPrivateUse1DeviceGuard);
   _acc.def("create_empty_tensor", &createEmptyTensor);
+  _acc.def("create_view_tensor", &createViewTensor);
 }
 
 } // namespace torch::acc
