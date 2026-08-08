@@ -2537,6 +2537,42 @@ class TestSDPA(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("kv_heads", [1, 2])
+    @parametrize("variant", ["plain", "mask", "causal", "dropout_mask"])
+    def test_math_gqa_broadcast_matches_repeat(self, device, dtype, kv_heads, variant):
+        if dtype == torch.float64 and torch.device(device).type == "mps":
+            self.skipTest("float64 is not supported on MPS")
+        # The math backend computes GQA by broadcasting key/value over grouped
+        # query heads. Check that matches the historical behavior of repeating
+        # key/value with repeat_interleave and running attention with equal heads.
+        torch.manual_seed(0)
+        batch, q_heads, q_len, kv_len, head_dim = 2, 8, 7, 11, 16
+        group = q_heads // kv_heads
+        q = torch.randn(batch, q_heads, q_len, head_dim, dtype=dtype, device=device)
+        k = torch.randn(batch, kv_heads, kv_len, head_dim, dtype=dtype, device=device)
+        v = torch.randn(batch, kv_heads, kv_len, head_dim, dtype=dtype, device=device)
+        k_rep = k.repeat_interleave(group, dim=-3)
+        v_rep = v.repeat_interleave(group, dim=-3)
+
+        attn_mask = None
+        is_causal = False
+        dropout_mask = None
+        dropout_p = 0.0
+        if variant == "mask":
+            attn_mask = torch.randn(batch, q_heads, q_len, kv_len, dtype=dtype, device=device)
+        elif variant == "causal":
+            is_causal = True
+        elif variant == "dropout_mask":
+            dropout_p = 0.3
+            dropout_mask = torch.rand(batch, q_heads, q_len, kv_len, device=device) > dropout_p
+
+        broadcast_out = torch.ops.aten._scaled_dot_product_attention_math(
+            q, k, v, attn_mask, dropout_p, is_causal, dropout_mask, enable_gqa=True)[0]
+        repeat_out = torch.ops.aten._scaled_dot_product_attention_math(
+            q, k_rep, v_rep, attn_mask, dropout_p, is_causal, dropout_mask, enable_gqa=False)[0]
+        self.assertEqual(broadcast_out, repeat_out)
+
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
 
