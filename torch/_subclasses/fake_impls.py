@@ -37,6 +37,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    _item_memo_for_data_dependent_output,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -1292,7 +1293,7 @@ def repeat_interleave_tensor(
 def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
-    if (r := arg.item_memo) is not None:
+    if (r := _item_memo_for_data_dependent_output(arg)) is not None:
         return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs

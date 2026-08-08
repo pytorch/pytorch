@@ -14,6 +14,7 @@ import random
 import re
 import tempfile
 from collections.abc import Callable
+from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
 
@@ -103,6 +104,24 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     if denominator == 1:
         return numerator
     return CleanDiv(numerator, denominator)
+
+
+def _sanitize_for_repr(obj: Any) -> Any:
+    """Convert Enum values to their underlying value for valid Python repr in code generation."""
+    if isinstance(obj, dict):
+        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_repr(v) for v in obj]
+    # For namedtuples (have _fields), reconstruct to preserve the type
+    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+        return getattr(type(obj), "_make")(  # noqa: B009
+            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
+        )
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_repr(v) for v in obj)
+    if isinstance(obj, Enum):
+        return _sanitize_for_repr(obj.value)
+    return obj
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -2360,9 +2379,8 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
         if orig_python_kernel_name.startswith("aten.scatter_reduce"):
             line += ", ".join([""] + kwargs)
-        else:
-            if reduce:
-                line += f", reduce={repr(reduce)}"
+        elif reduce:
+            line += f", reduce={repr(reduce)}"
         line += ")"
         self.writeline(line)
 
@@ -3095,13 +3113,17 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(DynamicScalarLine(self, node))
 
     def _codegen_dynamic_scalar(self, node):
+        self.add_import_once(
+            "from torch._subclasses.fake_tensor import _item_with_optional_fake_mode"
+        )
         (data,) = (t.codegen_reference() for t in node.inputs)
+        item_expr = f"_item_with_optional_fake_mode({data})"
         if len(node.keypath) == 0:
-            self.writeline(f"{node.sym} = {data}.item()")
+            self.writeline(f"{node.sym} = {item_expr}")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
-            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+            self.writeline(f"{node.sym} = 1 if {item_expr} else 0")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
-            self.writeline(f"{node.sym}_undivided = {data}.item()")
+            self.writeline(f"{node.sym}_undivided = {item_expr}")
             self.writeline(
                 f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
                 f"f'{{{node.sym}_undivided}} not divisible by {node.keypath[0].divisor}'"
@@ -3668,12 +3690,14 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
+        # Sanitize triton_meta to convert Enum values for valid Python repr
+        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={triton_meta!r},
+                triton_meta={sanitized_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
