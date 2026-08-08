@@ -88,7 +88,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
 
 aten = torch.ops.aten
@@ -2615,6 +2615,68 @@ class FakeTensorConverterTest(TestCase):
         x_conv = converter.from_real_tensor(mode, x)
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+
+    def test_wrapper_view_with_nontransparent_layout(self):
+        class Packed(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    dtype=torch.uint8,
+                    device=data.device,
+                )
+
+            def __init__(self, data):
+                self._data = data
+
+            def __tensor_flatten__(self):
+                return ["_data"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inners, metadata, outer_size, outer_stride):
+                return Packed(inners["_data"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func in (
+                    torch.ops.aten.as_strided.default,
+                    torch.ops.aten.set_.source_Storage_storage_offset,
+                ):
+                    raise RuntimeError("outer metadata mutation unsupported")
+                unwrapped_args = pytree.tree_map_only(Packed, lambda x: x._data, args)
+                unwrapped_kwargs = pytree.tree_map_only(
+                    Packed, lambda x: x._data, kwargs
+                )
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+                wrapped = pytree.tree_map_only(torch.Tensor, Packed, out)
+                return return_and_correct_aliasing(func, args, kwargs, wrapped)
+
+        base = Packed(torch.arange(24, dtype=torch.uint8).reshape(3, 8))
+        view = base[1:]
+        self.assertTrue(view._is_view())
+        fake = FakeTensorMode(shape_env=ShapeEnv()).from_tensor(view)
+        self.assertEqual(fake.shape, view.shape)
+        self.assertEqual(fake._data.shape, view._data.shape)
+
+    def test_wrapper_multi_output_view_preserves_autograd_metadata(self):
+        base = TwoTensor(
+            torch.randn(4, requires_grad=True),
+            torch.randn(4, requires_grad=True),
+        )
+        view = base.split(2)[0]
+        self.assertTrue(view._is_view())
+        self.assertEqual(view._version, 0)
+
+        fake = FakeTensorMode(shape_env=ShapeEnv()).from_tensor(view)
+
+        self.assertTrue(fake.requires_grad)
+        self.assertFalse(fake.is_leaf)
+        self.assertTrue(fake._is_view())
+        self.assertEqual(fake._version, view._version)
 
     @xfailIfTorchDynamo
     def test_separate_tensor_storages_non_view(self):

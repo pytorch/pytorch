@@ -575,6 +575,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         super().__init__(gm)
         self._symint_name_map: dict[str, str] = symint_name_map or {}
         self._graph_symint_names: set[str] = graph_symint_names or set()
+        self._canonical_symbol_names: dict[str, str] = dict(self._symint_name_map)
+        self._canonical_nested_int_names: dict[int, str] = {}
+        self._seed_symbols_from_placeholders(gm)
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
@@ -583,21 +586,6 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
-
-    def _reduce_symint(
-        self, s: torch.SymInt
-    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
-        name = str(s)
-        normalized = self._symint_name_map.get(name)
-        if normalized is not None:
-            if name in self._graph_symint_names:
-                return (_ident, (normalized,))
-            # Non-graph SymInt with non-deterministic name (from MetaConverter).
-            # Include the hint to distinguish different specializations.
-            hint = s.node.hint
-            if hint is not None:
-                return (_ident, (normalized, hint))
-        return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
@@ -775,6 +763,107 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         metadata = extract_tensor_metadata_for_cache_key(t)
         return (_ident, (metadata,))
 
+    def _seed_symbols_from_placeholders(self, gm: torch.fx.GraphModule) -> None:
+        for node in gm.graph.find_nodes(op="placeholder", sort=True):
+            self._seed_symbols(node.meta.get("example_value"))
+            self._seed_symbols(node.meta.get("val"))
+
+    def _seed_symbols(self, value: Any) -> None:
+        if isinstance(value, torch.SymInt):
+            self._canonical_symint(value)
+        elif isinstance(value, torch.SymBool):
+            self._canonical_symbool(value)
+        elif isinstance(value, torch.Tensor):
+            self._seed_symbols(tuple(value.shape))
+            self._seed_symbols(tuple(value.stride()))
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                self._seed_symbols(item)
+        elif isinstance(value, dict):
+            for key in sorted(value, key=str):
+                self._seed_symbols(key)
+                self._seed_symbols(value[key])
+
+    def _canonical_symbol_name(self, symbol: Any) -> str:
+        name = symbol.name
+        if name not in self._canonical_symbol_names:
+            self._canonical_symbol_names[name] = (
+                f"s_{len(self._canonical_symbol_names)}"
+            )
+        return self._canonical_symbol_names[name]
+
+    def _canonical_symbolic_expr(self, expr: Any) -> str:
+        replacements = {
+            symbol: type(symbol)(self._canonical_symbol_name(symbol))
+            for symbol in sorted(expr.free_symbols, key=lambda symbol: symbol.name)
+        }
+        return str(expr.xreplace(replacements))
+
+    def _canonical_nested_int_name(self, nested_int: int) -> str:
+        if nested_int not in self._canonical_nested_int_names:
+            self._canonical_nested_int_names[nested_int] = (
+                f"j{len(self._canonical_nested_int_names)}"
+            )
+        return self._canonical_nested_int_names[nested_int]
+
+    def _canonical_symint(self, value: torch.SymInt) -> str:
+        node = value.node
+        if node.is_symbolic():
+            # pyrefly: ignore[missing-attribute]
+            return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
+        if node.is_nested_int():
+            nested_int = node.nested_int()
+            if nested_int is None:
+                raise AssertionError("Nested SymInt must have a nested integer ID")
+            # pyrefly: ignore[missing-attribute]
+            nested_int_coeff = node.nested_int_coeff()
+            return (
+                f"nested:{self._canonical_nested_int_name(nested_int)}:"
+                f"{nested_int_coeff}"
+            )
+        if node.is_constant():
+            value_as_int = node.maybe_as_int()
+            if value_as_int is None:
+                raise AssertionError("Constant SymInt must have an integer value")
+            return f"constant:{value_as_int}"
+        if node.is_int():
+            # Preserve the payload of nonstandard integer nodes such as
+            # LocalIntNode. Their string representation was also the cache-key
+            # representation before symbolic alpha-normalization.
+            node_type = type(node)
+            return f"opaque:{node_type.__module__}.{node_type.__qualname__}:{value}"
+        raise BypassAOTAutogradCache(
+            f"Unsupported SymInt node type: {type(node).__qualname__}"
+        )
+
+    def _canonical_symbool(self, value: torch.SymBool) -> str:
+        node = value.node
+        if node.is_symbolic():
+            # pyrefly: ignore[missing-attribute]
+            return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
+        if node.is_constant():
+            return f"constant:{bool(value)}"
+        raise BypassAOTAutogradCache(
+            f"Unsupported SymBool node type: {type(node).__qualname__}"
+        )
+
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        normalized = self._canonical_symint(s)
+        if s.node.is_symbolic() and str(s) not in self._graph_symint_names:
+            # MetaConverter symbols have non-deterministic names. Preserve the
+            # hint so distinct specialized graphs still get distinct keys.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (normalized,))
+
+    def _reduce_symbool(
+        self, s: torch.SymBool
+    ) -> tuple[Callable[..., Any], tuple[str]]:
+        return (_ident, (self._canonical_symbool(s),))
+
 
 @contextlib.contextmanager
 def normalize_placeholder_names(
@@ -925,11 +1014,9 @@ def autograd_cache_key(
             for n in gm.graph.find_nodes(op="placeholder", sort=True):
                 if n.type == torch.SymInt:
                     graph_symint_names.add(n.target)
-            j = 0
             for inp in example_inputs:
                 if isinstance(inp, torch.SymInt):
-                    symint_name_map[str(inp)] = f"s_{j}"
-                    j += 1
+                    symint_name_map.setdefault(str(inp), f"s_{len(symint_name_map)}")
         with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()

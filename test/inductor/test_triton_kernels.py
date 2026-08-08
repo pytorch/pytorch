@@ -928,7 +928,7 @@ def forward(self, x_1, output_1):
                 self.assertIn("output_handles[0] = ", code)
                 self.assertIn("output_handles[1] = ", code)
             else:
-                self.assertIn("return (buf0, s92, )", code)
+                self.assertRegex(code, r"return \(buf0, s[0-9]+, \)")
         else:
             self.assertIn(
                 "output_handles[0] = "

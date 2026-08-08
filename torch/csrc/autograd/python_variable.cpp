@@ -2270,7 +2270,16 @@ static bool dtensor_spec_has_symints(py::handle spec) {
     throw py::error_already_set();
   }
   const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
-  return contains_any_symint(shape);
+  if (contains_any_symint(shape)) {
+    return true;
+  }
+  py::object raw_stride = tensor_meta.attr(dtensor_interned_strings.stride);
+  if (!PyTuple_Check(raw_stride.ptr())) {
+    PyErr_SetString(PyExc_TypeError, "TensorMeta.stride must be a tuple!");
+    throw py::error_already_set();
+  }
+  const auto stride = py::reinterpret_steal<py::tuple>(raw_stride.release());
+  return contains_any_symint(stride);
 }
 
 // set to false to bail out of the C++ fast path for ops that need pytree

@@ -277,8 +277,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        # when testing with dynamic shape, symbols are lifted as inputs
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_var_used_multiple_times(self):
@@ -292,8 +292,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        # when testing with dynamic shape, symbols are lifted as inputs
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 2)
 
     def test_capture_untracked_global(self):
@@ -301,8 +301,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(lambda x: x + global_var, x)
 
         x = torch.randn(3)
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        # when testing with dynamic shape, symbols are lifted as inputs
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_allow_python_side_effects_utility(self):
@@ -508,7 +508,7 @@ class GraphModule(torch.nn.Module):
             y2 = t[0] + 0.2
             yield (x2, y2, (x2, y2))
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, my_args_generator((x, y, (x, y))), arg_count)
 
     def test_wrap_pytree_args_not_const_symint_tensor(self):
@@ -579,7 +579,7 @@ class GraphModule(torch.nn.Module):
                 return wrap(lambda x: x + y, x)
 
             # when testing with dynamic shape, a symbol is lifted as input
-            arg_count = ifdynstaticdefault(3, 4)
+            arg_count = ifdynstaticdefault(3, 7)
             self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
             return g(x)
 
@@ -593,7 +593,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: x + y, x)
 
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_capture_tracked_nested(self):
@@ -604,7 +604,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_inlined_functions(self):
@@ -617,7 +617,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_same_freevar_twice(self):
@@ -1043,7 +1043,7 @@ class GraphModule(torch.nn.Module):
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
-            6,
+            7,
             2,
             return_graph=True,
         )
@@ -1051,24 +1051,24 @@ class GraphModule(torch.nn.Module):
             out_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[s77, s27]", s77: "Sym(s77)", s27: "Sym(s27)", L_y_: "f32[s27, s94]", s94: "Sym(s94)"):
+    def forward(self, L_x_: "f32[s77, s17]", s77: "Sym(s77)", s27: "Sym(s17)", L_y_: "f32[s17, s94]", s17: "Sym(s17)", s94: "Sym(s94)"):
         l_x_ = L_x_
         l_y_ = L_y_
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, s27, l_x_, s94, l_y_);  wrap_body_1 = s77 = s27 = l_x_ = s94 = l_y_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, s77, s27, l_x_, s17, s94, l_y_);  wrap_body_1 = s77 = s27 = l_x_ = s17 = s94 = l_y_ = None
         getitem: "f32[s77, s94]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", l_x_: "f32[s77, s27]", s94: "Sym(s94)", l_y_: "f32[s27, s94]"):
+        def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", l_x_: "f32[s77, s17]", s17: "Sym(s17)", s94: "Sym(s94)", l_y_: "f32[s17, s94]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, s27, l_x_, s94, l_y_);  wrap_body_0 = s77 = s27 = l_x_ = s94 = l_y_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, s27, l_x_, s17, s94, l_y_);  wrap_body_0 = s77 = s27 = l_x_ = s17 = s94 = l_y_ = None
             getitem: "f32[s77, s94]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", l_x_: "f32[s77, s27]", s94: "Sym(s94)", l_y_: "f32[s27, s94]"):
+            def forward(self, s77: "Sym(s77)", s27: "Sym(s17)", l_x_: "f32[s77, s17]", s17: "Sym(s17)", s94: "Sym(s94)", l_y_: "f32[s17, s94]"):
                 matmul: "f32[s77, s94]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
                 return (matmul,)
 """,
@@ -1673,7 +1673,7 @@ class GraphModule(torch.nn.Module):
             return wrap(f, x)
 
         x = torch.randn(3, 3)
-        arg_count = ifdynstaticdefault(2, 3)
+        arg_count = ifdynstaticdefault(2, 4)
         self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
 
     def test_wrap_kwarg(self):
@@ -1682,7 +1682,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3)
         y = torch.randn(3, 3)
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_int(self):
@@ -1706,7 +1706,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_only(self):
@@ -1719,7 +1719,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_default(self):
@@ -1732,7 +1732,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_default_if_branch(self):
@@ -1748,7 +1748,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_recompile(self):
@@ -2150,8 +2150,9 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Since we compile with dynamic, each branch takes 4 inputs (buffer, x, z, s1)
-                self.assertEqual(len(operands), 4)
+                # Since we compile with dynamic and duck sizing is off by
+                # default, each branch takes 5 inputs (buffer, x, z, s1, s2).
+                self.assertEqual(len(operands), 5)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -2163,7 +2164,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 4)
+                    self.assertEqual(num_placeholders, 5)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
@@ -2759,7 +2760,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(h, default_args_generator((x, y)), arg_count)
 
     def test_internal_nonlocal(self):
@@ -2785,7 +2786,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 7)
         self._test_wrap_simple(h, default_args_generator((x, y)), arg_count)
 
     def test_capture_numpy_number(self):
@@ -2808,7 +2809,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x, y: x + y, x, y)
 
         x = torch.randn(3)
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 5)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_lift_tensor_constant(self):
@@ -2840,7 +2841,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap(gn, x)
 
-        arg_count = ifdynstaticdefault(4, 5)
+        arg_count = ifdynstaticdefault(4, 6)
         self._test_wrap_simple(
             fn, default_args_generator((torch.randn(10, 10),)), arg_count
         )

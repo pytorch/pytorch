@@ -1281,8 +1281,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
 
         if is_dynamic_shape_test(self._testMethodName):
-            # an extra symint exists
-            expected_msg = "bw_donated_idxs=[1]"
+            # Extra symints exist when duck sizing is disabled.
+            expected_msg = "bw_donated_idxs=[2]"
         else:
             expected_msg = "bw_donated_idxs=[0]"
 

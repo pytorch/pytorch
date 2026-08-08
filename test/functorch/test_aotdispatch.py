@@ -2524,6 +2524,35 @@ def forward(self, primals_1):
         self.assertTensorMetadataEqual(test_inp, ref_inp)
         self.assertTensorMetadataEqual(test_out, ref_out)
 
+    def test_subclass_metadata_mutation_aot_function_independent_outer_metadata(self):
+        def f(a):
+            a.transpose_(1, 0)
+            return a
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions=None,
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+
+        def make_input():
+            inner = torch.ones(2, 4).clone()
+            return WrapperSubclass(inner, outer_size=(2, 4), outer_stride=(1, 2))
+
+        ref_inp = make_input()
+        test_inp = make_input()
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_inp.size(), ref_inp.size())
+        self.assertEqual(test_inp.stride(), ref_inp.stride())
+        self.assertEqual(test_out.size(), ref_out.size())
+        self.assertEqual(test_out.stride(), ref_out.stride())
+
     @parametrize("req_grad", [False, True])
     @skipIfDynamoInput("Dynamo fails to fakeify non-contiguous TwoTensor inputs")
     def test_subclass_metadata_mutation_noncontiguous_input(self, req_grad):
@@ -10817,7 +10846,8 @@ class TestAOTModuleSimplified(AOTTestCase):
             shape_env.format_guards(),
             """\
  - Eq(s49, 20)
- - Eq(s70, 30)""",
+ - Eq(s70, 30)
+ - Eq(s26, s93)""",
         )
 
         if not torch.allclose(ref[0], res[0]):

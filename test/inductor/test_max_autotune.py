@@ -2400,6 +2400,9 @@ class TestMaxAutotune(TestCase):
             "max_autotune_gemm_backends": "TRITON",
         }
     )
+    # Generated-code cache assertions here target the legacy duck-shaped mm
+    # cache-key behavior; no-duck codegen coverage lives in other matmul tests.
+    @torch.fx.experimental._config.patch(use_duck_shape=True)
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
     def test_triton_template_generated_code_caching(self):
         def reset_counters():

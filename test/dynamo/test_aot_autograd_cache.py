@@ -51,8 +51,10 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
+from torch.distributed._local_tensor import LocalIntNode
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.nested._internal.nested_int import NestedIntNode
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -3521,6 +3523,49 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
+
+    def test_nested_symint_cache_key(self):
+        def get_hash(nested_int):
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("nested_int")
+            placeholder.meta["val"] = nested_int
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(nested_int)
+
+        python_nested = torch.SymInt(NestedIntNode(1, 1))
+        cpp_nested = torch._C._get_nested_int(2, 1)
+        self.assertEqual(get_hash(python_nested), get_hash(cpp_nested))
+        self.assertNotEqual(
+            get_hash(python_nested),
+            get_hash(torch._C._get_nested_int(2, 2)),
+        )
+
+    def test_nonstandard_symint_cache_key(self):
+        def get_hash(local_values):
+            local_int = torch.SymInt(LocalIntNode(local_values))
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("local_int")
+            placeholder.meta["val"] = local_int
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(local_int)
+
+        self.assertEqual(get_hash({0: 3, 1: 4}), get_hash({0: 3, 1: 4}))
+        self.assertNotEqual(get_hash({0: 3, 1: 4}), get_hash({0: 3, 1: 5}))
+
+    def test_constant_symbool_cache_key(self):
+        def get_hash(value):
+            symbool = torch.SymBool(torch._C._get_constant_bool_symnode(value))
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("symbool")
+            placeholder.meta["val"] = symbool
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(symbool)
+
+        self.assertEqual(get_hash(True), get_hash(True))
+        self.assertNotEqual(get_hash(True), get_hash(False))
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
