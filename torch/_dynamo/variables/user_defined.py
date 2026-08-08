@@ -401,6 +401,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 }
             )
 
+        from ..device_interface import get_registered_device_interfaces
+
+        for _, iface in get_registered_device_interfaces():
+            stream_cls = getattr(iface, "Stream", None)
+            event_cls = getattr(iface, "Event", None)
+            if stream_cls is not None and stream_cls is not torch.Stream:
+                _in_graph_class_list.add(stream_cls)
+            if event_cls is not None and event_cls is not torch.Event:
+                _in_graph_class_list.add(event_cls)
+
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
