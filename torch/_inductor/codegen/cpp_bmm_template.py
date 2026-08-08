@@ -25,6 +25,7 @@ GEMM_SINGLE_THREAD_MM_STUB = r"""
     aliases=aliases,
     function_name=kernel_name+"_single_thread_mm",
     extra_sizevars=BY_sizevars + [b_index],
+    extra_cpp_args=[kernel.integer_div_error_arg()],
     placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
 
 GEMM_THREADED_MM_STUB = r"""
@@ -34,6 +35,7 @@ GEMM_THREADED_MM_STUB = r"""
     aliases=aliases,
     function_name=kernel_name+"_threaded_mm",
     extra_sizevars=BY_sizevars + [b_index],
+    extra_cpp_args=[kernel.integer_div_error_arg()],
     placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
 BMM_TEMPLATE = r"""
@@ -44,6 +46,7 @@ BMM_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs={"X": BX, "W": BW}, outputs={"Y": BY}, aliases=aliases)}}
 {
+    {{kernel.declare_integer_div_error()}}
     const int64_t B = {{kernel.size(BY_2d, 0)}};
     {%- if num_threads > 1 %}
     constexpr int64_t num_threads = {{num_threads}};
@@ -74,6 +77,7 @@ extern "C"
             b_index="b_start",
         )}}
     }
+    {{kernel.check_integer_div_error()}}
 }
 """
 
@@ -165,7 +169,9 @@ class CppBmmTemplate(CppGemmTemplate):
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
                     arg_defs[i] = ArgName(b_index)
-            call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
+            call_args = [x.full_name() for x in arg_defs]
+            call_args.append(kernel.integer_div_error_var)
+            call = f"{function_name}({', '.join(call_args)});"
             return call
 
         if placeholder in kernel.render_hooks:
@@ -255,7 +261,11 @@ class CppBmmTemplate(CppGemmTemplate):
             self.render_options
         )
         return stub + self._template_from_string(GEMM_TEMPLATE).render(
-            {**self.render_options, "num_threads": 1}
+            {
+                **self.render_options,
+                "num_threads": 1,
+                "defer_integer_div_error_to_caller": True,
+            }
         )
 
     def codegen_multi_thread_gemm(self):
@@ -263,7 +273,7 @@ class CppBmmTemplate(CppGemmTemplate):
             self.render_options
         )
         return stub + self._template_from_string(GEMM_TEMPLATE).render(
-            self.render_options
+            {**self.render_options, "defer_integer_div_error_to_caller": True}
         )
 
     def codegen_gemm_stub_def(self):

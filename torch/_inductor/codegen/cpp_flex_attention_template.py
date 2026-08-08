@@ -223,6 +223,7 @@ INIT_PARAMS = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
+  {{ kernel.declare_integer_div_error() }}
   {{ kernel.maybe_codegen_profile() }}
 
   // dtypes
@@ -683,6 +684,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
     at::native::cpublas::brgemm_release(need_pack);
 
   });
+  {{ kernel.check_integer_div_error() }}
 }
 """
 
@@ -1055,6 +1057,7 @@ FLEX_DECODING_TEMPLATE = r"""
     }
 
   });
+  {{ kernel.check_integer_div_error() }}
 }
 """
 

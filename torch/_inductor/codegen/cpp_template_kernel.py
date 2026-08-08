@@ -41,11 +41,27 @@ def wrap_with_tensorbox(node) -> ir.TensorBox:
 
 
 class CppTemplateKernel(CppKernel):
+    """Code generation helpers shared by CPU C++ template kernels."""
+
+    integer_div_error_var = "inductor_cpu_integer_div_error"
+
     def __init__(self, kernel_name, num_threads):
         super().__init__(None, num_threads)
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
+
+    @classmethod
+    def declare_integer_div_error(cls) -> str:
+        return f"std::atomic<int> {cls.integer_div_error_var}{{0}};"
+
+    @classmethod
+    def check_integer_div_error(cls) -> str:
+        return f"inductor_cpu_throw_if_integer_div_error({cls.integer_div_error_var});"
+
+    @classmethod
+    def integer_div_error_arg(cls) -> str:
+        return f"std::atomic<int>& {cls.integer_div_error_var}"
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -59,6 +75,7 @@ class CppTemplateKernel(CppKernel):
         aliases: dict[str, str] | None = None,
         function_name: str = "",
         extra_sizevars: list[sympy.Expr] | None = None,
+        extra_cpp_args: list[str] | None = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -111,6 +128,7 @@ class CppTemplateKernel(CppKernel):
                     if alias in self.args.output_buffers:
                         self.args.output_buffers[alias] = REMOVED
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
+            cpp_argdefs.extend(extra_cpp_args or [])
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
         if placeholder in self.render_hooks:

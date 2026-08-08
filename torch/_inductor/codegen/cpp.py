@@ -859,7 +859,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # a and b are integer type
-        return f"floor_divide_integral({a}, {b})"
+        return f"floor_divide_integral({a}, {b}, inductor_cpu_integer_div_error)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -875,7 +875,7 @@ class CppOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # a and b are integer type
-        return f"{a} / {b}"
+        return f"truncdiv_integral({a}, {b}, inductor_cpu_integer_div_error)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1026,7 +1026,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def mod(a, b):
-        return f"mod({a}, {b})"
+        return f"mod({a}, {b}, inductor_cpu_integer_div_error)"
 
     @staticmethod
     def constant(val, dtype):
@@ -1552,7 +1552,7 @@ class CppVecOverrides(CppOverrides):
             _t = f"decltype({a})"
             if V.kernel._get_raw_num_vectors(b.dtype) < 1:
                 b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-            return f"remainder_integral({a}, {b})"
+            return f"remainder_integral({a}, {b}, inductor_cpu_integer_div_error)"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1694,14 +1694,14 @@ class CppVecOverrides(CppOverrides):
             # a and b are integer type
             _t = f"decltype({b})"
             b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
-            return f"floor_divide_integral({a}, {b})"
+            return f"floor_divide_integral({a}, {b}, inductor_cpu_integer_div_error)"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
         _t = f"decltype({b})"
         b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
-        return f"{a} / {b}"
+        return f"truncdiv_integral({a}, {b}, inductor_cpu_integer_div_error)"
 
     @staticmethod
     def minimum(a, b):
@@ -6152,9 +6152,6 @@ class KernelGroup:
         # 3. Function body
         with code.indent():
             code.writeline("std::atomic<int> inductor_cpu_integer_div_error{0};")
-            code.writeline(
-                "inductor_cpu_integer_div_error_flag = &inductor_cpu_integer_div_error;"
-            )
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
@@ -6169,7 +6166,6 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
-            code.writeline("inductor_cpu_integer_div_error_flag = nullptr;")
             code.writeline(
                 "inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);"
             )

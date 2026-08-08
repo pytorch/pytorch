@@ -41,6 +41,7 @@ GEMM_TEMPLATE = r"""
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs=Y_list, aliases=aliases)}}
 {
+    {{kernel.declare_integer_div_error()}}
     {{kernel.maybe_codegen_profile(template.get_kernel_prefix_name())}}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
@@ -149,6 +150,7 @@ extern "C" {{export_declaration}}
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 {%- endif %}
+    {{kernel.check_integer_div_error()}}
 }
 """
 

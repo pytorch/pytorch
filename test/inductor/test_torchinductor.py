@@ -4274,30 +4274,100 @@ class CommonTemplate:
             b = torch.full((128,), -1, dtype=dtype, device=self.device)
             self.common(fn, (a, b))
 
-    def test_floordiv_div_by_zero_int_cpu_inductor_raises_error(self):
+    def test_integer_div_by_zero_cpu_inductor_raises_error(self):
         if not is_cpp_backend(self.device):
             raise unittest.SkipTest("cpp backend required")
 
         code = """
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import torch
 
-def fn(a, b):
+def floor_divide(a, b):
     return torch.floor_divide(a, b)
 
-opt = torch.compile(fn, backend="inductor", fullgraph=True)
-for dtype in (torch.int32, torch.int64):
-    cases = [
-        (torch.arange(1, 11, dtype=dtype), torch.tensor([1, 1, 1, 0, 1, 1, 1, 1, 1, 1], dtype=dtype)),
-        (torch.tensor([1], dtype=dtype), torch.tensor([0], dtype=dtype)),
-    ]
-    for a, b in cases:
-        try:
-            opt(a, b)
-        except RuntimeError as exc:
-            if "ZeroDivisionError" not in str(exc):
-                raise
-        else:
-            raise AssertionError("expected ZeroDivisionError")
+def trunc_divide(a, b):
+    return torch.divide(a, b, rounding_mode="trunc")
+
+for fn in (floor_divide, trunc_divide):
+    opt = torch.compile(fn, backend="inductor", fullgraph=True)
+    for dtype in (torch.int32, torch.int64):
+        zero_cases = [
+            (torch.arange(1, 11, dtype=dtype), torch.tensor([1, 1, 1, 0, 1, 1, 1, 1, 1, 1], dtype=dtype)),
+            (torch.tensor([1], dtype=dtype), torch.tensor([0], dtype=dtype)),
+        ]
+        for a, b in zero_cases:
+            try:
+                opt(a, b)
+            except RuntimeError as exc:
+                if "ZeroDivisionError" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("expected ZeroDivisionError")
+
+        tail_a = torch.arange(1, 11, dtype=dtype)
+        tail_b = torch.full((10,), 2, dtype=dtype)
+        torch.testing.assert_close(opt(tail_a, tail_b), fn(tail_a, tail_b))
+
+torch._dynamo.reset()
+torch.set_num_threads(4)
+parallel_size = 1 << 20
+parallel_dividend = torch.arange(1, parallel_size + 1, dtype=torch.int32)
+parallel_divisor = torch.ones_like(parallel_dividend)
+parallel_divisor[-1] = 0  # place the error in the last OpenMP worker's chunk
+parallel_opt = torch.compile(trunc_divide, backend="inductor", fullgraph=True)
+try:
+    parallel_opt(parallel_dividend, parallel_divisor)
+except RuntimeError as exc:
+    if "ZeroDivisionError" not in str(exc):
+        raise
+else:
+    raise AssertionError("expected deferred OpenMP ZeroDivisionError")
+
+torch._dynamo.reset()
+torch.set_num_threads(1)
+size = parallel_size
+dividend = parallel_dividend
+nonzero_divisor = torch.ones_like(dividend)
+zero_divisor = torch.zeros_like(dividend)
+concurrent_opt = torch.compile(
+    trunc_divide,
+    backend="inductor",
+    fullgraph=True,
+    options={"cpp_wrapper": True},
+)
+torch.testing.assert_close(concurrent_opt(dividend, nonzero_divisor), dividend)
+
+num_workers = 8
+barrier = threading.Barrier(num_workers)
+
+def invoke(index):
+    expect_error = index % 2 == 0
+    divisor = zero_divisor if expect_error else nonzero_divisor
+    barrier.wait()
+    try:
+        result = concurrent_opt(dividend, divisor)
+    except RuntimeError as exc:
+        if expect_error and "ZeroDivisionError" in str(exc):
+            return "expected_error"
+        return f"spurious:{exc}"
+    if expect_error:
+        return "missing_error"
+    if not torch.equal(result, dividend):
+        return "incorrect_result"
+    return "ok"
+
+with ThreadPoolExecutor(max_workers=num_workers) as pool:
+    futures = [pool.submit(invoke, index) for index in range(num_workers)]
+    outcomes = [future.result() for future in futures]
+
+expected = [
+    "expected_error" if index % 2 == 0 else "ok"
+    for index in range(num_workers)
+]
+if outcomes != expected:
+    raise AssertionError(f"unexpected concurrent outcomes: {outcomes}")
 """
         env = os.environ.copy()
         env.setdefault("TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0")

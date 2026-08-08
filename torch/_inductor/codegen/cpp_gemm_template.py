@@ -194,6 +194,9 @@ extern "C" {{export_declaration}}
 GEMM_TEMPLATE = r"""
 {{ template.codegen_gemm_stub_def() }}
 {
+{%- if not defer_integer_div_error_to_caller %}
+    {{ kernel.declare_integer_div_error() }}
+{%- endif %}
     {{ kernel.maybe_codegen_profile(template.get_kernel_prefix_name()) }}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
@@ -359,12 +362,16 @@ GEMM_TEMPLATE = r"""
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 {%- endif %}
+{%- if not defer_integer_div_error_to_caller %}
+    {{ kernel.check_integer_div_error() }}
+{%- endif %}
 }
 """
 
 SMALL_M_GEMM_TEMPLATE = r"""
 {{ template.codegen_gemm_stub_def() }}
 {
+    {{ kernel.declare_integer_div_error() }}
     {{ kernel.maybe_codegen_profile() }}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
@@ -405,6 +412,7 @@ SMALL_M_GEMM_TEMPLATE = r"""
             )|indent(20, false) }}
         }
     }
+    {{ kernel.check_integer_div_error() }}
 }
 """
 
@@ -1739,6 +1747,7 @@ class CppGemmTemplate(CppTemplate):
             q_group_size=q_group_size_node,
             qscale_and_zeros=qscale_and_zeros,
             cpu_count=os.cpu_count(),
+            defer_integer_div_error_to_caller=False,
         )
         return options
 
