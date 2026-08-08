@@ -569,14 +569,17 @@ class _KinetoProfile:
                 ]
             ) as p:
                 code_to_profile_0()
-                // turn off collection of all CUDA activity
-                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                # turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(
+                    False, [torch.profiler.ProfilerActivity.CUDA]
+                )
                 code_to_profile_1()
-                // turn on collection of all CUDA activity
-                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                # turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(
+                    True, [torch.profiler.ProfilerActivity.CUDA]
+                )
                 code_to_profile_2()
-            print(p.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
         """
         if self.profiler is None:
             return
