@@ -2275,6 +2275,19 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             new_unbacked_defs.add(result)
 
+        # A tensor placeholder also defines the unbacked symints in its
+        # shape -- the placeholder IS the def-site, mirroring what
+        # ``torch.export._trace._add_input_unbacked_bindings`` records on
+        # the fx side. Without this, ShapesSpec-style inputs (whose dims
+        # are unbacked symbols rather than backed s0/s1) trip the
+        # (inductor >= fx) check below.
+        if n.op == "placeholder":
+            val = n.meta.get("val")
+            if isinstance(val, torch.Tensor):
+                for dim in val.shape:
+                    if isinstance(dim, (torch.SymInt, torch.SymFloat)):
+                        new_unbacked_defs |= free_unbacked_symbols(dim.node._expr)
+
         def format_new_defs() -> str:
             r = [
                 f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
