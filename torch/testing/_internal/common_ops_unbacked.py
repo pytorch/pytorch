@@ -237,6 +237,7 @@ ops_unbacked_skip = {
     skip("signal.windows.hamming"),
     skip("signal.windows.hann"),
     skip("signal.windows.kaiser"),
+    skip("signal.windows.kaiser_bessel_derived"),
     skip("signal.windows.nuttall"),
     skip("zeros"),
     # Sparse ops that can't be deepcopied

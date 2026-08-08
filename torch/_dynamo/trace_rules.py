@@ -2992,6 +2992,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.signal.windows.windows.hamming",
         "torch.signal.windows.windows.hann",
         "torch.signal.windows.windows.kaiser",
+        "torch.signal.windows.windows.kaiser_bessel_derived",
         "torch.signal.windows.windows.merge_dicts",
         "torch.signal.windows.windows.nuttall",
         "torch.signal.windows.windows.parse_kwargs",

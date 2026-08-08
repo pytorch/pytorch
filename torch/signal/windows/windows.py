@@ -19,6 +19,7 @@ __all__ = [
     "hamming",
     "hann",
     "kaiser",
+    "kaiser_bessel_derived",
     "nuttall",
 ]
 
@@ -423,6 +424,106 @@ def kaiser(
         # pyrefly: ignore [bad-argument-type]
         beta
     )
+
+
+@_add_docstr(
+    r"""
+Computes the Kaiser-Bessel derived window.
+
+The Kaiser-Bessel derived (KBD) window is derived from the
+:func:`~torch.signal.windows.kaiser` window. It is widely used in audio signal
+processing, e.g., the modified discrete cosine transform (MDCT), as it
+satisfies the Princen-Bradley condition for perfect reconstruction:
+
+.. math::
+    w_n^2 + w_{n + M/2}^2 = 1, \qquad 0 \leq n < M/2
+
+The Kaiser-Bessel derived window of length :math:`M` is defined as follows:
+
+.. math::
+    w_n = \begin{cases}
+        \sqrt{\frac{\sum_{i=0}^{n} k_i}{\sum_{i=0}^{M/2} k_i}}
+            & \text{if } 0 \leq n < M/2 \\
+        \sqrt{\frac{\sum_{i=0}^{M-1-n} k_i}{\sum_{i=0}^{M/2} k_i}}
+            & \text{if } M/2 \leq n < M \\
+    \end{cases}
+
+where :math:`k_i` is the :math:`i`-th coefficient of a Kaiser window of length
+:math:`M/2 + 1` with shape parameter :math:`\beta`.
+
+The Kaiser-Bessel derived window is only defined for even :math:`M` and
+symmetric shapes (``sym=True``).
+    """,
+    r"""
+
+Args:
+    {M}
+
+Keyword args:
+    beta (float, optional): shape parameter for the underlying Kaiser window.
+        Must be non-negative. Default: 12.0.
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Examples::
+
+    >>> # Generates a Kaiser-Bessel derived window of length 10.
+    >>> torch.signal.windows.kaiser_bessel_derived(10)
+    tensor([0.0054, 0.2385, 0.7071, 0.9711, 1.0000, 1.0000, 0.9711, 0.7071, 0.2385, 0.0054])
+
+    >>> # Generates a Kaiser-Bessel derived window of length 6 and shape parameter 8.0.
+    >>> torch.signal.windows.kaiser_bessel_derived(6, beta=8.0)
+    tensor([0.0423, 0.7071, 0.9991, 0.9991, 0.7071, 0.0423])
+""".format(**window_common_args),
+)
+def kaiser_bessel_derived(
+    M: int,
+    *,
+    beta: float = 12.0,
+    sym: bool = True,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout = torch.strided,
+    device: torch.device | None = None,
+    requires_grad: bool = False,
+) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks("kaiser_bessel_derived", M, dtype, layout)
+
+    if M == 0:
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
+
+    if not sym:
+        raise ValueError(
+            "Kaiser-Bessel derived windows are only defined for symmetric shapes, got: sym=False"
+        )
+
+    if M % 2:
+        raise ValueError(
+            f"Kaiser-Bessel derived windows are only defined for even length, got: M={M}"
+        )
+
+    # The KBD window reuses a Kaiser window of length M / 2 + 1; cumulative
+    # normalization then mirrors the half-window to satisfy Princen-Bradley.
+    w = kaiser(
+        M // 2 + 1,
+        beta=beta,
+        sym=True,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+    csum = torch.cumsum(w, dim=0)
+    half = torch.sqrt(csum[:-1] / csum[-1])
+    return torch.cat((half, half.flip(0)))
 
 
 @_add_docstr(
