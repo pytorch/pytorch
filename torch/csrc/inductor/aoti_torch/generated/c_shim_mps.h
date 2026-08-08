@@ -65,6 +65,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_cummax(AtenTensorHandle self, in
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_cummin(AtenTensorHandle self, int64_t dim, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_cumprod(AtenTensorHandle self, int64_t dim, int32_t* dtype, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_cumsum(AtenTensorHandle self, int64_t dim, int32_t* dtype, AtenTensorHandle* ret0);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_expand(AtenTensorHandle self, const int64_t* size, int64_t size_len_, int32_t implicit, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_exponential(AtenTensorHandle self, double lambd, AtenGeneratorHandle* generator, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_fill__Scalar(AtenTensorHandle self, double value);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_gcd(AtenTensorHandle self, AtenTensorHandle other, AtenTensorHandle* ret0);
@@ -160,6 +163,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_to_sparse(AtenTensorHandle self,
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_topk(AtenTensorHandle self, int64_t k, int64_t dim, int32_t largest, int32_t sorted, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_triangular_solve(AtenTensorHandle self, AtenTensorHandle A, int32_t upper, int32_t transpose, int32_t unitriangular, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_uniform(AtenTensorHandle self, double from, double to, AtenGeneratorHandle* generator, AtenTensorHandle* ret0);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_unsqueeze(AtenTensorHandle self, int64_t dim, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_upsample_bicubic2d_backward(AtenTensorHandle grad_output, const int64_t* output_size, int64_t output_size_len_, const int64_t* input_size, int64_t input_size_len_, int32_t align_corners, double* scales_h, double* scales_w, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_upsample_linear1d_backward(AtenTensorHandle grad_output, const int64_t* output_size, int64_t output_size_len_, const int64_t* input_size, int64_t input_size_len_, int32_t align_corners, double* scales, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_upsample_trilinear3d_backward(AtenTensorHandle grad_output, const int64_t* output_size, int64_t output_size_len_, const int64_t* input_size, int64_t input_size_len_, int32_t align_corners, double* scales_d, double* scales_h, double* scales_w, AtenTensorHandle* ret0);
