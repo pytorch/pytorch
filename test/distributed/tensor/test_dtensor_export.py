@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -23,14 +24,17 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
+from torch.testing._internal.common_device_type import skipPRIVATEUSE1
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     run_tests,
     TestCase,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DEVICE_TYPE,
+    MLPModule,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import register_pytree_node
 
@@ -175,7 +179,7 @@ register_pytree_node(
 )
 
 
-@requires_cuda
+@unittest.skipIf(DEVICE_TYPE == "cpu", "requires accelerator")
 class DTensorExportTest(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -188,7 +192,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
@@ -443,6 +447,7 @@ class DTensorExportTest(TestCase):
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
+    @skipPRIVATEUSE1
     @parametrize(
         "export_fn",
         [
