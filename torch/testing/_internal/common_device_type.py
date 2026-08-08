@@ -1095,13 +1095,13 @@ def get_desired_device_type_test_bases(
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
-    generic_test_class,
-    scope,
-    except_for=None,
-    only_for=None,
-    include_lazy=False,
-    allow_mps=False,
-    allow_xpu=False,
+    generic_test_class: type[TestCase],
+    scope: dict,
+    except_for: Iterable | None = None,
+    only_for: Iterable | None = None,
+    include_lazy: bool = False,
+    allow_mps: bool | None = None,
+    allow_xpu: bool | None = None,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -1109,6 +1109,12 @@ def instantiate_device_type_tests(
 
     generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
+    allow_mps = (
+        allow_mps if isinstance(allow_mps, bool) else (only_for and "mps" in only_for)
+    )
+    allow_xpu = (
+        allow_xpu if isinstance(allow_xpu, bool) else (only_for and "xpu" in only_for)
+    )
 
     # Creates device-specific test cases
     for base in get_desired_device_type_test_bases(
@@ -1776,7 +1782,7 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type: str | list):
+    def __init__(self, device_type: str | Iterable[str]):
         self.device_type = device_type
 
     def __call__(self, fn):
