@@ -66,7 +66,6 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
-from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -567,9 +566,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        symint_name_map: dict[str, str] | None = None,
+        graph_symint_names: set[str] | None = None,
+    ) -> None:
         super().__init__(gm)
-        self._canonical_symbol_names: dict[str, str] = {}
+        self._symint_name_map: dict[str, str] = symint_name_map or {}
+        self._graph_symint_names: set[str] = graph_symint_names or set()
+        self._canonical_symbol_names: dict[str, str] = dict(self._symint_name_map)
         self._canonical_nested_int_names: dict[int, str] = {}
         self._seed_symbols_from_placeholders(gm)
         # pyrefly: ignore[missing-attribute]
@@ -577,8 +583,6 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
                 torch.Tensor: functools.partial(self._reduce_tensor),
-                torch.SymInt: functools.partial(self._reduce_symint),
-                torch.SymBool: functools.partial(self._reduce_symbool),
                 FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
@@ -783,7 +787,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def _canonical_symbol_name(self, symbol: Any) -> str:
         name = symbol.name
         if name not in self._canonical_symbol_names:
-            self._canonical_symbol_names[name] = f"s{len(self._canonical_symbol_names)}"
+            self._canonical_symbol_names[name] = (
+                f"s_{len(self._canonical_symbol_names)}"
+            )
         return self._canonical_symbol_names[name]
 
     def _canonical_symbolic_expr(self, expr: Any) -> str:
@@ -805,16 +811,27 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         if node.is_symbolic():
             # pyrefly: ignore[missing-attribute]
             return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
-        if isinstance(node, NestedIntNode):
+        if node.is_nested_int():
+            nested_int = node.nested_int()
+            if nested_int is None:
+                raise AssertionError("Nested SymInt must have a nested integer ID")
+            # pyrefly: ignore[missing-attribute]
+            nested_int_coeff = node.nested_int_coeff()
             return (
-                f"nested:{self._canonical_nested_int_name(node.nested_int())}:"
-                f"{node.nested_int_coeff()}"
+                f"nested:{self._canonical_nested_int_name(nested_int)}:"
+                f"{nested_int_coeff}"
             )
         if node.is_constant():
             value_as_int = node.maybe_as_int()
             if value_as_int is None:
                 raise AssertionError("Constant SymInt must have an integer value")
             return f"constant:{value_as_int}"
+        if node.is_int():
+            # Preserve the payload of nonstandard integer nodes such as
+            # LocalIntNode. Their string representation was also the cache-key
+            # representation before symbolic alpha-normalization.
+            node_type = type(node)
+            return f"opaque:{node_type.__module__}.{node_type.__qualname__}:{value}"
         raise BypassAOTAutogradCache(
             f"Unsupported SymInt node type: {type(node).__qualname__}"
         )
@@ -824,21 +841,27 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         if node.is_symbolic():
             # pyrefly: ignore[missing-attribute]
             return f"symbolic:{self._canonical_symbolic_expr(node.expr)}"
-        value_as_bool = node.maybe_as_bool()
-        if value_as_bool is not None:
-            return f"constant:{value_as_bool}"
+        if node.is_constant():
+            return f"constant:{bool(value)}"
         raise BypassAOTAutogradCache(
             f"Unsupported SymBool node type: {type(node).__qualname__}"
         )
 
     def _reduce_symint(
         self, s: torch.SymInt
-    ) -> tuple[Callable[[Any], Any], tuple[str]]:
-        return (_ident, (self._canonical_symint(s),))
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        normalized = self._canonical_symint(s)
+        if s.node.is_symbolic() and str(s) not in self._graph_symint_names:
+            # MetaConverter symbols have non-deterministic names. Preserve the
+            # hint so distinct specialized graphs still get distinct keys.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (normalized,))
 
     def _reduce_symbool(
         self, s: torch.SymBool
-    ) -> tuple[Callable[[Any], Any], tuple[str]]:
+    ) -> tuple[Callable[..., Any], tuple[str]]:
         return (_ident, (self._canonical_symbool(s),))
 
 
@@ -862,15 +885,26 @@ def normalize_placeholder_names(
 
     # Track all the old state of placeholders
     old_placeholder_names = []
+    old_symint_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
-    for i, n in enumerate(gm.graph.find_nodes(op="placeholder", sort=True)):
-        # _rename renames the node in the body of the function,
-        # but it doesn't change the raw name from node.target.
-        # So we also set the raw_name of node.target to a new placeholder name.
-        new_placeholder_name = f"p_{i}"
-        old_placeholder_names.append((n.name, n.target))
-        n.target = new_placeholder_name
-        n._rename(new_placeholder_name)
+    i = 0
+    j = 0
+    for n in gm.graph.find_nodes(op="placeholder", sort=True):
+        if n.type == torch.SymInt:
+            new_name = f"s_{j}"
+            old_symint_names.append((n.name, n.target))
+            n.target = new_name
+            n._rename(new_name)
+            j += 1
+        else:
+            # _rename renames the node in the body of the function,
+            # but it doesn't change the raw name from node.target
+            # So we also set the raw_name of node.target to a new placeholder name
+            new_placeholder_name = f"p_{i}"
+            old_placeholder_names.append((n.name, n.target))
+            n.target = new_placeholder_name
+            n._rename(new_placeholder_name)
+            i += 1
     gm.recompile()
     try:
         yield
@@ -880,14 +914,25 @@ def normalize_placeholder_names(
         gm.graph._graph_namespace._used_names = set()
         # Restore the placeholder names
         i = 0
+        j = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            (name, target) = old_placeholder_names[i]
-            n.target = target
-            n._rename(name)
-            i += 1
+            if n.type == torch.SymInt:
+                (name, target) = old_symint_names[j]
+                n.target = target
+                n._rename(name)
+                j += 1
+            else:
+                (name, target) = old_placeholder_names[i]
+                n.target = target
+                n._rename(name)
+                i += 1
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
+        if j != len(old_symint_names):
+            raise AssertionError(
+                f"j={j} != len(old_symint_names)={len(old_symint_names)}"
             )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
@@ -959,8 +1004,20 @@ def autograd_cache_key(
     """
 
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-    with sanitize_gm_for_cache(gm):
-        try:
+    try:
+        # Capture graph SymInt placeholder names before normalization so the
+        # pickler can distinguish graph-native SymInts (deterministic names)
+        # from MetaConverter-generated SymInts (non-deterministic names).
+        graph_symint_names: set[str] = set()
+        symint_name_map: dict[str, str] = {}
+        if torch._functorch.config.autograd_cache_normalize_inputs:
+            for n in gm.graph.find_nodes(op="placeholder", sort=True):
+                if n.type == torch.SymInt:
+                    graph_symint_names.add(n.target)
+            for inp in example_inputs:
+                if isinstance(inp, torch.SymInt):
+                    symint_name_map.setdefault(str(inp), f"s_{len(symint_name_map)}")
+        with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -970,24 +1027,24 @@ def autograd_cache_key(
                 create_fx_config(compiler_config_extra),
                 act_input_paths,
             )
-            pickler = AOTAutogradCachePickler(gm)
+            pickler = AOTAutogradCachePickler(gm, symint_name_map, graph_symint_names)
             # The prefix distinguishes among the other kinds of objects we cache
             key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)
             debug_lines = _get_debug_lines_for_cache_key(pickler, details, key)
             return key, debug_lines
-        except Exception:
-            # If enable_aot_compile is set, we're in AOT precompile mode where we always
-            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-            # a proper key because we are guaranteed in an AOT precompile world users are in
-            # complete control of distributing and loading artifacts.
-            if torch._functorch.config.bypass_autograd_cache_key:
-                log.info(
-                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                    exc_info=True,
-                )
-                return str(random.random()), []
-            else:
-                raise
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager

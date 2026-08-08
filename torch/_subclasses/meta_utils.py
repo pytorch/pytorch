@@ -1562,7 +1562,13 @@ class MetaConverter(Generic[_TensorT]):
                         # Canonicalize only the wrapper's outer metadata. Going
                         # through as_strided would require subclass support and
                         # could incorrectly transform layout-opaque inner tensors.
-                        with in_kernel_invocation_manager(fake_mode):
+                        # This only replaces FakeTensor metadata. Bypass the
+                        # autograd and inplace/view keys so the bookkeeping does
+                        # not mutate the replayed view's autograd state.
+                        with (
+                            torch._C._AutoDispatchBelowADInplaceOrView(),
+                            in_kernel_invocation_manager(fake_mode),
+                        ):
                             fake_t.set_(
                                 fake_t.untyped_storage(),
                                 storage_offset,

@@ -51,6 +51,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
+from torch.distributed._local_tensor import LocalIntNode
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nested._internal.nested_int import NestedIntNode
@@ -61,17 +62,25 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     skipIfWindows,
+    skipIfXpu,
     subtest,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+)
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -627,7 +636,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -654,9 +662,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         compiled_fn(a)
         compiled_fn(a8)
         compiled_fn(a16)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
         self._clear_dynamo_and_codecache()
 
@@ -664,9 +672,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         compiled_fn(a)
         compiled_fn(a8)
         compiled_fn(a16)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 4)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -771,7 +779,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -966,7 +974,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -988,7 +996,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1022,7 +1030,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1044,7 +1052,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1064,7 +1072,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1117,7 +1125,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1195,7 +1203,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(fn(a3), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1251,7 +1259,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1316,7 +1324,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.local_var_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1376,7 +1384,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1438,7 +1446,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.recursive_func_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1494,7 +1502,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.factory_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1562,7 +1570,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.lru_cache_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2048,7 +2056,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2063,8 +2071,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def f(x, y):
             return x.sin() + y
 
-        x = torch.randn(10, device="cuda")
-        y = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=device_type)
+        y = torch.randn(10, device=device_type)
         with torch.no_grad():
             result = f(x, y)
             self.assertEqual(result, x.sin() + y)
@@ -2109,7 +2117,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2119,7 +2127,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"saved_tensors_hooks_filtering_mode": "all"})
     def test_saved_tensors_hooks_autograd_cache(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
 
         def pack_cpu(x):
             return x.to(device="cpu")
@@ -2211,7 +2219,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2232,7 +2240,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             x = x.relu()
             return x
 
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
         backend = "inductor"
 
         def inp_fn():
@@ -3451,7 +3459,7 @@ class _MockEntryForPickleTest:
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return device_type
 
     def default_config(self):
         return AOTConfig(
@@ -3517,8 +3525,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c1, c2)
 
     def test_nested_symint_cache_key(self):
-        def get_hash(nested_id, coeff):
-            nested_int = torch.SymInt(NestedIntNode(nested_id, coeff))
+        def get_hash(nested_int):
             graph = torch.fx.Graph()
             placeholder = graph.placeholder("nested_int")
             placeholder.meta["val"] = nested_int
@@ -3526,8 +3533,39 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             gm = torch.fx.GraphModule({}, graph)
             return AOTAutogradCachePickler(gm).get_hash(nested_int)
 
-        self.assertEqual(get_hash(1, 1), get_hash(2, 1))
-        self.assertNotEqual(get_hash(1, 1), get_hash(2, 2))
+        python_nested = torch.SymInt(NestedIntNode(1, 1))
+        cpp_nested = torch._C._get_nested_int(2, 1)
+        self.assertEqual(get_hash(python_nested), get_hash(cpp_nested))
+        self.assertNotEqual(
+            get_hash(python_nested),
+            get_hash(torch._C._get_nested_int(2, 2)),
+        )
+
+    def test_nonstandard_symint_cache_key(self):
+        def get_hash(local_values):
+            local_int = torch.SymInt(LocalIntNode(local_values))
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("local_int")
+            placeholder.meta["val"] = local_int
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(local_int)
+
+        self.assertEqual(get_hash({0: 3, 1: 4}), get_hash({0: 3, 1: 4}))
+        self.assertNotEqual(get_hash({0: 3, 1: 4}), get_hash({0: 3, 1: 5}))
+
+    def test_constant_symbool_cache_key(self):
+        def get_hash(value):
+            symbool = torch.SymBool(torch._C._get_constant_bool_symnode(value))
+            graph = torch.fx.Graph()
+            placeholder = graph.placeholder("symbool")
+            placeholder.meta["val"] = symbool
+            graph.output(placeholder)
+            gm = torch.fx.GraphModule({}, graph)
+            return AOTAutogradCachePickler(gm).get_hash(symbool)
+
+        self.assertEqual(get_hash(True), get_hash(True))
+        self.assertNotEqual(get_hash(True), get_hash(False))
 
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
@@ -4019,7 +4057,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
+    @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold
         exec'd launcher keys that aren't picklable.
