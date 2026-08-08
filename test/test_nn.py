@@ -10177,6 +10177,28 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
+    @onlyCUDA
+    @parametrize_test("mode, antialias", [("bilinear", True), ("bicubic", True), ("bicubic", False)])
+    def test_upsampling2d_channels_last_consistency(self, device, mode, antialias):
+        # The changed CUDA kernels must produce identical forward output and input
+        # grad for channels_last and contiguous inputs, up- and downsampling.
+        torch.manual_seed(0)
+        x = torch.randn(2, 5, 16, 16, device=device)
+        for out_size in [(8, 10), (25, 23)]:
+            kwargs = dict(size=out_size, mode=mode, align_corners=False, antialias=antialias)
+            x_cl = x.clone().contiguous(memory_format=torch.channels_last).requires_grad_()
+            x_co = x.clone().requires_grad_()
+            out_cl = F.interpolate(x_cl, **kwargs)
+            out_co = F.interpolate(x_co, **kwargs)
+            self.assertEqual(out_cl, out_co)
+            self.assertTrue(out_cl.is_contiguous(memory_format=torch.channels_last))
+
+            grad = torch.randn(2, 5, *out_size, device=device)
+            out_cl.backward(grad.contiguous(memory_format=torch.channels_last))
+            out_co.backward(grad.contiguous())
+            self.assertEqual(x_cl.grad, x_co.grad)
+            self.assertTrue(x_cl.grad.is_contiguous(memory_format=torch.channels_last))
+
     @onlyCPU
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingLanczos2d_aa_correctness(self, device, memory_format):

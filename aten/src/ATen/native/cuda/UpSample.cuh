@@ -349,7 +349,8 @@ template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
     const scalar_t* src,
     const scalar_t* weights,
-    int size) {
+    int size,
+    int64_t stride) {
   accscalar_t t = static_cast<accscalar_t>(*src);
   accscalar_t wts = static_cast<accscalar_t>(weights[0]);
   accscalar_t output = t * wts;
@@ -357,7 +358,7 @@ __device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
   int j = 1;
   for (; j < size; j++) {
     wts = static_cast<accscalar_t>(weights[j]);
-    t = static_cast<accscalar_t>(*(src + j));
+    t = static_cast<accscalar_t>(src[j * stride]);
     output += t * wts;
   }
   return output;
