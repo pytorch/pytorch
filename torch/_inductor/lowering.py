@@ -2867,8 +2867,19 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.op == "placeholder":
         return False
 
-    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
     if node.target is aten.lift_fresh_copy.default:
+        output = node.meta.get("val")
+        # Lowering this to clone would send a complex TensorArg to Triton,
+        # which cannot represent complex dtypes.
+        if (
+            torch._subclasses.fake_tensor.is_fake_tensor(output)
+            and output.is_complex()
+            and is_triton(output.device)
+        ):
+            return True
+
+        # We should be able to remove this special case once
+        # `disable_cpp_codegen` is killed.
         return False
 
     def check_skip_condition(inp_out_node, is_output):

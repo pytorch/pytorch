@@ -62,6 +62,7 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.ir import is_triton
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -7900,6 +7901,32 @@ for dtype in (torch.int32, torch.int64):
         compiled = torch.compile(fn, backend="inductor")
         actual = compiled()
         self.assertEqual(actual, expected)
+
+    @skip_if_halide  # complex dtypes are not supported
+    @config.patch(fx_graph_cache=False)
+    def test_complex_tensor_constant(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/191330.
+        if not self.is_dtype_supported(torch.complex64):
+            self.skipTest("complex64 not supported on this device")
+
+        def fn(x):
+            weight = torch.tensor(
+                [1 + 2j, 3 + 4j, 5 + 6j],
+                dtype=torch.complex64,
+                device=x.device,
+            )
+            return x + weight
+
+        x = torch.randn(2, 3, device=self.device)
+        expected = fn(x)
+        torch._inductor.metrics.generated_kernel_count = 0
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            0 if is_triton(x.device) else 1,
+        )
 
     def test_complex_uniform_constant_folding(self):
         # Fix https://github.com/pytorch/pytorch/issues/174891
