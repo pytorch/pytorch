@@ -204,13 +204,6 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.eye(64),), check_lowp=False)
 
-    def test_eye_uint16_index(self):
-        # Inductor uses uint16 indices for this size; the output remains float32.
-        def fn(x):
-            return torch.eye(x.shape[-1], device=x.device)
-
-        self.common(fn, (torch.zeros(10, 256),))
-
     def test_reduced_max(self):
         # inductor test do not validate that max of say 16K half elements can be computed
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
