@@ -105,7 +105,7 @@ def download_s3_artifacts(
     for obj in objs:
         object_name = Path(obj.key).name
         # target an artifact for a specific job_id if provided, otherwise skip the download.
-        if job_id is not None and str(job_id) not in object_name:
+        if job_id is not None and not object_name.endswith(f"_{job_id}.zip"):
             continue
         found_one = True
         p = Path(Path(obj.key).name)
