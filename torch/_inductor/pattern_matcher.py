@@ -46,6 +46,7 @@ import math
 import operator
 import os
 import re
+import struct
 import textwrap
 import typing
 from abc import ABC, abstractmethod
@@ -91,6 +92,18 @@ prims = torch.ops.prims
 
 Constant = Any
 NodeOrConstant = Constant | torch.fx.Node
+
+
+def _scalar_constants_equal(a: Any, b: Any) -> bool:
+    # Python float eq is not value-identity: nan != nan while -0.0 == 0.0.
+    # Compare scalar constants by bit pattern so nan literals in patterns can
+    # match and 0.0 does not spuriously match -0.0.
+    if type(a) is float and type(b) is float:
+        return struct.pack(">d", a) == struct.pack(">d", b)
+    if type(a) is complex and type(b) is complex:
+        return struct.pack(">dd", a.real, a.imag) == struct.pack(">dd", b.real, b.imag)
+    return a == b
+
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
@@ -277,7 +290,7 @@ class Match:
     def extend(self, other: Match) -> None:
         if self.kwargs:
             for key in OrderedSet(self.kwargs.keys()) & OrderedSet(other.kwargs.keys()):
-                if self.kwargs[key] != other.kwargs[key]:
+                if not _scalar_constants_equal(self.kwargs[key], other.kwargs[key]):
                     raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
         self.nodes.extend(other.nodes)
@@ -505,7 +518,7 @@ class MatchContext:
     def match(self, pattern: PatternExpr, node: NodeOrConstant) -> MatchResult:
         """wrapper to check reused nodes in patterns"""
         if pattern in self.pattern_to_node:
-            if self.pattern_to_node[pattern] == node:
+            if _scalar_constants_equal(self.pattern_to_node[pattern], node):
                 return Match(self, pattern)  # already checked this node
             else:
                 return FailedMatch("repeated pattern differs")
@@ -590,15 +603,16 @@ def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
 
 
 def _tensor_values_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
-    if torch.equal(a, b):
-        return True
     if a.dtype.is_complex:
         return _tensor_values_equal(a.real, b.real) and _tensor_values_equal(
             a.imag, b.imag
         )
     if a.dtype.is_floating_point:
-        return bool(((a == b) | (torch.isnan(a) & torch.isnan(b))).all().item())
-    return False
+        # Constant identity: treat any nan as equal to any nan, but do not
+        # conflate -0.0 with 0.0 (the signbit check only differs at +-0.0).
+        same = (a == b) & (torch.signbit(a) == torch.signbit(b))
+        return bool((same | (torch.isnan(a) & torch.isnan(b))).all().item())
+    return torch.equal(a, b)
 
 
 def _constant_values_equal(a: Any, b: Any) -> bool:
@@ -628,7 +642,7 @@ def _constant_values_equal(a: Any, b: Any) -> bool:
             return False
 
     try:
-        result = a == b
+        result = _scalar_constants_equal(a, b)
     except (RuntimeError, TypeError, ValueError):
         return False
     return result if isinstance(result, bool) else False
@@ -1007,7 +1021,9 @@ class _TargetArgsExpr(_TargetExpr):
                 if not is_match(child_match):
                     return child_match
                 m.extend(child_match)
-            elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
+            elif isinstance(child_node, torch.fx.Node) or not _scalar_constants_equal(
+                child_node, pattern
+            ):
                 return FailedMatch(
                     "constant_args: {} {!r}!={pattern!r}",
                     node,
@@ -1049,7 +1065,9 @@ class _TargetArgsExpr(_TargetExpr):
             super().pattern_eq(other)
             and self.flat_args_kwargs[1] == other.flat_args_kwargs[1]
             and all(
-                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                a.pattern_eq(b)
+                if isinstance(a, PatternExpr)
+                else _scalar_constants_equal(a, b)
                 for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
             )
         )
@@ -1228,7 +1246,9 @@ class MultiOutputPattern(PatternExpr):
             super().pattern_eq(other)
             and len(self.outputs) == len(other.outputs)
             and all(
-                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                a.pattern_eq(b)
+                if isinstance(a, PatternExpr)
+                else _scalar_constants_equal(a, b)
                 for a, b in zip(self.outputs, other.outputs)
             )
         )
