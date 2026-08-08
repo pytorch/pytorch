@@ -24,11 +24,14 @@ namespace at::native {
 // BEGIN QUANTIZE HELPER FUNCTIONS
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
 #ifdef USE_ROCM
-  return *reinterpret_cast<float*>((val >> pos) && ((1u << len) - 1u ));
+  // Extract the [pos, pos+len) bit field and convert to float. Use bitwise-AND
+  // (`&`), not logical-AND (`&&`): the logical form yielded a bool that the
+  // prior code reinterpret_cast to float* and dereferenced, faulting on ROCm.
+  return __uint2float_rn((val >> pos) & ((1u << len) - 1u));
 #else
   uint32_t ret;
   // Get the bit field of [pos, pos+len) bits from val:
-  // (val >> pos) && ( (1u << len) - 1u )
+  // (val >> pos) & ((1u << len) - 1u)
   asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
   return __uint2float_rn(ret);
 #endif
@@ -240,6 +243,15 @@ at::Tensor& embedding_bag_byte_impl(
 
   const std::vector<int64_t> shape = {output_size, D};
   at::native::resize_(output, shape, std::nullopt);
+  // The kernel below reads `offsets` through the SAME `index_t` as
+  // `indices` (both packed_accessor32<index_t>), so offsets must share indices'
+  // dtype. The dispatch keys only on indices' dtype, so a mismatched offsets
+  // (e.g. Int indices + Long offsets, which occurs on the pruned->remapped path)
+  // would fault the accessor with "expected scalar type Int but found Long".
+  // Cast offsets to match; offset values (cumulative bag sizes) fit index_t.
+  const at::Tensor offsets_k = offsets.scalar_type() == indices.scalar_type()
+      ? offsets
+      : offsets.to(indices.scalar_type());
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
@@ -249,7 +261,7 @@ at::Tensor& embedding_bag_byte_impl(
             at::cuda::getCurrentCUDAStream()>>>(
             weight.packed_accessor64<uint8_t, 2, RestrictPtrTraits>(),
             indices.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
-            offsets.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
+            offsets_k.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
             false /* pruned_weights */,
             sample_weights.packed_accessor32<float, 1, RestrictPtrTraits>(),
             compressed_indices_mapping,
@@ -267,12 +279,65 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
     const std::optional<Tensor>& offsets_in,
-    const bool /* scale_grad_by_freq */,
-    const int64_t /* mode */,
+    const bool scale_grad_by_freq,
+    const int64_t mode,
     bool pruned_weights,
     const std::optional<Tensor>& per_sample_weights_,
     const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  // Pruned lookups (compressed_indices_mapping) on CUDA/ROCm.
+  //
+  // The kernel below has no notion of a compressed mapping, so when one is
+  // supplied we translate the indices into the compressed row space here and
+  // then re-enter as an ordinary dense lookup. This mirrors the semantics of
+  // the CPU op in native/quantized/cpu/qembeddingbag.cpp.
+  if (weight.is_cuda() && compressed_indices_mapping.has_value()) {
+    const auto& mapping = compressed_indices_mapping.value();
+    Tensor eff_indices = indices;
+    std::optional<Tensor> eff_per_sample_weights = per_sample_weights_;
+    // The mapping is only meaningful alongside pruned_weights; the CPU op
+    // ignores it otherwise, so drop it and fall through to a dense lookup.
+    //
+    // A real mapping holds one entry per uncompressed row, so a single-entry
+    // mapping is instead the "this table is not pruned" sentinel and the
+    // indices already address the weight rows directly. The CPU op spells that
+    // sentinel {0} and rejects {-1}; both spellings are in circulation and
+    // neither can be a meaningful mapping except for a single-row table, so
+    // accept either here.
+    if (pruned_weights && mapping.numel() != 1) {
+      const auto cim = mapping.to(weight.device());
+      // index_select bounds-checks the gather on device, so an out-of-range
+      // index is reported rather than silently folded onto a valid row. The
+      // CPU op rejects the same input with "Invalid indices data for Sparse
+      // Op.".
+      const auto remapped = cim.index_select(0, indices.reshape({-1}));
+      // The mapping marks a pruned-away row with -1, and such an entry must
+      // contribute nothing to its bag -- the CPU op simply skips it. The dense
+      // kernel cannot skip, so point the index at a valid row and cancel its
+      // contribution with a zero per-sample weight instead. Computed
+      // branchlessly: testing for pruned rows on the host would force a device
+      // synchronization on every call.
+      const auto keep = remapped.ge(0).to(at::kFloat);
+      eff_per_sample_weights = per_sample_weights_.has_value()
+          ? per_sample_weights_.value().reshape({-1}).mul(keep)
+          : keep;
+      // The kernel reads indices as Int32. Remapped ids address the compressed
+      // row space, which is no larger than the original, so emit kInt
+      // explicitly rather than inheriting a possibly-Int64 input dtype.
+      eff_indices =
+          remapped.clamp_min(0).to(at::kInt).reshape(indices.sizes());
+    }
+    return embedding_bag_byte_rowwise_offsets(
+        weight,
+        eff_indices,
+        offsets_in,
+        scale_grad_by_freq,
+        mode,
+        /*pruned_weights=*/false,
+        eff_per_sample_weights,
+        /*compressed_indices_mapping=*/std::nullopt,
+        include_last_offset);
+  }
   bool is_embedding_op = false;
   auto output = create_empty_from(weight, at::kFloat);
 

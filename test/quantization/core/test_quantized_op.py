@@ -5423,6 +5423,106 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                sparsity=sparsity,
                                                atol=1.0, rtol=1e-1)
 
+    """ Tests that the CUDA quantized embedding_bag operators agree with their
+        CPU counterparts. This covers the bit-field extraction the dequantization
+        path is built on, which is shared by both bit widths. """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_rowwise_offsets_cuda(self):
+        # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
+        # requires D % 8 == 0.
+        num_embeddings, embedding_dim = 32, 24
+        weights = torch.from_numpy((np.random.random_sample(
+            (num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        indices = torch.tensor([3, 1, 4, 1, 5, 9, 2, 6], dtype=torch.int)
+        offsets = torch.tensor([0, 3, 5], dtype=torch.int)
+
+        for bit_rate, prepack_op, op, atol in (
+            (8, torch.ops.quantized.embedding_bag_byte_prepack,
+             torch.ops.quantized.embedding_bag_byte_rowwise_offsets, 0.005),
+            (4, torch.ops.quantized.embedding_bag_4bit_prepack,
+             torch.ops.quantized.embedding_bag_4bit_rowwise_offsets, 0.1),
+        ):
+            q_weights = prepack_op(weights)
+
+            def run(device, q_weights=q_weights, op=op):
+                return op(q_weights.to(device), indices.to(device),
+                          offsets.to(device), mode=0, pruned_weights=False,
+                          include_last_offset=False)
+
+            cuda_result = run("cuda").cpu()
+            self.assertTrue(
+                torch.isfinite(cuda_result).all(),
+                f"{bit_rate}-bit CUDA output is not finite: {cuda_result}")
+            torch.testing.assert_close(
+                run("cpu"), cuda_result, atol=atol, rtol=1e-2)
+
+    """ Tests that the CUDA embedding_bag_byte operator agrees with the CPU one
+        on pruned tables, i.e. when a compressed_indices_mapping is supplied """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned(self):
+        num_embeddings, embedding_dim = 32, 16
+
+        weights = torch.from_numpy(np.random.uniform(
+            low=-1, high=1, size=[num_embeddings, embedding_dim]).astype(np.float32))
+        q_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
+
+        # Prune every third row, and build the mapping from the original row
+        # space onto the compressed one. Pruned rows are marked -1.
+        mapping = np.zeros(num_embeddings, dtype=np.int32)
+        kept_rows = []
+        for i in range(num_embeddings):
+            if i % 3 == 0:
+                mapping[i] = -1
+            else:
+                mapping[i] = len(kept_rows)
+                kept_rows.append(i)
+        q_pruned = q_weights[kept_rows].contiguous()
+
+        # Bags deliberately mix kept and pruned ids, including a bag whose
+        # every id was pruned away (which must come out as zeros).
+        indices = torch.tensor(
+            [1, 2, 0, 4, 5, 3, 6, 9, 7, 8, 31, 30], dtype=torch.int)
+        offsets = torch.tensor([0, 3, 6, 8, 10], dtype=torch.int)
+        per_sample_weights = torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[indices.numel()]).astype(np.float32))
+
+        def run(device, weight, mapping_arg, weights_arg):
+            return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                weight.to(device),
+                indices.to(device),
+                offsets.to(device),
+                mode=0,
+                pruned_weights=True,
+                per_sample_weights=(
+                    weights_arg.to(device) if weights_arg is not None else None),
+                compressed_indices_mapping=(
+                    None if mapping_arg is None
+                    else torch.from_numpy(mapping_arg).to(device)),
+                include_last_offset=False)
+
+        for weights_arg in (None, per_sample_weights):
+            # A real mapping: the indices address the original row space and
+            # are translated onto the pruned table.
+            torch.testing.assert_close(
+                run("cpu", q_pruned, mapping, weights_arg),
+                run("cuda", q_pruned, mapping, weights_arg).cpu(),
+                atol=0.005, rtol=1e-3)
+
+            # The {0} sentinel means "not pruned", so the indices address the
+            # full table directly.
+            zero_sentinel = np.array([0], dtype=np.int32)
+            torch.testing.assert_close(
+                run("cpu", q_weights, zero_sentinel, weights_arg),
+                run("cuda", q_weights, zero_sentinel, weights_arg).cpu(),
+                atol=0.005, rtol=1e-3)
+
+            # The {-1} spelling of that sentinel is rejected by the CPU op, so
+            # there is nothing to compare against; check instead that CUDA
+            # treats it as the dense lookup it denotes.
+            torch.testing.assert_close(
+                run("cuda", q_weights, np.array([-1], dtype=np.int32), weights_arg),
+                run("cuda", q_weights, None, weights_arg))
+
     """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
