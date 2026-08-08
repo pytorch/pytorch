@@ -5794,6 +5794,18 @@ def pad(
         4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
         or the last dimension of a 2D or 3D input tensor.
 
+        .. note::
+
+            When using non-constant padding modes, the padding size (len(pad))
+            must follow these constraints:
+
+            - 2D or 3D input: len(pad) == 2 (pads the last dimension)
+            - 3D or 4D input: len(pad) == 4 (pads the last 2 dimensions)
+            - 4D or 5D input: len(pad) == 6 (pads the last 3 dimensions)
+
+            Using an unsupported combination will raise a
+            :exc:`NotImplementedError`.
+
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
         behaviour in its backward pass that is not easily switched off.
