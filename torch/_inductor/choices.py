@@ -35,7 +35,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
     from functools import partial
 
     from triton import Config as TritonConfig
