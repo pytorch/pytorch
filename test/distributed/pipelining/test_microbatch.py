@@ -15,7 +15,11 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -23,6 +27,8 @@ torch.manual_seed(0)
 
 
 class MicrobatchTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_split_and_merge(self):
         x0 = torch.randn(128, d_hid)
         x1 = torch.randn(256, d_hid)
@@ -331,10 +337,7 @@ class MicrobatchTests(TestCase):
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    MicrobatchTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(MicrobatchTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
