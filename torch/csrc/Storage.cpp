@@ -212,15 +212,23 @@ static PyObject* THPStorage_pynew(
     THPObjectPtr item;
     try {
       const auto& storage = THPStorage_Unpack(self);
+      const bool use_default_allocator =
+          (allocator == c10::GetDefaultCPUAllocator());
+      std::vector<uint8_t> stage_buffer;
+      uint8_t* dst = nullptr;
+      if (use_default_allocator) {
+        dst = static_cast<uint8_t*>(storage.mutable_data());
+      } else {
+        stage_buffer.resize(length);
+        dst = stage_buffer.data();
+      }
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(sequence, i);
-        uint8_t value = THPByteUtils_unpackReal(item.get());
-        if (allocator == c10::GetDefaultCPUAllocator()) {
-          static_cast<uint8_t*>(storage.mutable_data())[i] = value;
-        } else {
-          // TODO: this might be slow - consider batched updates?
-          storage_set(storage, i, value);
-        }
+        dst[i] = THPByteUtils_unpackReal(item.get());
+      }
+      if (!use_default_allocator) {
+        storage_copy_from_host(
+            storage, stage_buffer.data(), stage_buffer.size());
       }
     } catch (const std::exception&) {
       TORCH_CHECK(
@@ -349,10 +357,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
           ", but only a step of "
           "1 is supported");
     }
-    // TODO: check the bounds only once
-    // TODO: fill?
-    for (; start < stop; start++)
-      storage_set(storage, start, rvalue);
+    storage_fill_range(storage, start, stop, rvalue);
     return 0;
   }
   TORCH_CHECK(

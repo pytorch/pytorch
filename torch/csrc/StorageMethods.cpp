@@ -389,10 +389,10 @@ static PyObject* THPStorage_fromBuffer(
           {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
           {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
 
-  // don't actually do a memcp if we are running with FakeTensorMode
+  // don't actually do a copy if we are running with FakeTensorMode
   if (!fake_mode_active) {
     if (is_endian_independent) {
-      memcpy(storage->mutable_data(), src + offset, count);
+      storage_copy_from_host(c10::Storage(storage), src + offset, size_bytes);
     } else {
       auto it = decode_map.find(scalar_type);
       if (it != decode_map.end()) {

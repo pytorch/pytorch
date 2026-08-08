@@ -214,28 +214,59 @@ void THPPointer<THPStorage>::free() {
     Py_DECREF(ptr);
 }
 
-void storage_fill(const at::Storage& self, uint8_t value) {
-  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, options).set_(self);
-  self_t.fill_(value);
+// 1-D byte tensor view over `storage`.
+static at::Tensor as_byte_tensor(const at::Storage& storage) {
+  auto options = c10::TensorOptions().device(storage.device()).dtype(at::kByte);
+  return at::empty({0}, options).set_(storage);
 }
 
-void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
-  TORCH_CHECK(
-      (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
-      "out of bounds");
-  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, options).set_(self);
-  self_t[idx].fill_(value);
+void storage_fill(const at::Storage& storage, uint8_t value) {
+  as_byte_tensor(storage).fill_(value);
 }
 
-uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
+void storage_fill_range(
+    const at::Storage& storage,
+    ptrdiff_t start,
+    ptrdiff_t stop,
+    uint8_t value) {
+  if (start >= stop) {
+    return;
+  }
+  as_byte_tensor(storage).slice(0, start, stop).fill_(value);
+}
+
+void storage_copy_from_host(
+    const at::Storage& storage,
+    const uint8_t* src,
+    size_t nbytes) {
+  if (nbytes == 0) {
+    return;
+  }
+  auto host_t = at::from_blob(
+      const_cast<uint8_t*>(src),
+      {static_cast<int64_t>(nbytes)},
+      at::TensorOptions().dtype(at::kByte));
+  as_byte_tensor(storage)
+      .slice(0, 0, static_cast<int64_t>(nbytes))
+      .copy_(host_t);
+}
+
+at::Tensor storage_copy_to_host(const at::Storage& storage) {
+  return as_byte_tensor(storage).to(at::kCPU);
+}
+
+void storage_set(const at::Storage& storage, ptrdiff_t idx, uint8_t value) {
   TORCH_CHECK(
-      (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
+      (idx >= 0) && (idx < static_cast<ptrdiff_t>(storage.nbytes())),
       "out of bounds");
-  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, options).set_(self);
-  return self_t[idx].item<uint8_t>();
+  as_byte_tensor(storage)[idx].fill_(value);
+}
+
+uint8_t storage_get(const at::Storage& storage, ptrdiff_t idx) {
+  TORCH_CHECK(
+      (idx >= 0) && (idx < static_cast<ptrdiff_t>(storage.nbytes())),
+      "out of bounds");
+  return as_byte_tensor(storage)[idx].item<uint8_t>();
 }
 
 std::string uuid_to_string(const char* uuid_bytes) {
