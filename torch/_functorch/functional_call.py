@@ -18,6 +18,7 @@ def functional_call(
     *,
     tie_weights: bool = True,
     strict: bool = False,
+    unsafe: bool = False,
 ) -> Any:
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -158,6 +159,7 @@ def functional_call(
         kwargs,
         tie_weights=tie_weights,
         strict=strict,
+        unsafe=unsafe,
     )
 
 
