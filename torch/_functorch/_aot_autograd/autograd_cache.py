@@ -172,6 +172,11 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # Dynamo-inserted autocast CM nodes. dtype=None is resolved from ambient
+        # get_autocast_dtype at call time; that ambient state (enabled + dtype +
+        # cache_enabled) is recorded unconditionally in _record_runtime_state.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -536,13 +541,29 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Include per-device autocast dtype in cache key to avoid reusing
-        # a graph compiled for one autocast dtype (e.g. bfloat16) when
-        # running under a different autocast dtype (e.g. float16).
-        self.autocast_state: dict[str, torch.dtype] = {}
-        for device_type in torch._C._autocast_supported_devices():
-            if torch.is_autocast_enabled(device_type):
-                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
+        # Full ambient autocast snapshot for every supported device.
+        #
+        # dtype must be recorded even when autocast is disabled: in-graph
+        # torch.autocast(dev) with dtype=None resolves via get_autocast_dtype
+        # at call time, and GraphModule.__reduce__ strips node.meta, so that
+        # resolved dtype would otherwise be missing from the key. Dynamo's
+        # AutocastState::operator== also skips dtype when a device is disabled
+        # on both sides, so this key cannot delegate upward for disabled-device
+        # dtype -- it must record every device unconditionally.
+        #
+        # enabled must be recorded too: ambient-on vs ambient-off with the same
+        # default dtype must not share a key (AOT tracing under ambient
+        # autocast bakes casts into the artifact). Deliberately stricter than
+        # Dynamo's AutocastState comparison, which skips dtype for devices
+        # disabled on both sides -- that skip is what this dict must not do.
+        self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+            )
+            for device_type in torch._C._autocast_supported_devices()
+        }
+        self.autocast_cache_enabled = torch.is_autocast_cache_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
