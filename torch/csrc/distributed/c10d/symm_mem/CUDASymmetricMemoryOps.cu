@@ -15,11 +15,16 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+
+#include <algorithm>
+#include <mutex>
+#include <unordered_map>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -157,7 +162,160 @@ void init_elementwise_launch_config(
   }
 }
 
+// ---- Low-latency (LL) one-shot all-reduce. See NOTE [LL one-shot]. ----
+constexpr size_t ll_all_reduce_max_num_blocks = 24;
+constexpr size_t ll_all_reduce_max_num_threads = 512;
+// LL is a small-message protocol; above this per-op message size we fall back
+// to the barrier-based op. The fixed inbox is sized to cover exactly this cap,
+// so it never has to grow.
+constexpr int64_t kLLMaxMsgBytes = 256 * 1024;
+
+// Number of 16-byte LL lines the inbox holds per (slot, source). Fixed.
+constexpr size_t ll_cap_lines() {
+  return static_cast<size_t>(kLLMaxMsgBytes) / 8;
+}
+
+struct LLBuffer {
+  at::Tensor buffer; // symmetric inbox: 2 slots * world_size * cap_lines lines
+  c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory> symm;
+  uint32_t* epoch = nullptr; // device counter, starts at 1
+};
+
+// One fixed-size symmetric inbox per group, allocated + rendezvous'd once on
+// the first LL op for that group and cached (held) thereafter -- no grow, no
+// graveyard, no per-op allocation. Modeled on NCCL's per-comm LL resource
+// buffer. Must be reached in lockstep by every rank (rendezvous is collective
+// on the first call for a group).
+//
+// The epoch is a dedicated device counter (not stored in the symmetric buffer):
+// reading it from the symm buffer's own memory can observe an inconsistent
+// value across ranks when the first LL op follows another symm op, which
+// partially deadlocks the flag protocol.
+LLBuffer& get_ll_buffer(
+    const std::string& group_name,
+    c10::Device device,
+    int world_size) {
+  static std::mutex mu;
+  // Intentionally leaked: LLBuffer holds symmetric-memory tensors whose
+  // destructors call the CUDA driver, which is unsafe during static destruction
+  // at process exit (cudaErrorCudartUnloading). Torn down with the process.
+  static auto* cache = new std::unordered_map<std::string, LLBuffer>();
+  std::lock_guard<std::mutex> lk(mu);
+  auto it = cache->find(group_name);
+  if (it != cache->end()) {
+    return it->second;
+  }
+  // 2 slots * world_size sources * cap_lines lines, 16 B/line.
+  const int64_t bytes = static_cast<int64_t>(2) * world_size *
+      static_cast<int64_t>(ll_cap_lines()) * 16;
+  // group_name = nullopt: the NCCL backend's allocator rejects a group_name at
+  // alloc; rendezvous() below binds the buffer to the group.
+  auto buffer = c10d::symmetric_memory::empty_strided_p2p(
+      {bytes}, {1}, at::kByte, device, std::nullopt, std::nullopt);
+  // Zero (flags -> 0, never matching a live epoch >= 1) BEFORE rendezvous: the
+  // rendezvous carries a cross-rank barrier, so this guarantees every rank's
+  // buffer is zeroed before any peer's LL kernel can push a flag into it.
+  // Zeroing after rendezvous races -- a fast peer's push gets wiped ->
+  // deadlock.
+  buffer.zero_();
+  auto symm = c10d::symmetric_memory::rendezvous(buffer, group_name);
+  uint32_t* epoch = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&epoch, sizeof(uint32_t)));
+  uint32_t one = 1u;
+  C10_CUDA_CHECK(
+      cudaMemcpy(epoch, &one, sizeof(uint32_t), cudaMemcpyHostToDevice));
+  auto inserted = cache->emplace(
+      group_name, LLBuffer{std::move(buffer), std::move(symm), epoch});
+  return inserted.first->second;
+}
+
+// Bump the device epoch once per LL op, stream-ordered after the LL kernel so
+// CUDA-graph replays advance it. Single-threaded -> plain increment.
+static __global__ void ll_epoch_inc_kernel(uint32_t* epoch_ptr) {
+  *epoch_ptr += 1u;
+}
+
+// LL one-shot all-reduce (unicast writes). Each rank pushes its input into
+// every peer's inbox as {payload, epoch} lines, then spin-reads its own inbox
+// and reduces. `stride` is the fixed per-(slot,src) line stride (= scratch
+// capacity); `lines` is the number of live lines this call.
+template <typename T>
+static __global__ void one_shot_all_reduce_ll_kernel(
+    uint4** inbox_ptrs,
+    const T* input,
+    T* output,
+    size_t lines,
+    size_t stride,
+    const uint32_t* epoch_ptr,
+    size_t rank,
+    size_t world_size) {
+  uint4* my_inbox = inbox_ptrs[rank];
+  const uint32_t epoch = *epoch_ptr;
+  // (epoch & 1) selects the double-buffer slot.
+  const size_t slot_base =
+      static_cast<size_t>(epoch & 1u) * world_size * stride;
+  const uint2* in2 = reinterpret_cast<const uint2*>(input);
+  uint2* out2 = reinterpret_cast<uint2*>(output);
+  const size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  const size_t nthreads = blockDim.x * gridDim.x;
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    const uint2 v = in2[i];
+    for (size_t step = 0; step < world_size; ++step) {
+      const size_t p = (rank + step) % world_size;
+      ll_st(inbox_ptrs[p] + slot_base + rank * stride + i, v.x, v.y, epoch);
+    }
+  }
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    uint2 acc = ll_ld(my_inbox + slot_base + i, epoch); // src 0
+    for (size_t s = 1; s < world_size; ++s) {
+      acc = ll_add<T>(acc, ll_ld(my_inbox + slot_base + s * stride + i, epoch));
+    }
+    out2[i] = acc;
+  }
+}
+
 #if !defined(USE_ROCM) //No multi-cast support on ROCm yet
+// LL one-shot all-reduce (multicast writes). Identical to the unicast variant
+// except the push is a single multimem.st per line that fans out to every
+// peer's inbox via the NVSwitch; the reduce is still local. See NOTE [LL
+// one-shot].
+template <typename T>
+static __global__ void multimem_one_shot_all_reduce_ll_kernel(
+    uint4* inbox_mc,
+    uint4* inbox_local,
+    const T* input,
+    T* output,
+    size_t lines,
+    size_t stride,
+    const uint32_t* epoch_ptr,
+    size_t rank,
+    size_t world_size) {
+  const uint32_t epoch = *epoch_ptr;
+  // (epoch & 1) selects the double-buffer slot.
+  const size_t slot_base =
+      static_cast<size_t>(epoch & 1u) * world_size * stride;
+  const uint2* in2 = reinterpret_cast<const uint2*>(input);
+  uint2* out2 = reinterpret_cast<uint2*>(output);
+  const size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  const size_t nthreads = blockDim.x * gridDim.x;
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    const uint2 v = in2[i];
+    ll_multimem_st(inbox_mc + slot_base + rank * stride + i, v.x, v.y, epoch);
+  }
+
+  for (size_t i = tid; i < lines; i += nthreads) {
+    uint2 acc = ll_ld(inbox_local + slot_base + i, epoch); // src 0
+    for (size_t s = 1; s < world_size; ++s) {
+      acc = ll_add<T>(
+          acc, ll_ld(inbox_local + slot_base + s * stride + i, epoch));
+    }
+    out2[i] = acc;
+  }
+}
+
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -390,6 +548,65 @@ at::Tensor multimem_one_shot_all_reduce(
     std::string group_name) {
   auto out = at::empty_like(input);
   return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
+}
+
+// Low-latency variant: the LL protocol (see NOTE [LL one-shot]) -- a single
+// cross-rank round-trip, reuse-safe via double-buffering + a device epoch.
+// Multicast push (one multimem.st per line), local reduce.
+at::Tensor multimem_one_shot_all_reduce_low_latency(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "multimem_one_shot_all_reduce_low_latency: input must be contiguous.");
+  TORCH_CHECK(
+      reduce_op == "sum",
+      "multimem_one_shot_all_reduce_low_latency: only sum is supported.");
+  auto out = at::empty_like(input);
+  if (input.numel() == 0) {
+    return out;
+  }
+  auto pg = c10d::resolve_process_group(group_name);
+  const int rank = pg->getRank();
+  const int world_size = pg->getSize();
+  const size_t elt = input.element_size();
+  // LL packs whole 8-byte lines and only covers up to the fixed inbox cap; fall
+  // back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0 ||
+      input.numel() / (8 / elt) > ll_cap_lines()) {
+    return multimem_one_shot_all_reduce(input, reduce_op, group_name);
+  }
+  const size_t lines = input.numel() / (8 / elt);
+  auto& ll = get_ll_buffer(group_name, input.device(), world_size);
+  if (!ll.symm->has_multicast_support()) {
+    return multimem_one_shot_all_reduce(input, reduce_op, group_name);
+  }
+
+  const int num_threads = static_cast<int>(ll_all_reduce_max_num_threads);
+  int num_blocks = static_cast<int>(std::min<size_t>(
+      ll_all_reduce_max_num_blocks, (lines + num_threads - 1) / num_threads));
+  num_blocks = std::max(num_blocks, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "multimem_one_shot_all_reduce_low_latency", [&]() {
+        multimem_one_shot_all_reduce_ll_kernel<scalar_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                reinterpret_cast<uint4*>(ll.symm->get_multicast_ptr()),
+                reinterpret_cast<uint4*>(ll.buffer.data_ptr()),
+                input.data_ptr<scalar_t>(),
+                out.data_ptr<scalar_t>(),
+                lines,
+                ll_cap_lines(),
+                ll.epoch,
+                rank,
+                world_size);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(ll.epoch);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out;
 }
 
 template <int alignment>
@@ -729,6 +946,62 @@ at::Tensor one_shot_all_reduce(
   auto out = at::empty_like(input);
   return one_shot_all_reduce_out_impl(
       input, std::nullopt, reduce_op, group_name, out);
+}
+
+// Low-latency variant: the LL protocol (see NOTE [LL one-shot]) -- a single
+// cross-rank round-trip, reuse-safe via double-buffering + a device epoch.
+// Unicast push (one st per peer per line), local reduce.
+at::Tensor one_shot_all_reduce_low_latency(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "one_shot_all_reduce_low_latency: input must be contiguous.");
+  TORCH_CHECK(
+      reduce_op == "sum",
+      "one_shot_all_reduce_low_latency: only sum is supported.");
+  auto out = at::empty_like(input);
+  if (input.numel() == 0) {
+    return out;
+  }
+  auto pg = c10d::resolve_process_group(group_name);
+  const int rank = pg->getRank();
+  const int world_size = pg->getSize();
+  const size_t elt = input.element_size();
+  // LL packs whole 8-byte lines and only covers up to the fixed inbox cap; fall
+  // back to the barrier-based op otherwise.
+  if (elt == 0 || (8 % elt) != 0 || (input.numel() % (8 / elt)) != 0 ||
+      input.numel() / (8 / elt) > ll_cap_lines()) {
+    return one_shot_all_reduce_out_impl(
+        input, std::nullopt, reduce_op, group_name, out);
+  }
+  const size_t lines = input.numel() / (8 / elt);
+  auto& ll = get_ll_buffer(group_name, input.device(), world_size);
+
+  const int num_threads = static_cast<int>(ll_all_reduce_max_num_threads);
+  int num_blocks = static_cast<int>(std::min<size_t>(
+      ll_all_reduce_max_num_blocks, (lines + num_threads - 1) / num_threads));
+  num_blocks = std::max(num_blocks, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "one_shot_all_reduce_low_latency", [&]() {
+        one_shot_all_reduce_ll_kernel<scalar_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                reinterpret_cast<uint4**>(ll.symm->get_buffer_ptrs_dev()),
+                input.data_ptr<scalar_t>(),
+                out.data_ptr<scalar_t>(),
+                lines,
+                ll_cap_lines(),
+                ll.epoch,
+                rank,
+                world_size);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+  ll_epoch_inc_kernel<<<1, 1, 0, stream>>>(ll.epoch);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return out;
 }
 
 at::Tensor one_shot_all_reduce_copy(
@@ -1198,6 +1471,15 @@ at::Tensor multimem_one_shot_all_reduce(
   return input;
 }
 
+at::Tensor multimem_one_shot_all_reduce_low_latency(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(
+      false, "multimem_one_shot_all_reduce_low_latency: requires CUDA 12.3+.");
+  return input;
+}
+
 at::Tensor multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
@@ -1239,6 +1521,14 @@ at::Tensor one_shot_all_reduce(
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_low_latency(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_low_latency: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1413,6 +1703,7 @@ at::Tensor stream_write_value32_(
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
 #if defined(USE_ROCM) || defined(CUDART_VERSION)
   m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_low_latency", ::one_shot_all_reduce_low_latency);
   m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
   m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
   m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
@@ -1433,6 +1724,9 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   // advantage of this property, but it should not be used without
   // understanding the caveats.
   m.impl("multimem_one_shot_all_reduce", ::multimem_one_shot_all_reduce);
+  m.impl(
+      "multimem_one_shot_all_reduce_low_latency",
+      ::multimem_one_shot_all_reduce_low_latency);
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
   m.impl(
