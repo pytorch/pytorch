@@ -1081,9 +1081,13 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     low_pr_fp = (torch.bfloat16, torch.float16)
     # In precision-emulation mode, explicit lowp casts must materialize the
     # storage dtype. Later pointwise barriers will widen from that rounded value.
+    current_node = getattr(V.graph, "current_node", None)
+    emulate_precision_casts = config.emulate_precision_casts or (
+        current_node is not None
+        and current_node.meta.get("low_precision_pointwise_barrier", False)
+    )
     use_compute_types = not (
-        config.emulate_precision_casts
-        and (src_dtype in low_pr_fp or dtype in low_pr_fp)
+        emulate_precision_casts and (src_dtype in low_pr_fp or dtype in low_pr_fp)
     )
     return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
 
@@ -3728,10 +3732,7 @@ if torch.xpu._is_compiled():
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
 
-if torch.mtia._is_compiled():
-    make_fallback(
-        aten.native_layer_norm, warn=False
-    )  # (MTIA-only and faster than decomp)
+make_fallback(aten.native_layer_norm, warn=False, override_decomp=True)
 
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
