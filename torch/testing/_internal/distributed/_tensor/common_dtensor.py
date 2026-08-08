@@ -707,7 +707,7 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         # we skip the test.
         if torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
                 torch.accelerator.set_device_index(rank)
 
@@ -802,7 +802,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
         )
         if requires_gpu and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
