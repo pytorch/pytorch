@@ -944,6 +944,86 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_slogdet_solve_second_order_forward_ad(self, device, dtype):
+        # Fixes #192540: nested forward AD (jvp of jvp, jacfwd of jacfwd) for
+        # linalg.det, slogdet, and linalg.solve.
+        A = torch.tensor([[1.3, 0.4], [-0.7, 0.9]], device=device, dtype=torch.double).to(dtype)
+        b = torch.tensor([1.0, -2.0], device=device, dtype=torch.double).to(dtype)
+        c = torch.tensor([0.5, 1.3], device=device, dtype=torch.double).to(dtype)
+        if dtype.is_complex:
+            A = A + 0.1j * A.flip(-1)
+        fns = {
+            "det": torch.linalg.det,
+            "slogdet": lambda X: torch.linalg.slogdet(X).logabsdet,
+            "solve": lambda X: c @ torch.linalg.solve(X, b),
+        }
+        n = A.shape[-1]
+        fwd, rev = torch.func.jacfwd, torch.func.jacrev
+
+        def unit(i, j):
+            e = torch.zeros_like(A)
+            e[i, j] = 1.0
+            return e
+
+        def hessian_ref(f, X):
+            if not dtype.is_complex:
+                return torch.autograd.functional.hessian(f, X)
+            eps = 1e-6
+
+            def dir_at(Y, E):
+                return torch.func.jvp(f, (Y,), (E,))[1]
+            hess = torch.empty(n, n, n, n, dtype=dtype, device=device)
+            for i, j in itertools.product(range(n), repeat=2):
+                Eij = unit(i, j)
+                for k, l in itertools.product(range(n), repeat=2):
+                    Ekl = unit(k, l)
+                    hess[i, j, k, l] = (dir_at(X + eps * Ekl, Eij) -
+                                        dir_at(X - eps * Ekl, Eij)) / (2 * eps)
+            return hess
+
+        atol, rtol = (1e-7, 1e-5) if dtype.is_complex else (1e-9, 1e-7)
+        for name, f in fns.items():
+            expected = hessian_ref(f, A)
+            modes = {}
+            if not dtype.is_complex:
+                modes["jacfwd(jacfwd)"] = fwd(fwd(f))(A)
+                modes["jacrev(jacfwd)"] = rev(fwd(f))(A)
+                modes["jacfwd(jacrev)"] = fwd(rev(f))(A)
+                modes["jacrev(jacrev)"] = rev(rev(f))(A)
+
+            hess_jvp_jvp = torch.empty(n, n, n, n, device=device, dtype=dtype)
+            hess_grad_jvp = torch.empty(n, n, n, n, device=device, dtype=dtype)
+            for i, j in itertools.product(range(n), repeat=2):
+                def jvp_dir(X, V=unit(i, j)):
+                    return torch.func.jvp(f, (X,), (V,))[1]
+
+                def grad_dir(X, V=unit(i, j)):
+                    return torch.func.jvp(f, (X,), (V,))[1].real
+
+                hess_grad_jvp[i, j] = torch.func.grad(grad_dir)(A)
+                for k, l in itertools.product(range(n), repeat=2):
+                    hess_jvp_jvp[i, j, k, l] = torch.func.jvp(
+                        jvp_dir, (A,), (unit(k, l),))[1]
+            modes["jvp(jvp)"] = hess_jvp_jvp
+            modes["grad(jvp)"] = hess_grad_jvp
+            if not dtype.is_complex and name == "det":
+                # Analytic Hessian oracle
+                H_true = torch.zeros(n, n, n, n, dtype=dtype, device=device)
+                H_true[0, 0, 1, 1] = H_true[1, 1, 0, 0] = 1
+                H_true[0, 1, 1, 0] = H_true[1, 0, 0, 1] = -1
+                for mode in ("jacfwd(jacfwd)", "jvp(jvp)"):
+                    self.assertEqual(modes[mode], H_true, atol=atol, rtol=rtol)
+            for mode, got in modes.items():
+                got_cmp = got.real if mode == "grad(jvp)" else got
+                exp_cmp = expected.real if mode == "grad(jvp)" else expected
+                self.assertFalse(torch.isnan(got).any())
+                self.assertEqual(got_cmp, exp_cmp, atol=atol, rtol=rtol)
+
+
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
