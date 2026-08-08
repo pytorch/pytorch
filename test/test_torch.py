@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
-    skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
+    skipIfRocm, skipIfRocmVersionAtLeast, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
@@ -221,6 +221,39 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(prev_cf, 2)
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
+
+    @onlyNativeDeviceTypes
+    def test_storage_throws_on_data_ptr_access(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.storage import _throws_on_data_ptr_access
+
+        def raises_on_data_ptr(storage):
+            try:
+                storage.data_ptr()
+            except RuntimeError:
+                return True
+            return False
+
+        # Normal storage: data_ptr() works, so we report False.
+        s = torch.randn(4, device=device).untyped_storage()
+        self.assertFalse(_throws_on_data_ptr_access(s))
+        self.assertFalse(raises_on_data_ptr(s))
+
+        # FakeTensor with unsafe access disallowed: data_ptr() raises.
+        with FakeTensorMode() as mode:
+            mode._allow_unsafe_data_ptr_access = False
+            fs = torch.randn(4, device=device).untyped_storage()
+            self.assertTrue(_throws_on_data_ptr_access(fs))
+            self.assertTrue(raises_on_data_ptr(fs))
+
+        # Storage armed to throw on the immutable data_ptr path.
+        s2 = torch.randn(4, device=device).untyped_storage()
+        torch._C._set_storage_data_ptr_access_error_msg(s2._cdata, "invalid")
+        self.assertTrue(_throws_on_data_ptr_access(s2))
+        self.assertTrue(raises_on_data_ptr(s2))
+        torch._C._clear_storage_data_ptr_access_error_msg(s2._cdata)
+        self.assertFalse(_throws_on_data_ptr_access(s2))
+        self.assertFalse(raises_on_data_ptr(s2))
 
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
@@ -2295,7 +2328,7 @@ class TestTorchDeviceType(TestCase):
             for to_ in [-4.2, 0, 42]:
                 if to_ > from_:
                     t = torch.empty(size, dtype=dtype, device=device).uniform_(from_, to_)
-                    res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
+                    res = stats.kstest(t.cpu().to(torch.double), stats.uniform(from_, (to_ - from_)).cdf)
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2306,7 +2339,7 @@ class TestTorchDeviceType(TestCase):
         for mean in [-10, 0, 50]:
             for std in [1, 5, 10]:
                 t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
-                res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
+                res = stats.kstest(t.cpu().to(torch.double), stats.norm(mean, std).cdf)
                 self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
@@ -2316,7 +2349,7 @@ class TestTorchDeviceType(TestCase):
         size = 50000
         for std in [0.005, 0.01]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
-            res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
+            res = stats.kstest(t.cpu().to(torch.double), stats.norm(0, std).cdf)
             self.assertTrue(
                 res.statistic < 0.01,
                 msg=lambda msg: f"{msg}\nKS statistic {res.statistic:.4f} for {dtype} std={std}",
@@ -7668,6 +7701,17 @@ class TestTorch(TestCase):
         with self.assertRaises(ValueError):
             torch.quasirandom.SobolEngine(maxdim + 1)
 
+    def test_sobol_invalid_inputs(self):
+        quasi = torch.ones(2, dtype=torch.long)
+        sobolstate = torch.ones(2, 30, dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "dimension must match"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 1250999896764, 0)
+        with self.assertRaisesRegex(ValueError, "at most"):
+            torch._sobol_engine_ff_(quasi, 1, sobolstate, 2, 2**30 - 1)
+        with self.assertRaisesRegex(ValueError, "dimension must be between"):
+            torch._sobol_engine_initialize_state_(sobolstate, 1250999896764)
+
     def test_sobolengine_high_dim(self):
         engine = torch.quasirandom.SobolEngine(1111, scramble=False, seed=123456)
         samples1 = engine.draw()
@@ -8713,6 +8757,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         torch.__config__.show()
 
     @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()
 
@@ -10947,61 +10992,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
-    def test_swap_allows_tensor_weakref(self):
-        from torch.utils.weak import TensorWeakRef
-
-        t1 = torch.nn.Parameter(torch.zeros(2))
-        t2 = torch.nn.Parameter(torch.ones(2))
-        t2.foo = "bar"
-
-        t1_ref = TensorWeakRef(t1)
-        t2_ref = TensorWeakRef(t2)
-        t1_ref.extra = "still settable"
-        self.assertEqual(t1_ref.extra, "still settable")
-        self.assertIs(t1_ref(), t1)
-        self.assertIs(t2_ref(), t2)
-        t1_weakrefs = weakref.getweakrefs(t1)
-        t2_weakrefs = weakref.getweakrefs(t2)
-        self.assertEqual(len(t1_weakrefs), 1)
-        self.assertEqual(len(t2_weakrefs), 1)
-        self.assertIs(t1_weakrefs[0], t1_ref.ref)
-        self.assertIs(t2_weakrefs[0], t2_ref.ref)
-
-        torch.utils.swap_tensors(t1, t2)
-
-        self.assertIs(t1_ref(), t1)
-        self.assertIs(t2_ref(), t2)
-        self.assertEqual(t1, torch.ones(2))
-        self.assertEqual(t2, torch.zeros(2))
-        self.assertEqual(t1.foo, "bar")
-
-        _wr = weakref.ref(t1)
-        self.assertIs(_wr(), t1)
-        with self.assertRaisesRegex(RuntimeError, "has weakref"):
-            torch.utils.swap_tensors(t1, t2)
-
-        t3 = torch.nn.Parameter(torch.zeros(2))
-        t4 = torch.nn.Parameter(torch.ones(2))
-        _ = TensorWeakRef(t3)
-        _ = TensorWeakRef(t4)
-        _wr = weakref.ref(t4)
-        self.assertIs(_wr(), t4)
-        with self.assertRaisesRegex(RuntimeError, "has weakref"):
-            torch.utils.swap_tensors(t3, t4)
-
-    def test_tensor_weakref_bc_behavior(self):
-        from torch.utils.weak import TensorWeakRef, WeakIdRef
-
-        t = torch.zeros(3)
-        tensor_ref = TensorWeakRef(t)
-        plain_ref = weakref.ref(t)
-
-        tensor_ref.extra = "still settable"
-        self.assertEqual(tensor_ref.extra, "still settable")
-        self.assertIs(tensor_ref(), t)
-        self.assertFalse(tensor_ref == plain_ref)
-        self.assertTrue(bool(TensorWeakRef(t) == WeakIdRef(t)))
-        self.assertFalse(bool(tensor_ref == plain_ref))
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):

@@ -2105,6 +2105,12 @@ def empty(  # type: ignore[misc]
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
 
+    .. note::
+        This is a host-synchronous allocation. Together with
+        :func:`rendezvous`, it is intended as an initialization-time
+        operation: allocate a symmetric memory tensor once and reuse it,
+        rather than allocating in hot code paths.
+
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
             Can be a variable number of arguments or a collection like a list or tuple.
@@ -2161,6 +2167,14 @@ def rendezvous(
 
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
+
+    .. note::
+        This is a host-blocking initialization operation: the first rendezvous
+        of a tensor performs handle exchange and mapping across processes, and
+        synchronizes the host with the device. It cannot be ordered onto a
+        CUDA stream or captured in a CUDA graph. Rendezvous a buffer once and
+        reuse the returned handle rather than calling this in hot code paths;
+        subsequent calls on the same tensor return the cached handle.
 
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.

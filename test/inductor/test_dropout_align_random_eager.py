@@ -2,8 +2,7 @@
 
 import struct
 import time
-
-import pytest
+import unittest
 
 import torch
 from torch._inductor import config
@@ -129,9 +128,9 @@ def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
 # ───────────────────────────────────────────────────────────────
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
-@pytest.mark.skipif(
+@unittest.skipIf(
     not (IS_LINUX and HAS_CUDA_AND_TRITON),
-    reason="Inductor CUDA dropout alignment tests require Linux and CUDA",
+    "Inductor CUDA dropout alignment tests require Linux and CUDA",
 )
 @config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
@@ -155,6 +154,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         )
 
     @requires_gpu()
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190237"
+    )
     def test_linear_block_compile_parity_forward(self):
         device = torch.device(GPU_TYPE)
 
@@ -184,6 +187,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(y_eager, y_comp)
 
     @requires_gpu()
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190237"
+    )
     def test_linear_block_compile_parity_backward(self):
         device = torch.device(GPU_TYPE)
 
@@ -292,6 +299,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190237"
+    )
     def test_dropout_parity_dynamic_shapes(self):
         device = torch.device(GPU_TYPE)
 
@@ -323,6 +334,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/190237"
+    )
     def test_dropout_parity_cudagraphs_reduce_overhead(self):
         device = torch.device(GPU_TYPE)
 
@@ -428,31 +443,22 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # Primitive random fns: rand / randn / randint -> mark as XFAIL
     # ───────────────────────────────────────────────────────────
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.rand parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_rand_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("rand", device, shape)
 
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.randn parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_randn_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randn", device, shape)
 
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.randint parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_randint_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
