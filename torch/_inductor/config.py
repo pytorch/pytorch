@@ -355,6 +355,7 @@ batch_fusion = True
 # batch_tanh
 # batch_relu
 # batch_sigmoid
+# batch_gelu
 
 # split cat fusion options:
 # normalization_pass
@@ -366,6 +367,10 @@ batch_fusion = True
 # split_cat_pass
 pre_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
+        "devices": ("xpu",),
+        "min_fuse_set_size": 2,
+    },
+    "batch_gelu": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
     },

@@ -941,6 +941,176 @@ class TestGroupBatchFusion(TestCase):
             "batch_linear_lhs should skip (return None) when weight is a tensor subclass",
         )
 
+    @unittest.skipUnless(
+        torch.xpu.is_available(),
+        "batch_gelu auto-enable is XPU-only for now",
+    )
+    def test_xpu_auto_enable_batch_gelu(self):
+        """batch_gelu fires for XPU tensors via the 'devices' key in config."""
+        default_options = config.pre_grad_fusion_options
+        self.assertIn("batch_gelu", default_options)
+        self.assertEqual(default_options["batch_gelu"]["devices"], ("xpu",))
+
+        for has_bias in [True, False]:
+            orig_fusion_options = dict(config.pre_grad_fusion_options)
+            counters.clear()
+            module = _TestGeLuModule("xpu", has_bias=has_bias)
+            input = [torch.randn(20, 10, device="xpu")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertGreater(
+                counters["inductor"]["batch_gelu"],
+                0,
+                f"batch_gelu should fire for XPU (has_bias={has_bias})",
+            )
+            self.assertEqual(ref, res)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.assertEqual(
+                orig_fusion_options,
+                dict(config.pre_grad_fusion_options),
+                "config.pre_grad_fusion_options should not be mutated",
+            )
+            counters.clear()
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_gelu": {"min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_gelu_cpu_opt_in(self):
+        """batch_gelu works on CPU when user explicitly opts in (no devices filter)."""
+        counters.clear()
+        module = _TestGeLuModule("cpu", has_bias=True)
+        input = [torch.randn(20, 10, device="cpu")]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_gelu"],
+            0,
+            "batch_gelu should fire for CPU when explicitly enabled",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_gelu": {"min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_batch_gelu_cpu(self):
+        """batch_gelu fires in predispatch path on CPU when devices key is absent."""
+        counters.clear()
+        module = _TestGeLuModule("cpu", has_bias=True)
+        input = [torch.randn(20, 10, device="cpu")]
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_gelu"],
+            0,
+            "batch_gelu should fire in predispatch mode",
+        )
+        self.assertEqual(ref, res)
+        counters.clear()
+
+    def test_batch_gelu_mixed_approximate_not_batched(self):
+        """Verify that gelu(approximate='none') and gelu(approximate='tanh')
+        are NOT batched together (different group keys)."""
+        from torch._inductor.fx_passes.group_batch_fusion import BatchGeLuPreGradFusion
+
+        counters.clear()
+        fusion = BatchGeLuPreGradFusion()
+        z = 4
+
+        graph = torch.fx.Graph()
+        x_node = graph.placeholder("x")
+        x_node.meta["example_value"] = torch.randn(2, z)
+
+        # Two GELU nodes with approximate='none'
+        gelu_none_1 = graph.call_function(
+            torch.nn.functional.gelu, args=(x_node,), kwargs={"approximate": "none"}
+        )
+        gelu_none_1.meta["example_value"] = torch.randn(2, z)
+        gelu_none_2 = graph.call_function(
+            torch.nn.functional.gelu, args=(x_node,), kwargs={"approximate": "none"}
+        )
+        gelu_none_2.meta["example_value"] = torch.randn(2, z)
+
+        # One GELU node with approximate='tanh'
+        gelu_tanh = graph.call_function(
+            torch.nn.functional.gelu, args=(x_node,), kwargs={"approximate": "tanh"}
+        )
+        gelu_tanh.meta["example_value"] = torch.randn(2, z)
+
+        graph.output((gelu_none_1, gelu_none_2, gelu_tanh))
+
+        # Match - the two 'none' nodes should match, the 'tanh' node should also match
+        # but with a different group key
+        none_key = fusion.match(gelu_none_1)
+        tanh_key = fusion.match(gelu_tanh)
+        self.assertIsNotNone(none_key)
+        self.assertIsNotNone(tanh_key)
+        # The group keys should differ
+        self.assertNotEqual(
+            none_key,
+            tanh_key,
+            "Group keys for approximate='none' vs 'tanh' should differ",
+        )
+        counters.clear()
+
+
+class _TestGeLuModule(torch.nn.Module):
+    """Module with multiple F.gelu() calls used to test batch_gelu fusion."""
+
+    def __init__(self, device, has_bias=True, approximate="none"):
+        super().__init__()
+        self.device = device
+        self.approximate = approximate
+        self.linear1 = torch.nn.Linear(10, 20, bias=has_bias, device=device)
+        self.linear2 = torch.nn.Linear(10, 20, bias=has_bias, device=device)
+        self.linear3 = torch.nn.Linear(10, 20, bias=has_bias, device=device)
+
+    def forward(self, x):
+        x = x.to(self.device)
+        h1 = torch.nn.functional.gelu(self.linear1(x), approximate=self.approximate)
+        h2 = torch.nn.functional.gelu(self.linear2(x), approximate=self.approximate)
+        h3 = torch.nn.functional.gelu(self.linear3(x), approximate=self.approximate)
+        return h1 + h2 + h3
+
+
+class _TestGeLuModuleApproxMix(torch.nn.Module):
+    """Module with mixed-approximate GELU calls to verify they are NOT batched together."""
+
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+        self.linear1 = torch.nn.Linear(10, 20, bias=False, device=device)
+        self.linear2 = torch.nn.Linear(10, 20, bias=False, device=device)
+        self.linear3 = torch.nn.Linear(10, 20, bias=False, device=device)
+        self.linear4 = torch.nn.Linear(10, 20, bias=False, device=device)
+
+    def forward(self, x):
+        x = x.to(self.device)
+        # Two with approximate='none', two with approximate='tanh'
+        h1 = torch.nn.functional.gelu(self.linear1(x), approximate="none")
+        h2 = torch.nn.functional.gelu(self.linear2(x), approximate="none")
+        h3 = torch.nn.functional.gelu(self.linear3(x), approximate="tanh")
+        h4 = torch.nn.functional.gelu(self.linear4(x), approximate="tanh")
+        return h1 + h2 + h3 + h4
+
 
 class _TestBMMFusionModule(torch.nn.Module):
     def __init__(self) -> None:
