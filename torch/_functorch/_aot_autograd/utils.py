@@ -11,7 +11,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import partial, wraps
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, cast, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
 
 import torch
@@ -399,6 +399,9 @@ def unlift_tokens(
                         output_tokens.add(user)
         return output_tokens
 
+    unlifted_while_loop_conds: set[torch.fx.GraphModule] = set()
+    unlifted_while_loop_bodies: set[torch.fx.GraphModule] = set()
+
     def _unlift_tokens_from_module_helper(
         module: torch.fx.GraphModule,
         subgraph_str: str,
@@ -488,6 +491,102 @@ def unlift_tokens(
                     output_token_nodes = (
                         output_token_nodes | tokens_from_invoke_subgraph
                     )
+
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.while_loop
+                and "num_effect_tokens" in node.kwargs
+            ):
+                num_effect_tokens = node.kwargs["num_effect_tokens"]
+                if type(num_effect_tokens) is not int or num_effect_tokens != 1:
+                    raise NotImplementedError(
+                        "torch.while_loop currently supports exactly one ORDERED "
+                        f"effect token, got {num_effect_tokens!r}"
+                    )
+                if len(node.args) != 4:
+                    raise AssertionError(f"Malformed tokenized while_loop node: {node}")
+                cond_node, body_node, carried_inputs, additional_inputs = node.args
+                if not all(
+                    isinstance(n, torch.fx.Node)
+                    and n.op == "get_attr"
+                    and isinstance(n.target, str)
+                    for n in (cond_node, body_node)
+                ) or (
+                    not isinstance(carried_inputs, (tuple, list)) or not carried_inputs
+                ):
+                    raise AssertionError(f"Malformed tokenized while_loop node: {node}")
+
+                cond_module = module.get_submodule(cast(str, cond_node.target))
+                body_module = module.get_submodule(cast(str, body_node.target))
+                if not isinstance(cond_module, torch.fx.GraphModule) or not isinstance(
+                    body_module, torch.fx.GraphModule
+                ):
+                    raise AssertionError(
+                        "Expected tokenized while_loop subgraphs to be GraphModules"
+                    )
+                # The cond token placeholder must be erased here: no with_effects
+                # node consumes it, so the named_modules sweep cannot see it. The
+                # body is swept again by that loop, but the second pass is a
+                # no-op since its token input is a _make_token call by then.
+                if cond_module not in unlifted_while_loop_conds:
+                    cond_nodes = cond_module.graph.find_nodes(op="placeholder")
+                    cond_token = cond_nodes[0] if cond_nodes else None
+                    if cond_token is None or cond_token.users:
+                        raise NotImplementedError(
+                            "effects in torch.while_loop cond_fn are not supported"
+                        )
+                    cond_module.graph.erase_node(cond_token)
+                    cond_module.recompile()
+                    unlifted_while_loop_conds.add(cond_module)
+                if body_module not in unlifted_while_loop_bodies:
+                    if not any(
+                        n.op == "call_function"
+                        and (
+                            n.target is torch.ops.higher_order.with_effects
+                            or (
+                                n.target is torch.ops.higher_order.while_loop
+                                and "num_effect_tokens" in n.kwargs
+                            )
+                        )
+                        for n in body_module.graph.nodes
+                    ):
+                        raise AssertionError(
+                            f"while_loop body {body_node.target} is marked with "
+                            "num_effect_tokens=1 but contains no with_effects "
+                            "nodes and no tokenized inner while_loop; effect "
+                            "detection and emission disagree"
+                        )
+                    _unlift_tokens_from_module_helper(
+                        body_module,
+                        f"{subgraph_str}_{body_node.target}",
+                        num_effect_tokens,
+                    )
+                    unlifted_while_loop_bodies.add(body_module)
+
+                token, *non_token_args = carried_inputs
+                inner_kwargs = dict(node.kwargs)
+                del inner_kwargs["num_effect_tokens"]
+                with module.graph.inserting_before(node):
+                    new_node = module.graph.call_function(
+                        torch.ops.higher_order.with_effects,
+                        # pyrefly: ignore [bad-argument-type]
+                        (
+                            token,
+                            torch.ops.higher_order.while_loop,
+                            cond_node,
+                            body_node,
+                            type(carried_inputs)(non_token_args),
+                            additional_inputs,
+                        ),
+                        inner_kwargs,
+                    )
+                    node.replace_all_uses_with(new_node)
+                    new_node.meta = node.meta
+                    module.graph.erase_node(node)
+                if isinstance(token, torch.fx.Node) and token.op == "placeholder":
+                    input_token_nodes.add(token)
+                    replace_input_token_with_make_token(module, token)
+                output_token_nodes |= get_output_tokens(new_node)
 
         if not output_token_nodes and not input_token_nodes:
             return

@@ -356,6 +356,12 @@ def _extract_subgraphs_and_args(
         subgraph_args = (*args[2], *args[3])
         yield args[0], subgraph_args
         yield args[1], subgraph_args
+    elif (
+        node.target is torch.ops.higher_order.with_effects
+        and args[1] is torch.ops.higher_order.while_loop
+    ):
+        yield args[2], (*args[4], *args[5])
+        yield args[3], (*args[4], *args[5])
     elif node.target is torch.ops.higher_order.switch:
         # args: (index, [branch_gm_0, ...], operands)
         subgraph_args = tuple(args[2])
