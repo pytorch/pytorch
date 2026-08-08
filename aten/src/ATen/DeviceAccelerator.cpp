@@ -81,6 +81,7 @@ c10::DeviceIndex deviceCount() {
 }
 
 void setDeviceIndex(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   impl.setDevice({device_type, device_index});
@@ -105,12 +106,14 @@ void setCurrentStream(c10::Stream stream) {
 }
 
 c10::Stream getCurrentStream(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getStream({device_type, device_index});
 }
 
 void synchronizeDevice(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   // impl.synchronizeDevice should can be safely called from any device
@@ -118,12 +121,14 @@ void synchronizeDevice(c10::DeviceIndex device_index) {
 }
 
 c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.exchangeDevice({device_type, device_index}).index();
 }
 
 c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   // Avoid creating a new context if the context for the given device_index
@@ -133,6 +138,7 @@ c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index) {
 }
 
 c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getDeviceCapability({device_type, device_index});
@@ -144,6 +150,7 @@ void emptyHostCache() {
 }
 
 const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
+  detail::checkDeviceIndex(device_index);
   const auto device_type = getAccelerator(true).value();
   return at::globalContext()
       .getAcceleratorHooksInterface(device_type)

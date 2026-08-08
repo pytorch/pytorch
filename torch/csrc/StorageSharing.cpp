@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/Device.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
@@ -31,6 +32,22 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <atomic>
 #include <string>
+
+#ifdef USE_CUDA
+static c10::DeviceIndex THPStorage_unpackSharedCudaDeviceIndex(PyObject* obj) {
+  const auto device_index = THPUtils_unpackLong(obj);
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+#endif
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
@@ -446,8 +463,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
-  const auto device = c10::checked_convert<c10::DeviceIndex>(
-      THPUtils_unpackLong(_device), "c10::DeviceIndex");
+  const auto device = THPStorage_unpackSharedCudaDeviceIndex(_device);
   at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {

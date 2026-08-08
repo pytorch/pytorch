@@ -16,6 +16,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/irange.h>
@@ -23,6 +24,23 @@
 #include <iostream>
 
 namespace torch::autograd::profiler {
+
+namespace {
+
+c10::DeviceIndex checkedLegacyProfilerDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+} // namespace
 
 // We decompose the profiler logic into the following components:
 //
@@ -523,7 +541,7 @@ void LegacyEvent::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
       ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
       ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
-      c10::DeviceIndex(
+      checkedLegacyProfilerDeviceIndex(
           ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt()), // device
       static_cast<double>(
           ivalues.get(EventIValueIdx::CUDA_US).toInt()) // cuda_us

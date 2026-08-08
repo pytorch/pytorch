@@ -1603,8 +1603,7 @@ auto Engine::ready_queue(
   } else {
     TORCH_INTERNAL_ASSERT(
         0 <= device.index() &&
-        device.index() <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
+        device.index() < static_cast<int64_t>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device.index());
   }
@@ -1620,8 +1619,7 @@ auto Engine::ready_queue_by_index(
   } else {
     TORCH_INTERNAL_ASSERT(
         0 <= device_index &&
-        device_index <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
+        device_index < static_cast<int64_t>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU
     // thread per device, rather than colocate.

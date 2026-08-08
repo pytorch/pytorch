@@ -4,7 +4,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarType.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/utils/ParamsHash.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -272,10 +271,14 @@ using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
     std::vector<std::vector<std::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
-using FlatMap = std::unordered_map<
-    DeviceDtypeKey,
-    TensorsAndIndicesT,
-    ParamsHash<DeviceDtypeKey>>;
+struct DeviceDtypeKeyHash {
+  std::size_t operator()(const DeviceDtypeKey& key) const noexcept {
+    return std::hash<at::Device>{}(key.first) ^
+        std::hash<at::ScalarType>{}(key.second);
+  }
+};
+using FlatMap =
+    std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, DeviceDtypeKeyHash>;
 
 inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
     const nested_optional_tensorvec_t& nested_tensorlist,

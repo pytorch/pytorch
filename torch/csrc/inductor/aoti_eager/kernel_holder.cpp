@@ -16,6 +16,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/core/jit_type.h>
+#include <c10/core/Device.h>
 
 namespace torch::inductor {
 
@@ -328,7 +329,16 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     // Access the fields of each metadata dict
     auto is_dynamic = metadata["is_dynamic"].cast<bool>();
     auto device_type = metadata["device_type"].cast<std::string>();
-    auto device_index = metadata["device_index"].cast<int8_t>();
+    auto device_index = metadata["device_index"].cast<int64_t>();
+    TORCH_CHECK(
+        device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+        "Device index ",
+        device_index,
+        " is out of range for DeviceIndex [",
+        -1,
+        ", ",
+        c10::Device::MAX_NUM_DEVICES - 1,
+        "]");
     auto data_type_obj = metadata["dtype"].cast<py::object>();
     TORCH_INTERNAL_ASSERT(THPDtype_Check(data_type_obj.ptr()));
     auto data_type =
@@ -341,7 +351,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     auto dispatch_key_set = c10::DispatchKeySet(
         c10::DispatchKeySet::RAW, dispatch_key_set_raw_repr);
     auto device = c10::Device(device_type);
-    device.set_index(device_index);
+    device.set_index(static_cast<c10::DeviceIndex>(device_index));
 
     auto tensor_metadata = TensorMetadata(
         is_dynamic,
@@ -447,8 +457,18 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         auto device = c10::Device(device_type_value);
         if (!Py_IsNone(metadata["device_index_value"].ptr())) {
           auto device_index_value =
-              metadata["device_index_value"].cast<c10::DeviceIndex>();
-          device.set_index(device_index_value);
+              metadata["device_index_value"].cast<int64_t>();
+          TORCH_CHECK(
+              device_index_value >= -1 &&
+                  device_index_value < c10::Device::MAX_NUM_DEVICES,
+              "Device index ",
+              device_index_value,
+              " is out of range for DeviceIndex [",
+              -1,
+              ", ",
+              c10::Device::MAX_NUM_DEVICES - 1,
+              "]");
+          device.set_index(static_cast<c10::DeviceIndex>(device_index_value));
         }
         parameter_metadata_list.emplace_back(device, arg_idx);
       } else if (is_layout) {

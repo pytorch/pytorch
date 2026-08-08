@@ -1,6 +1,7 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/core/Device.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -15,6 +16,19 @@
 namespace c10d {
 
 namespace {
+
+c10::DeviceIndex checkedDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 const std::map<c10::DeviceType, ucc_memory_type_t> ucc_mtype_map = {
     {c10::kCPU, UCC_MEMORY_TYPE_HOST},
@@ -1190,14 +1204,15 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::barrier(const BarrierOptions& opts) {
 #ifdef USE_CUDA
   auto numGPUs = c10::cuda::device_count();
   if (!opts.device_ids.empty()) {
-    device = c10::Device(c10::DeviceType::CUDA, opts.device_ids.front());
+    device = c10::Device(
+        c10::DeviceType::CUDA, checkedDeviceIndex(opts.device_ids.front()));
   } else if (comm && comm->cuda_device_index != TORCH_UCC_DEVICE_NOT_SET) {
     device = c10::Device(c10::DeviceType::CUDA, comm->cuda_device_index);
   } else if (numGPUs > 0) {
-    int8_t deviceIdx = static_cast<int8_t>(c10::cuda::current_device());
+    c10::DeviceIndex deviceIdx = c10::cuda::current_device();
     // if current device is 0, likely the device is not set, use the best guess
     if (0 == (int)deviceIdx) {
-      deviceIdx = static_cast<int8_t>(this->getRank() % numGPUs);
+      deviceIdx = static_cast<c10::DeviceIndex>(this->getRank() % numGPUs);
     }
     TORCH_UCC_LOG_INFO(
         TORCH_UCC_COLL_POST,

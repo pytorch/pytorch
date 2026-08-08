@@ -6,12 +6,26 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
+#include <c10/core/Device.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cuda_runtime_api.h>
 #include <structmember.h>
 
 PyObject* THCPStreamClass = nullptr;
+
+static c10::DeviceIndex checked_stream_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= -1 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      -1,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 static PyObject* THCPStream_pynew(
     PyTypeObject* type,
@@ -78,7 +92,7 @@ static PyObject* THCPStream_pynew(
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
             stream_id,
-            static_cast<c10::DeviceIndex>(device_index),
+            checked_stream_device_index(device_index),
             static_cast<c10::DeviceType>(device_type))
       : stream_ptr_provided ? at::cuda::getStreamFromExternal(
                                   // NOLINTNEXTLINE(performance-no-int-to-ptr)

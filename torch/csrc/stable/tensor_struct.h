@@ -9,6 +9,7 @@
 #include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
+#include <limits>
 #include <memory>
 
 #include <torch/csrc/stable/accelerator.h>
@@ -61,7 +62,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   Tensor() {
-    AtenTensorHandle ret;
+    AtenTensorHandle ret{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
     ath_ = std::shared_ptr<AtenTensorOpaque>(ret, [](AtenTensorHandle ath) {
       STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
@@ -125,7 +126,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   void* data_ptr() const {
-    void* data_ptr;
+    void* data_ptr{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
@@ -207,7 +208,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   int64_t dim() const {
-    int64_t dim;
+    int64_t dim{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(ath_.get(), &dim));
     return dim;
   }
@@ -220,7 +221,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   int64_t numel() const {
-    int64_t numel;
+    int64_t numel{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
     return numel;
   }
@@ -242,7 +243,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   IntHeaderOnlyArrayRef sizes() const {
-    int64_t* sizes;
+    int64_t* sizes{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &sizes));
     return IntHeaderOnlyArrayRef(sizes, dim());
   }
@@ -258,7 +259,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   IntHeaderOnlyArrayRef strides() const {
-    int64_t* strides;
+    int64_t* strides{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &strides));
     return IntHeaderOnlyArrayRef(strides, dim());
   }
@@ -275,7 +276,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   bool is_contiguous() const {
-    bool is_contiguous;
+    bool is_contiguous{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_is_contiguous(ath_.get(), &is_contiguous));
     return is_contiguous;
@@ -290,7 +291,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   int64_t stride(int64_t dim) const {
-    int64_t stride;
+    int64_t stride{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_stride(ath_.get(), dim, &stride));
     return stride;
@@ -301,7 +302,7 @@ class Tensor {
   // range of int8_t.
   /// \private
   int8_t get_device() const {
-    int32_t device_index;
+    int32_t device_index{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
     STD_TORCH_CHECK(
@@ -314,8 +315,7 @@ class Tensor {
   // The same as get_device but with two differences:
   // 1. it has a more suiting name
   // 2. it returns a DeviceIndex, which is int32_t in this world
-  //    that should be more stable than the likely shifting
-  //    DeviceIndex in libtorch (it is int8_t that might become int16_t)
+  //    that should be more stable than DeviceIndex in libtorch
   /**
    * @brief Returns the device index of the tensor.
    *
@@ -324,7 +324,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   DeviceIndex get_device_index() const {
-    int32_t device_index;
+    int32_t device_index{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
     return device_index;
@@ -338,7 +338,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cuda() const {
-    int32_t device_type;
+    int32_t device_type{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cuda();
@@ -352,7 +352,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cpu() const {
-    int32_t device_type;
+    int32_t device_type{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cpu();
@@ -367,7 +367,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   int64_t size(int64_t dim) const {
-    int64_t size;
+    int64_t size{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
     return size;
   }
@@ -380,7 +380,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   bool defined() const {
-    bool defined;
+    bool defined{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
   }
@@ -414,7 +414,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   int64_t storage_offset() const {
-    int64_t storage_offset;
+    int64_t storage_offset{};
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_storage_offset(ath_.get(), &storage_offset));
     return storage_offset;
@@ -428,7 +428,7 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   size_t element_size() const {
-    int32_t dtype;
+    int32_t dtype{};
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
     return aoti_torch_dtype_element_size(dtype);
   }

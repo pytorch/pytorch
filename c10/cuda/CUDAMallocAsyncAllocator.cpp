@@ -882,6 +882,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> /*filter*/) override {
+    assertValidDevice(device);
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
@@ -927,6 +928,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    assertValidDevice(device);
     // Q: Do we need to do anything special here, like clear long-lived
     //    pointers created during the original capture (for example,
     //    tensors intended as the graph's I/O surface) that might still

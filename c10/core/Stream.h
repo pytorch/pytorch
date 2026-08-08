@@ -138,21 +138,20 @@ class C10_API Stream final {
   // the stream is in capture mode, false otherwise.
   bool is_capturing() const;
 
-  // The purpose of this function is to more conveniently permit binding
-  // of Stream to and from Python.  Without packing, I have to setup a whole
-  // class with two fields (device and stream id); with packing I can just
-  // store a single uint64_t.
-  //
-  // The particular way we pack streams into a uint64_t is considered an
-  // implementation detail and should not be relied upon.
+  // The particular way we hash streams is considered an implementation detail
+  // and should not be relied upon.
   uint64_t hash() const noexcept {
-    // Concat these together into a 64-bit integer
-    uint64_t bits = static_cast<uint64_t>(device_type()) << 56 |
-        static_cast<uint64_t>(device_index()) << 48 |
-        // Remove the sign extension part of the 64-bit address because
-        // the id might be used to hold a pointer.
-        (static_cast<uint64_t>(id()) & ((1ull << 48) - 1));
-    return bits;
+    static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    auto combine = [](size_t seed, size_t value) {
+      return seed ^ (value + 0x9e3779b9 + (seed << 6u) + (seed >> 2u));
+    };
+    auto seed = std::hash<StreamId>{}(id());
+    seed = combine(
+        seed, std::hash<uint16_t>{}(static_cast<uint16_t>(device_index())));
+    seed = combine(
+        seed, std::hash<uint8_t>{}(static_cast<uint8_t>(device_type())));
+    return static_cast<uint64_t>(seed);
   }
 
   struct StreamData3 pack3() const {

@@ -8,6 +8,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 
+#include <cstdint>
 #include <utility>
 
 namespace c10 {
@@ -85,6 +86,7 @@ namespace impl {
 // Additionally, we support lists, dicts and optionals containing these types.
 using supported_primitive_arg_types = guts::typelist::typelist<
     int64_t,
+    int8_t,
     double,
     bool,
     std::string_view,

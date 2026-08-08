@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/Device.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -23,6 +24,19 @@
 namespace c10d::nccl2 {
 
 namespace {
+
+c10::DeviceIndex checkedDeviceIndex(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 std::vector<uint64_t> normalizeSplitSizes(
     const std::vector<int64_t>& split_sizes,
@@ -632,8 +646,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::barrier(
     at::Device dev = at::Device(
         at::kCUDA, static_cast<c10::DeviceIndex>(getRank() % device_count));
     if (!opts.device_ids.empty()) {
-      dev = at::Device(
-          at::kCUDA, static_cast<c10::DeviceIndex>(opts.device_ids[0]));
+      dev = at::Device(at::kCUDA, checkedDeviceIndex(opts.device_ids[0]));
     } else if (getBoundDeviceId().has_value()) {
       dev = getBoundDeviceId().value();
     }

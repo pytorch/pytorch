@@ -15,6 +15,7 @@
 #include <c10/core/Device.h>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <sstream>
@@ -1857,6 +1858,12 @@ template <>
 struct getTypePtr_<c10::complex<double>> final {
   static decltype(auto) call() {
     return ComplexType::get();
+  }
+};
+template <>
+struct getTypePtr_<int8_t> final {
+  static decltype(auto) call() {
+    return IntType::get();
   }
 };
 template <>

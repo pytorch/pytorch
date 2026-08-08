@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/Device.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
@@ -21,6 +22,19 @@
 namespace torch::cuda {
 using namespace at;
 using namespace torch::autograd;
+
+static DeviceIndex checked_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<DeviceIndex>(device_index);
+}
 
 // Some operations can be performed more efficiently if we're handling tensors
 // of a single type only. Adding this logic directly in the loop makes it a bit
@@ -97,14 +111,12 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
   std::vector<Tensor> diff_device_dst_tensors;
   diff_device_dst_tensors.reserve(devices.size());
   for (auto device : devices) {
-    TORCH_CHECK(
-        device >= 0, "Expected non-negative device index, but got ", device);
-    if (device != tensor.get_device()) {
+    const auto device_index = checked_device_index(device);
+    if (device_index != tensor.get_device()) {
       diff_device_dst_tensors.emplace_back(at::empty(
           tensor.sizes(),
           tensor.options().device(at::Device(
-              DeviceType::CUDA,
-              static_cast<DeviceIndex>(device))))); // preserve memory format
+              DeviceType::CUDA, device_index)))); // preserve memory format
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);
@@ -112,8 +124,9 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
   dst_tensors.reserve(devices.size());
   auto it = diff_device_dst_tensors.begin();
   for (auto device : devices) {
+    const auto device_index = checked_device_index(device);
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (device != tensor.get_device()) {
+    if (device_index != tensor.get_device()) {
       dst_tensors.emplace_back(*it++);
     } else {
       dst_tensors.emplace_back(tensor);
@@ -176,7 +189,7 @@ tensor_list2d broadcast_coalesced(
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(devices[0]));
+  at::cuda::CUDAGuard device_guard(checked_device_index(devices[0]));
   for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
     auto type_id = chunk.type_id();
     type_checker.show(type_id);
@@ -187,7 +200,7 @@ tensor_list2d broadcast_coalesced(
       auto broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        device_guard.set_index(static_cast<DeviceIndex>(devices[i]));
+        device_guard.set_index(checked_device_index(devices[i]));
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
@@ -201,7 +214,7 @@ tensor_list2d broadcast_coalesced(
       auto results = broadcast(
           torch::utils::flatten_dense_tensors(chunk.tensors), devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        device_guard.set_index(static_cast<DeviceIndex>(devices[i]));
+        device_guard.set_index(checked_device_index(devices[i]));
         auto& device_outputs = outputs[i];
         for (auto& var :
              torch::utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
@@ -292,7 +305,7 @@ std::vector<at::Tensor>& scatter_out(
           ") ",
           "to match the device supplied at that index ",
           "(expected ",
-          static_cast<int16_t>(device_index),
+          static_cast<int>(device_index),
           ")");
       cuda_guard.reset_stream(*(*streams)[i]);
     }
@@ -329,7 +342,7 @@ std::vector<at::Tensor> scatter(
             /*chunks=*/static_cast<int64_t>(devices.size()), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (const auto i : c10::irange(chunks.size())) {
-    const auto device_index = static_cast<int16_t>(devices[i]);
+    const auto device_index = checked_device_index(devices[i]);
     if (device_index != tensor.get_device()) {
       if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
         TORCH_CHECK(
@@ -345,10 +358,6 @@ std::vector<at::Tensor> scatter(
             ")");
         cuda_guard.reset_stream(*(*streams)[i]);
       }
-      TORCH_CHECK(
-          device_index >= 0,
-          "Expected non-negative device index, but got ",
-          device_index);
       chunks[i] = chunks[i].to(
           {DeviceType::CUDA, device_index},
           /*non_blocking=*/true,
@@ -488,7 +497,7 @@ at::Tensor gather(
   if (!destination_index || *destination_index != -1) {
     device = at::Device(
         DeviceType::CUDA,
-        destination_index ? static_cast<DeviceIndex>(*destination_index)
+        destination_index ? checked_device_index(*destination_index)
                           : DeviceIndex(-1));
   }
 

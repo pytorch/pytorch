@@ -612,6 +612,11 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.test_device_guard(device_index)
         self.assertEqual(out, device_index)
 
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index 32767 is out of range for DeviceIndex"
+        ):
+            libtorch_agnostic.ops.test_device_guard(32767)
+
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_device_guard_set_index(self, device):
@@ -634,6 +639,10 @@ class TestLibtorchAgnostic(TestCase):
             stream_id = libtorch_agnostic.ops.test_stream(device)
 
         self.assertEqual(stream_id, expected_stream_id)
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index 32767 is out of range for DeviceIndex"
+        ):
+            libtorch_agnostic.ops.test_stream(32767)
 
     @skipIfTorchVersionLessThan(2, 13)
     @onlyCUDA
@@ -855,17 +864,22 @@ class TestLibtorchAgnostic(TestCase):
             libtorch_agnostic.ops.test_device_equality(cpu_device, cuda_device)
         )
 
+        cuda_129_device = libtorch_agnostic.ops.test_device_constructor(
+            is_cuda=True, index=129, use_str=False
+        )
+        self.assertEqual(cuda_129_device, torch.device("cuda:129"))
+
         with self.assertRaisesRegex(
-            RuntimeError, "Device index 129 is out of range for int8_t"
+            RuntimeError, "Device index 32767 is out of range for DeviceIndex"
         ):
             libtorch_agnostic.ops.test_device_constructor(
-                is_cuda=True, index=129, use_str=False
+                is_cuda=True, index=32767, use_str=False
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, "Device index 129 is out of range for int8_t"
+            RuntimeError, "Device index 32767 is out of range for DeviceIndex"
         ):
-            libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
+            libtorch_agnostic.ops.test_device_set_index(cuda_device, 32767)
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA

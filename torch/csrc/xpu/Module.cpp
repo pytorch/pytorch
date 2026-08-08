@@ -16,7 +16,22 @@
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
 #include <torch/csrc/xpu/memory_snapshot.h>
 
+#include <c10/core/Device.h>
+
 using namespace torch;
+
+static c10::DeviceIndex checked_device_index(int64_t device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+      "Device index ",
+      device_index,
+      " is out of range for DeviceIndex [",
+      0,
+      ", ",
+      c10::Device::MAX_NUM_DEVICES - 1,
+      "]");
+  return static_cast<c10::DeviceIndex>(device_index);
+}
 
 // XPU management methods
 
@@ -162,7 +177,7 @@ static PyObject* THXPModule_setStream_wrap(
 
   auto stream = at::xpu::XPUStream::unpack3(
       stream_id,
-      static_cast<c10::DeviceIndex>(device_index),
+      checked_device_index(device_index),
       static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::xpu::current_device();
@@ -432,40 +447,42 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](c10::DeviceIndex device) -> c10::xpu::DeviceProp* {
-        return at::xpu::getDeviceProperties(device);
+      [](int64_t device) -> c10::xpu::DeviceProp* {
+        return at::xpu::getDeviceProperties(checked_device_index(device));
       },
       py::return_value_policy::reference);
 }
 
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+  m.def("_xpu_getMemoryInfo", [](int64_t device_index) {
     py::gil_scoped_release no_gil;
-    return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
+    return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(
+        checked_device_index(device_index));
   });
   m.def(
       "_xpu_getStreamFromExternal",
-      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+      [](uintptr_t data_ptr, int64_t device_index) {
         sycl::queue* ext_queue =
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             reinterpret_cast<sycl::queue*>(reinterpret_cast<void*>(data_ptr));
-        at::xpu::XPUStream stream =
-            c10::xpu::getStreamFromExternal(ext_queue, device_index);
+        at::xpu::XPUStream stream = c10::xpu::getStreamFromExternal(
+            ext_queue, checked_device_index(device_index));
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
-  m.def(
-      "_xpu_canDeviceAccessPeer",
-      [](c10::DeviceIndex device, c10::DeviceIndex peer) {
-        return at::xpu::canDeviceAccessPeer(device, peer);
-      });
-  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
-  m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
-    return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
+  m.def("_xpu_canDeviceAccessPeer", [](int64_t device, int64_t peer) {
+    return at::xpu::canDeviceAccessPeer(
+        checked_device_index(device), checked_device_index(peer));
   });
-  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
-    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  m.def("_xpu_sleep", [](uint64_t cycles) { at::xpu::sleep(cycles); });
+  m.def("_xpu_getMemoryFraction", [](int64_t device) {
+    return c10::xpu::XPUCachingAllocator::getMemoryFraction(
+        checked_device_index(device));
+  });
+  m.def("_xpu_setMemoryFraction", [](double fraction, int64_t device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(
+        fraction, checked_device_index(device));
   });
   m.def("_xpu_memorySnapshot", [](std::optional<c10::MempoolId_t> mempool_id) {
     using c10::CachingDeviceAllocator::BlockInfo;
@@ -633,24 +650,26 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_recordMemoryHistory", &torch::xpu::_record_memory_history);
   m.def(
       "_xpu_beginAllocateCurrentThreadToPool",
-      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+      [](int64_t device, at::xpu::MempoolId_t mempool_id) {
+        const auto device_index = checked_device_index(device);
         auto tid = std::this_thread::get_id();
 
         c10::xpu::XPUCachingAllocator::beginAllocateToPool(
-            device, mempool_id, [=](sycl::queue*) {
+            device_index, mempool_id, [=](sycl::queue*) {
               auto current_tid = std::this_thread::get_id();
               return current_tid == tid;
             });
       });
   m.def(
       "_xpu_endAllocateToPool",
-      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
-        c10::xpu::XPUCachingAllocator::endAllocateToPool(device, mempool_id);
+      [](int64_t device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::endAllocateToPool(
+            checked_device_index(device), mempool_id);
       });
   m.def(
-      "_xpu_releasePool",
-      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
-        c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
+      "_xpu_releasePool", [](int64_t device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::releasePool(
+            checked_device_index(device), mempool_id);
       });
 }
 
