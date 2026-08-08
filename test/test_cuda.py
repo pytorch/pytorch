@@ -528,6 +528,12 @@ print(t.is_pinned())
         with self.assertRaisesRegex(ValueError, "Invalid memory size"):
             torch.cuda.memory.caching_allocator_alloc(-1024)
 
+    def test_caching_allocator_alloc_non_integer_size(self):
+        with self.assertRaisesRegex(TypeError, "integer"):
+            torch.cuda.memory.caching_allocator_alloc(1.5)
+        with self.assertRaisesRegex(TypeError, "integer"):
+            torch.cuda.memory.caching_allocator_alloc(torch.tensor(1))
+
     def test_memory_metadata_supported(self):
         # The native caching allocator records user metadata; cudaMallocAsync
         # (and pluggable allocators) do not.
