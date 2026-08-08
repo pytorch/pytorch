@@ -12,9 +12,12 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    Capability,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import skipIfWindows, HardwareClassification
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -27,6 +30,8 @@ from torch.testing._internal.logging_utils import logs_to_string
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -1091,11 +1096,10 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "Platform does not support efficient attention",
-    )
+    @requires_capabilities(Capability.attention.mem_efficient_attention)
     def test_no_recompilations_with_efficient_attention(self, device):
         if self.device_type == "cpu":
             raise unittest.SkipTest("EFFICIENT_ATTENTION requires a non-CPU device")
