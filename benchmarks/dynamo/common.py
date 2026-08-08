@@ -711,7 +711,7 @@ def timed(
 
     time_total = 0
     # Dont collect outputs to correctly measure timing
-    for i in range(times):
+    for _i in range(times):
         # If batch_size is 1, it too often collides with other non batch size
         # dimensions resulting in errors.
         if batch_size and batch_size > 1:
@@ -1296,7 +1296,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
     timings = np.zeros((args.repeat, len(models)), np.float64)
     timings.fill(1.0e10)
     for rep in range(args.repeat):
-        for idx, (name, model) in enumerate(models):
+        for idx, (_name, model) in enumerate(models):
             if model is not None:
                 try:
                     timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
@@ -1308,7 +1308,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
     ]
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1:]
-    for idx, (name, model) in enumerate(models[1:]):
+    for idx, (_name, model) in enumerate(models[1:]):
         if model is None:
             speedup[idx] = 0.0
     result = " ".join(

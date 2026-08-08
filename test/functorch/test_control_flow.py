@@ -77,7 +77,7 @@ def _check_compile_cudagraph_backend(test_case, fn, args):
     # 3 and beyond) do graph replay
     # So we need to get to iteration 3 to test all ways of running.
     outputs = []
-    for i in range(3):
+    for _i in range(3):
         with check_cudagraphs_not_skipped(test_case):
             torch.compiler.cudagraph_mark_step_begin()
             outputs.append(

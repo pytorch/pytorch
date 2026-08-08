@@ -41,7 +41,7 @@ class Benchmark(BenchmarkBase):
         )
         def f(a, b):
             z = torch.mm(a, b)
-            for i in range(200):
+            for _i in range(200):
                 z = torch.mm(z, b)
             return z
 

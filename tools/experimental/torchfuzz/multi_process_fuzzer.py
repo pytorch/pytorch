@@ -586,7 +586,7 @@ def run_until_failure(
                     pbar = None
 
                 # Collect results as they complete
-                for seed, future in future_results:
+                for _seed, future in future_results:
                     result: FuzzerResult = future.get()
 
                     if result.ignored_pattern_idx != -1:

@@ -475,7 +475,7 @@ external = [
 ]
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
-    "B007", "B008", "B017",
+    "B008", "B017",
     "B018", # Useless expression
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found
@@ -587,6 +587,14 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# B007 (unused loop control variable) is enabled repo-wide, but these files
+# carry pre-existing ruff-format (PYFMT) debt; reformatting them is out of
+# scope for enabling B007, so it stays suppressed here until they are
+# reformatted.
+"test/test_datapipe.py" = ["B007"]
+"test/test_mps.py" = ["B007"]
+"test/test_sparse_csr.py" = ["B007"]
+"test/quantization/fx/test_quantize_fx.py" = ["B007"]
 "__init__.py" = [
     "F401",
 ]
