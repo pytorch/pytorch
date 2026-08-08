@@ -111,6 +111,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_utils import JitTestCase
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 pytree_modules = {
     "python": python_pytree,
 }
@@ -813,7 +818,7 @@ graph():
 
         res = add_fn(2, 3, torch.tensor(0.0))
         add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
-        res_compiled = add_fn(2, 3, torch.tensor(0.0))
+        res_compiled = add_fn(2, 3, torch.tensor(0.0, device=device_type))
         self.assertEqual(res, res_compiled)
 
     def test_callpacked(self):
@@ -1157,7 +1162,7 @@ graph():
             return y
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
-        x = torch.ones(5)
+        x = torch.ones(5, device=device_type)
 
         res = opt_f(x)
         ref = f(x)
@@ -4639,9 +4644,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         shapes = [(2, 1), (6, 1), (4, 1)]
         for shape in shapes:
             vec1, vec2 = shape
-            input_tensor1 = torch.randn(vec1)
-            input_tensor2 = torch.randn(vec2)
-            out_tensor = torch.empty(shape)
+            input_tensor1 = torch.randn(vec1, device=device_type)
+            input_tensor2 = torch.randn(vec2, device=device_type)
+            out_tensor = torch.empty(shape, device=device_type)
             args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
             res = compile_fn(args)
             opt_res = res.clone()  # cuz this is out and we mutate it
@@ -8367,14 +8372,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log,
             torch._dynamo.config.patch(verbose=True),
         ):
-            f1(torch.randn(10), torch.randn(10))
+            f1(torch.randn(10, device=device_type), torch.randn(10, device=device_type))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
         with (
             self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log,
             torch._dynamo.config.patch(verbose=False),
         ):
-            g1(torch.randn(10), torch.randn(10))
+            g1(torch.randn(10, device=device_type), torch.randn(10, device=device_type))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
 
         # reset logging state
@@ -14382,7 +14387,7 @@ ShapeEnv not equal: field values don't match:
             [True, False], [True, False]
         ):
             torch.use_deterministic_algorithms(forward_deterministic)
-            a = torch.randn(10, requires_grad=True)
+            a = torch.randn(10, requires_grad=True, device=device_type)
             res = func(a, 1)
             grad = torch.ones_like(res)
             torch.use_deterministic_algorithms(backward_deterministic)
@@ -15200,8 +15205,8 @@ fn
         ref_y = torch.clone(z).detach()
         ref_x_grad = torch.clone(x.grad).detach()
 
-        y = torch.arange(4).reshape(2, 2).to(torch.float)
-        x = torch.randn(2, 2)
+        y = torch.arange(4, device=device_type).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2, device=device_type)
         x.grad = None
 
         opt_fn = torch.compile(fn, backend="eager")
@@ -16483,7 +16488,7 @@ fn
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     def test_new_tensor_break(self):
-        a = torch.tensor([1, 0, 0, 5])
+        a = torch.tensor([1, 0, 0, 5], device=device_type)
 
         cases = {
             "scalar": lambda a: a.new_tensor([a.nonzero().squeeze(-1).numel()]),
@@ -16839,7 +16844,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             x.requires_grad_()
             return (x * 2).sum()
 
-        x_ref = torch.randn(3, 3)
+        x_ref = torch.randn(3, 3, device=device_type)
         x_test = x_ref.clone()
 
         fn(x_ref).backward()
@@ -16984,8 +16989,8 @@ def forward(self, L_x_ : torch.Tensor):
             h.backward(x_detached.grad)
             return x.grad, total_loss
 
-        x_ref = torch.randn(4, 8, requires_grad=True)
-        targets = torch.randint(0, 8, (4,))
+        x_ref = torch.randn(4, 8, requires_grad=True, device=device_type)
+        targets = torch.randint(0, 8, (4,), device=device_type)
 
         x_test = x_ref.clone().detach().requires_grad_(True)
         ref_grad, ref_loss = fn(x_ref, targets)
@@ -17875,10 +17880,10 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
             res.add_(1.0)
             return res.sum()
 
-        inp1_custom = torch.randn(4, 1, 2, requires_grad=True)
+        inp1_custom = torch.randn(4, 1, 2, requires_grad=True, device=device_type)
         inp1_usual = inp1_custom.detach().clone().requires_grad_(True)
 
-        inp2 = torch.randn(2, 4)
+        inp2 = torch.randn(2, 4, device=device_type)
         c_custom_func = torch.compile(outer_function, backend="eager")
         c_usual_func = torch.compile(usual_function, backend="eager")
 
