@@ -345,6 +345,8 @@ class MemoryTracker:
         self.nodes = list(graph.nodes)
         self.device_filter = device_filter or (lambda device: device.type != "cpu")
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
+        # False in NoOpMemoryTracker, whose zeros are not measurements.
+        self.tracks_memory = True
 
         # Memory tracking using GraphAliasTracker
         self.alias_tracker = GraphAliasTracker(self.nodes)
@@ -452,3 +454,27 @@ class MemoryTracker:
             len(storages_to_free),
             self.current_memory_bytes // (1024 * 1024),
         )
+
+
+class NoOpMemoryTracker(MemoryTracker):
+    """
+    MemoryTracker that always reports zero memory and does no bookkeeping.
+
+    Building a real tracker walks every storage in the graph, which is pure
+    overhead for a caller that set no memory budget. Using this instead lets
+    such a caller keep an always-present tracker rather than ``None``.
+
+    Only ``tracks_memory``, ``current_memory_bytes``, ``get_current_memory_bytes``,
+    ``peak_memory`` and ``schedule_node`` are meaningful; the inherited
+    per-node accounting has no state to work from. ``tracks_memory`` is False so
+    callers can tell the zeros apart from a measured zero. Overriding
+    ``schedule_node`` also drops the parent's scheduled-twice assertion, which is
+    safe because ``OverlapScheduler._schedule`` makes that check itself.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(fx.Graph())
+        self.tracks_memory = False
+
+    def schedule_node(self, node: fx.Node) -> None:
+        pass

@@ -23,7 +23,7 @@ from torch._inductor.fx_passes.bucketing import (
     get_full_bucket_key,
     is_wait_tensor,
 )
-from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._inductor.fx_passes.memory_estimator import MemoryTracker, NoOpMemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import optimization_hint
@@ -528,7 +528,12 @@ class OverlapScheduler:
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+            self.memory_tracker = NoOpMemoryTracker()
+            # _compute_baseline_memory() did not run, so fill the per-compute-index
+            # baseline that _prefetch_would_exceed_memory_budget indexes. Zero
+            # baselines keep its budget check vacuous against sys.maxsize while
+            # its in-flight check still applies.
+            self.original_mem_before_compute_index = [0] * len(self.compute_nodes)
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
@@ -1612,19 +1617,25 @@ class OverlapScheduler:
         counters["inductor"]["overlap_scheduling_potentially_hidden"] += len(
             potentially_hidden_collectives
         )
-        counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
-        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+        # With no cap the tracker is inert, so a 0 here would read as a measured
+        # peak rather than an absent measurement.
+        tracked = self.memory_tracker.tracks_memory
+        if tracked:
+            counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
+            counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
 
+        orig_mem = self.original_peak_memory if tracked else "n/a"
+        resched_mem = self.memory_tracker.peak_memory if tracked else "n/a"
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
-            "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
+            "original_peak_memory=%s bytes, rescheduled_peak_memory=%s bytes, "
             "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
             "wasted_compute_ms=%.2f",
             len(exposed),
             len(bad_exposed),
             len(potentially_hidden_collectives),
-            self.original_peak_memory,
-            self.memory_tracker.peak_memory,
+            orig_mem,
+            resched_mem,
             total_exposed,
             hideable_exposed_ms,
             total_potential_exposed,

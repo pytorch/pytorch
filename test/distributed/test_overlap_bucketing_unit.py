@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    subtest,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -1894,6 +1896,158 @@ class TestForeachGroupsUnit(InductorTestCase):
             ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
+
+
+_NO_MEMORY_CAPS = {
+    "max_memory_increase_gb": None,
+    "max_memory_increase_ratio": None,
+}
+
+
+@unittest.skipIf(not dist.is_available(), "requires distributed")
+@instantiate_parametrized_tests
+class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
+    """
+    Both memory caps set to None is the documented "no limit" configuration, so
+    it must schedule as if the budget were unbounded rather than raise.
+
+    Deliberately not gated on an accelerator (like TestBitsetAncestors): a fake
+    process group plus a patched DRAM bandwidth keeps this on CPU, so it runs
+    everywhere rather than skipping.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def _make_gm(self):
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(a, b):
+            # mm can hide the collective; mm_1 is blocked by it, so the prefetch
+            # memory-budget check runs over a real compute index.
+            mm = torch.mm(a, b)
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(b, 4, group_name)
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            mm_1 = torch.mm(ag_out, ag_out.t())
+            return mm.sum() + mm_1.sum()
+
+        return make_fx(func, tracing_mode="fake")(
+            torch.randn(64, 256), torch.randn(256, 256)
+        )
+
+    def _schedule(self, **caps):
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            # Pin every estimate so the hiding decision is independent of the
+            # host's roofline numbers.
+            if "all_gather" in str(node.target):
+                return 1.0
+            if node.target is torch.ops.aten.mm.default:
+                return 10.0
+            return 0.0
+
+        counters.clear()
+        gm = self._make_gm()
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_gpu_dram_gbps", return_value=1_000
+        ):
+            schedule_overlap_bucketing(
+                gm,
+                custom_runtime_estimation=custom_runtime,
+                compute_estimator="analytical",
+                # Pre-bucketing sizes its buckets from the detected interconnect,
+                # so leaving it on would make the assertions host-dependent.
+                pre_bucketing_fsdp_collectives=False,
+                **caps,
+            )
+        return [n.name for n in gm.graph.nodes]
+
+    @parametrize(
+        "caps,expect_overlap",
+        [
+            # Only both_none takes the no-memory-tracking branch; the rest are
+            # controls pinning that each cap combination still decides as it did.
+            subtest(({}, True), name="defaults"),
+            # Ratio-only: the budget is baseline * 0.05, and these graphs trace CPU
+            # tensors, which MemoryTracker's default device_filter excludes. So the
+            # baseline is 0, the budget is 0, and every prefetch is refused.
+            subtest(({"max_memory_increase_gb": None}, False), name="gb_none"),
+            subtest(({"max_memory_increase_ratio": None}, True), name="ratio_none"),
+            subtest((_NO_MEMORY_CAPS, True), name="both_none"),
+        ],
+    )
+    def test_memory_caps_schedule(self, caps, expect_overlap):
+        node_names = self._schedule(**caps)
+        ag = node_names.index("all_gather_into_tensor")
+        # Overlapped means the collective is hoisted above the mm that hides it.
+        self.assertEqual(ag < node_names.index("mm"), expect_overlap)
+        self.assertLess(ag, node_names.index("wait_tensor"))
+        exposed = 0 if expect_overlap else 1
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], exposed)
+
+    def test_both_none_matches_unbounded_budget(self):
+        """
+        Both caps None must behave like an explicitly enormous budget, not merely
+        avoid crashing: the collective is still prefetched ahead of the compute
+        that hides it, so nothing is left exposed.
+        """
+        both_none = self._schedule(**_NO_MEMORY_CAPS)
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+        self.assertEqual(
+            counters["inductor"]["overlap_scheduling_potentially_hidden"], 1
+        )
+        self.assertLess(
+            both_none.index("all_gather_into_tensor"), both_none.index("mm")
+        )
+
+        huge_budget = self._schedule(
+            max_memory_increase_gb=1e6, max_memory_increase_ratio=None
+        )
+        self.assertEqual(both_none, huge_budget)
+
+    def test_no_memory_limit_tracker_is_inert(self):
+        from torch._inductor.fx_passes.memory_estimator import (
+            MemoryTracker,
+            NoOpMemoryTracker,
+        )
+
+        tracker = NoOpMemoryTracker()
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        # A node the tracker never saw: the real MemoryTracker raises KeyError
+        # here, which is why schedule_node is overridden rather than inherited.
+        foreign = graph.call_function(torch.ops.aten.mm.default, (x, x))
+        tracker.schedule_node(foreign)
+        tracker.schedule_node(foreign)  # no "scheduled twice" bookkeeping
+        self.assertEqual(tracker.current_memory_bytes, 0)
+        self.assertEqual(tracker.get_current_memory_bytes(), 0)
+        self.assertEqual(tracker.peak_memory, 0)
+        # Its zeros must be distinguishable from a measured zero, or the memory
+        # counters get reported as if they had been measured.
+        self.assertFalse(tracker.tracks_memory)
+        self.assertTrue(MemoryTracker(graph).tracks_memory)
+
+    def test_both_none_omits_memory_counters(self):
+        """Inert tracker means no memory counters, rather than a fabricated 0."""
+        self._schedule(**_NO_MEMORY_CAPS)
+        self.assertNotIn("rescheduled_mem", counters["inductor"])
+        self.assertNotIn("overlap_original_mem", counters["inductor"])
+
+        self._schedule(max_memory_increase_gb=1e6)
+        self.assertIn("rescheduled_mem", counters["inductor"])
 
 
 class TestNodeRuntimeEstimationUnit(InductorTestCase):
