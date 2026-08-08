@@ -197,6 +197,56 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
+def _get_device_autocast_classes() -> dict[type, str]:
+    """Autocast classes registered by out-of-tree DeviceInterfaces.
+
+    Not cached: device interfaces may be registered lazily, so we
+    query each time.
+    """
+    from ..device_interface import get_registered_device_interfaces
+
+    result: dict[type, str] = {}
+    for _, iface in get_registered_device_interfaces():
+        ac = getattr(iface, "autocast_classes", None)
+        if ac:
+            result.update(ac)
+    return result
+
+
+def _matches_device_autocast_class(value) -> bool:
+    """Check if `value` is an autocast class belonging to a registered device.
+
+    Handles the multi-path import identity mismatch where the same class
+    loaded via ``torch.npu.amp`` and ``torch_npu.npu.amp`` has different
+    Python identities.  Falls back to comparing source files when the
+    exact object reference does not match.
+    """
+    if not isinstance(value, type):
+        return False
+    if not issubclass(value, torch.amp.autocast_mode.autocast):
+        return False
+    if value is torch.amp.autocast_mode.autocast:
+        return False
+
+    registered = _get_device_autocast_classes()
+    if value in registered:
+        return True
+
+    if not registered:
+        return False
+
+    import inspect
+
+    for ac_cls in registered:
+        try:
+            if inspect.getfile(value) == inspect.getfile(ac_cls):
+                return True
+        except (TypeError, OSError):
+            pass
+
+    return False
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -689,7 +739,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and (
+                    value in supported_ctx_manager_classes
+                    or _matches_device_autocast_class(value)
+                )
             )
         )
 
@@ -812,6 +865,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ):
+            # pyrefly: ignore [bad-argument-type]
+            return AutocastModeVariable.create(self.value, args, kwargs)
+        elif _matches_device_autocast_class(self.value):
+            # Autocast class registered via DeviceInterface.
+            # Handles both exact reference match and multi-path
+            # import identity mismatch (e.g. torch.npu.amp vs
+            # torch_npu.npu.amp returning different Python objects
+            # for the same class).
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (

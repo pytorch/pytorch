@@ -1080,12 +1080,22 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
+        from ..device_interface import get_registered_device_interfaces
+
         if func not in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ]:
-            raise AssertionError(f"unexpected autocast function: {func}")
+            # Also accept autocast subclasses registered via
+            # DeviceInterface.  issubclass handles multi-path import
+            # aliasing where the same class acquires different Python
+            # identities.
+            if not (
+                isinstance(func, type)
+                and issubclass(func, torch.amp.autocast_mode.autocast)
+            ):
+                raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -1102,6 +1112,22 @@ class AutocastModeVariable(ContextWrappingVariable):
             ]:
                 # pyrefly: ignore [unnecessary-comparison]
                 arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
+            elif key == "device_type" and key not in bound_args.arguments:
+                # Out-of-tree device autocast subclass: device_type
+                # is implicit in the subclass constructor.  Resolve
+                # from the DeviceInterface registration by name.
+                arg = None
+                for _, iface in get_registered_device_interfaces():
+                    for ac_cls, dt in getattr(iface, "autocast_classes", {}).items():
+                        if func.__name__ == ac_cls.__name__:
+                            arg = dt
+                            break
+                    if arg is not None:
+                        break
+                if arg is None:
+                    raise AssertionError(
+                        f"Cannot determine device_type for autocast class: {func}"
+                    )
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
