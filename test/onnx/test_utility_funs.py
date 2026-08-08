@@ -12,7 +12,7 @@ import pytorch_test_common
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
-    skipIfNoCuda,
+    skipIfNoAccelerator,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
@@ -25,7 +25,9 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
+device_type = getattr(torch.accelerator.current_accelerator(), "type", None)
 
 def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
     """Remove test environment prefix added to module.
@@ -1797,7 +1799,7 @@ class TestUtilityFuns(_BaseTestCase):
     def test_deduplicate_initializers_torchscript(self):
         self._test_deduplicate_initializers(torchscript=True)
 
-    @skipIfNoCuda
+    @skipIfNoAccelerator
     def test_deduplicate_initializers_diff_devices(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1806,14 +1808,14 @@ class TestUtilityFuns(_BaseTestCase):
                     torch.ones(3, device=torch.device("cpu"))
                 )
                 self.w_cuda = torch.nn.Parameter(
-                    torch.ones(3, device=torch.device("cuda"))
+                    torch.ones(3, device=device_type)
                 )
 
             def forward(self, x, y):
                 return x + self.w_cpu, y + self.w_cuda
 
         x = torch.randn(3, 3, device=torch.device("cpu"))
-        y = torch.randn(3, 3, device=torch.device("cuda"))
+        y = torch.randn(3, 3, device=device_type)
         f = io.BytesIO()
         torch.onnx.export(
             Model(), (x, y), f, opset_version=self.opset_version, dynamo=False
@@ -1929,6 +1931,7 @@ class TestUtilityFuns(_BaseTestCase):
         )
         torch.onnx.unregister_custom_op_symbolic("::cat", _onnx_opset_version)
 
+instantiate_device_type_tests(TestUtilityFuns, globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()
