@@ -24,7 +24,11 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -41,6 +45,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestClipGradNorm(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """Tests :meth:`FullyShardedDataParallel.clip_grad_norm_`."""
 
     @skip_if_lt_x_gpu(2)
@@ -380,9 +386,8 @@ class TestClipGradNorm(FSDPTestContinuous):
         self.assertEqual(total_norm.dtype, torch.float32)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestClipGradNorm, globals(), only_for=devices, allow_xpu=True
+    TestClipGradNorm, globals(), except_for=("cpu",), allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
