@@ -284,7 +284,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
     return true;
+#else
+    return false;
+#endif
   }
   ::c10d::ReconfigureHandle get_reconfigure_handle() const override;
   c10::intrusive_ptr<::c10d::Work> reconfigure(
