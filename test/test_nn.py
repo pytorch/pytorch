@@ -6665,6 +6665,56 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_layer_norm_backwards_multidim_normalized_shape(self):
+        # Regression: with a multi-dim normalized_shape, the two-pass dgamma
+        # kernel (selected when M > 64 * 1024) sized its partial-sum buffer with
+        # normalized_shape[-1] instead of prod(normalized_shape), then rebound
+        # dgamma to the flat sum(0). That both wrote out of bounds and returned
+        # a gradient shaped [normalized_shape[-1]] instead of normalized_shape.
+        dtype = torch.float
+        normalized_shape = (2, 8)
+        # The second condition for selecting that kernel is N // warp_size <
+        # sm_count // 2. Skip rather than silently pass if the device can't meet it.
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        n = math.prod(normalized_shape)
+        if not n // props.warp_size < props.multi_processor_count // 2:
+            self.skipTest(
+                f"two-pass dgamma kernel not selected on this device: "
+                f"{n=} {props.warp_size=} {props.multi_processor_count=}"
+            )
+        for m in (64 * 1024, 64 * 1024 + 1, 66000):
+            x = torch.randn((m, *normalized_shape), dtype=dtype, requires_grad=True)
+            grad_output = torch.rand_like(x)
+            x_cuda = x.clone().detach().to("cuda").requires_grad_()
+            grad_output_cuda = grad_output.clone().detach().to("cuda")
+
+            ln = nn.LayerNorm(normalized_shape, dtype=dtype)
+            ln_cuda = nn.LayerNorm(normalized_shape, device="cuda", dtype=dtype)
+            with torch.no_grad():
+                ln_cuda.weight.copy_(ln.weight)
+                ln_cuda.bias.copy_(ln.bias)
+
+            ln(x).backward(grad_output)
+            ln_cuda(x_cuda).backward(grad_output_cuda)
+
+            self.assertEqual(ln_cuda.weight.grad.shape, normalized_shape)
+            self.assertEqual(ln_cuda.bias.grad.shape, normalized_shape)
+            atol, rtol = (1e-3, 1e-3) if m > 64 * 1024 else (1e-4, 1e-5)
+            self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=}", rtol=rtol, atol=atol)
+            self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=}", rtol=rtol, atol=atol)
+            self.assertEqual(x.grad, x_cuda.grad, lambda msg: f"{msg}\ninput grad failed: {m=}", rtol=rtol, atol=atol)
+
+        # dbeta requested without dgamma: the buffer for dbeta used to be sized
+        # from the (undefined) dgamma tensor.
+        m = 66000
+        x_cuda = torch.randn((m, *normalized_shape), dtype=dtype, device="cuda")
+        ln_cuda = nn.LayerNorm(normalized_shape, device="cuda", dtype=dtype)
+        ln_cuda.weight.requires_grad_(False)
+        ln_cuda(x_cuda).backward(torch.rand_like(x_cuda))
+        self.assertIsNone(ln_cuda.weight.grad)
+        self.assertEqual(ln_cuda.bias.grad.shape, normalized_shape)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
         # test for https://github.com/pytorch/pytorch/issues/136291
