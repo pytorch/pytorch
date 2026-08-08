@@ -107,6 +107,9 @@ std::string get_cpu_capability() {
       return "SVE128";
     case native::CPUCapability::SVE256:
       return "SVE256";
+#elif defined(HAVE_RVV_CPU_DEFINITION)
+    case native::CPUCapability::RVV:
+      return "RVV";
 #else
     case native::CPUCapability::AVX2:
       return "AVX2";
