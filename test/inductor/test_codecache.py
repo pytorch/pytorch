@@ -5654,5 +5654,107 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertNotIn("extra_options", saved_data)
 
 
+@unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+class TestAllGatherBucketCacheKey(TestCase):
+    """
+    Regression tests for https://github.com/pytorch/pytorch/issues/188332
+
+    The bucket_all_gathers_fx post-grad pass embeds dist.get_rank() as a
+    compile-time constant in the traced graph (narrow offset into packed
+    all-gather buffer). The FxGraphCache key must include the rank when
+    bucketing is enabled to prevent cross-rank cache collisions.
+    """
+
+    _initialized_pg: bool = False
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import torch.distributed as dist
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        if not dist.is_initialized():
+            store = FakeStore()
+            dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+            cls._initialized_pg = True
+
+    @classmethod
+    def tearDownClass(cls):
+        import torch.distributed as dist
+
+        if cls._initialized_pg:
+            dist.destroy_process_group()
+        super().tearDownClass()
+
+    def _cache_key_for_rank(self, rank, **config_patches):
+        """Get the FxGraphCache key with a specific rank via the real code path."""
+        import torch.distributed as dist
+
+        with config.patch(config_patches):
+            with mock.patch.object(dist, "get_rank", return_value=rank):
+                details = FxGraphHashDetails(None, [], cast(Any, {}), [])
+        gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        return FxGraphCachePickler(gm).get_key(details)
+
+    def test_different_ranks_produce_different_keys_with_bucketing(self):
+        """Cache keys must differ across ranks when allgather bucketing is on."""
+        key0 = self._cache_key_for_rank(0, bucket_all_gathers_fx="all")
+        key1 = self._cache_key_for_rank(1, bucket_all_gathers_fx="all")
+        self.assertNotEqual(key0, key1)
+
+    def test_same_rank_produces_same_key(self):
+        """Same rank must produce a deterministic, stable cache key."""
+        key1 = self._cache_key_for_rank(0, bucket_all_gathers_fx="all")
+        key2 = self._cache_key_for_rank(0, bucket_all_gathers_fx="all")
+        self.assertEqual(key1, key2)
+
+    def test_keys_equal_when_bucketing_disabled(self):
+        """No cache fragmentation when bucketing is off."""
+        key0 = self._cache_key_for_rank(0, bucket_all_gathers_fx="none")
+        key1 = self._cache_key_for_rank(1, bucket_all_gathers_fx="none")
+        self.assertEqual(key0, key1)
+
+    def test_only_fsdp_mode_differentiates_ranks(self):
+        """bucket_all_gathers_fx='only_fsdp' also needs rank in the key."""
+        key0 = self._cache_key_for_rank(0, bucket_all_gathers_fx="only_fsdp")
+        key1 = self._cache_key_for_rank(1, bucket_all_gathers_fx="only_fsdp")
+        self.assertNotEqual(key0, key1)
+
+    def test_overlap_scheduling_differentiates_ranks(self):
+        """enable_overlap_scheduling triggers bucketed allgather with rank."""
+        key0 = self._cache_key_for_rank(
+            0,
+            bucket_all_gathers_fx="none",
+            **{"aten_distributed_optimizations.enable_overlap_scheduling": True},
+        )
+        key1 = self._cache_key_for_rank(
+            1,
+            bucket_all_gathers_fx="none",
+            **{"aten_distributed_optimizations.enable_overlap_scheduling": True},
+        )
+        self.assertNotEqual(key0, key1)
+
+    def test_bucketed_allgather_graphs_differ_by_rank(self):
+        """Traced bucketed allgather embeds rank as constant in narrow offset."""
+        from torch._inductor.fx_passes.bucketing import all_gather_merge_fn_to_trace
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        with FakeTensorMode():
+            ins = [torch.randn(128, 256, device=device) for _ in range(2)]
+            gm0 = make_fx(all_gather_merge_fn_to_trace)(
+                ins, "0", 2, torch.float32, [torch.float32, torch.float32], 0
+            )
+            gm1 = make_fx(all_gather_merge_fn_to_trace)(
+                ins, "0", 2, torch.float32, [torch.float32, torch.float32], 1
+            )
+
+        self.assertNotEqual(
+            gm0.print_readable(print_output=False),
+            gm1.print_readable(print_output=False),
+        )
+
+
 if __name__ == "__main__":
     run_tests()
