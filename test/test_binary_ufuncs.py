@@ -34,7 +34,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
-    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -3299,7 +3298,6 @@ class TestBinaryUfuncsDevice(TestCase):
 
     @dtypesIfCPU(torch.bfloat16, torch.half, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @skipXPU
     def test_hypot(self, device, dtype):
         inputs = [
             (
@@ -3834,7 +3832,6 @@ class TestBinaryUfuncsDevice(TestCase):
             raise AssertionError("m is intentionally a scalar")
         self.assertEqual(torch.pow(2, m), 2**m)
 
-    @skipXPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
