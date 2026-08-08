@@ -65,10 +65,9 @@ bool attributesEqual(
   if (a1.size() != a2.size()) {
     return false;
   }
-  return std::equal(
-      a1.begin(), a1.end(), a2.begin(), [](double x, double y) {
-        return attributesEqual(x, y);
-      });
+  return std::equal(a1.begin(), a1.end(), a2.begin(), [](double x, double y) {
+    return attributesEqual(x, y);
+  });
 }
 
 bool attributesEqual(
