@@ -15,6 +15,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    requires_cuda,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -51,6 +53,8 @@ def T(*shape, requires_grad=False):
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
 class TestFlopCounter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sdpa_flop_count_gqa(self):
         """sdpa_flop_count should handle GQA where KV heads < Q heads."""
         # MHA: q_heads == kv_heads
@@ -326,7 +330,219 @@ class TestFlopCounter(TestCase):
         with FlopCounterMode() as mode:
             T(4, 5).cos()
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    def test_flash_attention_forward_flop_layout(self):
+        B, S, H, D = 2, 128, 8, 64
+        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._flash_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                None,
+                S,
+                S,
+                0.0,
+                False,
+                False,
+            )
+
+        flash_flops = int(get_total_flops(mode))
+        expected = sdpa_flop_count((B, H, S, D), (B, H, S, D), (B, H, S, D))
+        self.assertEqual(flash_flops, expected)
+
+    def test_flash_attention_backward_flop_layout(self):
+        B, S, H, D = 2, 128, 8, 64
+        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        grad_out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
+        logsumexp = torch.randn(B, H, S, device="meta", dtype=torch.float32)
+        rng_state = torch.zeros(2, dtype=torch.int64, device="meta")
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._flash_attention_backward(
+                grad_out,
+                q,
+                k,
+                v,
+                out,
+                logsumexp,
+                None,
+                None,
+                S,
+                S,
+                0.0,
+                False,
+                rng_state,
+                None,
+            )
+
+        bwd_flops = int(get_total_flops(mode))
+        expected = sdpa_backward_flop_count(
+            (B, H, S, D),
+            (B, H, S, D),
+            (B, H, S, D),
+            (B, H, S, D),
+        )
+        self.assertEqual(bwd_flops, expected)
+
+    def test_addmm_out(self):
+        def f(x):
+            y = torch.zeros(10, 10)
+            return torch.mm(x, x, out=y)
+
+        with FlopCounterMode() as mode:
+            f(torch.randn(10, 10))
+
+        self.assertExpectedInline(get_total_flops(mode), """2000""")
+
+    def test_matmul_flop_formula_extra_positional_out(self):
+        # Regression test: Inductor's count_flops_fx can hand a matmul flop
+        # formula the output as an extra trailing positional arg, while
+        # shape_wrapper simultaneously passes out_shape by keyword.
+        # shape_wrapper strips the extra trailing positional before forwarding
+        # to the formula, preventing a TypeError collision on out_shape.
+        from torch.utils.flop_counter import flop_registry
+
+        # Mirrors FlopCounterMode._count_flops: f(*args, **kwargs, out_val=out),
+        # where args carries the output shape as a trailing positional.
+        a, b = (8, 128, 64), (8, 64, 32)
+        out = (8, 128, 32)
+        expected_bmm = 8 * 128 * 32 * 2 * 64
+        self.assertEqual(
+            flop_registry[torch.ops.aten.bmm](a, b, out, out_val=out), expected_bmm
+        )
+        self.assertEqual(
+            flop_registry[torch.ops.aten.baddbmm](out, a, b, out, out_val=out),
+            expected_bmm,
+        )
+
+        a2, b2 = (128, 64), (64, 32)
+        out2 = (128, 32)
+        self.assertEqual(
+            flop_registry[torch.ops.aten.addmm](out2, a2, b2, out2, out_val=out2),
+            128 * 32 * 2 * 64,
+        )
+
+    def test_hook_registration(self):
+        model = torch.nn.Linear(100, 100)
+        x = torch.randn(3, 100)
+
+        with FlopCounterMode() as mode:
+            self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 1)
+            self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 1)
+            model(x).sum().backward()
+
+        self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 0)
+        self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 0)
+
+    def test_pytrees(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = x["a"].relu_()
+                return {"a": torch.mm(x, x)}
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = Foo()
+                self.b = Foo()
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        mod = Mod()
+        with FlopCounterMode() as mode:
+            mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
+                "a"
+            ].sum().backward()
+        self.assertExpectedInline(
+            (mode.flop_counts["Mod"][torch.ops.aten.mm]), """12000"""
+        )
+
+        class Mod2(torch.nn.Module):
+            def forward(self, x):
+                return (torch.mm(x, x),)
+
+        mod = Mod2()
+        with FlopCounterMode() as mode:
+            mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
+        self.assertExpectedInline(
+            (mode.flop_counts["Mod2"][torch.ops.aten.mm]), """6000"""
+        )
+
+    def test_warning(self):
+        mod = torch.nn.Linear(2, 2)
+        with self.assertWarnsRegex(UserWarning, "not needed"):
+            FlopCounterMode(mod)
+
+    def test_custom_op(self):
+        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        called = 0
+
+        with self.assertRaisesRegex(
+            ValueError, "expected each target to be OpOverloadPacket"
+        ):
+            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
+
+        @register_flop_formula(torch.ops.mylib.foo)
+        def formula(*args, **kwargs):
+            nonlocal called
+            called += 1
+            return 9001
+
+        x = torch.randn(3)
+        with FlopCounterMode(display=False) as mode:
+            y = foo(x)
+
+        self.assertEqual(called, 1)
+        self.assertExpectedInline(get_total_flops(mode), """9001""")
+
+    @skipIfNoTorchVision
+    def test_inference_mode(self):
+        def get_flops(model):
+            with FlopCounterMode(model) as mode:
+                a = T(1, 3, 224, 224)
+                model(a).sum()
+            return mode
+
+        resnet18 = torchvision_models.resnet18()
+
+        mode_standard = get_flops(resnet18)
+
+        with torch.inference_mode():
+            mode_inference = get_flops(resnet18)
+
+        self.assertEqual(
+            get_total_flops(mode_standard), get_total_flops(mode_inference)
+        )
+
+        layer1_conv_flops_standard = mode_standard.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        layer1_conv_flops_inference = mode_inference.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+@requires_cuda
+class TestFlopCounterCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
         or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
@@ -488,7 +704,6 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
@@ -552,7 +767,6 @@ class TestFlopCounter(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
         or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -771,7 +985,6 @@ class TestFlopCounter(TestCase):
             ),
         )
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
@@ -818,184 +1031,6 @@ class TestFlopCounter(TestCase):
             int(get_total_flops(fake_flop_counter_mode)),
             int(get_total_flops(real_flop_counter_mode)),
         )
-
-    def test_flash_attention_forward_flop_layout(self):
-        B, S, H, D = 2, 128, 8, 64
-        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-
-        with FlopCounterMode() as mode:
-            torch.ops.aten._flash_attention_forward(
-                q,
-                k,
-                v,
-                None,
-                None,
-                S,
-                S,
-                0.0,
-                False,
-                False,
-            )
-
-        flash_flops = int(get_total_flops(mode))
-        expected = sdpa_flop_count((B, H, S, D), (B, H, S, D), (B, H, S, D))
-        self.assertEqual(flash_flops, expected)
-
-    def test_flash_attention_backward_flop_layout(self):
-        B, S, H, D = 2, 128, 8, 64
-        q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        k = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        v = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        grad_out = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
-        logsumexp = torch.randn(B, H, S, device="meta", dtype=torch.float32)
-        rng_state = torch.zeros(2, dtype=torch.int64, device="meta")
-
-        with FlopCounterMode() as mode:
-            torch.ops.aten._flash_attention_backward(
-                grad_out,
-                q,
-                k,
-                v,
-                out,
-                logsumexp,
-                None,
-                None,
-                S,
-                S,
-                0.0,
-                False,
-                rng_state,
-                None,
-            )
-
-        bwd_flops = int(get_total_flops(mode))
-        expected = sdpa_backward_flop_count(
-            (B, H, S, D),
-            (B, H, S, D),
-            (B, H, S, D),
-            (B, H, S, D),
-        )
-        self.assertEqual(bwd_flops, expected)
-
-    def test_addmm_out(self):
-        def f(x):
-            y = torch.zeros(10, 10)
-            return torch.mm(x, x, out=y)
-
-        with FlopCounterMode() as mode:
-            f(torch.randn(10, 10))
-
-        self.assertExpectedInline(get_total_flops(mode), """2000""")
-
-    def test_matmul_flop_formula_extra_positional_out(self):
-        # Regression test: Inductor's count_flops_fx can hand a matmul flop
-        # formula the output as an extra trailing positional arg, while
-        # shape_wrapper simultaneously passes out_shape by keyword.
-        # shape_wrapper strips the extra trailing positional before forwarding
-        # to the formula, preventing a TypeError collision on out_shape.
-        from torch.utils.flop_counter import flop_registry
-
-        # Mirrors FlopCounterMode._count_flops: f(*args, **kwargs, out_val=out),
-        # where args carries the output shape as a trailing positional.
-        a, b = (8, 128, 64), (8, 64, 32)
-        out = (8, 128, 32)
-        expected_bmm = 8 * 128 * 32 * 2 * 64
-        self.assertEqual(
-            flop_registry[torch.ops.aten.bmm](a, b, out, out_val=out), expected_bmm
-        )
-        self.assertEqual(
-            flop_registry[torch.ops.aten.baddbmm](out, a, b, out, out_val=out),
-            expected_bmm,
-        )
-
-        a2, b2 = (128, 64), (64, 32)
-        out2 = (128, 32)
-        self.assertEqual(
-            flop_registry[torch.ops.aten.addmm](out2, a2, b2, out2, out_val=out2),
-            128 * 32 * 2 * 64,
-        )
-
-    def test_hook_registration(self):
-        model = torch.nn.Linear(100, 100)
-        x = torch.randn(3, 100)
-
-        with FlopCounterMode() as mode:
-            self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 1)
-            self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 1)
-            model(x).sum().backward()
-
-        self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 0)
-        self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 0)
-
-    def test_pytrees(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                x = x["a"].relu_()
-                return {"a": torch.mm(x, x)}
-
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = Foo()
-                self.b = Foo()
-
-            def forward(self, x):
-                return self.b(self.a(x))
-
-        mod = Mod()
-        with FlopCounterMode() as mode:
-            mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
-                "a"
-            ].sum().backward()
-        self.assertExpectedInline(
-            (mode.flop_counts["Mod"][torch.ops.aten.mm]), """12000"""
-        )
-
-        class Mod2(torch.nn.Module):
-            def forward(self, x):
-                return (torch.mm(x, x),)
-
-        mod = Mod2()
-        with FlopCounterMode() as mode:
-            mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
-        self.assertExpectedInline(
-            (mode.flop_counts["Mod2"][torch.ops.aten.mm]), """6000"""
-        )
-
-    def test_warning(self):
-        mod = torch.nn.Linear(2, 2)
-        with self.assertWarnsRegex(UserWarning, "not needed"):
-            FlopCounterMode(mod)
-
-    def test_custom_op(self):
-        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
-
-        @torch.library.custom_op("mylib::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            return x.sin()
-
-        called = 0
-
-        with self.assertRaisesRegex(
-            ValueError, "expected each target to be OpOverloadPacket"
-        ):
-            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
-
-        @register_flop_formula(torch.ops.mylib.foo)
-        def formula(*args, **kwargs):
-            nonlocal called
-            called += 1
-            return 9001
-
-        x = torch.randn(3)
-        with FlopCounterMode(display=False) as mode:
-            y = foo(x)
-
-        self.assertEqual(called, 1)
-        self.assertExpectedInline(get_total_flops(mode), """9001""")
 
     @requires_cuda_and_triton
     def test_flop_counter_custom_triton_manual_decomp(self):
@@ -1217,34 +1252,6 @@ class TestFlopCounter(TestCase):
             "Custom formula for cos_kernel not recorded during partitioning",
         )
 
-    @skipIfNoTorchVision
-    def test_inference_mode(self):
-        def get_flops(model):
-            with FlopCounterMode(model) as mode:
-                a = T(1, 3, 224, 224)
-                model(a).sum()
-            return mode
-
-        resnet18 = torchvision_models.resnet18()
-
-        mode_standard = get_flops(resnet18)
-
-        with torch.inference_mode():
-            mode_inference = get_flops(resnet18)
-
-        self.assertEqual(
-            get_total_flops(mode_standard), get_total_flops(mode_inference)
-        )
-
-        layer1_conv_flops_standard = mode_standard.flop_counts["ResNet.layer1"][
-            torch.ops.aten.convolution
-        ]
-        layer1_conv_flops_inference = mode_inference.flop_counts["ResNet.layer1"][
-            torch.ops.aten.convolution
-        ]
-        self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
-
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -1262,7 +1269,6 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
@@ -1352,6 +1358,8 @@ class TestFlopCounter(TestCase):
 
 
 class TestFlexAttentionEstimation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_flex_attention_flop_registration(self):
         """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
         from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
