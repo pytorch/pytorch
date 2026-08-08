@@ -374,7 +374,7 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && defined(__aarch64__)
 static bool use_mkldnn(const Tensor& input) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
@@ -390,23 +390,19 @@ static bool use_mkldnn(const Tensor& input) {
 }
 #endif
 
+// Exact gelu no longer dispatches to oneDNN: eltwise_gelu_erf computes
+// 0.5 * x * (1 + erf(x / sqrt(2))), which flushes the negative tail to
+// zero (gh-187806), unlike the erfc-based ATen kernel.
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, std::string_view approximate, const Tensor& result
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
-    ideep::tensor y = itensor_from_tensor(result);
-    ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
-#ifdef __aarch64__
-  } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
+#if AT_MKLDNN_ENABLED() && defined(__aarch64__)
+  if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
-#endif  // ifdef __aarch64__
   } else {
     GeluKernel(kCPU, *this, approximate_type);
   }
@@ -418,20 +414,8 @@ auto approximate_type = get_gelutype_enum(approximate);
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input
 ) {
-auto approximate_type = get_gelutype_enum(approximate);
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
-    ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
-    ideep::tensor gradx = itensor_from_tensor(grad_input);
-    ideep::eltwise_backward::compute(x, grady, gradx,
-      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
-  } else {
-    GeluBackwardKernel(kCPU, *this, approximate_type);
-  }
-#else
+  auto approximate_type = get_gelutype_enum(approximate);
   GeluBackwardKernel(kCPU, *this, approximate_type);
-#endif
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -761,7 +745,8 @@ Tensor infinitely_differentiable_gelu_backward(
   const auto opmath_dtype = at::toOpMathType(result_dtype);
   const Tensor grad_ = grad.to(opmath_dtype);
   const Tensor self_ = self.to(opmath_dtype);
-  Tensor cdf = (1.0 + (self_ * M_SQRT1_2).erf_()).mul_(0.5);
+  // 1 + erf(x) = erfc(-x)
+  Tensor cdf = (self_ * -M_SQRT1_2).erfc_().mul_(0.5);
   Tensor pdf = (-0.5 * self_ * self_).exp_();
   return cdf.addcmul_(self_, pdf, kAlpha).mul_(grad_).to(result_dtype);
 }

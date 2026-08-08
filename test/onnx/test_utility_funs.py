@@ -1251,7 +1251,7 @@ class TestUtilityFuns(_BaseTestCase):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.erfc(x)
+                return torch.special.erfcx(x)
 
         x = torch.randn(2, 3, 4)
         GLOBALS.export_onnx_opset_version = self.opset_version
@@ -1263,7 +1263,26 @@ class TestUtilityFuns(_BaseTestCase):
             dynamic_axes={"x": [0, 1, 2]},
         )
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "aten::erfc")
+        self.assertEqual(next(iter).kind(), "aten::special_erfcx")
+
+    def test_erfc_lowered_to_erf(self):
+        # ONNX has no Erfc op; the symbolic lowers aten::erfc to Sub(1, Erf)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.erfc(x)
+
+        x = torch.randn(2, 3, 4)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        graph, _, __ = self._model_to_graph(
+            Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1, 2]}
+        )
+        node_kinds = [node.kind() for node in graph.nodes()]
+        self.assertIn("onnx::Erf", node_kinds)
+        self.assertIn("onnx::Sub", node_kinds)
+        # operand order matters: erfc(x) = Sub(1, erf(x)), not Sub(erf(x), 1)
+        sub = next(n for n in graph.nodes() if n.kind() == "onnx::Sub")
+        sub_input_kinds = [inp.node().kind() for inp in sub.inputs()]
+        self.assertEqual(sub_input_kinds, ["onnx::Constant", "onnx::Erf"])
 
     def test_custom_op_fallthrough(self):
         # Test custom op
