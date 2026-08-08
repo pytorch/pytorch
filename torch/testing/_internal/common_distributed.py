@@ -188,10 +188,10 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl", "hccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl", "hccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl", "hccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
@@ -199,7 +199,12 @@ class DistTestCases:
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
-    backend_feature["plugin"] = set()
+    # Dynamic discovery of third-party backends (e.g., hccl from torch_npu)
+    _BUILTIN_BACKENDS = {"nccl", "gloo", "ucc", "mpi"}
+    try:
+        backend_feature["plugin"] = set(c10d.Backend.backend_list) - _BUILTIN_BACKENDS
+    except AttributeError:
+        backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
     if TEST_XPU:
