@@ -9,6 +9,7 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
@@ -109,6 +110,63 @@ class TestCppExtensionJIT(common.TestCase):
     @classmethod
     def tearDownClass(cls):
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+    @unittest.skipIf(IS_WINDOWS, "uses POSIX compiler flags")
+    def test_combined_traceback_header_does_not_include_nlohmann(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_include = os.path.join(tmpdir, "include")
+            fake_nlohmann = os.path.join(fake_include, "nlohmann")
+            os.makedirs(fake_nlohmann)
+            with open(os.path.join(fake_nlohmann, "json.hpp"), "w") as f:
+                f.write(
+                    "#error combined_traceback.h should not include "
+                    "nlohmann/json.hpp\n"
+                )
+
+            source = os.path.join(tmpdir, "test.cpp")
+            with open(source, "w") as f:
+                f.write(
+                    "#include <torch/csrc/profiler/python/combined_traceback.h>\n"
+                    "#include <utility>\n"
+                    "#include <vector>\n"
+                    "using JsonFrames = decltype(torch::json_symbolize(\n"
+                    "    std::declval<std::vector<torch::CapturedTraceback*>&>()));\n"
+                    "JsonFrames* frames = nullptr;\n"
+                    "int main() { return frames == nullptr ? 0 : 1; }\n"
+                )
+
+            try:
+                torch_include_paths = torch.utils.cpp_extension.include_paths(
+                    device_type="cpu"
+                )
+            except Exception as e:
+                self.skipTest(f"Could not compute PyTorch include paths: {e}")
+
+            cmd = [
+                get_cxx_compiler(),
+                "-std=c++17",
+                "-fsyntax-only",
+                source,
+                f"-I{fake_include}",
+                *[f"-I{path}" for path in torch_include_paths],
+            ]
+
+            python_include = sysconfig.get_path(
+                "include", scheme="nt" if IS_WINDOWS else "posix_prefix"
+            )
+            if python_include is not None:
+                cmd.append(f"-I{python_include}")
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"command failed: {' '.join(cmd)}\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}",
+            )
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
