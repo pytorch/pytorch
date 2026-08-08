@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import torch
+
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._inductor.package import load_package
 from torch.export import Dim
@@ -217,20 +218,19 @@ class TestAOTIPackageDeviceValidation(TestCase):
 
         with (
             mock.patch.object(
-                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoaderAvx512
+                torch._C._aoti,
+                "AOTIModelPackageLoader",
+                FakeAOTIModelPackageLoaderAvx512,
             ),
             mock.patch(
                 "torch._inductor.codecache.get_device_information",
                 return_value={"AOTI_CPU_ISA": "AVX2"},
             ),
-            mock.patch(
-                "torch.export.pt2_archive._package.logger.warning"
-            ) as mock_warn,
+            mock.patch("torch.export.pt2_archive._package.logger.warning") as mock_warn,
         ):
             _load_aoti("model.pt2", "model", False, 1, -1)
             mock_warn.assert_called_once()
             self.assertIn("Device information mismatch", mock_warn.call_args[0][0])
-
 
 
 if __name__ == "__main__":

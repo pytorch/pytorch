@@ -13,6 +13,7 @@ from typing import Any
 import torch
 from torch._inductor import config
 from torch._inductor.utils import python_subprocess_env
+from torch.utils._ordered_set import OrderedSet
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -626,24 +627,28 @@ def is_cpu_isa_compatible(host_isa: str, artifact_isa: str) -> bool:
     if artifact_isa.lower() == _INVALID or host_isa.lower() == _INVALID:
         return True
 
-    host_tokens = set(host_isa.lower().split())
-    artifact_tokens = set(artifact_isa.lower().split())
+    host_tokens = OrderedSet(host_isa.lower().split())
+    artifact_tokens = OrderedSet(artifact_isa.lower().split())
 
     if artifact_tokens.issubset(host_tokens):
         return True
 
-    expanded_host_tokens = set(host_tokens)
+    expanded_host_tokens = OrderedSet(host_tokens)
 
     # neon/asimd are two names for the same ARMv8 SIMD extension.
     if "neon" in host_tokens or "asimd" in host_tokens:
-        expanded_host_tokens.update({"neon", "asimd"})
+        expanded_host_tokens.update(OrderedSet(["neon", "asimd"]))
 
     # x86 SIMD hierarchy: VecISA.__str__ already chains tokens cumulatively
     # (VecAMX.__str__ == "avx512 avx512_vnni amx_tile"), so a host string from
     # pick_vec_isa() already contains all implied tokens.  The expansion below
     # is still needed for strings sourced from AOTI_CPU_ISA metadata (which
     # stores only the highest-capability token).
-    if "avx512" in host_tokens or "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
+    if (
+        "avx512" in host_tokens
+        or "avx512_vnni" in host_tokens
+        or "amx_tile" in host_tokens
+    ):
         expanded_host_tokens.add("avx2")
     if "avx512_vnni" in host_tokens or "amx_tile" in host_tokens:
         expanded_host_tokens.add("avx512")
