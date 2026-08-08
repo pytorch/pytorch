@@ -260,6 +260,14 @@ class NormalizedView:
 
 
 @dataclasses.dataclass(frozen=True)
+class NormalizedDtypeView:
+    """Canonical source and target dtype for a storage reinterpretation."""
+
+    source: torch.fx.Node
+    dtype: torch.dtype
+
+
+@dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
     """Canonical arguments for a supported FX reduction."""
 
@@ -321,6 +329,7 @@ class NormalizedUnsupportedReduction:
 
 NormalizedNode = (
     NormalizedView
+    | NormalizedDtypeView
     | NormalizedReduction
     | NormalizedPrepareSoftmax
     | NormalizedSqueeze
@@ -361,6 +370,13 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
     """Return canonical arguments for a selected epilogue FX node."""
     if node.op != "call_function":
         return None
+    if node.target is torch.ops.aten.view.dtype:
+        source, dtype = node.args
+        if not isinstance(source, torch.fx.Node) or not isinstance(dtype, torch.dtype):
+            raise AssertionError(
+                f"malformed GEMM epilogue dtype view: {node.format_node()}"
+            )
+        return NormalizedDtypeView(source, dtype)
     if node.target in (
         torch.ops.aten.view.default,
         torch.ops.aten.reshape.default,
