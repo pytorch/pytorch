@@ -12,6 +12,7 @@ import torch.nn as nn
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import requires_gloo, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
@@ -22,7 +23,7 @@ from torch.testing._internal.common_utils import (
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 
 
-class DistributedDataParallelSingleProcessTest(TestCase):
+class _DistributedDataParallelSingleProcessBase(TestCase):
     def setUp(self):
         super().setUp()
         self.rank = 0
@@ -71,9 +72,21 @@ class DistributedDataParallelSingleProcessTest(TestCase):
             for i, j in zip(ddp.parameters(), net.parameters()):
                 self.assertTrue(i.allclose(j))
 
+
+class DistributedDataParallelSingleProcessTest(
+    _DistributedDataParallelSingleProcessBase
+):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_gloo()
     def test_cpu(self):
         self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
+
+
+class DistributedDataParallelSingleProcessTestCUDA(
+    _DistributedDataParallelSingleProcessBase
+):
+    hw_classification = HardwareClassification.CUDA
 
     @requires_gloo()
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
@@ -126,7 +139,9 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 # Skip dev-asan as torch + multiprocessing spawn have known issues
 if not TEST_WITH_DEV_DBG_ASAN:
 
-    class TestDistributedNNFunctionsGloo(TestDistributedNNFunctions):
+    class TestDistributedNNFunctionsGlooCUDA(TestDistributedNNFunctions):
+        hw_classification = HardwareClassification.CUDA
+
         # Test Common Ops First.
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
@@ -135,26 +150,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
         )
         def test_broadcast(self):
             self._test_broadcast("gloo")
-
-        @requires_gloo()
-        @skip_but_pass_in_sandcastle_if(
-            not _torch_dist_nn_available, "torch.distributed.nn is not available"
-        )
-        def test_broadcast_subgroup_with_nonzero_global_src(self):
-            store = c10d.FileStore(self.file_name, self.world_size)
-            c10d.init_process_group(
-                store=store,
-                rank=self.rank,
-                world_size=self.world_size,
-                backend="gloo",
-            )
-            group = c10d.new_group([1])
-
-            if self.rank == 1:
-                x = torch.ones(5, 5, requires_grad=True)
-                y = torch.distributed.nn.broadcast(x, 1, group=group)
-                y.sum().backward()
-                self.assertEqual(x.grad, torch.ones_like(x))
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
@@ -262,6 +257,29 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 self.assertEqual(x1.grad, x1_s)
             if self.rank == 0:
                 self.assertEqual(x0.grad, torch.zeros(5, 5, device=device))
+
+    class TestDistributedNNFunctionsGloo(TestDistributedNNFunctions):
+        hw_classification = HardwareClassification.GENERIC
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_broadcast_subgroup_with_nonzero_global_src(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="gloo",
+            )
+            group = c10d.new_group([1])
+
+            if self.rank == 1:
+                x = torch.ones(5, 5, requires_grad=True)
+                y = torch.distributed.nn.broadcast(x, 1, group=group)
+                y.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
 
 
 if __name__ == "__main__":
