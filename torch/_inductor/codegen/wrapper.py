@@ -1788,7 +1788,7 @@ class PythonWrapperCodegen(CodeGen):
                 continue
             line = f"assert not {name}.isnan().any().item()"
             self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
+            line = f"assert not {name}.float().isinf().any().item()"
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
@@ -2194,7 +2194,9 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("assert not var.isnan().any().item()")
-                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                self.wrapper_call.writeline(
+                    "assert not var.float().isinf().any().item()"
+                )
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
