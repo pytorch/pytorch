@@ -106,6 +106,21 @@ using op_input_t = std::variant<
     c10::IValue,
     std::nullopt_t>;
 
+// Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
+// KinetoEvent constructor and the Kineto metadata producers.
+struct OpArgData {
+  bool hasData;
+  std::vector<shape> shapes;
+  std::vector<std::string> dtypes;
+  std::vector<c10::IValue> concreteInputs;
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
+  std::vector<shape> strides;
+};
+
+TORCH_API OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs);
+
 // ============================================================================
 // == ExtraFields =============================================================
 // ============================================================================
@@ -130,6 +145,7 @@ using jit_stack_t = std::vector<std::string>;
 using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
+using typed_metadata_t = std::unordered_map<std::string, c10::IValue>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
 // Mirrors `libkineto::GenericTraceActivity::Flow`. Used during post processing
@@ -156,7 +172,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
-      extra_meta_t&& extra_meta,
+      collective_meta_t&& collective_meta,
       kwinputs_t&& kwinputs,
       FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
@@ -169,7 +185,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
-        extra_meta_{std::move(extra_meta)},
+        collective_meta_{std::move(collective_meta)},
         kwinputs_{std::move(kwinputs)},
         device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
@@ -181,7 +197,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
-  extra_meta_t extra_meta_;
+  collective_meta_t collective_meta_;
   kwinputs_t kwinputs_;
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
@@ -371,11 +387,12 @@ struct ExtraFields<EventType::Kineto> {
   std::weak_ptr<Result> linked_activity_;
   std::string metadata_json_;
   extra_meta_t extra_meta_;
+  typed_metadata_t typed_metadata_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename... Args>
-  [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
+  [[nodiscard]] static std::shared_ptr<Result> create(Args&&... args) {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
   }
 
@@ -391,18 +408,15 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 
   template <typename T, typename Fn>
   void visit_if_base(const Fn& fn) const {
-    visit([&](const auto& extra_fields) {
-      using extra_fields_t = typename std::remove_cv_t<
-          typename std::remove_reference_t<decltype(extra_fields)>>;
-
-      if constexpr (std::is_base_of_v<T, extra_fields_t>) {
+    visit([&]<typename EF>(const EF& extra_fields) {
+      if constexpr (std::is_base_of_v<T, EF>) {
         fn(extra_fields);
       }
     });
   }
 
   EventType tag() const {
-    return visit([](const auto& i) { return deduceTag(i); });
+    return visit([]<EventType E>(const ExtraFields<E>&) { return E; });
   }
 
   std::string name() const;
@@ -440,16 +454,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       int64_t start_time_ns,
       uint64_t start_tid,
       kineto::DeviceAndResource kineto_info,
-      ExtraFields<E>&& extra_fields)
+      ExtraFields<E> extra_fields)
       : start_time_ns_{start_time_ns},
         start_tid_{start_tid},
         kineto_info_{kineto_info},
         extra_fields_{std::move(extra_fields)} {}
-
-  template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
-    return E;
-  }
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
@@ -463,13 +472,27 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
-    extra_meta_t* extra_nccl_meta_{};
+    collective_meta_t* collective_meta_{};
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
 
   Event* event_;
   FallbackPair* fallback_{nullptr};
+
+  // Generation of the global session this op entered under, snapshotted from
+  // global_callback_session at enter time. That counter bumps per new global
+  // session (not on the mid-session toggle). At exit, a match means event_ is
+  // still live so the exit finalizes it; a mismatch means the session was torn
+  // down and event_ freed, so the exit drops without touching event_.
+  uint64_t session_generation_{0};
+
+  // True if begin_op pushed an external correlation id for this op. The
+  // matching pop must run on every exit path (including teardown /
+  // stale-session early exits), or the id leaks onto the device profiling
+  // backend's per-thread correlation stack, which is not reset across profiler
+  // sessions.
+  bool pushed_correlation_id_{false};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
@@ -625,8 +648,8 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-    // report extra metadata, i.e. collective communication meta
-    AppendOnlyList<extra_meta_t, BlockSize> extra_meta_;
+    // report collective communication metadata
+    AppendOnlyList<collective_meta_t, BlockSize> collective_meta_;
 
     // report kwinputs
     AppendOnlyList<kwinputs_t, BlockSize> kwinputs_;
