@@ -123,13 +123,17 @@ struct ConcretePyInterpreterVTable final
       uintptr_t stream) const override {
     CONCRETE_GPU_TRACE(device_type, "EventWaitCallbacks", event, stream);
   }
-  void trace_gpu_memory_allocation(at::DeviceType device_type, uintptr_t ptr)
-      const override {
-    CONCRETE_GPU_TRACE(device_type, "MemoryAllocationCallbacks", ptr);
+  void trace_gpu_memory_allocation(
+      at::DeviceType device_type,
+      uintptr_t ptr,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryAllocationCallbacks", ptr, stream);
   }
-  void trace_gpu_memory_deallocation(at::DeviceType device_type, uintptr_t ptr)
-      const override {
-    CONCRETE_GPU_TRACE(device_type, "MemoryDeallocationCallbacks", ptr);
+  void trace_gpu_memory_deallocation(
+      at::DeviceType device_type,
+      uintptr_t ptr,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryDeallocationCallbacks", ptr, stream);
   }
   void trace_gpu_stream_creation(at::DeviceType device_type, uintptr_t stream)
       const override {
