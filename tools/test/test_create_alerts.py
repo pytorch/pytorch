@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest import main, TestCase
 
@@ -64,11 +65,8 @@ class TestGitHubPR(TestCase):
             ["pytorch_linux_xenial_py3_6_gcc5_4_test2"],
         )
         self.assertListEqual(filter_job_names(job_names, ".*xenial.*test3"), [])
-        self.assertRaises(
-            Exception,
-            lambda: filter_job_names(job_names, "["),
-            msg="malformed regex should throw exception",
-        )
+        with self.assertRaisesRegex(re.error, "unterminated character set"):
+            filter_job_names(job_names, "[")
 
 
 if __name__ == "__main__":
