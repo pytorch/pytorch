@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/cpu/vec/vec.h>
