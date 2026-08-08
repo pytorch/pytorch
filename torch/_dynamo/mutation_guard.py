@@ -20,6 +20,7 @@ from typing import Any
 
 import torch.nn
 from torch.nn import Module
+from torch.utils.hooks import _register_hook_dict_mutation_observer
 
 from . import config
 from .utils import ExactWeakKeyDictionary, nn_module_has_global_hooks
@@ -42,20 +43,43 @@ class MutationTracker:
         for ref in tmp:
             guarded = ref()
             if guarded is not None:
-                guarded.invalidate(ref)
+                guarded.invalidate(
+                    name, reason=f"Cache line invalidated because {name} mutated"
+                )
 
     def track(self, guarded_code: Any) -> None:
+        for ref in self.watchers:
+            if ref() is guarded_code:
+                return
         self.watchers.append(weakref.ref(guarded_code))
 
 
-def watch(obj: Any, guarded_code: Any) -> None:
+def watch(
+    obj: Any, guarded_code: Any, *, guard_on_attribute_mutation: bool = True
+) -> None:
     """invalidate guarded_code when obj is mutated"""
-    ensure_patched(type(obj))
+    if guard_on_attribute_mutation:
+        ensure_patched(type(obj))
 
     if obj not in MutationTracker.db:
         MutationTracker.db[obj] = MutationTracker()
     tracker = MutationTracker.db[obj]
     tracker.track(guarded_code)
+
+
+def on_mutation(obj: Any, name: str) -> None:
+    """invalidate all guarded code watching obj"""
+    tracker = MutationTracker.db.get(obj)
+    if tracker is not None:
+        tracker.on_mutation(name)
+
+
+def _on_hook_dict_mutation(hooks_dict: Any) -> None:
+    if not torch.compiler.is_dynamo_compiling():
+        on_mutation(hooks_dict, "hook dictionary")
+
+
+_register_hook_dict_mutation_observer(_on_hook_dict_mutation)
 
 
 def ensure_patched(cls: Any) -> None:

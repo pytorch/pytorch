@@ -1,11 +1,32 @@
 # mypy: allow-untyped-defs
 import torch
 from collections import OrderedDict
+from collections.abc import Callable
 import weakref
 import warnings
 from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
+
+
+_hook_dict_mutation_observers: list[Callable[[Any], None]] = []
+
+
+def _register_hook_dict_mutation_observer(observer: Callable[[Any], None]) -> None:
+    """Register a process-lifetime observer for hook dictionary mutations.
+
+    Observers receive the exact dictionary after it is mutated. Hook registration
+    can run under tracing, so observers must be safe to trace.
+    """
+    if observer not in _hook_dict_mutation_observers:
+        _hook_dict_mutation_observers.append(observer)
+
+
+def _notify_hook_dict_mutation(hooks_dict: Any) -> None:
+    """Notify registered observers after a hook dictionary is mutated."""
+    for observer in _hook_dict_mutation_observers:
+        observer(hooks_dict)
+
 
 class RemovableHandle:
     r"""
@@ -36,11 +57,13 @@ class RemovableHandle:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
+            _notify_hook_dict_mutation(hooks_dict)
 
         for ref in self.extra_dict_ref:
             extra_dict = ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
+                _notify_hook_dict_mutation(extra_dict)
 
     def __getstate__(self):
         if self.extra_dict_ref is None:

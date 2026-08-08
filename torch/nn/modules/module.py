@@ -15,7 +15,7 @@ from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.hooks import BackwardHook, RemovableHandle
+from torch.utils.hooks import _notify_hook_dict_mutation, BackwardHook, RemovableHandle
 
 
 __all__ = [
@@ -243,6 +243,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     """
     handle = RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
+    _notify_hook_dict_mutation(_global_forward_pre_hooks)
     return handle
 
 
@@ -283,13 +284,20 @@ def register_module_forward_hook(
     ``register_forward_hook``.
     """
     handle = RemovableHandle(
-        _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
+        _global_forward_hooks,
+        extra_dict=[
+            _global_forward_hooks_always_called,
+            _global_forward_hooks_with_kwargs,
+        ],
     )
     _global_forward_hooks[handle.id] = hook
+    _notify_hook_dict_mutation(_global_forward_hooks)
     if with_kwargs:
         _global_forward_hooks_with_kwargs[handle.id] = True
+        _notify_hook_dict_mutation(_global_forward_hooks_with_kwargs)
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
+        _notify_hook_dict_mutation(_global_forward_hooks_always_called)
     return handle
 
 
@@ -319,6 +327,7 @@ def register_module_backward_hook(
 
     handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
+    _notify_hook_dict_mutation(_global_backward_hooks)
     return handle
 
 
@@ -346,6 +355,7 @@ def register_module_full_backward_pre_hook(
     """
     handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
+    _notify_hook_dict_mutation(_global_backward_pre_hooks)
     return handle
 
 
@@ -382,6 +392,7 @@ def register_module_full_backward_hook(
 
     handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
+    _notify_hook_dict_mutation(_global_backward_hooks)
     return handle
 
 
@@ -1431,6 +1442,7 @@ class Module:
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _notify_hook_dict_mutation(self._backward_pre_hooks)
         return handle
 
     def register_backward_hook(
@@ -1457,6 +1469,7 @@ class Module:
 
         handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
+        _notify_hook_dict_mutation(self._backward_hooks)
         return handle
 
     def register_full_backward_hook(
@@ -1523,6 +1536,7 @@ class Module:
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _notify_hook_dict_mutation(self._backward_hooks)
         return handle
 
     def _get_backward_hooks(self):
@@ -1676,14 +1690,17 @@ class Module:
                 ``handle.remove()``
         """
         handle = RemovableHandle(
-            self._forward_pre_hooks, extra_dict=self._forward_pre_hooks_with_kwargs
+            self._forward_pre_hooks,
+            extra_dict=self._forward_pre_hooks_with_kwargs,
         )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_pre_hooks_with_kwargs[handle.id] = True
+            _notify_hook_dict_mutation(self._forward_pre_hooks_with_kwargs)
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _notify_hook_dict_mutation(self._forward_pre_hooks)
         return handle
 
     def register_forward_hook(
@@ -1747,10 +1764,13 @@ class Module:
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
+            _notify_hook_dict_mutation(self._forward_hooks_with_kwargs)
         if always_call:
             self._forward_hooks_always_called[handle.id] = True
+            _notify_hook_dict_mutation(self._forward_hooks_always_called)
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        _notify_hook_dict_mutation(self._forward_hooks)
         return handle
 
     def _slow_forward(self, *input, **kwargs):

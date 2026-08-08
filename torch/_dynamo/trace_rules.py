@@ -389,6 +389,7 @@ manual_torch_name_rule_map: dict[
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._dynamo.dont_skip_tracing": UserFunctionVariable,
+    "torch._dynamo.mutation_guard._on_hook_dict_mutation": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
