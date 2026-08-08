@@ -3810,6 +3810,14 @@ def all_reduce(
 
     Complex tensors are supported.
 
+    .. warning::
+        This collective is **not** autograd-aware. It operates in-place and does
+        not participate in the autograd graph, so gradients do not flow through it.
+        For autograd-aware collectives, prefer
+        :mod:`torch.distributed.tensor` (DTensor) or
+        :mod:`torch.distributed._functional_collectives`.
+        The older :mod:`torch.distributed.nn` wrappers are deprecated.
+
     Args:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
