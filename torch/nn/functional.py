@@ -3342,6 +3342,11 @@ def gaussian_nll_loss(
             reduction=reduction,
         )
 
+    torch._check_type(
+        input.is_floating_point(),
+        lambda: f"gaussian_nll_loss only supports floating point dtypes, but got {input.dtype}",
+    )
+
     # Entries of var must be non-negative
     if isinstance(var, float):
         if var < 0:
