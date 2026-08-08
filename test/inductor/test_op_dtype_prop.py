@@ -457,7 +457,7 @@ class TestCase(InductorTestCase):
 
 
 instantiate_device_type_tests(
-    TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestCase, globals(), only_for=("cuda", "xpu", "privateuse1"), allow_xpu=True
 )
 
 if __name__ == "__main__":
