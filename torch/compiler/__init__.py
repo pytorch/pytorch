@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -47,6 +47,7 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "export_python",
     "PrecompileError",
     "wrap_numpy",
     "is_compiling",
@@ -1012,3 +1013,126 @@ def load_compiled_function(
 
     data = file.read()
     return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+
+
+def export_python(
+    *,
+    path: str,
+    backend: str = "inductor",
+    tracer: str = "make_fx",
+    decompositions: dict | None = None,
+    example_inputs: Sequence[object] | None = None,
+    unsafe_reduce_overhead: bool = False,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Export the human-readable Python emitted by :func:`torch.compiler.precompile` to disk.
+
+    ``export_python`` is a decorator wrapping :func:`torch.compiler.precompile`.
+    On the first run in an environment it precompiles the decorated function (make_fx
+    capture plus backend lowering) and writes the emitted, self-contained Python
+    source to ``path``. On any later run the ``.py`` is already present, so
+    precompilation is skipped: the source is read back from disk and executed
+    directly. There is no acceleration cache -- the emitted source is self-contained
+    and always exec'd as written.
+
+    It is a distinct entry point rather than a ``path=`` kwarg on
+    :func:`torch.compiler.precompile` because the two have different shapes: the raw
+    ``precompile(fn, *example_inputs)`` primitive is eager, takes the example inputs
+    positionally (mirroring how ``fn`` is called), and returns ``(python_code,
+    cache)`` for the caller to manage. ``export_python`` is a decorator that owns the
+    on-disk artifact and returns a runnable, so ``fn`` arrives via ``@`` and the
+    example inputs move to a keyword-only ``example_inputs`` list.
+
+    Keyword call arguments are supported: they are bound onto ``fn``'s positional
+    signature (so ``rope(q=..., k=...)`` works); keyword-only parameters are not
+    expressible in the artifact's positional convention and are rejected.
+
+    Unlike a binary artifact, ``path`` is readable, re-executable Python meant to be
+    committed and hand-edited. An engineer or agent can "hill-climb" the generated
+    kernel in place (ejectable compilation): the emitted source is always exec'd, so
+    edits always take effect. Keeping the edited source correct is the caller's
+    responsibility. The original eager function stays in source as the reference to
+    regenerate from (delete ``path`` to re-precompile).
+
+    Args:
+        path: Filesystem path for the emitted Python source. Parent directories are
+            created as needed. Its presence is the sole signal used to decide whether
+            to precompile or to load. Because presence is the sole signal, changing
+            ``backend``, ``tracer``, ``decompositions``, or ``example_inputs`` later
+            does NOT invalidate a previously written artifact: an existing ``path`` is
+            loaded as-is. To force a re-precompile after changing any of those, delete
+            ``path``. The artifact records the producing torch version in its first
+            line; loading it under a different torch logs a warning (it still runs) so
+            a committed artifact gone stale across a torch upgrade is visible. A
+            hand-edit that drops that line disables the warning.
+        backend: How the captured graph is realized: ``"inductor"`` (default) or
+            ``"eager"``. Forwarded to :func:`torch.compiler.precompile`.
+        tracer: Capture front-end; ``"make_fx"`` (default) is the only one
+            implemented. Forwarded to :func:`torch.compiler.precompile`.
+        decompositions: Optional decomposition table forwarded to ``make_fx`` during
+            capture.
+        example_inputs: Positional inputs used to drive precompilation, matching
+            ``fn``'s own positional signature (``nn.Module`` arguments stay at their
+            original positions; the rest are the runtime inputs). If None, the first
+            call's own arguments are used, deep-copied for capture so a mutating
+            ``fn`` is applied exactly once. Pass ``example_inputs`` explicitly when
+            the first-call arguments are not deep-copyable (e.g. non-leaf tensors or
+            ``weight_norm`` modules). Explicit ``example_inputs`` are consumed by
+            capture, which runs ``fn`` once and mutates them (e.g. module buffers), so
+            they must NOT be objects that also appear in the runtime call args --
+            otherwise the mutation is applied twice (once at capture, once by the
+            artifact). The None path avoids this by deep-copying the first call's args
+            for capture. Note that this deep copy includes the full weights of any
+            ``nn.Module`` argument, so it transiently doubles that memory. Pass
+            ``example_inputs`` explicitly for large modules to avoid the clone.
+        unsafe_reduce_overhead: Skip the artifact's per-call invariant checks. The
+            emitted ``forward`` re-verifies the precompile invariants on every call
+            (pytree round-trip against the traced structure, per-input shape / dtype /
+            device guards); with this set, the compiled ``call`` is invoked directly
+            instead, which on a small kernel removes most of the per-call host
+            overhead. AOTAutograd's own semantics (input-mutation reflection, subclass
+            unwrapping, grad disabling) are still applied -- only the checks go away.
+            Passing an input whose shape, dtype, device or layout differs from the
+            traced example is then undefined behavior (silent wrong results or a
+            crash) instead of a diagnosed error, so use it only where the call site
+            provably matches the capture. It has no effect (and warns) when the
+            calling convention needs the driver: an ``nn.Module`` argument, a gradient
+            to scatter, or a non-flat input/output structure. Note that ``forward`` is
+            bypassed in this mode, so a hand-edit to the driver in ``path`` does not
+            take effect (hand-edits to the kernels and to ``call`` still do). It also
+            enables the ``out=`` calling convention described below.
+
+    With ``unsafe_reduce_overhead=True`` and an artifact that allocates its own buffers
+    (``backend="inductor"`` does; ``backend="eager"`` emits a bare graph call and
+    raises), the artifact accepts an ``out=`` sequence of destination tensors. Donating the outputs also lets the
+    artifact reuse its internal scratch buffers, so a steady-state ``out=`` call
+    allocates nothing -- worth roughly a microsecond per buffer the graph would
+    otherwise have asked the caching allocator for::
+
+        o0, o1 = torch.empty_like(q), torch.empty_like(k)
+        for ... :
+            apply_rotary_pos_emb(q, k, cos, sin, out=(o0, o1))
+
+    The donated tensors are validated once, on the first ``out=`` call, and must match
+    the artifact's outputs exactly (shape, stride, dtype, device); passing different
+    ones later is undefined behavior and can corrupt memory, since the kernels write
+    through baked sizes and strides. Because the scratch buffers are shared across
+    ``out=`` calls, a donating call is neither reentrant nor thread-safe. Calls without
+    ``out=`` are unaffected and keep allocating their own outputs. ``out=`` raises if
+    the artifact's outputs are not buffers it allocates (a view of one, or an input
+    passed through), which is the case where there is nothing to donate into.
+
+    Example::
+
+        @torch.compiler.export_python(path="precompiled_kernels/rope.py")
+        def apply_rotary_pos_emb(q, k, cos, sin): ...
+    """
+    from torch.compiler._export_python import export_python as _export_python
+
+    return _export_python(
+        path=path,
+        backend=backend,
+        tracer=tracer,
+        decompositions=decompositions,
+        example_inputs=example_inputs,
+        unsafe_reduce_overhead=unsafe_reduce_overhead,
+    )
