@@ -197,29 +197,6 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-static __global__ void put_signal_kernel(
-    uint32_t** signal_pads,
-    int dst_rank,
-    int channel,
-    int rank,
-    int world_size,
-    size_t timeout_ms) {
-  if (threadIdx.x == 0) {
-    bool success = try_put_signal<std::memory_order_release>(
-        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
-    if (!success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::put_signal: rank %d failed to send signal "
-          "to rank %d on channel %d after %lu microseconds\n",
-          rank,
-          dst_rank,
-          channel,
-          timeout_ms);
-      trap();
-    }
-  }
-}
-
 void CUDASymmetricMemory::put_signal(
     int dst_rank,
     int channel,
@@ -252,34 +229,6 @@ void CUDASymmetricMemory::put_signal(
       world_size_,
       timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-static __global__ void wait_signal_kernel(
-    uint32_t** signal_pads,
-    int src_rank,
-    int channel,
-    int rank,
-    int world_size,
-    size_t timeout_ms) {
-  if (threadIdx.x == 0) {
-    bool success = try_wait_signal<std::memory_order_acquire>(
-        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
-    if (!success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::wait_signal rank %d failed to receive signal "
-          "from rank %d on channel %d after %lu microseconds\n",
-          rank,
-          src_rank,
-          channel,
-          timeout_ms);
-#if !defined(USE_ROCM)
-      __trap();
-#else
-      assert(0);
-#endif
-    }
-  }
-  __threadfence_system();
 }
 
 void CUDASymmetricMemory::wait_signal(
