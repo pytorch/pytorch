@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import unittest
 from copy import deepcopy
 from functools import partial
 
@@ -16,18 +15,25 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     OffloadWrapper,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils.checkpoint import checkpoint
 
 
 _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
-device_type = torch.device(get_devtype())
-
 
 class CheckpointWrapperTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_activation_checkpointed_module(self):
         lin = nn.Linear(10, 10, bias=False)
         lin = checkpoint_wrapper(
@@ -132,85 +138,6 @@ class CheckpointWrapperTest(TestCase):
         )
         m(torch.randn(2, 1)).sum().backward()
         self.assertEqual(2, count)
-
-    @unittest.skip
-    def test_checkpoint_wrapper_parity(self):
-        """
-        Tests that using checkpoint_wrapper or the functional
-        torch.utils.checkpoint (with the same reentrant config)
-        results in the same maximum memory usage, i.e. they are
-        equivalent memory usage wise.
-        """
-
-        class Model(nn.Module):
-            def __init__(
-                self,
-                n: int,
-                use_cp: bool,
-                use_wrapper: bool = False,
-                use_reentrant: bool = True,
-            ):
-                super().__init__()
-                self.layers = nn.ModuleList()
-                self.n = n
-                self.use_cp = use_cp
-                self.use_wrapper = use_wrapper
-                self.use_reentrant = use_reentrant
-                wrp = partial(
-                    checkpoint_wrapper,
-                    checkpoint_impl=(
-                        CheckpointImpl.REENTRANT
-                        if use_reentrant
-                        else CheckpointImpl.NO_REENTRANT
-                    ),
-                )
-                for _ in range(self.n):
-                    l = nn.Sequential(
-                        nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
-                    )
-                    use_checkpoint_wrapper = self.use_wrapper
-                    if use_checkpoint_wrapper:
-                        l = wrp(l)
-                    self.layers.append(l)
-
-            def forward(self, x):
-                for i in range(self.n):
-                    if self.use_wrapper or not self.use_cp:
-                        x = self.layers[i](x)
-                    else:
-                        x = checkpoint(
-                            self.layers[i], x, use_reentrant=self.use_reentrant
-                        )
-                return x
-
-        def test(use_checkpointing, use_wrapper, use_reentrant):
-            a = Model(
-                8,
-                use_checkpointing,
-                use_wrapper=use_wrapper,
-                use_reentrant=use_reentrant,
-            ).to(device_type.type)
-            x = torch.randn(10000, 256, requires_grad=True).to(device_type.type)
-            torch.get_device_module(device_type.type).reset_peak_memory_stats()
-            loss = a(x).sum()
-            loss.backward()
-            return torch.get_device_module(device_type.type).max_memory_allocated()
-
-        functional_no_reentrant = test(
-            use_checkpointing=True, use_wrapper=False, use_reentrant=False
-        )
-        wrapper_no_reentrant = test(
-            use_checkpointing=False, use_wrapper=True, use_reentrant=False
-        )
-        self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
-
-        functional_reentrant = test(
-            use_checkpointing=True, use_wrapper=False, use_reentrant=True
-        )
-        wrapper_reentrant = test(
-            use_checkpointing=False, use_wrapper=True, use_reentrant=True
-        )
-        self.assertEqual(functional_reentrant, wrapper_reentrant)
 
     def test_forward_missing_attributes(self):
         lin = nn.Linear(1, 1)
@@ -340,12 +267,94 @@ class CheckpointWrapperTest(TestCase):
                 fqn in state_dict, msg=lambda msg: f"{msg}\n{fqn} not in state_dict."
             )
 
-    def test_checkpoint_wrapper_cpu_offload(self):
+
+class CheckpointWrapperTestDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_checkpoint_wrapper_parity(self, device):
+        """
+        Tests that using checkpoint_wrapper or the functional
+        torch.utils.checkpoint (with the same reentrant config)
+        results in the same maximum memory usage, i.e. they are
+        equivalent memory usage wise.
+        """
+
+        class Model(nn.Module):
+            def __init__(
+                self,
+                n: int,
+                use_cp: bool,
+                use_wrapper: bool = False,
+                use_reentrant: bool = True,
+            ):
+                super().__init__()
+                self.layers = nn.ModuleList()
+                self.n = n
+                self.use_cp = use_cp
+                self.use_wrapper = use_wrapper
+                self.use_reentrant = use_reentrant
+                wrp = partial(
+                    checkpoint_wrapper,
+                    checkpoint_impl=(
+                        CheckpointImpl.REENTRANT
+                        if use_reentrant
+                        else CheckpointImpl.NO_REENTRANT
+                    ),
+                )
+                for _ in range(self.n):
+                    l = nn.Sequential(
+                        nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
+                    )
+                    use_checkpoint_wrapper = self.use_wrapper
+                    if use_checkpoint_wrapper:
+                        l = wrp(l)
+                    self.layers.append(l)
+
+            def forward(self, x):
+                for i in range(self.n):
+                    if self.use_wrapper or not self.use_cp:
+                        x = self.layers[i](x)
+                    else:
+                        x = checkpoint(
+                            self.layers[i], x, use_reentrant=self.use_reentrant
+                        )
+                return x
+
+        def test(use_checkpointing, use_wrapper, use_reentrant):
+            a = Model(
+                8,
+                use_checkpointing,
+                use_wrapper=use_wrapper,
+                use_reentrant=use_reentrant,
+            ).to(device)
+            x = torch.randn(10000, 256, requires_grad=True).to(device)
+            torch.accelerator.reset_peak_memory_stats()
+            loss = a(x).sum()
+            loss.backward()
+            return torch.accelerator.max_memory_allocated()
+
+        functional_no_reentrant = test(
+            use_checkpointing=True, use_wrapper=False, use_reentrant=False
+        )
+        wrapper_no_reentrant = test(
+            use_checkpointing=False, use_wrapper=True, use_reentrant=False
+        )
+        self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
+
+        functional_reentrant = test(
+            use_checkpointing=True, use_wrapper=False, use_reentrant=True
+        )
+        wrapper_reentrant = test(
+            use_checkpointing=False, use_wrapper=True, use_reentrant=True
+        )
+        self.assertEqual(functional_reentrant, wrapper_reentrant)
+
+    def test_checkpoint_wrapper_cpu_offload(self, device):
         model = nn.Sequential(
             nn.Linear(10, 10),
             nn.Linear(10, 10),
             nn.Linear(10, 10),
-        ).to(device_type.type)
+        ).to(device)
 
         # Patch saved_tensor_hooks to make the unpack keep the tensor on CPU for
         # testing, otherwise the tensor access during the DFS will cause orig
@@ -364,7 +373,7 @@ class CheckpointWrapperTest(TestCase):
 
         model = offload_wrapper(model)
 
-        inp = torch.randn(3, 10, device=device_type.type)
+        inp = torch.randn(3, 10, device=device)
         loss = model(inp).sum()
 
         # All autograd saved tensors should be offloaded to CPU.
@@ -391,8 +400,8 @@ class CheckpointWrapperTest(TestCase):
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_checkpoint_wrapper_with_block_mask(self):
+    @onlyAccelerator
+    def test_checkpoint_wrapper_with_block_mask(self, device):
         """Test that BlockMask can be passed through checkpoint_wrapper."""
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
         from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
@@ -414,11 +423,14 @@ class CheckpointWrapperTest(TestCase):
             def forward(self, x, mask):
                 return x * 2
 
-        model = checkpoint_wrapper(Block()).cuda()
-        x = torch.randn(4, 128, device="cuda")
+        model = checkpoint_wrapper(Block()).to(device)
+        x = torch.randn(4, 128, device=device)
         result = model(x, block_mask)
         self.assertEqual(result, x * 2)
 
 
+instantiate_device_type_tests(
+    CheckpointWrapperTestDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
