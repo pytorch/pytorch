@@ -387,20 +387,16 @@ user_stack=None)
 
     @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
     def test_dict_tag_does_not_skip_immutable_object_aliasing_guard(self):
-        value = tuple([1, 2])
-        different = tuple([1, 3])
+        value = (1, 2)
+        different = (1, 3)
         container = {"value": value}
 
         root = RootGuardManager()
-        dict_manager = root.list_getitem_manager(
-            0, "", container, default_mgr_enum
-        )
+        dict_manager = root.list_getitem_manager(0, "", container, default_mgr_enum)
         dict_value_manager = dict_manager.dict_getitem_manager(
             "value", "", value, default_mgr_enum
         )
-        peer_manager = root.list_getitem_manager(
-            1, "", value, default_mgr_enum
-        )
+        peer_manager = root.list_getitem_manager(1, "", value, default_mgr_enum)
         install_object_aliasing_guard(
             dict_value_manager,
             peer_manager,
