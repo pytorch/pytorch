@@ -420,6 +420,99 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// `InputArchive` when deserializing.
   virtual void load(serialize::InputArchive& archive);
 
+  /// Registers a forward pre-hook on the module.
+  ///
+  /// The hook will be called every time before :func:`forward` is invoked.
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   struct MyModule : torch::nn::Module {
+  ///     torch::Tensor forward(torch::Tensor input) override {
+  ///       return input;
+  ///     }
+  ///   };
+  ///
+  ///   MyModule module;
+  ///   module.register_forward_pre_hook([](torch::nn::Module& m, const std::vector<torch::Tensor>& inputs) {
+  ///     std::cout << "Before forward" << std::endl;
+  ///   });
+  /// \endrst
+  ///
+  /// Args:
+  ///   hook: The hook to register.
+  ///   prepend: If true, the hook will be fired before all existing forward
+  ///     pre-hooks on this module. Otherwise, it will be fired after all
+  ///     existing forward pre-hooks. Default: false.
+  ///   with_kwargs: If true, the hook will be passed the kwargs given to the
+  ///     forward function. Default: false.
+  ///
+  /// Returns:
+  ///   A handle that can be used to remove the hook by calling `handle.remove()`.
+  ///
+  /// \note\n
+  ///   This method mirrors the Python :func:`torch.nn.Module.register_forward_pre_hook` API.
+  void register_forward_pre_hook(
+      std::function<void(Module&, const std::vector<Tensor>&)> hook,
+      bool prepend = false,
+      bool with_kwargs = false);
+
+  /// Registers a forward hook on the module.
+  ///
+  /// The hook will be called every time after :func:`forward` has computed an output.
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   struct MyModule : torch::nn::Module {
+  ///     torch::Tensor forward(torch::Tensor input) override {
+  ///       return input;
+  ///     }
+  ///   };
+  ///
+  ///   MyModule module;
+  ///   module.register_forward_hook([](torch::nn::Module& m, const std::vector<torch::Tensor>& inputs, const torch::Tensor& output) {
+  ///     std::cout << "After forward" << std::endl;
+  ///   });
+  /// \endrst
+  ///
+  /// Args:
+  ///   hook: The hook to register.
+  ///   prepend: If true, the hook will be fired before all existing forward hooks
+  ///     on this module. Otherwise, it will be fired after all existing forward hooks.
+  ///     Default: false.
+  ///   with_kwargs: If true, the hook will be passed the kwargs given to the
+  ///     forward function. Default: false.
+  ///   always_call: If true, the hook will be called regardless of whether an
+  ///     exception is raised during forward. Default: false.
+  ///
+  /// Returns:
+  ///   A handle that can be used to remove the hook by calling `handle.remove()`.
+  ///
+  /// \note\n
+  ///   This method mirrors the Python :func:`torch.nn.Module.register_forward_hook` API.
+  void register_forward_hook(
+      std::function<void(Module&, const std::vector<Tensor>&, const Tensor&)> hook,
+      bool prepend = false,
+      bool with_kwargs = false,
+      bool always_call = false);
+
+  /// Registers a forward pre-hook with kwargs on the module.
+  ///
+  /// The hook will be called every time before :func:`forward` is invoked.
+  ///
+  /// Args:
+  ///   hook: The hook to register.
+  ///   prepend: If true, the hook will be fired before all existing forward
+  ///     pre-hooks on this module. Otherwise, it will be fired after all
+  ///     existing forward pre-hooks. Default: false.
+  ///
+  /// Returns:
+  ///   A handle that can be used to remove the hook by calling `handle.remove()`.
+  void register_forward_pre_hook_with_kwargs(
+      std::function<void(Module&, const std::vector<Tensor>&, std::unordered_map<std::string, at::Tensor>)> hook,
+      bool prepend = false);
+
   /// Streams a pretty representation of the `Module` into the given `stream`.
   /// By default, this representation will be the name of the module (taken from
   /// `name()`), followed by a recursive pretty print of all of the `Module`'s
