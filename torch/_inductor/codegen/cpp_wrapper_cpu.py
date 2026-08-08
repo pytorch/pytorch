@@ -3051,6 +3051,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
 
             if isinstance(arg_type, torch.TensorType):
+                if isinstance(arg, (bool, float, int)):
+                    # A scalar bound to a Tensor-typed parameter is serialized
+                    # by value in the extern kernel node; the proxy executor
+                    # materializes the tensor, so nothing is passed here.
+                    return
                 if not isinstance(arg, inductor_tensor_buffers):
                     raise AssertionError(f"got {type(arg)}")
                 new_tensor_args.append(f"{arg.codegen_reference()}")

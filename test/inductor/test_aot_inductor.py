@@ -8653,6 +8653,73 @@ class AOTInductorTestsTemplate:
                 M(), list_example_inputs, dynamic_shapes=({0: Dim.DYNAMIC},)
             )
 
+    def test_proxy_executor_omitted_kwarg_only_defaults(self):
+        # serialize_inputs omits kwarg-only arguments that were not explicitly
+        # provided (the proxy executor fills them from schema defaults), so the
+        # generated call-site arrays must skip them too; passing their
+        # filled-in default values desyncs the executor's argument count
+        # ("Mismatch between ints consumed and num_ints"). The post-grad
+        # mm+add fusion emits addmm without explicit beta/alpha, which is such
+        # a node. Routing it through the proxy executor requires an op without
+        # a torchgen'd C shim; simulate that (the situation of out-of-tree
+        # backends, where no per-device C shim exists at all) by removing
+        # addmm from the C-shim list and forcing fallback lowering.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(4, 4))
+                self.b = torch.nn.Parameter(torch.randn(4))
+
+            def forward(self, x):
+                return x @ self.w + self.b
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+
+        from torchgen.aoti import fallback_ops
+
+        patched_fallback_ops = {
+            k: v
+            for k, v in fallback_ops.inductor_fallback_ops.items()
+            if k != "aten.addmm.default"
+        }
+        with (
+            patch.object(
+                fallback_ops, "inductor_fallback_ops", patched_fallback_ops
+            ),
+            config.patch(fallback_by_default=True),
+        ):
+            self.check_model(M(), example_inputs)
+
+    def test_proxy_executor_scalar_bound_to_tensor_arg(self):
+        # FX graphs allow a python scalar to bind to a Tensor-typed parameter
+        # (aten.add.Tensor(x, 1)). The extern kernel node serializes it by
+        # value (as_int); the proxy executor must materialize the 0-d tensor
+        # instead of rejecting it expecting as_tensor. Routing an op with such
+        # an argument through the proxy executor requires an op without a
+        # torchgen'd C shim; simulate that (the situation of out-of-tree
+        # backends, where no per-device C shim exists at all) by removing
+        # add.Tensor from the C-shim list and forcing fallback lowering.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+
+        from torchgen.aoti import fallback_ops
+
+        patched_fallback_ops = {
+            k: v
+            for k, v in fallback_ops.inductor_fallback_ops.items()
+            if k != "aten.add.Tensor"
+        }
+        with (
+            patch.object(
+                fallback_ops, "inductor_fallback_ops", patched_fallback_ops
+            ),
+            config.patch(fallback_by_default=True),
+        ):
+            self.check_model(M(), example_inputs)
+
     def test_clamp_decomposition(self):
         class Model1(torch.nn.Module):
             def forward(self, x):

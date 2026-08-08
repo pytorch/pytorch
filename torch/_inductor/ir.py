@@ -9790,6 +9790,17 @@ class FallbackKernel(ExternKernelAlloc):
 
         V.extern_kernel_nodes.append(node)
 
+        # serialize_inputs only emits kwarg-only arguments that were
+        # explicitly provided; the proxy executor fills schema defaults for
+        # the omitted ones. Return None for those so the generated call
+        # arrays line up with the serialized node (None args are skipped).
+        omittable = OrderedSet(self.ordered_kwargs_for_cpp_kernel) - OrderedSet(
+            kwargs.keys()
+        )
+        ordered_kwargs = [
+            None if key in omittable else self.get_kwargs_value(key, **kwargs)
+            for key in self.ordered_kwargs_for_cpp_kernel
+        ]
         return [*args, *ordered_kwargs]
 
     @override
