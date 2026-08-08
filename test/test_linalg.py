@@ -7045,6 +7045,35 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    @onlyCUDA
+    @parametrize("m", [1, 8, 17])
+    @parametrize("k", [31, 32, 33, 96, 130])
+    @parametrize("n", [48, 63])
+    def test__int8_mm_nonaligned_k(self, device, m, k, n):
+        # Covers both the vectorized (k % 4 == 0) and scalar-tail (k % 4 != 0)
+        # paths of the CUDA kernel, and small batch (decode) shapes.
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+            b, -128, 127, torch.int8
+        )
+        res = torch._weight_int8pack_mm(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+        a_f32_storage = torch.empty((m * k) + 1, dtype=torch.float32, device=device)
+        a_f32 = a_f32_storage[1:].view(m, k)
+        a_f32.copy_(a)
+        res = torch._weight_int8pack_mm(a_f32, b_int8pack, b_scales)
+        ref = torch.mm(a_f32, b.float().transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
     @slowTest
     @onlyCPU
     @largeTensorTest('12GB', device='cpu')
