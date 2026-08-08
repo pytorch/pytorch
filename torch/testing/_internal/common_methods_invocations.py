@@ -5143,6 +5143,16 @@ def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
                 approximate=approximate)
 
 
+def reference_inputs_gelu(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_gelu(op, device, dtype, requires_grad, **kwargs)
+    # 64 elements so the extremal values also reach the vectorized kernel paths
+    extremals = [float('-inf'), float('inf'), float('nan'), 0.0] * 16
+    for approximate in ['none', 'tanh']:
+        yield SampleInput(
+            torch.tensor(extremals, device=device, dtype=dtype, requires_grad=requires_grad),
+            approximate=approximate)
+
+
 def error_inputs_gelu(op, device, **kwargs):
     # Tests that gelu errors out when passed an approximation we don't know.
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device), kwargs={"approximate": "asdf"}),
@@ -11508,10 +11518,8 @@ def reference_gelu(X, *, approximate='none'):
         Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
         return 0.5 * X * (1.0 + np.tanh(Z))
 
-    if approximate == 'tanh':
-        return _tanh_gelu_ref(X)
-    else:
-        return _gelu_ref(X)
+    res = _tanh_gelu_ref(X) if approximate == 'tanh' else _gelu_ref(X)
+    return np.where(np.isinf(X), np.maximum(X, 0), res).astype(X.dtype)
 
 
 def reference_one_hot(a: npt.NDArray, num_classes: int = -1) -> npt.NDArray:
@@ -17783,6 +17791,7 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
+           reference_inputs_func=reference_inputs_gelu,
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            supports_gradgrad=True,
            supports_forward_ad=True,
@@ -17792,7 +17801,8 @@ op_db: list[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                # May not replicate in CI
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+               # CUDA kernel still returns NaN at inf (#187293)
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref', device_type='cuda'),
            )),
     UnaryUfuncInfo('nn.functional.relu6',
                    aten_name="relu6",
@@ -24507,6 +24517,13 @@ python_ref_db = [
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
         torch_opinfo_name="nn.functional.gelu",
+        skips=(
+            # ref returns NaN at inf, fixed CPU/MPS kernels do not (#187293)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
