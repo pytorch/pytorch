@@ -25,6 +25,7 @@
 #else
 #include <ATen/ops/_sparse_addmm.h>
 #include <ATen/ops/_sparse_addmm_native.h>
+#include <ATen/ops/_sparse_broadcast_to.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_mm_native.h>
 #include <ATen/ops/_sparse_sum.h>
@@ -861,7 +862,29 @@ static Tensor& intersection_binary_op_sparse_dense_out(
   // Always coalesce when sparse broadcasts over dense,
   // because new sparse dimensions are created and
   // repeated indices have to be eliminated because of that.
-  const auto s = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+  const auto s_coalesced = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+
+  // A size-1 sparse dimension of the sparse operand has to broadcast up to the
+  // result size. The intersection logic below reuses the sparse indices as-is
+  // and does not expand them, which would silently drop all but the index-0
+  // slice along such a dimension. Materialize the broadcast here so each
+  // specified element is replicated across the broadcasted sparse dimensions.
+  // See https://github.com/pytorch/pytorch/issues/188900.
+  const auto s = [&]() -> Tensor {
+    const auto n_sparse = s_coalesced.sparse_dim();
+    const auto s_ndim = s_coalesced.dim();
+    const auto res_ndim = static_cast<int64_t>(res_shape.size());
+    auto bcast_shape = s_coalesced.sizes().vec();
+    bool needs_bcast = false;
+    for (const auto j : c10::irange(n_sparse)) {
+      const auto res_size = res_shape[res_ndim - s_ndim + j];
+      if (bcast_shape[j] == 1 && res_size != 1) {
+        bcast_shape[j] = res_size;
+        needs_bcast = true;
+      }
+    }
+    return needs_bcast ? at::_sparse_broadcast_to(s_coalesced, bcast_shape) : s_coalesced;
+  }();
 
   const auto sparse_dim = s.sparse_dim();
   const auto dense_dim = s.dense_dim();
