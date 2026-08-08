@@ -7781,7 +7781,7 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        return truncdiv(a, b) if both_integer else trunc(_div_rn(a, b))
     return div(a, b)
 
 
