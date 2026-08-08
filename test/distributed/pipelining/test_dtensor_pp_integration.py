@@ -26,11 +26,10 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
@@ -137,7 +136,6 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 def _requires_multi_gpu(func):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 4,
         f"{backend} test requires 4+ GPUs",
@@ -153,23 +151,31 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
-        return backend
+    def _resolved_device_type(cls) -> str:
+        # MultiProcContinuousTest subprocesses run tests without calling
+        # PrivateUse1TestBase.setUpClass, so cls.device_type stays the generic
+        # "privateuse1" token; resolve it to the registered backend name.
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
 
     @classmethod
-    def device_type(cls) -> str:
-        return device_type
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls._resolved_device_type())
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+        return torch.device(self._resolved_device_type(), self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(self.device)
 
     def _make_mesh(self) -> DeviceMesh:
-        return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))
+        return init_device_mesh(
+            self._resolved_device_type(), (2, 2), mesh_dim_names=("pp", "tp")
+        )
 
     def _build_baseline_and_clones(
         self,
@@ -669,6 +675,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
 
 
 class TestDTensorPPModes(DTensorPPIntegrationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @_requires_multi_gpu
     def test_static_mode_replicate(self):
         self._run_training_correctness(
@@ -801,6 +809,14 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             [Shard(1)],
             use_static_metadata=False,
         )
+
+
+instantiate_device_type_tests(
+    TestDTensorPPModes,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
