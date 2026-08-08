@@ -1681,8 +1681,12 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
 }
 
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
-  static BundledShaderLibrary l;
-  return l;
+  // Heap-allocate and intentionally leak: the singleton lives for the whole
+  // process, and its destructor cannot safely release Metal objects during
+  // __cxa_finalize on builds where the Metal runtime has already been torn
+  // down. See https://github.com/pytorch/pytorch/issues/188812.
+  static BundledShaderLibrary* l = new BundledShaderLibrary();
+  return *l;
 }
 
 // DynamicMetalShaderLibrary implementation
