@@ -33,6 +33,13 @@
     - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
+- [Release automation workflows in pytorch/test-infra](#release-automation-workflows-in-pytorchtest-infra)
+  - [Matrix generation workflows](#matrix-generation-workflows)
+  - [Binary validation and smoke-test workflows](#binary-validation-and-smoke-test-workflows)
+  - [Branch-cut workflows](#branch-cut-workflows)
+  - [Promotion and publishing workflows](#promotion-and-publishing-workflows)
+  - [Nightly trigger workflows](#nightly-trigger-workflows)
+  - [When each workflow is used](#when-each-workflow-is-used)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
   - [Accelerator Software](#accelerator-software)
@@ -439,6 +446,68 @@ Only following issues are accepted:
 
 1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
+
+# Release automation workflows in pytorch/test-infra
+
+Much of the release process is automated by reusable and scheduled GitHub Actions workflows that live in [`pytorch/test-infra/.github/workflows`](https://github.com/pytorch/test-infra/tree/main/.github/workflows). This section summarizes the release-relevant workflows and when each one is used during the release process described above. Most take a `channel` input (`nightly`, `test`, or `release`) that selects which download channel to build, validate, or promote.
+
+## Matrix generation workflows
+
+These are reusable (`workflow_call`) workflows. They are not run directly; other build, validation, and promotion workflows call them to fan out across every supported configuration.
+
+| Workflow | Purpose |
+| --- | --- |
+| [`generate_binary_build_matrix.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/generate_binary_build_matrix.yml) | Generates the binary build/test matrix (package type, OS, Python versions, and accelerator/channel). Consumed by binary build and validation workflows throughout the nightly, RC, and release cycles. |
+| [`generate_release_matrix.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/generate_release_matrix.yml) | Generates the release matrix used to drive the get-started install selector / published versions. Used when preparing the release-day get-started matrix update. |
+| [`generate_docker_release_matrix.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/generate_docker_release_matrix.yml) | Generates the Docker image release matrix for a given channel. Consumed by the Docker validation and Docker Hub release workflows. |
+
+## Binary validation and smoke-test workflows
+
+| Workflow | Purpose |
+| --- | --- |
+| [`validate-binaries.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/validate-binaries.yml) | Reusable entry point that runs smoke tests / validation of PyTorch (and optionally domain) binaries for a given `os` and `channel`. This is the **Validate Binaries** workflow referenced under [Preparing and Creating Final Release Candidate](#preparing-and-creating-final-release-candidate). It delegates to the per-OS workflows: `validate-linux-binaries.yml`, `validate-windows-binaries.yml`, `validate-macos-arm64-binaries.yml`, and `validate-aarch64-linux-binaries.yml`. |
+| [`validate-release-binaries.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/validate-release-binaries.yml) | Scheduled (daily) + manual wrapper that runs `validate-binaries` against the `release` channel for all OSes. Continuously validates the test/release channel during an RC cycle and after GA. |
+| [`validate-nightly-binaries.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/validate-nightly-binaries.yml) | Scheduled (daily) + manual wrapper that runs `validate-binaries` against the `nightly` channel. Used to confirm nightlies are healthy (a branch-cut prerequisite). |
+| [`validate-docker-images.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/validate-docker-images.yml) | Runs GPU smoke tests against the generated Docker release matrix for a given channel. |
+| [`validate-domain-library.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/validate-domain-library.yml) | Reusable smoke-test/validation workflow for an ecosystem library's binaries (torchvision, torchaudio, etc.) for a given channel. Used during RC validation of ecosystem libraries. |
+
+## Branch-cut workflows
+
+| Workflow | Purpose |
+| --- | --- |
+| [`release-pytorch-post-branch-cut.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-pytorch-post-branch-cut.yml) | After the release branch is cut, opens the release-only-changes PR on the `pytorch/pytorch` release branch (version bump and switching workflow/composite-action refs from `@main` to `@release/[major].[minor]`). Automates [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch). |
+
+## Promotion and publishing workflows
+
+All of these are `workflow_dispatch` (manually triggered) and default to a dry run. They are used during [Preparing and Creating Final Release Candidate](#preparing-and-creating-final-release-candidate) and [Promoting RCs to Stable](#promoting-rcs-to-stable).
+
+| Workflow | Purpose |
+| --- | --- |
+| [`release-stage-pypi.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-stage-pypi.yml) | Stages (prepares) an ecosystem library's binaries and pushes them to the PyPI staging bucket. Used in the "Prepare and stage PyPI binaries for promotion" step. |
+| [`release-pypi.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-pypi.yml) | Publishes an ecosystem library binary to PyPI from staging (PyPI step of promotion). |
+| [`release-download-pytorch-org.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-download-pytorch-org.yml) | Promotes an ecosystem library from the `test` channel to production on `download.pytorch.org` (S3 step of promotion). |
+| [`release-wheel-variants.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-wheel-variants.yml) | Promotes wheel-variant packages (e.g. `torch`, `torchvision`) to PyPI staging for a given version/architecture/platform set. |
+| [`release-post-promotion.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-post-promotion.yml) | Recomputes SHA256 checksums on the production `whl/` index for `torch` after wheels are promoted to production. |
+| [`release-docker.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/release-docker.yml) | Pulls release CUDA Docker images from GHCR, retags them, and pushes them to Docker Hub on release day. |
+
+## Nightly trigger workflows
+
+| Workflow | Purpose |
+| --- | --- |
+| [`trigger_nightly_core.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/trigger_nightly_core.yml) | Triggers the nightly build for PyTorch core (scheduled + manual). |
+| [`trigger_nightly.yml`](https://github.com/pytorch/test-infra/blob/main/.github/workflows/trigger_nightly.yml) | Triggers nightly builds for the ecosystem/domain libraries (scheduled + manual). |
+
+## When each workflow is used
+
+| Release phase | Workflows |
+| --- | --- |
+| [Cutting a release branch preparations](#cutting-a-release-branch-preparations) | `trigger_nightly_core.yml`, `trigger_nightly.yml`, `validate-nightly-binaries.yml` |
+| [Making release branch specific changes](#making-release-branch-specific-changes-for-pytorch) | `release-pytorch-post-branch-cut.yml` |
+| [Drafting RCs / health validation](#release-candidate-health-validation) | `validate-binaries.yml` (+ per-OS), `validate-release-binaries.yml`, `validate-domain-library.yml`, `validate-docker-images.yml` |
+| [Preparing final RC](#preparing-and-creating-final-release-candidate) | `validate-binaries.yml`, `release-stage-pypi.yml`, `release-wheel-variants.yml` |
+| [Promoting RCs to Stable](#promoting-rcs-to-stable) | `release-download-pytorch-org.yml`, `release-pypi.yml`, `release-post-promotion.yml`, `release-docker.yml` |
+| [Release day (get-started matrix)](#modify-release-matrix) | `generate_release_matrix.yml` |
+| Used by build & validation across all phases | `generate_binary_build_matrix.yml`, `generate_docker_release_matrix.yml` |
 
 # Hardware / Software Support in Binary Build Matrix
 
