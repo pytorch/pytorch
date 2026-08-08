@@ -6,17 +6,39 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
     print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
     sys.exit(0)
+
+
+class FindFreePortTest(unittest.TestCase):
+    def test_returns_bound_socket(self):
+        sock = find_free_port()
+        try:
+            self.assertGreater(sock.getsockname()[1], 0)
+        finally:
+            sock.close()
+
+    def test_raises_runtime_error_when_socket_creation_fails(self):
+        # If socket.socket() itself raises, the cleanup path must not fail
+        # with UnboundLocalError and mask the original error.
+        addr = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))
+        with (
+            mock.patch("socket.getaddrinfo", return_value=[addr]),
+            mock.patch("socket.socket", side_effect=OSError("socket failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+                find_free_port()
 
 
 class EtcdServerTest(unittest.TestCase):
