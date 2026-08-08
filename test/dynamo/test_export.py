@@ -1193,6 +1193,276 @@ def forward(self, x, y):
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
         self.assertEqual(attr_access_count, 2)
 
+    def test_export_nn_module_stack_contains_module_path_prefix(self):
+        """nn_module_stack paths from Dynamo use the L['self']. prefix format.
+
+        Any downstream pass that reconstructs module hierarchy from
+        nn_module_stack (e.g. ONNX export, custom hardware backends,
+        quantisation) must know how to strip the L['self']. prefix to
+        get clean dotted module paths.  This test ensures Dynamo
+        continues to produce that format so such consumers can rely on
+        it.
+        """
+        inp = torch.randn(4, 4)
+
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+
+            def forward(self, x):
+                return self.inner(x)
+
+        m = Outer()
+        exported = torch._dynamo.export(m, aten_graph=False)(inp)
+        out_graph = exported[0]
+
+        found_prefixed = False
+        for node in out_graph.graph.nodes:
+            stack = node.meta.get("nn_module_stack") or {}
+            for path, _cls in stack.values():
+                if isinstance(path, str) and path.startswith("L['self']."):
+                    found_prefixed = True
+                    # After prefix, should have valid dotted module path
+                    clean = path[len("L['self'].") :]
+                    self.assertTrue(
+                        len(clean) > 0,
+                        "Module path after L['self']. prefix should not be empty",
+                    )
+        self.assertTrue(
+            found_prefixed,
+            "Expected at least one nn_module_stack entry using L['self']. prefix",
+        )
+
+    def test_export_nn_module_stack_class_is_type(self):
+        """nn_module_stack class entries are actual types with __name__.
+
+        Passes that render module names (ONNX, debugging tools, custom
+        backends) access cls.__name__ on nn_module_stack entries.
+        This test ensures the class values remain real type objects,
+        not serialised strings.
+        """
+        inp = torch.randn(4, 4)
+
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                return self.block(x)
+
+        m = MyModel()
+        exported = torch._dynamo.export(m, aten_graph=False)(inp)
+        out_graph = exported[0]
+
+        found_class = False
+        for node in out_graph.graph.nodes:
+            stack = node.meta.get("nn_module_stack") or {}
+            for _path, cls in stack.values():
+                found_class = True
+                self.assertTrue(
+                    isinstance(cls, type),
+                    f"Expected a type in nn_module_stack, got {type(cls)}: {cls}",
+                )
+        self.assertTrue(found_class)
+
+    def test_export_nn_module_stack_nested_module_list(self):
+        """nn_module_stack reflects ModuleList child indices in paths.
+
+        Models with nn.ModuleList (e.g. transformer layers) produce
+        numeric path components like 'layers.0', 'layers.1'.  Passes
+        that detect repeated identical blocks rely on these numeric
+        components being present and structurally consistent across
+        repeated children.
+        """
+        n_blocks = 3
+        inp = torch.randn(4, 4)
+
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Block() for _ in range(n_blocks)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        m = Model()
+        exported = torch._dynamo.export(m, aten_graph=False)(inp)
+        out_graph = exported[0]
+
+        # Collect all module paths that reference layers.N
+        layer_indices = set()
+        for node in out_graph.graph.nodes:
+            stack = node.meta.get("nn_module_stack") or {}
+            for path, _cls in stack.values():
+                if not isinstance(path, str):
+                    continue
+                # Strip L['self']. if present
+                clean = path
+                clean = clean.removeprefix("L['self'].")
+                # Match "layers.N" components
+                if clean.startswith("layers."):
+                    parts = clean.split(".")
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        layer_indices.add(int(parts[1]))
+
+        self.assertEqual(
+            layer_indices,
+            set(range(n_blocks)),
+            f"Expected all {n_blocks} ModuleList children to appear in nn_module_stack paths",
+        )
+
+    def test_export_nn_module_stack_ordering_outermost_to_innermost(self):
+        """nn_module_stack entries are ordered outermost to innermost.
+
+        Consumers that reconstruct module trees iterate nn_module_stack
+        in insertion order (dict ordering) to walk from the root toward
+        the leaf.  This test validates that deeper modules always appear
+        later in the ordered dict.
+        """
+        inp = torch.randn(4, 4)
+
+        def model_creator(depth: int) -> torch.nn.Module:
+            class Chain(torch.nn.Module):
+                def __init__(self, level: int):
+                    super().__init__()
+                    # For depth N, chain of modules is Root.level_0..level_{N-2}; final leaf is .linear
+                    if level == depth - 2:
+                        self.linear = torch.nn.Linear(4, 4)
+                    else:
+                        self._next_name = f"level_{level + 1}"
+                        setattr(self, self._next_name, Chain(level + 1))
+
+                def forward(self, x):
+                    if hasattr(self, "linear"):
+                        return self.linear(x)
+                    return getattr(self, self._next_name)(x)
+
+            class Root(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.level_0 = Chain(level=0)
+
+                def forward(self, x):
+                    return self.level_0(x)
+
+            return Root()
+
+        for depth in (3, 6, 9):
+            with self.subTest(depth=depth):
+                m = model_creator(depth)
+                exported = torch._dynamo.export(m, aten_graph=False)(inp)
+                out_graph = exported[0]
+
+                max_stack_len = 0
+                for node in out_graph.graph.nodes:
+                    stack = node.meta.get("nn_module_stack") or {}
+                    if len(stack) < 2:
+                        continue
+                    max_stack_len = max(max_stack_len, len(stack))
+                    paths = []
+                    for path, _cls in stack.values():
+                        if isinstance(path, str):
+                            clean = path
+                            if clean.startswith("L['self']."):
+                                clean = clean[len("L['self'].") :]
+                            elif clean == "L['self']":
+                                clean = ""
+                            paths.append(clean)
+                    # Prefix-chain invariant: each path extends its predecessor
+                    for k in range(1, len(paths)):
+                        if not paths[k - 1]:
+                            # Root (empty string) is prefix of everything
+                            continue
+                        self.assertTrue(
+                            paths[k].startswith(paths[k - 1] + "."),
+                            f"Path {paths[k]!r} is not a child of {paths[k - 1]!r}",
+                        )
+                # The deepest node should reflect the full nesting chain
+                self.assertGreaterEqual(
+                    max_stack_len,
+                    depth,
+                    f"Expected max nn_module_stack depth >= {depth} for model with depth={depth}",
+                )
+
+    def test_export_source_fn_stack_entries_are_named_callable_pairs(self):
+        """source_fn_stack entries are indexable sequences starting with (str, callable-with-__name__, ...).
+
+        Downstream passes use source_fn_stack[-1][1].__name__ to
+        identify the originating function or module class for an
+        operation.  This test ensures each entry is a list or tuple
+        with at least two elements, where the first is a string and
+        the second carries a __name__ attribute.
+        """
+        inp = torch.randn(4, 4)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.relu(self.linear(x))
+
+        m = MyModule()
+        exported = torch._dynamo.export(m, aten_graph=False)(inp)
+        out_graph = exported[0]
+
+        found_stack = False
+        for node in out_graph.graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            sfn_stack = node.meta.get("source_fn_stack", [])
+            if not sfn_stack:
+                continue
+            found_stack = True
+
+            # Must be a list/tuple of list/tuple entries
+            self.assertIsInstance(sfn_stack, (list, tuple))
+            for entry in sfn_stack:
+                self.assertIsInstance(entry, (list, tuple))
+                self.assertGreaterEqual(
+                    len(entry),
+                    2,
+                    f"source_fn_stack entry should have >= 2 elements: {entry}",
+                )
+                # First element is a string name
+                self.assertIsInstance(entry[0], str)
+                # Second element should have __name__ (function or class)
+                fn_or_cls = entry[1]
+                self.assertTrue(
+                    hasattr(fn_or_cls, "__name__"),
+                    f"source_fn_stack entry[1] ({fn_or_cls}) lacks __name__",
+                )
+        self.assertTrue(found_stack, "Expected at least one source_fn_stack entry")
+
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
         linear = torch.nn.Linear(2, 2)
