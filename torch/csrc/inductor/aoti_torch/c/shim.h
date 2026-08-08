@@ -384,6 +384,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
     AtenTensorHandle src,
     int32_t non_blocking);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_below_autograd_(
+    AtenTensorHandle self,
+    AtenTensorHandle src,
+    int32_t non_blocking);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle a,
