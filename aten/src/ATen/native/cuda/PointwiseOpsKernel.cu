@@ -140,11 +140,26 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
   }
 }
 
+void addcdiv_cuda_scalar_denominator_kernel(
+    TensorIteratorBase& iter,
+    const Scalar& scalar_denominator,
+    const Scalar& value);
+
 #if AT_USE_JITERATOR()
 // return a + alpha * (b / static_cast<accscalar_t>(c));
 constexpr char addcdiv_name[] = "addcdiv";
 #endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
+  TORCH_CHECK_VALUE(
+      !iter.is_cpu_scalar(1),
+      "CPU scalar support for the self argument is not supported when "
+      "calling addcdiv on CUDA tensors.");
+
+  TORCH_CHECK_VALUE(
+      !iter.is_cpu_scalar(2),
+      "CPU scalar support for the numerator argument is not supported when "
+      "calling addcdiv on CUDA tensors.");
+
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
     #if AT_USE_JITERATOR()
@@ -153,6 +168,11 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
         static const auto addcdiv_string =
             jiterator_stringify(template <typename T> T addcdiv(
                 T a, T b, T c, T alpha) { return a + alpha * (b / c); });
+        if (iter.is_cpu_scalar(3)) {
+          auto denominator = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          return addcdiv_cuda_scalar_denominator_kernel(iter, denominator, value);
+        }
         jitted_gpu_kernel<
             /*name=*/addcdiv_name,
             /*return_dtype=*/scalar_t,
@@ -166,6 +186,11 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       });
     #else
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
+        if (iter.is_cpu_scalar(3)) {
+          auto denominator = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          return addcdiv_cuda_scalar_denominator_kernel(iter, denominator, value);
+        }
         auto alpha = value.to<scalar_t>();
         gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
           return a + alpha * (b / c);
@@ -174,6 +199,11 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
     #endif
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "addcdiv_cuda", [&]() {
+      if (iter.is_cpu_scalar(3)) {
+        auto denominator = iter.scalar_value<scalar_t>(3);
+        iter.remove_operand(3);
+        return addcdiv_cuda_scalar_denominator_kernel(iter, denominator, value);
+      }
       // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -181,6 +211,59 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
         //return a + alpha * (b / static_cast<accscalar_t>(c));
         return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::divides<accscalar_t>());
+      });
+    });
+  }
+}
+
+#if AT_USE_JITERATOR()
+constexpr char addcdiv_scalar_denominator_name[] =
+    "addcdiv_scalar_denominator";
+#endif
+void addcdiv_cuda_scalar_denominator_kernel(
+    TensorIteratorBase& iter,
+    const Scalar& scalar_denominator,
+    const Scalar& value) {
+  auto dtype = iter.common_dtype();
+
+  if (at::isComplexType(dtype)) {
+    #if AT_USE_JITERATOR()
+      AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda_scalar_denominator", [&]() {
+        auto denominator = scalar_denominator.to<scalar_t>();
+        auto alpha = value.to<scalar_t>();
+        static const auto addcdiv_scalar_denominator_string =
+            jiterator_stringify(template <typename T> T addcdiv_scalar_denominator(
+                T a, T b, T denominator, T alpha) {
+              return a + alpha * (b / denominator);
+            });
+        jitted_gpu_kernel<
+            /*name=*/addcdiv_scalar_denominator_name,
+            /*return_dtype=*/scalar_t,
+            /*common_dtype=*/scalar_t,
+            /*arity=*/2>(
+            iter,
+            addcdiv_scalar_denominator_string,
+            /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
+            /*scalar_val=*/0,
+            /*extra_args=*/std::make_tuple(denominator, alpha));
+      });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda_scalar_denominator", [&]() {
+        auto denominator = scalar_denominator.to<scalar_t>();
+        auto alpha = value.to<scalar_t>();
+        gpu_kernel(iter, [alpha, denominator]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a + alpha * (b / denominator);
+        });
+      });
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "addcdiv_cuda_scalar_denominator", [&]() {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      auto denominator = scalar_denominator.to<accscalar_t>();
+      auto alpha = value.to<accscalar_t>();
+      gpu_kernel(iter, [alpha, denominator]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return pointwise_op_impl<accscalar_t>(
+            a, b, denominator, alpha, std::divides<accscalar_t>());
       });
     });
   }
