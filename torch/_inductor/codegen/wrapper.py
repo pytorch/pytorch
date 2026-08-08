@@ -961,6 +961,7 @@ class EfficientPeakEstimate:
             scheduler_nodes,
             names_to_freeable_bufs,
             graph_outputs,
+            inplace_reuses=V.graph.wrapper_code.reuses,
         )
 
         from .segmented_tree import SegmentedTree
