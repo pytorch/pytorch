@@ -1779,7 +1779,6 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   }
 
   auto m = self.size(-2);
-  auto m2 = m * m;
   auto n = self.size(-1);
   auto k = tau.size(-1);
 
@@ -1792,22 +1791,12 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   auto batch_sizes = self.sizes().slice(0, num_batch_dims);
   int64_t num_batches = c10::multiply_integers(batch_sizes);
 
-  std::vector<int64_t> H_sizes(num_batch_dims + 2);
-  for (auto dim : c10::irange(num_batch_dims)) {
-    H_sizes[dim] = self.size(dim);
-  }
-  H_sizes[num_batch_dims] = m;
-  H_sizes[num_batch_dims + 1] = m;
-
-  auto H = at::empty(H_sizes, self.options().memory_format(MemoryFormat::Contiguous));
-  auto H_prod = at::empty_like(H);
-  auto H_prod_work = at::empty_like(H);
+  auto Q = at::empty_like(self);
 
   OrgqrParams params;
 
   params.num_batch_dims = num_batch_dims;
   params.m = m;
-  params.m2 = m2;
   params.n = n;
   params.k = k;
 
@@ -1818,8 +1807,8 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
       params.tau_strides[dim] = tau.stride(dim);
     }
 
-    params.H_strides[dim] = H.stride(dim);
-    params.H_sizes[dim] = H.size(dim);
+    params.Q_strides[dim] = Q.stride(dim);
+    params.Q_sizes[dim] = Q.size(dim);
   }
 
   MPSStream* stream = getCurrentMPSStream();
@@ -1830,13 +1819,12 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
       auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("orgqr_{}", scalarToMetalTypeString(self)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "orgqr", {self, tau});
       [compute_encoder setComputePipelineState:pipeline_state];
-      mtl_setArgs(compute_encoder, self, tau, H, H_prod, H_prod_work, params);
+      mtl_setArgs(compute_encoder, self, tau, Q, params);
       static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
       auto max_threadgroup_size = pipeline_state.maxTotalThreadsPerThreadgroup;
-      auto threads_per_group = std::min(max_threadgroup_size, NSUInteger(m2));
-      NSUInteger num_threads = threads_per_group * num_batches;
+      NSUInteger num_threads = max_threadgroup_size * num_batches;
       [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
-                 threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
+                 threadsPerThreadgroup:MTLSizeMake(max_threadgroup_size, 1, 1)];
       getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });

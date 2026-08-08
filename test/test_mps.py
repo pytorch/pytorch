@@ -16522,6 +16522,20 @@ class TestConsistency(TestCaseMPS):
                 r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
                 self.assertEqual(r_cpu, r_mps)
 
+    @parametrize("shape", [(256, 8), (512, 16), (200, 36), (8, 256), (64, 64), (4, 128, 8)])
+    @parametrize("mode", ["reduced", "complete"])
+    def test_linalg_qr_tall_skinny(self, device, shape, mode):
+        m, n = shape[-2], shape[-1]
+        A = torch.randn(*shape, dtype=torch.float32, device=device)
+        q, r = torch.linalg.qr(A, mode=mode)
+        k = min(m, n) if mode == "reduced" else m
+        self.assertEqual(q.shape, (*shape[:-2], m, k))
+        self.assertEqual(r.shape, (*shape[:-2], k, n))
+        eye = torch.eye(k, device=device).expand(*shape[:-2], k, k)
+        self.assertEqual(q @ r, A, atol=1e-4, rtol=1e-4)
+        self.assertEqual(q.mT @ q, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual(r, torch.triu(r))
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented

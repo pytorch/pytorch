@@ -2307,78 +2307,33 @@ float2 bool_to_float(bool b) {
 }
 
 template <typename T>
-static T calc_H_irc(
-    device T* A,
-    uint32_t A_stride_r,
-    uint32_t A_stride_c,
-    constant T* tau,
-    uint32_t tau_stride,
-    uint32_t r,
-    uint32_t c,
-    uint32_t i) {
-  T I_val = bool_to_float<T>(r == c);
-  T tau_val = tau[i * tau_stride];
-
-  T A_ci = c10::metal::conj(A[c * A_stride_r + i * A_stride_c]);
-  T A_ri = A[r * A_stride_r + i * A_stride_c];
-
-  T c_eq_i = bool_to_float<T>(c == i);
-  T r_eq_i = bool_to_float<T>(r == i);
-
-  T A_ci_ = (c > i) ? A_ci : c_eq_i;
-  T A_ri_ = (r > i) ? A_ri : r_eq_i;
-
-  return I_val - c10::metal::mul(tau_val, c10::metal::mul(A_ci_, A_ri_));
+static T orgqr_simd_sum(T value) {
+  return c10::metal::simd_sum(value);
 }
 
-// Calculate (A @ B)[r, c], the element in the r-th row and c-th column of the
-// result of matrix multiplying A and B together. A and B must be size m-by-m
-// and have the same strides. The formula for this operation, written in Python
-// syntax, is:
-//   (A @ B)[r, c] = A[r, :].dot(B[:, c])
-template <typename T>
-static T calc_matmul_rc(
-    device T* A,
-    device T* B,
-    uint32_t stride_r,
-    uint32_t stride_c,
-    uint32_t m,
-    uint32_t r,
-    uint32_t c) {
-  T AB_rc = 0;
-  auto A_row_offset = r * stride_r;
-  auto B_col_offset = c * stride_c;
-
-  uint32_t A_col_offset = 0;
-  uint32_t B_row_offset = 0;
-
-  for (uint32_t j = 0; j < m;
-       j++, A_col_offset += stride_c, B_row_offset += stride_r) {
-    AB_rc += c10::metal::mul(
-        A[A_row_offset + A_col_offset], B[B_row_offset + B_col_offset]);
-  }
-  return AB_rc;
+template <>
+float2 orgqr_simd_sum(float2 value) {
+  return float2(c10::metal::simd_sum(value.x), c10::metal::simd_sum(value.y));
 }
 
 template <typename T>
 kernel void orgqr(
     device T* A [[buffer(0)]],
     constant T* tau [[buffer(1)]],
-    device T* H [[buffer(2)]],
-    device T* H_prod [[buffer(3)]],
-    device T* H_prod_work [[buffer(4)]],
-    constant OrgqrParams<>& params [[buffer(5)]],
+    device T* Q [[buffer(2)]],
+    constant OrgqrParams<>& params [[buffer(3)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]]) {
+  using opmath_t = c10::metal::opmath_t<T>;
+
   constant auto& A_strides = params.A_strides;
   constant auto& tau_strides = params.tau_strides;
-  constant auto& H_strides = params.H_strides;
-  constant auto& H_sizes = params.H_sizes;
+  constant auto& Q_strides = params.Q_strides;
+  constant auto& Q_sizes = params.Q_sizes;
 
   auto num_batch_dims = params.num_batch_dims;
   auto m = params.m;
-  auto m2 = params.m2;
   auto n = params.n;
   auto k = params.k;
 
@@ -2387,83 +2342,81 @@ kernel void orgqr(
   // Find the matrices for this thread's batch index
   uint32_t A_offset = 0;
   uint32_t tau_offset = 0;
-  uint32_t H_offset = 0;
+  uint32_t Q_offset = 0;
 
   for (auto dim = num_batch_dims - 1; dim >= 0; dim--) {
-    auto dim_size = H_sizes[dim];
+    auto dim_size = Q_sizes[dim];
     auto dim_idx = batch_idx % dim_size;
 
     A_offset += dim_idx * A_strides[dim];
     tau_offset += dim_idx * tau_strides[dim];
-    H_offset += dim_idx * H_strides[dim];
+    Q_offset += dim_idx * Q_strides[dim];
 
     batch_idx /= dim_size;
   }
 
   A += A_offset;
   tau += tau_offset;
-  H += H_offset;
-  H_prod += H_offset;
-  H_prod_work += H_offset;
+  Q += Q_offset;
 
   auto A_stride_r = A_strides[num_batch_dims];
   auto A_stride_c = A_strides[num_batch_dims + 1];
   auto tau_stride = tau_strides[num_batch_dims];
-  auto H_stride_r = H_strides[num_batch_dims];
-  auto H_stride_c = H_strides[num_batch_dims + 1];
+  auto Q_stride_r = Q_strides[num_batch_dims];
+  auto Q_stride_c = Q_strides[num_batch_dims + 1];
+  auto mn = m * n;
 
-  for (uint32_t i = 0; i < k; i++) {
-    // Calculate and write H_i
-    for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
-      auto r = matrix_idx / m;
-      auto c = matrix_idx % m;
-      T H_irc = calc_H_irc(A, A_stride_r, A_stride_c, tau, tau_stride, r, c, i);
+  // Applying reflectors in reverse as left multiplications forms Q in an m x n
+  // panel. Reduced QR therefore avoids the full m x m working set.
+  for (auto matrix_idx = tid; matrix_idx < mn; matrix_idx += tptg) {
+    auto r = matrix_idx / n;
+    auto c = matrix_idx % n;
+    Q[r * Q_stride_r + c * Q_stride_c] = bool_to_float<T>(r == c);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
 
-      if (i == 0) {
-        H_prod[r * H_stride_r + c * H_stride_c] = H_irc;
-      } else {
-        H[r * H_stride_r + c * H_stride_c] = H_irc;
+  auto simd_lane = tid % c10::metal::simdgroup_size;
+  auto simd_group_id = tid / c10::metal::simdgroup_size;
+  auto num_simd_groups = tptg / c10::metal::simdgroup_size;
+
+  for (int32_t reflector = static_cast<int32_t>(k) - 1; reflector >= 0;
+       reflector--) {
+    auto tau_value = static_cast<opmath_t>(tau[reflector * tau_stride]);
+    auto A_col_offset = reflector * A_stride_c;
+
+    for (uint32_t c_base = 0; c_base < n; c_base += num_simd_groups) {
+      auto c = c_base + simd_group_id;
+      if (c < n) {
+        opmath_t dot = 0;
+        auto Q_col_offset = c * Q_stride_c;
+        for (uint32_t r = reflector + simd_lane; r < m;
+             r += c10::metal::simdgroup_size) {
+          auto v = r == reflector
+              ? static_cast<opmath_t>(bool_to_float<T>(true))
+              : static_cast<opmath_t>(A[r * A_stride_r + A_col_offset]);
+          auto q = static_cast<opmath_t>(Q[r * Q_stride_r + Q_col_offset]);
+          dot += c10::metal::mul(c10::metal::conj(v), q);
+        }
+        auto factor = c10::metal::mul(tau_value, orgqr_simd_sum(dot));
+
+        for (uint32_t r = reflector + simd_lane; r < m;
+             r += c10::metal::simdgroup_size) {
+          auto v = r == reflector
+              ? static_cast<opmath_t>(bool_to_float<T>(true))
+              : static_cast<opmath_t>(A[r * A_stride_r + A_col_offset]);
+          auto Q_idx = r * Q_stride_r + Q_col_offset;
+          auto q = static_cast<opmath_t>(Q[Q_idx]);
+          Q[Q_idx] = static_cast<T>(q - c10::metal::mul(v, factor));
+        }
       }
     }
-
-    if (i > 0) {
-      // Need this sync because the below matmul requires all threads to finish
-      // writing their entries to `H_prod` and `H`.
-      threadgroup_barrier(mem_flags::mem_threadgroup);
-
-      // Calculate H_prod @ H_i, and write result to H_prod_work
-      for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
-        auto r = matrix_idx / m;
-        auto c = matrix_idx % m;
-
-        T H_prod_0_to_i_rc =
-            calc_matmul_rc(H_prod, H, H_stride_r, H_stride_c, m, r, c);
-
-        H_prod_work[r * H_stride_r + c * H_stride_c] = H_prod_0_to_i_rc;
-      }
-
-      // Need this sync because the above matmul uses the current values in
-      // `H_prod`, and we don't want to overwrite those until all threads are
-      // finished using them.
-      threadgroup_barrier(mem_flags::mem_threadgroup);
-
-      // Copy H_prod_work into H_prod
-      for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
-        auto r = matrix_idx / m;
-        auto c = matrix_idx % m;
-        H_prod[r * H_stride_r + c * H_stride_c] =
-            H_prod_work[r * H_stride_r + c * H_stride_c];
-      }
-    }
+    threadgroup_barrier(mem_flags::mem_device);
   }
 
-  for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
-    auto r = matrix_idx / m;
-    auto c = matrix_idx % m;
-    if (c < n) {
-      A[r * A_stride_r + c * A_stride_c] =
-          H_prod[r * H_stride_r + c * H_stride_c];
-    }
+  for (auto matrix_idx = tid; matrix_idx < mn; matrix_idx += tptg) {
+    auto r = matrix_idx / n;
+    auto c = matrix_idx % n;
+    A[r * A_stride_r + c * A_stride_c] = Q[r * Q_stride_r + c * Q_stride_c];
   }
 }
 
@@ -2720,10 +2673,8 @@ INSTANTIATE_MM_OPS(uchar);
   kernel void orgqr<T>(                              \
       device T * A [[buffer(0)]],                    \
       constant T * tau [[buffer(1)]],                \
-      device T * H [[buffer(2)]],                    \
-      device T * H_prod [[buffer(3)]],               \
-      device T * H_prod_work [[buffer(4)]],          \
-      constant OrgqrParams<> & params [[buffer(5)]], \
+      device T * Q [[buffer(2)]],                    \
+      constant OrgqrParams<> & params [[buffer(3)]], \
       uint tid [[thread_position_in_threadgroup]],   \
       uint tptg [[threads_per_threadgroup]],         \
       uint tgid [[threadgroup_position_in_grid]]);
