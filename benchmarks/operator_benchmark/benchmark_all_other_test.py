@@ -25,6 +25,7 @@ from pt import (  # noqa: F401
     interpolate_test,
     layernorm_test,
     linear_test,
+    linalg_svd_test,
     matmul_test,
     mm_test,
     nan_to_num_test,
