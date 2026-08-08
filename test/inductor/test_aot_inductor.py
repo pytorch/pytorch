@@ -63,6 +63,8 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     e5m2_type,
     skipCUDAIf,
+    skipPRIVATEUSE1If,
+    skipPRIVATEUSE1,
 )
 from torch.testing._internal.common_dtype import (
     highest_precision_complex,
@@ -75,6 +77,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -294,7 +297,7 @@ class AOTInductorTestsTemplate:
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
         # to loadKernel so CUmodule handles are tracked and unloaded on
         # destruction, preventing GPU code object leaks.
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             raise unittest.SkipTest("requires CUDA/HIP")
 
         class Model(torch.nn.Module):
@@ -418,7 +421,7 @@ class AOTInductorTestsTemplate:
             self.check_model(Model().to(self.device), example_inputs)
 
     @unittest.skipIf(
-        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
+        not HAS_GPU or (GPU_TYPE != "cuda" and GPU_TYPE != "privateuseone") or TEST_WITH_ROCM,
         "Pinned async constant copy is CUDA-only",
     )
     @patch.dict(
@@ -1226,6 +1229,7 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
+    @skipPRIVATEUSE1
     @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
@@ -1697,7 +1701,7 @@ class AOTInductorTestsTemplate:
     def test_scaled_grouped_mm(self):
         # Test torch._scaled_grouped_mm AOTI lowering
         # cuda only
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
@@ -2984,14 +2988,14 @@ class AOTInductorTestsTemplate:
             )
 
     @common_utils.parametrize("max_autotune", [False, True])
-    def test_cond_cpu_predicate_cuda_operands(self, max_autotune):
+    def test_cond_cpu_predicate_accel_operands(self, max_autotune):
         """
         Test torch.cond with CPU predicate and CUDA operands.
         This is a regression test for the bug where inductor incorrectly
         determined device from [predicate] + operands, causing CPU predicates
         to force CUDA outputs onto CPU during autotuning.
         """
-        if self.device != "cuda" and self.device != "xpu":
+        if self.device != "cuda" and self.device != "xpu" and self.device != "privateuseone":
             raise unittest.SkipTest("requires CUDA or XPU")
 
         class Model(torch.nn.Module):
@@ -3421,6 +3425,7 @@ class AOTInductorTestsTemplate:
 
     @skipCUDAIf(True, "Test for x86 backend")
     @skipIfXpu(msg="Test for x86 backend")
+    @skipPRIVATEUSE1If(True, msg="Test for x86 backend")
     @unittest.skipUnless(IS_X86, "Test for x86 backend")
     @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
@@ -4029,7 +4034,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
@@ -4049,13 +4054,13 @@ class AOTInductorTestsTemplate:
 
         # Warm up to trigger any one-time allocations
         result = optimized(*example_inputs)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = torch.accelerator.memory_allocated()
         for _ in range(10):
             result = optimized(*example_inputs)
-        torch.cuda.synchronize()
-        mem_after = torch.cuda.memory_allocated()
+        torch.accelerator.synchronize()
+        mem_after = torch.accelerator.memory_allocated()
 
         self.assertEqual(result, expected)
         self.assertEqual(mem_before, mem_after)
@@ -5724,7 +5729,7 @@ class AOTInductorTestsTemplate:
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
         # cuda only
-        if self.device != "cuda":
+        if self.device != "cuda" and self.device != "privateuseone":
             return
 
         class Model(torch.nn.Module):
@@ -6577,7 +6582,7 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
     def test_aoti_debug_printing_model_inputs_codegen(self):
-        if self.device not in ["cuda", "xpu"]:
+        if self.device not in ["cuda", "xpu", "privateuseone"]:
             raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
@@ -6961,7 +6966,7 @@ class AOTInductorTestsTemplate:
     @requires_gpu
     def test_d2h_copy(self):
         # device to copy host should always have the same stride
-        if self.device not in ["cuda", "xpu"]:
+        if self.device not in ["cuda", "xpu", "privateuseone"]:
             raise unittest.SkipTest("This test is only for CUDA or XPU")
 
         class ToCpuModel(nn.Module):
@@ -6987,6 +6992,7 @@ class AOTInductorTestsTemplate:
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
+                torch.profiler.ProfilerActivity.PrivateUse1,
             ],
         ) as prof:
             true_res = aoti_model(input_tensor)
@@ -6996,8 +7002,8 @@ class AOTInductorTestsTemplate:
         self.assertTrue(not any("aten::contiguous" in op for op in all_ops))
 
     @requires_multigpu()
-    def test_cuda_to_cuda_device_copy(self):
-        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+    def test_accel_to_accel_device_copy(self):
+        if self.device != GPU_TYPE or (GPU_TYPE != "cuda" and GPU_TYPE != "privateuseone") or TEST_WITH_ROCM:
             raise unittest.SkipTest("This test requires CUDA")
 
         device0 = torch.device(type=GPU_TYPE, index=0)
@@ -7486,6 +7492,7 @@ class AOTInductorTestsTemplate:
 
         runner.free_inactive_constant_buffer()
 
+    @skipPRIVATEUSE1
     def test_create_with_external_constants(self):
         # AOTInductorModelContainerCreateWithExternalConstants: a runner
         # built from caller-supplied weights must use those weights at
@@ -7571,7 +7578,7 @@ class AOTInductorTestsTemplate:
         self.assertFalse(runner.did_call_load_constants())
 
     def test_update_user_managed_buffer(self):
-        if self.device not in ["cuda", "xpu"]:
+        if self.device not in ["cuda", "xpu", "privateuseone"]:
             raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
@@ -7589,7 +7596,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
         compile_config = {"always_keep_tensor_constants": True}
-        if self.device == "cuda":
+        if self.device == "cuda" or self.device == "privateuseone":
             compile_config["aot_inductor.weight_use_caching_allocator"] = True
 
         with torch.no_grad(), config.patch(compile_config):
@@ -7601,8 +7608,8 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def constant_buffer_memory_used():
-            if self.device == "cuda":
-                return torch.cuda.memory_allocated(self.device)
+            if self.device == "cuda" or self.device == "privateuseone":
+                return torch.accelerator.memory_allocated(self.device)
             free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
             return -free_memory
 
@@ -7820,7 +7827,7 @@ class AOTInductorTestsTemplate:
         "To enable after the C shim FC window ends",
     )
     def test_misaligned_input_1(self):
-        if self.device not in ["cuda", "xpu"]:
+        if self.device not in ["cuda", "xpu", "privateuseone"]:
             raise unittest.SkipTest("CUDA/XPU test only")
 
         class Model(torch.nn.Module):
@@ -8474,7 +8481,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_sym_expr_indexing(self):
-        if self.device not in ["cuda", "xpu"]:
+        if self.device not in ["cuda", "xpu", "privateuseone"]:
             raise unittest.SkipTest("requires CUDA/XPU")
 
         class Repro(torch.nn.Module):
@@ -8538,6 +8545,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(m, example_inputs)
 
+    @skipPRIVATEUSE1
     def test_with_cudagraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -8799,7 +8807,7 @@ class AOTInductorTestsTemplate:
         """
         Fix https://github.com/pytorch/pytorch/issues/167630
         """
-        if self.device not in ("cuda", "xpu"):
+        if self.device not in ("cuda", "xpu", "privateuseone"):
             raise unittest.SkipTest("test is only for cuda or xpu")
 
         def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
@@ -8839,6 +8847,7 @@ class AOTInductorTestsTemplate:
 
         self.assertTrue(allocated_memory[1] == allocated_memory[2])
 
+    @skipPRIVATEUSE1
     @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
     def test_libtorch_free_so(self):
         class Model(torch.nn.Module):
@@ -8978,23 +8987,23 @@ class AOTInductorTestsTemplate:
                     torch.tensor([0, 1, 2, 3], device="cpu", dtype=torch.int64),
                 )
                 self.register_buffer(
-                    "cuda_weights",
+                    "accel_weights",
                     torch.tensor(
                         [1.0, 2.0, 3.0, 4.0], device=GPU_TYPE, dtype=torch.float32
                     ),
                 )
                 # Another CUDA buffer to verify offset tracking is correct
                 self.register_buffer(
-                    "cuda_bias",
+                    "accel_bias",
                     torch.tensor(
                         [0.5, 0.5, 0.5, 0.5], device=GPU_TYPE, dtype=torch.float32
                     ),
                 )
 
             def forward(self, x):
-                idx_cuda = self.cpu_indices.to(GPU_TYPE)
-                weights = self.cuda_weights[idx_cuda]
-                return x * weights + self.cuda_bias
+                idx_accel = self.cpu_indices.to(GPU_TYPE)
+                weights = self.accel_weights[idx_accel]
+                return x * weights + self.accel_bias
 
         example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
@@ -9278,6 +9287,8 @@ torch._inductor.aoti_load_package("{model_path}")
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -9315,6 +9326,8 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 
 class TestAOTInductorConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
@@ -9480,6 +9493,8 @@ MPS_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -9499,6 +9514,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -9534,6 +9551,8 @@ class AOTInductorTestDualWrapper(TestCase):
     """Run AOTInductor tests with autotune_at_compile_time=False, exercising
     the lazy Triton compile + dual-wrapper-mode codegen path."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -9559,6 +9578,8 @@ copy_tests(
 
 @unittest.skipIf(not torch.backends.mps.is_available(), "No MPS backend available")
 class AOTInductorTestABICompatibleMps(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     device = "mps"
     device_type = "mps"
     check_model = check_model
@@ -9577,6 +9598,8 @@ copy_tests(
 
 
 class TestCheckLowerboundConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_check_lowerbound_codegen(self):
         """
         Test that check_lowerbound config controls lowerbound check codegen.
