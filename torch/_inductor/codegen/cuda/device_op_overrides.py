@@ -359,7 +359,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             )
             size_array = f"int64_t {var_name}_size[] = {{{size_expr}}};"
             stride_array = f"int64_t {var_name}_stride[] = {{1}};"
-            device_type = "cached_torch_device_type_cuda"
+            device_type = workspace.generate_device_type_str()
             device_idx = "device_idx_"
 
             return (
