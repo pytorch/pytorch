@@ -179,6 +179,132 @@ class TestComplexTensor(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    def test_conj_physical(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 - 4j, -5 + 6j], dtype=torch.complex64)
+        expected = torch.conj_physical(c)
+
+        result = torch.conj_physical(ComplexTensor.from_interleaved(c))
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_conj_physical_underscore(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 - 4j, -5 + 6j], dtype=torch.complex64)
+        expected = torch.ops.aten._conj_physical(c)
+
+        result = torch.ops.aten._conj_physical(ComplexTensor.from_interleaved(c))
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_index_add_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 + 4j, 5 + 6j], dtype=torch.complex64)
+        source = torch.tensor([10 + 20j, 30 + 40j], dtype=torch.complex64)
+        index = torch.tensor([0, 2])
+        expected = c.clone().index_add_(0, index, source)
+
+        xc = ComplexTensor.from_interleaved(c.clone())
+        result = xc.index_add_(0, index, ComplexTensor.from_interleaved(source))
+
+        self.assertEqual(result.as_interleaved(), expected)
+        self.assertEqual(xc.as_interleaved(), expected)
+
+    def test_masked_fill_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 + 4j, 5 + 6j], dtype=torch.complex64)
+        mask = torch.tensor([True, False, True])
+        value = 7 + 8j
+        expected = c.clone().masked_fill_(mask, value)
+
+        xc = ComplexTensor.from_interleaved(c.clone())
+        result = xc.masked_fill_(mask, value)
+
+        self.assertEqual(result.as_interleaved(), expected)
+        self.assertEqual(xc.as_interleaved(), expected)
+
+    def test_convolution(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        input = torch.tensor(
+            [[[[1 + 1j, 2 - 1j], [0 + 2j, 1 + 0j]]]], dtype=torch.complex64
+        )
+        weight = torch.tensor(
+            [[[[1 + 0j, 0 + 1j], [1 - 1j, 2 + 0j]]]], dtype=torch.complex64
+        )
+        # Complex convolution identity, computed with real-valued convolutions so
+        # the expected value does not itself depend on complex-conv support.
+        conv = torch.nn.functional.conv2d
+        expected = torch.complex(
+            conv(input.real, weight.real) - conv(input.imag, weight.imag),
+            conv(input.real, weight.imag) + conv(input.imag, weight.real),
+        )
+
+        xin = ComplexTensor.from_interleaved(input)
+        xw = ComplexTensor.from_interleaved(weight)
+        result = conv(xin, xw)
+
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_alias(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64)
+        expected = torch.ops.aten.alias(c)
+
+        result = torch.ops.aten.alias(ComplexTensor.from_interleaved(c))
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_lift_fresh(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64)
+        expected = torch.ops.aten.lift_fresh(c)
+
+        result = torch.ops.aten.lift_fresh(ComplexTensor.from_interleaved(c))
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_unsafe_view(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor(
+            [[1 + 2j, 3 - 4j, 5 + 6j], [7 + 8j, 9j, -1 - 1j]], dtype=torch.complex64
+        )
+        expected = torch.ops.aten._unsafe_view(c, [6])
+
+        result = torch.ops.aten._unsafe_view(ComplexTensor.from_interleaved(c), [6])
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_col2im(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        real = torch.arange(16, dtype=torch.float32).reshape(1, 4, 4)
+        imag = torch.arange(16, 32, dtype=torch.float32).reshape(1, 4, 4)
+        c = torch.complex(real, imag)
+        args = ([3, 3], [2, 2], [1, 1], [0, 0], [1, 1])
+        # Native complex `col2im` may be unsupported, so build the expected value
+        # from the per-part results the way the ComplexTensor impl does.
+        expected = torch.complex(
+            torch.ops.aten.col2im(real, *args),
+            torch.ops.aten.col2im(imag, *args),
+        )
+
+        result = torch.ops.aten.col2im(ComplexTensor.from_interleaved(c), *args)
+        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_convert_element_type(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64)
+        expected = torch.ops.prims.convert_element_type(c, torch.complex128)
+
+        result = torch.ops.prims.convert_element_type(
+            ComplexTensor.from_interleaved(c), torch.complex128
+        )
+        self.assertEqual(result.as_interleaved(), expected)
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
