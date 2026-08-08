@@ -88,13 +88,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      abort_process_on_timeout_or_error_(
-          SHOULD_TEAR_DOWN(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
-              ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
-              ::c10d::SkipCleanUp)))),
+      event_cache_enabled_(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
+      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
+          ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
+          ::c10d::SkipCleanUp))),
+      blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
+
+  if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
+    auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+    options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
+  }
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
   TORCH_CHECK(
       !options_c10d_->enable_reconfigure,
