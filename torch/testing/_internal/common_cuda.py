@@ -6,7 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_PRIVATEUSE1
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -153,6 +153,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -175,6 +177,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_PRIVATEUSE1:
         return True
     return False
 
