@@ -593,8 +593,8 @@ def _register_pytree_node(
 def _deregister_pytree_node(
     cls: type[Any],
 ) -> None:
-    """This is an internal function that is used to deregister a pytree node type
-    for the Python pytree only. This should be only used inside PyTorch.
+    """This is an internal function that is used to deregister a pytree node type.
+    This should be only used inside PyTorch.
     """
     with _NODE_REGISTRY_LOCK:
         del SUPPORTED_NODES[cls]
@@ -602,6 +602,22 @@ def _deregister_pytree_node(
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
         CONSTANT_NODES.discard(cls)
+
+    if not _cxx_pytree_exists:
+        return
+
+    if _cxx_pytree_imported:
+        import optree
+
+        # not everything reaches optree, e.g. register_dataclass and structseq types
+        try:
+            optree.unregister_pytree_node(cls, namespace="torch")
+        except ValueError:
+            pass
+    else:
+        _cxx_pytree_pending_imports[:] = [
+            entry for entry in _cxx_pytree_pending_imports if entry[0][0] is not cls
+        ]
 
 
 def _private_register_pytree_node(
