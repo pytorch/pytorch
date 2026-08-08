@@ -43,6 +43,7 @@ import pytest
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
+from torch.testing._internal.common_cuda import CDNA3OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -476,7 +477,9 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
     },
     "inductor_default": {
         "nn.functional.linear": {ALL},
-        "log1p": {fp32},
+        # https://github.com/pytorch/pytorch/issues/191552: log1p is batch-variant on
+        # CDNA3+ (gfx942/gfx950) but passes on MI200 (gfx90a), where this entry would XPASS.
+        **({"log1p": {fp32}} if CDNA3OrLater() else {}),
     },
     "inductor_numerics": {
         "nn.functional.linear": {ALL},

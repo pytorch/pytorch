@@ -17,7 +17,13 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    MI200_ARCH,
+    skipIfRocmArch,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -1816,7 +1822,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
         device = GPU_TYPE
-        test_sdpa_rewriter_1_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
+        # https://github.com/pytorch/pytorch/issues/191552: fails on MI200 (gfx90a)
+        test_sdpa_rewriter_1_gpu = skipIfRocmArch(MI200_ARCH)(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
+        )
         test_sdpa_rewriter_1_freezing = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1_freezing
         )
@@ -1831,8 +1840,13 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_4_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_4
         test_sdpa_rewriter_5_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_sdpa_rewriter_6_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_6
-        test_sdpa_rewriter_7_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7
-        test_sdpa_rewriter_8_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_8
+        # https://github.com/pytorch/pytorch/issues/191552: fail on MI200 (gfx90a)
+        test_sdpa_rewriter_7_gpu = skipIfRocmArch(MI200_ARCH)(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7
+        )
+        test_sdpa_rewriter_8_gpu = skipIfRocmArch(MI200_ARCH)(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_8
+        )
         test_sdpa_rewriter_9_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9
         test_sdpa_rewriter_10_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_10

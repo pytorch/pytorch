@@ -25,7 +25,7 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo, skipIfXpu)
+    skipIfTorchDynamo, skipIfXpu, skipIfRocmArch, MI200_ARCH)
 from types import ModuleType
 import operator
 
@@ -4703,6 +4703,9 @@ module_db: list[ModuleInfo] = [
                                 "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
                                 "test_cpu_gpu_parity", dtypes=[torch.float16]),
+                   # https://github.com/pytorch/pytorch/issues/191552: fp16 parity fails on MI200 (gfx90a)
+                   DecorateInfo(skipIfRocmArch(MI200_ARCH), "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.float16], device_type="cuda"),
                    # Insufficient accuracy, likely related to an issue with cross_entropy
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
                                 dtypes=[torch.bfloat16], device_type='cuda'),

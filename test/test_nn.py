@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, skipIfRocmArch, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -14655,6 +14655,8 @@ if __name__ == '__main__':
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             bias=bias)
 
+    # https://github.com/pytorch/pytorch/issues/191552: fp16 acc_dtype path fails on MI200 (gfx90a)
+    @skipIfRocmArch(MI200_ARCH)
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
