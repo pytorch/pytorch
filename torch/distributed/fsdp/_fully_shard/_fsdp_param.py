@@ -220,14 +220,23 @@ class FSDPParam:
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
+        offload_to_cpu: bool | None = None,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
-        self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
-        self.pin_memory = (
-            self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
+        # ``offload_to_cpu`` may be set explicitly by the owning param group
+        # (e.g. ``PartialOffloadPolicy`` selects a per-parameter subset to
+        # offload). When ``None``, fall back to the all-or-nothing decision
+        # derived from the policy type, which preserves ``OffloadPolicy`` (no
+        # offload) and ``CPUOffloadPolicy`` (full offload) behavior exactly.
+        if offload_to_cpu is None:
+            self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
+        else:
+            self.offload_to_cpu = offload_to_cpu
+        self.pin_memory = self.offload_to_cpu and bool(
+            getattr(offload_policy, "pin_memory", False)
         )
         self.grad_offload_event: torch.Event | None = None
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
