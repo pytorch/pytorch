@@ -4166,7 +4166,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
-    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
@@ -4180,6 +4179,24 @@ class TestTorchDeviceType(TestCase):
         actual_cpu = torch.pdist(x.to(device), p=2).cpu()         # 5 GB on GPU + 5GB on CPU
         # Workaround for large memory overhead of self.assertTrue (see #84944)
         self.assertTrue(torch.allclose(expected_cpu, actual_cpu))  # ~20GB in allclose
+
+    # Regression for two ROCm pdist forward bugs that test_pdist_norm_large could
+    # not catch in CI (it requires 32 GB host RAM and was @skipIfRocm; see #168868):
+    #  (1) device_sqrt ran in fp32 on ROCm, corrupting the triangular-index
+    #      inversion once n2^2 exceeded the fp32 integer limit 2^24 (n >~ 4097);
+    #  (2) launching a 1-D grid of `numel` blocks dropped blocks past ~15M,
+    #      leaving ~40% of outputs unwritten.
+    # This test is memory-light and exercises both boundaries on any GPU.
+    @onlyCUDA
+    def test_pdist_norm_index_and_grid(self, device):
+        for n in (4096, 4097, 6000, 8000, 10000):
+            x = torch.randn(n, 1, dtype=torch.float32)
+            expected = torch.pdist(x, p=2)
+            actual = torch.pdist(x.to(device), p=2).cpu()
+            self.assertFalse(torch.isnan(actual).any(),
+                             msg=f"NaN in pdist output at n={n}")
+            self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4,
+                             msg=f"pdist mismatch at n={n} (numel={n * (n - 1) // 2})")
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
