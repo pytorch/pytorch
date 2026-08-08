@@ -235,12 +235,61 @@ scaled_dot_product_attention.
 ## Low-Precision functions
 
 ```{eval-rst}
+.. NOTE: ScalingType and SwizzleType are pybind11 enums imported via type alias
+   (e.g. ``_ScalingType as ScalingType``). Sphinx autodoc/autosummary treats
+   these as aliases and renders "alias of _ScalingType" instead of the class
+   docstring and members. Manual ``.. class::`` with ``.. attribute::`` entries
+   is required. When adding new enum values, update both the C++ definition in
+   aten/src/ATen/BlasBackend.h and the entries below.
+
+.. class:: ScalingType
+
+    Enum describing how a tensor's scaling factors are organized for use with
+    :func:`~torch.nn.functional.scaled_mm` and :func:`~torch.nn.functional.scaled_grouped_mm`.
+
+    .. attribute:: TensorWise
+
+        Single ``float32`` scale for the entire tensor.
+
+    .. attribute:: RowWise
+
+        One ``float32`` scale per row.
+
+    .. attribute:: BlockWise1x16
+
+        One ``float8_e4m3fn`` scale per 16 contiguous values.
+
+    .. attribute:: BlockWise1x32
+
+        One ``float8_e8m0fnu`` scale per 32 contiguous values (OCP MX format).
+
+    .. attribute:: BlockWise1x128
+
+        One ``float32`` scale per 128 contiguous values (OCP MX format).
+
+    .. attribute:: BlockWise128x128
+
+        One ``float32`` scale per 128x128 tile.
+
+.. class:: SwizzleType
+
+    Enum describing the swizzling pattern of scale tensors for use with
+    :func:`~torch.nn.functional.scaled_mm` and :func:`~torch.nn.functional.scaled_grouped_mm`.
+
+    .. attribute:: NO_SWIZZLE
+
+        No swizzling.
+
+    .. attribute:: SWIZZLE_32_4_4
+
+        Blackwell-style 32x4x4 swizzle.
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    ScalingType
-    SwizzleType
     grouped_mm
     scaled_mm
     scaled_grouped_mm
