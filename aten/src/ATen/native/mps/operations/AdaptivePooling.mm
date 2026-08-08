@@ -1,7 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <fmt/format.h>
+#include <string_view>
+
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/AdaptivePooling.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -18,6 +23,57 @@
 #endif
 namespace at::native {
 namespace mps {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/AdaptivePooling_metallib.h>
+#endif
+
+static AdaptiveAvgPool2DParams adaptive_avg_pool2d_params(const Tensor& input, const Tensor& output) {
+  const bool batched = input.dim() == 4;
+  const auto input_strides = input.strides();
+  const auto output_strides = output.strides();
+  return {
+      .B = batched ? input.size(0) : 1,
+      .C = input.size(-3),
+      .input_height = input.size(-2),
+      .input_width = input.size(-1),
+      .output_height = output.size(-2),
+      .output_width = output.size(-1),
+      .input_strides = {batched ? input_strides[0] : 0,
+                        input_strides[batched ? 1 : 0],
+                        input_strides[batched ? 2 : 1],
+                        input_strides[batched ? 3 : 2]},
+      .output_strides = {batched ? output_strides[0] : 0,
+                         output_strides[batched ? 1 : 0],
+                         output_strides[batched ? 2 : 1],
+                         output_strides[batched ? 3 : 2]},
+  };
+}
+
+static void adaptive_avg_pool2d_metal(const Tensor& input, Tensor& output, bool backward) {
+  using namespace std::string_view_literals;
+
+  auto stream = getCurrentMPSStream();
+  const auto direction = backward ? "backward"sv : "forward"sv;
+  const auto kernel = fmt::format("adaptive_avg_pool2d_{}_{}", direction, scalarToMetalTypeString(input));
+  const auto params = backward ? adaptive_avg_pool2d_params(output, input) : adaptive_avg_pool2d_params(input, output);
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(kernel);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto encoder = stream->commandEncoder();
+        getMPSProfiler().beginProfileKernel(pso, kernel, {input});
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, input, output, params);
+        mtl_dispatch1DJob(encoder, pso, output.numel());
+        getMPSProfiler().endProfileKernel(pso);
+      }
+    });
+  }
+}
+
 static void set_kernel_params(int64_t isizeH,
                               int64_t isizeW,
                               int64_t osizeH,
@@ -75,7 +131,15 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
+  const bool divisible_downsample =
+      isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
+  const bool divisible_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
+  if (!divisible_downsample && !divisible_upsample) {
+    mps::adaptive_avg_pool2d_metal(input, output, false);
+    return output;
+  }
+
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
 
   if (isizeH >= osizeH) {
     output = at::avg_pool2d(input,
@@ -146,7 +210,17 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
+  const bool regular_downsample = isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
+  const bool regular_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
+  if (!regular_downsample && !regular_upsample) {
+    auto gradInput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    if (gradInput.numel() != 0) {
+      mps::adaptive_avg_pool2d_metal(gradOutput, gradInput, true);
+    }
+    return gradInput;
+  }
+
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
 
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (gradInput.numel() != 0) {
