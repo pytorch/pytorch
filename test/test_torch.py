@@ -6767,6 +6767,24 @@ class TestTorch(TestCase):
     def test_dir(self):
         dir(torch)
 
+    def test_stream_compare_with_non_stream(self):
+        # Comparing a Stream with a non-Stream object used to reinterpret_cast the
+        # other object to THPStream* and read Stream fields out of unrelated memory.
+        # It must instead compare unequal without crashing. See issue #188033.
+        s = torch.Stream(device='cpu')
+        same = torch.Stream(
+            stream_id=s.stream_id,
+            device_index=s.device_index,
+            device_type=s.device_type,
+        )
+        for other in (5, 'x', None, [1, 2], object()):
+            self.assertFalse(s == other)
+            self.assertTrue(s != other)
+        self.assertTrue(s == same)
+        self.assertFalse(s != same)
+        # ordering against a non-Stream is undefined, not silently False
+        self.assertRaises(TypeError, lambda: s < 5)
+
     def test_wildcard_import(self):
         exec('from torch import *')
 

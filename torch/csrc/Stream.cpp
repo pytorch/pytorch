@@ -435,8 +435,22 @@ static PyObject* THPStream_richcompare(
     PyObject* other,
     int op) {
   PyObject* result = nullptr;
-  if (Py_IsNone(other)) {
-    result = Py_False;
+  if (!THPStream_Check(other)) {
+    // `other` is None or any non-Stream object. Only (in)equality is defined,
+    // and a Stream never equals a non-Stream. Handling this here also avoids
+    // reinterpret_cast-ing an unrelated object to THPStream* below, which would
+    // read Stream fields out of unrelated memory.
+    switch (op) {
+      case Py_EQ:
+        result = Py_False;
+        break;
+      case Py_NE:
+        result = Py_True;
+        break;
+      default:
+        result = Py_NotImplemented;
+        break;
+    }
   } else {
     switch (op) {
       case Py_EQ:
