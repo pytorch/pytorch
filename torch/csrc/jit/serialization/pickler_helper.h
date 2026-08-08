@@ -203,6 +203,22 @@ inline void setTensorMetadata(
   setTensorMetadata(t, std::move(metadata));
 }
 
+// Copy backend metadata (c10::BackendMeta) from src to dst: via
+// BackendMeta::clone_for_fake() when for_fake (copying onto a FakeTensor), else
+// BackendMeta::clone(). A no-op when src has none or the backend declines the
+// fake copy; other tensor metadata on dst is left untouched.
+inline void copyBackendMeta(
+    const at::Tensor& src,
+    const at::Tensor& dst,
+    bool for_fake = false) {
+  if (auto meta = src.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    auto copied = for_fake ? meta->clone_for_fake(meta) : meta->clone(meta);
+    if (copied) {
+      dst.unsafeGetTensorImpl()->set_backend_meta(copied);
+    }
+  }
+}
+
 // Register function pointer of Tensor BackendMetadata for serialization.
 inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
