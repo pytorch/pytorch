@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocmArch,
     skipIfRocmVersionLessThan,
-    TEST_HPU,
 )
 
 
@@ -630,12 +629,13 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        if TEST_HPU:
+        acc = torch.accelerator.current_accelerator()
+        if acc is not None and acc.type in ("npu", "hpu"):
             inner(model, torch.randn((3, 1, 9, 9)))
         else:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
+                "Expected running_mean to have type",  # Error not seen on HPUs or NPUs, and hence it can be skipped
             ):
                 # Errors in batch norm 2D backward
                 inner(model, torch.randn((3, 1, 9, 9)))
@@ -708,7 +708,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
         model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
+        inp = Input(torch.randn(2, 10, device=device_type))
 
         replicate(model, mp_policy=mp_policy)
         loss = model(inp).sum()
