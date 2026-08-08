@@ -22,14 +22,17 @@ static bool needs_nd_workaround(const Tensor& input) {
   return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
 }
 
-// Apple7/8 (M1/M2) MPSGraph matmul silently returns wrong results once a GEMM dimension
-// exceeds 2^15; Apple9+ is fine. mm/addmm already divert such shapes to the stride-aware
-// metal kernels, but linear builds its own graph, so it has to test the GEMM it would form
-// and delegate instead. Threshold mirrors use_metal_mm in LinearAlgebra.mm.
+// Apple7/8 (M1/M2) MPSGraph matmul intermittently returns wrong results when the
+// reduction dimension exceeds 2^15 and both output dimensions are at least 16; the
+// corruption is allocator/session-state dependent and hits contiguous and transposed
+// operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
+// stride-aware metal kernels, but linear builds its own graph, so it has to test the
+// GEMM it would form and delegate instead. Mirrors use_metal_mm in LinearAlgebra.mm.
 static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
   static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   constexpr int64_t max_mpsgraph_dim = 32768;
-  return is_affected_gpu && (m > max_mpsgraph_dim || k > max_mpsgraph_dim || n > max_mpsgraph_dim);
+  constexpr int64_t min_matrix_dim = 16;
+  return is_affected_gpu && k > max_mpsgraph_dim && m >= min_matrix_dim && n >= min_matrix_dim;
 }
 
 static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
