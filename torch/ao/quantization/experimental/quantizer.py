@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.apot_utils import (
     apot_to_float,
-    float_to_apot,
     quant_dequant_util,
 )
 
@@ -40,23 +39,35 @@ class APoTQuantizer:
     """
 
     def quantize(self, tensor2quantize: Tensor):
-        result = torch.tensor([])
-
-        # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.detach().apply_(
-            lambda x: float_to_apot(
-                x, self.quantization_levels, self.level_indices, self.alpha
-            )
+        tensor2quantize = tensor2quantize.detach()
+        quantization_levels = self.quantization_levels.to(
+            device=tensor2quantize.device
         )
+        level_indices = self.level_indices.to(device=tensor2quantize.device)
+        alpha = self.alpha.to(device=tensor2quantize.device).reshape(())
+
+        level_deltas = torch.abs(
+            tensor2quantize.unsqueeze(-1) - quantization_levels
+        )
+        nearest_level_indices = level_indices[level_deltas.argmin(dim=-1)]
+        nearest_level_indices = torch.where(
+            torch.isnan(tensor2quantize),
+            torch.zeros_like(nearest_level_indices),
+            nearest_level_indices,
+        )
+        quantized = torch.where(
+            tensor2quantize < -alpha, -alpha, nearest_level_indices
+        )
+        quantized = torch.where(tensor2quantize > alpha, alpha, quantized)
+
+        tensor2quantize.data.copy_(quantized)
 
         # convert to APoT int representation for dtype
         tensor2quantize = tensor2quantize.int()
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
-        result = TensorAPoT(self, tensor2quantize)  # type: ignore[assignment]
-
-        return result
+        return TensorAPoT(self, tensor2quantize)
 
     r""" Dequantizes integer Tensor to floating point (fp) representation
     based on the calculated quantization levels from a specified APoT non-uniform observer.
