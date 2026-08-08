@@ -1532,22 +1532,49 @@ class MetaConverter(Generic[_TensorT]):
                 # for symbolic SymInts or fake tensors.
                 if t.view_func is None:
                     raise AssertionError("t.view_func must not be None for view replay")
-                # NB: we do NOT suppress guards here, we need to remove ephemeral
-                # sources
-                fake_t = t.view_func.apply(
-                    t,
-                    base,
-                    # pyrefly: ignore[bad-argument-type]
-                    symint_visitor_fn,
-                    tensor_visitor_fn,
-                )
+                # Replay may emit guards on ephemeral closed-over metadata or
+                # the hidden view base. As in the dense as_strided path above,
+                # neither has an actionable Dynamo source. Re-establish the
+                # visible outer metadata relationships with the checks below.
+                with maybe_suppress():
+                    fake_t = t.view_func.apply(
+                        t,
+                        base,
+                        # pyrefly: ignore[bad-argument-type]
+                        symint_visitor_fn,
+                        tensor_visitor_fn,
+                    )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
                 # These checks should simplify out any symbols created for closed-over view func
                 # SymInts.
+                torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
                 torch._check(sym_eq(fake_t.size(), sizes))
                 torch._check(sym_eq(fake_t.stride(), strides))
-                torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
+                if t.is_traceable_wrapper_subclass and not t.is_nested:
+                    from torch._subclasses.fake_tensor import (
+                        in_kernel_invocation_manager,
+                        maybe_get_fake_mode,
+                    )
+
+                    fake_mode = maybe_get_fake_mode(fake_t)
+                    if fake_mode is not None:
+                        # Canonicalize only the wrapper's outer metadata. Going
+                        # through as_strided would require subclass support and
+                        # could incorrectly transform layout-opaque inner tensors.
+                        # This only replaces FakeTensor metadata. Bypass the
+                        # autograd and inplace/view keys so the bookkeeping does
+                        # not mutate the replayed view's autograd state.
+                        with (
+                            torch._C._AutoDispatchBelowADInplaceOrView(),
+                            in_kernel_invocation_manager(fake_mode),
+                        ):
+                            fake_t.set_(
+                                fake_t.untyped_storage(),
+                                storage_offset,
+                                sizes,
+                                strides,
+                            )
                 return fake_t
 
         if self.get_tensor_memo(t) is None:

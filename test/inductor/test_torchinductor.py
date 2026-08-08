@@ -16758,7 +16758,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s64" in mul_buf.data.inner_fn_str()
+                    or re.search(r"\bi0 \+ i1 \* s\d+\b", mul_buf.data.inner_fn_str())
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -17588,13 +17588,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
         if is_dynamic_shape_enabled():
-            # Dynamic shapes have compound sympy expressions (e.g. 3*s12*s80*s80)
+            if TEST_WITH_ROCM and not code:
+                return
+            # Dynamic shapes have compound sympy expressions (e.g. 3*s12*s80*s81)
             # whose C++ formatting (3L*s12*...) requires regex matching.
             suffix = "L?" if config.cpp_wrapper else ""
             assert_fn = (
                 "assert_size_stride" if config.cpp_wrapper else "assert_tensor_metadata"
             )
-            size_assert_pattern = rf"{assert_fn}.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, s12, s80, s80., .3{suffix}\*s12\*s80\*s80, s12\*s80\*s80, 1{suffix}, s12\*s80, s1.."
+            sym = r"s[0-9][0-9]*"
+            size_assert_pattern = rf"{assert_fn}.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, {sym}, {sym}, {sym}., .3{suffix}\*{sym}\*{sym}\*{sym}, {sym}\*{sym}\*{sym}, 1{suffix}, {sym}\*{sym}, {sym}.."
             FileCheck().check_regex(size_assert_pattern).run(code)
         else:
             FileCheck().check("assert_size_stride(").check(

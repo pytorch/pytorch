@@ -863,13 +863,13 @@ class TestCustomOpAutoTune(TestCase):
         test_op_name = f"test_lib::shape_tracker_{id(self)}"
 
         def decomposition(x, weight):
-            return x @ weight
+            return x.sum(dim=1, keepdim=True) + weight.sum(dim=0).unsqueeze(0)
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def shape_tracker_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
             # This runs during benchmarking with REAL values
             shapes_seen.append(x.shape[0])
-            return x @ weight
+            return decomposition(x, weight)
 
         @shape_tracker_op.register_fake
         def _(x, weight):

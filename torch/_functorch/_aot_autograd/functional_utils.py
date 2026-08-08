@@ -405,7 +405,13 @@ def gen_alias_from_base(
             size, stride, storage_offset
         )
     elif not aliased_base_tensor.is_complex() and target_meta_tensor.is_complex():
-        aliased_out = torch.view_as_complex(aliased_base_tensor).as_strided(
+        real_size = (*size, 2)
+        real_stride = tuple(s * 2 for s in stride) + (1,)
+        real_storage_offset = storage_offset * 2
+        real_base = aliased_base_tensor.as_strided(
+            real_size, real_stride, real_storage_offset
+        )
+        aliased_out = torch.view_as_complex(real_base).as_strided(
             size, stride, storage_offset
         )
     else:

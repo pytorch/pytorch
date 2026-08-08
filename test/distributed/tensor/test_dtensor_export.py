@@ -371,7 +371,18 @@ class DTensorExportTest(TestCase):
         [
             (
                 graph_capture_and_aot_export_joint_with_descriptors_v2,
-                "[[4, 10], [4], [10, 4], [10], [4, 10], [4], [10, 4], [10], [s64, 10], [s64, 10]]",
+                [
+                    [4, 10],
+                    [4],
+                    [10, 4],
+                    [10],
+                    [4, 10],
+                    [4],
+                    [10, 4],
+                    [10],
+                    ["s0", 10],
+                    ["s0", 10],
+                ],
             ),
         ],
     )
@@ -404,15 +415,24 @@ class DTensorExportTest(TestCase):
         joint_gm = export_fn(tp_model, inputs)
 
         res = []
+        symbols = {}
+
+        def canonicalize_dim(dim):
+            if isinstance(dim, torch.SymInt):
+                if not dim.node.expr.free_symbols:
+                    return int(dim)
+                return symbols.setdefault(repr(dim), f"s{len(symbols)}")
+            return dim
+
         for node in joint_gm.graph.nodes:
             if node.op == "placeholder":
                 if "val" not in node.meta:
                     raise AssertionError(f"Expected 'val' in node.meta for {node}")
                 fake_val = node.meta["val"]
                 if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
-                    res.append(list(fake_val.shape))
+                    res.append([canonicalize_dim(dim) for dim in fake_val.shape])
 
-        self.assertEqual(str(res), answer)
+        self.assertEqual(res, answer)
 
     @parametrize(
         "export_fn",

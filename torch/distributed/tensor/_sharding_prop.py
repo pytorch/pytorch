@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
-from typing import cast
+from typing import cast, TypeVar
 
 import torch
 from torch._guards import detect_fake_mode
@@ -43,6 +43,32 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 log = logging.getLogger(__name__)
+
+
+_T = TypeVar("_T")
+
+
+def _op_schema_can_be_cached(op_schema: OpSchema) -> bool:
+    try:
+        hash(op_schema)
+    except TypeError:
+        return False
+    return True
+
+
+def _cached_or_uncached(
+    op_schema: OpSchema,
+    cached_fn: Callable[[OpSchema], _T],
+    uncached_fn: Callable[[OpSchema], _T],
+) -> _T:
+    try:
+        return cached_fn(op_schema)
+    except TypeError:
+        # lru_cache hashes arguments before calling the wrapped function. If
+        # the schema is hashable, the TypeError came from the body and is real.
+        if _op_schema_can_be_cached(op_schema):
+            raise
+        return uncached_fn(op_schema)
 
 
 def _propagate_use_strided_shard_flag(
@@ -597,7 +623,11 @@ class ShardingPropagator:
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
-            return self._propagate_tensor_meta_cached(op_schema)
+            return _cached_or_uncached(
+                op_schema,
+                self._propagate_tensor_meta_cached,
+                self._propagate_tensor_meta_non_cached,
+            )
 
     def _create_output_spec_with_new_tensor_meta(
         self,
@@ -728,7 +758,12 @@ class ShardingPropagator:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
+                OutputSharding,
+                _cached_or_uncached(
+                    op_info.schema,
+                    self.propagate_op_sharding,
+                    self.propagate_op_sharding_non_cached,
+                ),
             )
         op_info.output_sharding = output_sharding
 

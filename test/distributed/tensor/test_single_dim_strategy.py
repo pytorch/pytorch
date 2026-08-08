@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.source import ConstantSource
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -16,9 +17,11 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    OpInfo,
     OpSchema,
     OpSpec,
     OpStrategy,
+    OutputSharding,
     RuntimeSchemaInfo,
     TupleStrategy,
 )
@@ -45,13 +48,27 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
-from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
-from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
+from torch.distributed.tensor._redistribute import (
+    _gen_transform_infos,
+    clear_redistribute_planner_cache,
+    get_redistribute_planner,
+    use_min_cost_redistribution_plan,
+)
+from torch.distributed.tensor._sharding_prop import (
+    _op_schema_can_be_cached,
+    _select_min_cost_strategy,
+    ShardingPropagator,
+)
+from torch.distributed.tensor.debug import (
+    _clear_sharding_prop_cache,
+    _get_fast_path_sharding_prop_cache_stats,
+)
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
     _StridedShard,
     Placement,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -844,6 +861,181 @@ class TestExpandPlaceholder(TestCase):
         # Verify result is valid
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
+
+    def test_symbolic_shapes_bypass_sharding_prop_caches(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(2))
+        shape_env = ShapeEnv()
+
+        sym_size = 8
+        symbol = shape_env.create_symbol(
+            sym_size, source=ConstantSource("test_sym_size")
+        )
+        other_symbol = shape_env.create_symbol(
+            sym_size + 1, source=ConstantSource("test_other_sym_size")
+        )
+        second_dim_symbol = shape_env.create_symbol(
+            4, source=ConstantSource("test_second_dim_sym_size")
+        )
+        sym_int = torch.SymInt(SymNode(symbol, shape_env, int, hint=sym_size))
+        other_sym_int = torch.SymInt(
+            SymNode(other_symbol, shape_env, int, hint=sym_size + 1)
+        )
+        other_shape_env = ShapeEnv()
+        same_expr_other_env_sym_int = torch.SymInt(
+            SymNode(symbol, other_shape_env, int, hint=sym_size)
+        )
+        second_dim_sym_int = torch.SymInt(
+            SymNode(second_dim_symbol, shape_env, int, hint=4)
+        )
+
+        symbolic_meta = TensorMeta(torch.Size([sym_int, 4]), (4, 1), torch.float32)
+        spec = DTensorSpec(mesh, (Shard(0),), symbolic_meta)
+        same_spec = DTensorSpec(mesh, (Shard(0),), symbolic_meta)
+        static_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_size, 4]), (4, 1), torch.float32),
+        )
+        other_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([other_sym_int, 4]), (4, 1), torch.float32),
+        )
+        same_expr_other_env_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(
+                torch.Size([same_expr_other_env_sym_int, 4]),
+                (4, 1),
+                torch.float32,
+            ),
+        )
+        mixed_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(
+                torch.Size([sym_int, second_dim_sym_int]), (4, 1), torch.float32
+            ),
+        )
+        symbolic_stride_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_int, 4]), (sym_int, 1), torch.float32),
+        )
+        static_stride_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_int, 4]), (sym_size, 1), torch.float32),
+        )
+        with self.assertRaisesRegex(TypeError, "symbolic TensorMeta"):
+            hash(spec)
+        self.assertEqual(spec, same_spec)
+        self.assertNotEqual(spec, same_expr_other_env_spec)
+        self.assertNotEqual(spec, static_spec)
+        self.assertNotEqual(static_spec, spec)
+        self.assertNotEqual(spec, other_spec)
+        self.assertNotEqual(spec, mixed_spec)
+        self.assertNotEqual(symbolic_stride_spec, static_stride_spec)
+        self.assertNotEqual(static_stride_spec, symbolic_stride_spec)
+
+        op_schema = OpSchema(torch.ops.aten.sin.default, (spec,), {})
+        self.assertFalse(_op_schema_can_be_cached(op_schema))
+        symbolic_stride_only_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_size, 4]), (sym_int, 1), torch.float32),
+        )
+        self.assertFalse(
+            _op_schema_can_be_cached(
+                OpSchema(torch.ops.aten.sin.default, (symbolic_stride_only_spec,), {})
+            )
+        )
+
+        _gen_transform_infos.cache_clear()
+        with patch(
+            "torch.distributed.tensor._redistribute._gen_transform_infos_non_cached",
+            return_value=[],
+        ) as non_cached_transform:
+            self.assertEqual(_gen_transform_infos(spec, same_spec), [])
+            self.assertEqual(_gen_transform_infos(spec, same_spec), [])
+            self.assertEqual(_gen_transform_infos(static_spec, static_spec), [])
+            self.assertEqual(_gen_transform_infos(static_spec, static_spec), [])
+            self.assertEqual(non_cached_transform.call_count, 3)
+
+        clear_redistribute_planner_cache()
+        with patch(
+            "torch.distributed.tensor._redistribute.DTensorRedistributePlanner"
+        ) as planner:
+            planner.side_effect = lambda *args: object()
+            symbolic_first = get_redistribute_planner(mesh, symbolic_meta)
+            symbolic_second = get_redistribute_planner(mesh, symbolic_meta)
+            self.assertIsNot(symbolic_first, symbolic_second)
+            self.assertEqual(planner.call_count, 2)
+
+            planner.reset_mock()
+            static_first = get_redistribute_planner(mesh, static_spec.tensor_meta)
+            static_second = get_redistribute_planner(mesh, static_spec.tensor_meta)
+            self.assertIs(static_first, static_second)
+            planner.assert_called_once_with(mesh, static_spec.tensor_meta)
+
+        propagator = ShardingPropagator()
+
+        with (
+            patch.object(
+                propagator,
+                "_propagate_tensor_meta_non_cached",
+                return_value=symbolic_meta,
+            ) as uncached_tensor_meta,
+            patch.object(
+                propagator,
+                "_propagate_tensor_meta_cached",
+                side_effect=TypeError("symbolic TensorMeta cache key is unhashable"),
+            ),
+        ):
+            self.assertIs(propagator._propagate_tensor_meta(op_schema), symbolic_meta)
+            uncached_tensor_meta.assert_called_once_with(op_schema)
+
+        output_sharding = OutputSharding(spec)
+        op_info = OpInfo(
+            compute_mesh=mesh,
+            schema=op_schema,
+            flat_args_schema=[spec],
+            local_args=(),
+            local_kwargs={},
+        )
+        with (
+            patch.object(
+                propagator,
+                "propagate_op_sharding_non_cached",
+                return_value=output_sharding,
+            ) as uncached_sharding,
+            patch.object(
+                propagator,
+                "propagate_op_sharding",
+                side_effect=TypeError("symbolic TensorMeta cache key is unhashable"),
+            ),
+        ):
+            propagator.propagate(op_info)
+            self.assertIs(op_info.output_sharding, output_sharding)
+            uncached_sharding.assert_called_once_with(op_schema)
+
+    def test_symbolic_stride_bypasses_native_sharding_cache(self):
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(4, source=ConstantSource("symbolic_stride"))
+        sym_stride = torch.SymInt(SymNode(symbol, shape_env, int, hint=4))
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([4, 4]), (sym_stride, 1), torch.float32),
+        )
+        local = torch.randn(2, 4)
+        value = DTensor(local, spec, requires_grad=False)
+
+        _clear_sharding_prop_cache()
+        result = torch.sin(value)
+        self.assertEqual(result.to_local(), torch.sin(local))
+        self.assertEqual(_get_fast_path_sharding_prop_cache_stats(), (0, 0))
 
     def test_strategy_length_validation(self):
         """Test that _PreparedSingleDimStrategy validates strategy length against

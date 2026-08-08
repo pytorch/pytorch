@@ -73,6 +73,67 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
+def _normalize_int_for_key(value: Any, include_shape_env: bool = False) -> Any:
+    if isinstance(value, int | torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+
+        normalized = SymIntEqByExpr(value)
+        if (
+            include_shape_env
+            and isinstance(value, torch.SymInt)
+            and normalized.val.free_symbols
+        ):
+            return value.node.shape_env, normalized
+        return normalized
+    return value
+
+
+def _has_symint(values: Any) -> bool:
+    return any(isinstance(value, torch.SymInt) for value in values)
+
+
+def _tensor_meta_has_symint(tensor_meta: TensorMeta) -> bool:
+    return _has_symint(tensor_meta.shape) or _has_symint(tensor_meta.stride)
+
+
+def _normalize_sequence_for_key(
+    values: Any, force: bool = False, include_shape_env: bool = False
+) -> Any:
+    if force or _has_symint(values):
+        return tuple(
+            _normalize_int_for_key(value, include_shape_env) for value in values
+        )
+    return values
+
+
+def _normalize_sequence_pair_for_compare(lhs: Any, rhs: Any) -> tuple[Any, Any]:
+    has_symint = _has_symint(lhs) or _has_symint(rhs)
+    return (
+        _normalize_sequence_for_key(lhs, force=has_symint, include_shape_env=True),
+        _normalize_sequence_for_key(rhs, force=has_symint, include_shape_env=True),
+    )
+
+
+def _tensor_meta_key(
+    tensor_meta: TensorMeta,
+) -> tuple[Any, Any, torch.dtype]:
+    return (
+        _normalize_sequence_for_key(tensor_meta.shape),
+        _normalize_sequence_for_key(tensor_meta.stride),
+        tensor_meta.dtype,
+    )
+
+
+def _tensor_meta_equals(lhs: TensorMeta, rhs: TensorMeta) -> bool:
+    lhs_shape, rhs_shape = _normalize_sequence_pair_for_compare(lhs.shape, rhs.shape)
+    lhs_stride, rhs_stride = _normalize_sequence_pair_for_compare(
+        lhs.stride, rhs.stride
+    )
+    return (
+        lhs_shape == rhs_shape and lhs_stride == rhs_stride and lhs.dtype == rhs.dtype
+    )
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
@@ -425,13 +486,14 @@ class DTensorSpec:
     def _hash_key(self) -> tuple[Any, ...]:
         """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
         if self.tensor_meta is not None:
+            shape, stride, dtype = _tensor_meta_key(self.tensor_meta)
             return (
                 self.mesh,
                 self.placements,
                 self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
-                self.tensor_meta.dtype,
+                shape,
+                stride,
+                dtype,
             )
         return (self.mesh, self.placements, self.shard_order)
 
@@ -448,6 +510,8 @@ class DTensorSpec:
         # use, where we make sure to update the hash when the `tensor_meta`
         # changes by overriding `__setattr__`. This must be lazy so that Dynamo
         # does not try to hash non-singleton `SymInt`s for the stride.
+        if self.tensor_meta is not None and _tensor_meta_has_symint(self.tensor_meta):
+            raise TypeError("DTensorSpec with symbolic TensorMeta is not hashable")
         if self._hash is None:
             self._hash = self._hash_impl()
         return self._hash
@@ -477,13 +541,11 @@ class DTensorSpec:
         if self.tensor_meta is None or other.tensor_meta is None:
             return self.tensor_meta == other.tensor_meta
 
+        if self.tensor_meta.dtype != other.tensor_meta.dtype:
+            return False
         if skip_shapes:
-            return self.tensor_meta.dtype == other.tensor_meta.dtype
-        return (
-            self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
-        )
+            return True
+        return _tensor_meta_equals(self.tensor_meta, other.tensor_meta)
 
     def __eq__(self, other: object, /) -> bool:
         return self._check_equals(other)

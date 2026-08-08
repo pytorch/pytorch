@@ -1154,8 +1154,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             False,
         )
         # (dynamic shapes, static shapes)
-        self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (92, 106, 119))
+        self.assertIn(cnt.frame_count, (4, 5, 7))
+        self.assertIn(cnt.op_count, (73, 92, 106, 119))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -1181,8 +1181,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """4""")
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """14""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.op_count, """12""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1599,8 +1599,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.tensor([1]), torch.tensor([0]))
 
     @torch._dynamo.config.patch(error_on_recompile=True)
-    @torch.fx.experimental._config.patch(use_duck_shape=False)
-    def test_dynamic_shape_disable_duck_size(self):
+    def test_dynamic_shape_does_not_duck_size_by_default(self):
         class TestModel(nn.Module):
             def __init__(
                 self,
@@ -8002,7 +8001,12 @@ SavedForBackwardsAOTOutput(idx=1)
 SavedForBackwardsAOTOutput(idx=2)
 SavedForBackwardsNoVcCheckAOTOutput(idx=3)
 SavedForBackwardsNoVcCheckAOTOutput(idx=4)
-SavedForBackwardsAOTOutput(idx=5)""",
+SavedForBackwardsAOTOutput(idx=5)
+SavedForBackwardsAOTOutput(idx=6)
+SavedForBackwardsAOTOutput(idx=7)
+SavedForBackwardsAOTOutput(idx=8)
+SavedForBackwardsAOTOutput(idx=9)
+SavedForBackwardsAOTOutput(idx=10)""",
             )
 
     def test_move_tensor_subclass_parameter_after_compile(self):

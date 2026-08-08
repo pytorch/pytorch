@@ -19,6 +19,7 @@ from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     _StridedShardNotDecodableError,
+    _tensor_meta_has_symint,
     DTensorSpec,
     ShardOrder,
     ShardOrderEntry,
@@ -661,7 +662,7 @@ def get_redistribute_planner(
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
-    if _are_we_tracing():
+    if _are_we_tracing() or _tensor_meta_has_symint(dtensor_meta):
         return DTensorRedistributePlanner(device_mesh, dtensor_meta)
 
     cache_key = (weakref.ref(device_mesh), dtensor_meta)
@@ -1520,7 +1521,7 @@ def _gen_transform_infos_non_cached(
 
 
 @cache
-def _gen_transform_infos(
+def _gen_transform_infos_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
     use_graph_based_transform: bool | None = None,
@@ -1528,6 +1529,24 @@ def _gen_transform_infos(
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, use_graph_based_transform
     )
+
+
+def _gen_transform_infos(
+    src_spec: DTensorSpec,
+    dst_spec: DTensorSpec,
+    use_graph_based_transform: bool | None = None,
+) -> list[_TransformInfo]:
+    if any(
+        spec.tensor_meta is not None and _tensor_meta_has_symint(spec.tensor_meta)
+        for spec in (src_spec, dst_spec)
+    ):
+        return _gen_transform_infos_non_cached(
+            src_spec, dst_spec, use_graph_based_transform
+        )
+    return _gen_transform_infos_cached(src_spec, dst_spec, use_graph_based_transform)
+
+
+_gen_transform_infos.cache_clear = _gen_transform_infos_cached.cache_clear  # type: ignore[attr-defined]
 
 
 def redistribute_local_tensor(

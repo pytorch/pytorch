@@ -141,6 +141,16 @@ def _force_gm_signature_match(ep_guards_code: list[str], signature):
                 for g in new_guards_code
             ]
 
+    # Handle case where **kwargs entries are flattened into explicit graph
+    # module parameters.  If the unlifted graph still has a top-level
+    # parameter named "kwargs", guards on L['kwargs'][...] refer to that real
+    # user input and must not be rewritten.
+    if "kwargs" not in signature.parameters:
+        for n in signature.parameters:
+            new_guards_code = [
+                g.replace(f"L['kwargs']['{n}']", f"L['{n}']") for g in new_guards_code
+            ]
+
     return new_guards_code
 
 
