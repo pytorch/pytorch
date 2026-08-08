@@ -26,11 +26,7 @@ from torch.distributed.checkpoint.staging import (
 )
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
-from torch.testing._internal.common_distributed import (
-    HAS_ACCELERATOR,
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import HAS_ACCELERATOR, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -877,7 +873,6 @@ class TestStateDictStager(TestCase):
 
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
-    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_dtensor(self):
         """
@@ -958,7 +953,10 @@ class TestReplicationStager(DTensorTestBase):
 
     @property
     def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+        if self.device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """

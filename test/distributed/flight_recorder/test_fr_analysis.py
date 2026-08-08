@@ -4,6 +4,7 @@ import copy
 import math
 from typing import Any
 
+import torch
 from torch.distributed.flight_recorder.components.builder import build_db
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
 from torch.distributed.flight_recorder.components.types import (
@@ -14,6 +15,10 @@ from torch.distributed.flight_recorder.components.types import (
 )
 from torch.distributed.flight_recorder.components.utils import match_one_event
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 def create_one_event(
@@ -27,7 +32,7 @@ def create_one_event(
     output_dtypes="float32",
 ):
     return {
-        "profiling_name": f"nccl:{collective_name}",
+        "profiling_name": f"{backend}:{collective_name}",
         "state": state,
         "process_group": pg_info,
         "input_sizes": input_sizes,
@@ -302,10 +307,10 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details1, args, version)
         self.assertEqual(len(db.collectives), 3)
         self.assertEqual(db.collectives[0].record_id, 0)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:all_reduce")
+        self.assertEqual(db.collectives[0].collective_name, f"{backend}:all_reduce")
         self.assertEqual(db.collectives[0].pass_check, True)
         self.assertEqual(db.collectives[1].record_id, 1)
-        self.assertEqual(db.collectives[1].collective_name, "nccl:all_reduce")
+        self.assertEqual(db.collectives[1].collective_name, f"{backend}:all_reduce")
         self.assertEqual(db.collectives[1].pass_check, True)
         self.assertEqual(db.collectives[2].pass_check, True)
         # Test case 2: matched allreduce_coalesced case.
@@ -319,7 +324,9 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details2, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 0)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:allreduce_coalesced")
+        self.assertEqual(
+            db.collectives[0].collective_name, f"{backend}:allreduce_coalesced"
+        )
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 3: matched slow path, two broadcast coalesce case.
         details3 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -345,7 +352,7 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details3, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 2)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:coalesced")
+        self.assertEqual(db.collectives[0].collective_name, f"{backend}:coalesced")
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 4: mis-matched uneven all-gather case.
         details4 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -371,7 +378,7 @@ class FlightRecorderE2ETest(TestCase):
         db = build_db(details4, args, version)
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 1)
-        self.assertEqual(db.collectives[0].collective_name, "nccl:_broadcast_oop")
+        self.assertEqual(db.collectives[0].collective_name, f"{backend}:_broadcast_oop")
         self.assertEqual(db.collectives[0].pass_check, False)
         # Test case 5: matched uneven reduce scatter case.
         details5 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
@@ -398,7 +405,7 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(len(db.collectives), 1)
         self.assertEqual(db.collectives[0].record_id, 2)
         self.assertEqual(
-            db.collectives[0].collective_name, "nccl:REDUCE_SCATTER_coalesced"
+            db.collectives[0].collective_name, f"{backend}:REDUCE_SCATTER_coalesced"
         )
         self.assertEqual(db.collectives[0].pass_check, True)
         # Test case 6: empty coalesced call on rank 0 case.
@@ -421,7 +428,7 @@ class FlightRecorderE2ETest(TestCase):
         )
         db = build_db(details6, args, version)
         self.assertEqual(len(db.collectives), 2)
-        self.assertEqual(db.collectives[1].collective_name, "nccl:_reduce_oop")
+        self.assertEqual(db.collectives[1].collective_name, f"{backend}:_reduce_oop")
         self.assertEqual(db.collectives[1].record_id, 1)
         self.assertEqual(db.collectives[1].pass_check, True)
 

@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 64
+
 none_grad_d_hid = 32
 none_grad_microbatches = 8
 torch.manual_seed(0)
@@ -538,7 +539,6 @@ class ScheduleTest(MultiProcContinuousTest):
                 schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
-
         dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
