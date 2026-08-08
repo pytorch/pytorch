@@ -7,7 +7,7 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -98,6 +98,8 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         if TEST_WITH_TORCHDYNAMO:
             self.skipTest("SchemaCheckMode is ignored by dynamo")
@@ -497,6 +499,8 @@ class TestSchemaCheck(JitTestCase):
             x.add(x)
 
 class TestSchemaCheckModeOpInfo(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
