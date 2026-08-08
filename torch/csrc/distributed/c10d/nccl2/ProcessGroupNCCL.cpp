@@ -85,6 +85,71 @@ void waitForNcclCompletion(
   }
 }
 
+void waitForNcclChildComm(
+    NcclApi& nccl_api,
+    ncclComm_t parent_comm,
+    ncclComm_t* child_comm,
+    ncclResult_t status,
+    bool expect_child,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  const auto remaining = [&] {
+    const auto now = std::chrono::steady_clock::now();
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        now < deadline,
+        operation,
+        " timed out after ",
+        timeout.count(),
+        " ms");
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - now);
+  };
+  try {
+    waitForNcclCompletion(
+        nccl_api, parent_comm, status, remaining(), operation);
+    if (!expect_child) {
+      return;
+    }
+
+    while (*child_comm == nullptr) {
+      remaining();
+      std::this_thread::yield();
+    }
+
+    ncclResult_t child_status{};
+    auto query_status = nccl_api.commGetAsyncError(*child_comm, &child_status);
+    if (query_status != ncclSuccess) {
+      throw NCCLException(
+          nccl_api,
+          fmt::format("{} child async error query failed", operation),
+          query_status,
+          *child_comm);
+    }
+    waitForNcclCompletion(
+        nccl_api, *child_comm, child_status, remaining(), operation);
+  } catch (...) {
+    const auto abortComm = [&](ncclComm_t comm, std::string_view description) {
+      try {
+        waitForNcclCompletion(
+            nccl_api, comm, nccl_api.commAbort(comm), timeout, description);
+      } catch (const std::exception& error) {
+        LOG(ERROR) << error.what();
+      }
+    };
+    if (status == ncclSuccess || status == ncclInProgress) {
+      abortComm(parent_comm, "Failed to abort parent NCCL communicator");
+    }
+    if (*child_comm != nullptr) {
+      abortComm(
+          std::exchange(*child_comm, nullptr),
+          "Failed to abort child NCCL communicator");
+    }
+    throw;
+  }
+}
+
 void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
@@ -303,11 +368,22 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclComm_t new_comm = nullptr;
   const int key = newRank >= 0 ? newRank : getRank();
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config),
-      "NCCL split failed");
+  auto splitStatus =
+      nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config);
+  try {
+    waitForNcclChildComm(
+        *nccl_api_,
+        nccl_comm_,
+        &new_comm,
+        splitStatus,
+        newRank != -1,
+        ncclOpts->timeout,
+        "NCCL split failed");
+  } catch (...) {
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    throw;
+  }
 
   if (newRank == -1) {
     // Non-member: no child communicator.
