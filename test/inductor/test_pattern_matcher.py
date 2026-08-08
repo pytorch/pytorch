@@ -777,6 +777,28 @@ class TestPatternMatcher(TestCase):
     # called in test_gpu_cpp_wrapper
     test_cat_slice_cat_xpu = test_cat_slice_cat_cuda
 
+    def test_scalar_literal_bitwise_match(self):
+        # Float literals in patterns must match by bit pattern: a nan literal
+        # should match a nan graph constant (nan != nan under IEEE eq), and a
+        # 0.0 literal should not match -0.0 (they compare equal under IEEE eq).
+        def f_nan(x):
+            return aten.mul.Tensor(x, float("nan"))
+
+        def f_negzero(x):
+            return aten.mul.Tensor(x, -0.0)
+
+        x = torch.randn(4)
+        nan_pattern = CallFunction(aten.mul.Tensor, KeywordArg("x"), float("nan"))
+        zero_pattern = CallFunction(aten.mul.Tensor, KeywordArg("x"), 0.0)
+
+        gm_nan = make_fx(f_nan)(x)
+        (node,) = (n for n in gm_nan.graph.nodes if n.op == "call_function")
+        self.assertTrue(bool(nan_pattern.match(node)))
+
+        gm_negzero = make_fx(f_negzero)(x)
+        (node,) = (n for n in gm_negzero.graph.nodes if n.op == "call_function")
+        self.assertFalse(bool(zero_pattern.match(node)))
+
     def test_pointless_view_pair(self):
         def f(x):
             x = aten.view.default(x, [3, 5, 7])
