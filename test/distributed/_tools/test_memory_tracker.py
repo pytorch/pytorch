@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import os
+import pickle
 import unittest
 
 import torch
@@ -62,6 +63,52 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
+    def test_load_restores_op_index_in_fresh_tracker(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/191397:
+        load() must restore _op_index so summary() works when stats are loaded
+        into a fresh tracker (e.g. in a notebook), not only when reusing the
+        tracker that recorded them.
+        """
+        device = torch.accelerator.current_accelerator()
+        torch.manual_seed(0)
+        model = nn.Sequential(nn.Linear(64, 8), nn.ReLU(), nn.Linear(8, 2)).to(device)
+
+        tracker = MemoryTracker()
+        tracker.start_monitor(model)
+        model(torch.randn(4, 64, device=device)).sum().backward()
+        tracker.stop()
+
+        expected_op_index = tracker._op_index
+        self.assertGreater(expected_op_index, 0)
+
+        path = "memory_op_index.trace"
+        try:
+            tracker.save_stats(path)
+
+            # Loading into a fresh tracker must restore _op_index.
+            fresh = MemoryTracker()
+            fresh.load(path)
+            self.assertEqual(fresh._op_index, expected_op_index)
+            self.assertEqual(len(fresh.memories_allocated), fresh._op_index)
+            fresh.summary()
+
+            # Backward compatibility: stats saved before this fix lack the
+            # "op_index" key, so load() must reconstruct it from the traces.
+            with open(path, "rb") as f:
+                legacy_stats = pickle.load(f)
+            del legacy_stats["op_index"]
+            with open(path, "wb") as f:
+                pickle.dump(legacy_stats, f, pickle.HIGHEST_PROTOCOL)
+
+            legacy = MemoryTracker()
+            legacy.load(path)
+            self.assertEqual(legacy._op_index, expected_op_index)
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 if __name__ == "__main__":
