@@ -422,7 +422,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("save", &ProfilerResult::save)
       .def(
           "trace_activities",
-          [](py::object self) {
+          [](const py::object& self) {
             auto& r = self.cast<ProfilerResult&>();
             auto* activities = r.traceActivities();
             if (!activities) {
@@ -651,7 +651,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   _C_m.def(
       "_register_py_class_for_device",
-      [](const std::string& device, py::object python_type_class) {
+      [](const std::string& device, const py::object& python_type_class) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
@@ -725,7 +725,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             // of the hook functions for us
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
-                    pack_hook, unpack_hook));
+                    std::move(pack_hook), std::move(unpack_hook)));
           })
       .def_property_readonly(
           "data",
