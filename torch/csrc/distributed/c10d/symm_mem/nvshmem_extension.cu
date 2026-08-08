@@ -953,15 +953,17 @@ __global__ void tile_reduce_kernel(
   auto block_src_tensor = nvshmemx::Tensor(block_src_ptr, block_layout);
   auto block_dst_tensor = nvshmemx::Tensor(block_dst_ptr, block_layout);
 
-  // Making these empty to avoid nvshmemx::tile_sum_reduce_block() from doing
-  // additional range checks
+  // Making these empty to avoid nvshmemx::tile_sum_rooted_reduce_block() from
+  // doing additional range checks
   auto start_coord = nvshmemx::make_shape();
   auto boundary = nvshmemx::make_shape();
 
-  // Use one-shot pull to reduce the tile
+  // Rooted reduce: the reduced tile is delivered only to `root`'s dst. The
+  // plain `tile_sum_reduce_block` is an AllReduce that writes the result to
+  // every PE (and ignores `root`), which would contaminate non-root out tiles.
   uint64_t flag = 0;
   constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
-  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+  nvshmemx::tile_sum_rooted_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
       team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
 
   // Wait for the operation to complete
@@ -1061,8 +1063,8 @@ void multi_root_tile_reduce(
   int i = 0, my_tile_idx = 0, root = world_size;
   // Note: if there is no tile for the current rank, my_tile_idx will remain
   // initial value 0, and root will remain `world_size`. This is OK. In
-  // `nvshmemx::tile_sum_reduce_block`, this rank would skip the reduction
-  // operation, but would still participate in the barrier.
+  // `nvshmemx::tile_sum_rooted_reduce_block`, a rank whose own PE id does not
+  // match `root` skips writing its dst, but still participates in the barrier.
   for (auto& in_tile : in_tiles) {
     TORCH_CHECK(in_tile.dim() == 2, "Only 2D tensors are supported");
     c10d::symmetric_memory::rendezvous(in_tile, group_name);
