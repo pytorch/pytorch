@@ -2622,6 +2622,8 @@ def device_hint(tensor) -> "str":
         and tensor.device.type != "meta"
     ):
         return tensor.device.type
+    elif (accelerator := torch.accelerator.current_accelerator()) is not None:
+        return accelerator.type
     else:
         return "cuda"  # default to cuda
 
@@ -6855,7 +6857,7 @@ def meta__flash_attention_forward(
     # See Note [Seed and Offset]
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available():
+    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
