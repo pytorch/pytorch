@@ -9,6 +9,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
+from contextvars import ContextVar
 from typing import *  # noqa: F403
 from typing_extensions import Self
 import enum
@@ -1523,6 +1524,29 @@ SAC_IGNORED_OPS = {
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
+SAC_IGNORED_OPS.update({
+    # Profiler annotations may legitimately differ between forward and recompute
+    # since they can depend on global runtime state such as FSDP hook ordering.
+    torch.ops.profiler._record_function_enter.default,
+    torch.ops.profiler._record_function_enter_new.default,
+    torch.ops.profiler._record_function_exit._RecordFunction,
+    torch.ops.profiler._record_function_exit.default,
+})
+
+
+_sac_dispatch_mode_bypass: ContextVar[bool] = ContextVar(
+    "_sac_dispatch_mode_bypass", default=False
+)
+
+
+@contextlib.contextmanager
+def _bypass_sac_dispatch_modes():
+    """Bypass SAC bookkeeping without disabling unrelated TorchDispatchModes."""
+    token = _sac_dispatch_mode_bypass.set(True)
+    try:
+        yield
+    finally:
+        _sac_dispatch_mode_bypass.reset(token)
 
 
 def _sac_storage_key(func, args):
@@ -1562,6 +1586,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
+        if _sac_dispatch_mode_bypass.get():
+            return func(*args, **kwargs)
+
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
@@ -1667,6 +1694,10 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return super().__enter__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+        if _sac_dispatch_mode_bypass.get():
+            return func(*args, **kwargs)
+
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
@@ -1692,7 +1723,6 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
                 "on any region computed under selective activation checkpoint."
             )
         elif entry is _RECOMPUTE:
-            kwargs = {} if kwargs is None else kwargs
             return func(*args, **kwargs)
         else:
             func_storage[idx] = _CONSUMED
