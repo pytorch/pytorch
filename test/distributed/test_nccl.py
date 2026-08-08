@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     load_tests,
@@ -57,6 +58,8 @@ broadcast_dtypes = (
 
 
 class TestNCCL(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self, device):
         uid = nccl.unique_id()
@@ -1192,6 +1195,24 @@ class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    NCCLSymmetricMemoryTest,
+    globals(),
+    only_for=("cuda",),
+)
+
+instantiate_device_type_tests(
+    NCCLSymmetricMemoryNccl2Test,
+    globals(),
+    only_for=("cuda",),
+)
+
+instantiate_device_type_tests(
+    NCCLSymmetricMemoryNcclLazyTest,
+    globals(),
+    only_for=("cuda",),
+)
 
 if __name__ == "__main__":
     run_tests()
