@@ -31,6 +31,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -4043,11 +4044,12 @@ class ShapeEnv:
         # While doing so, we try to preserve the relations from the original
         # shape env by avoiding re-emitting new symbols for foreign expressions
         # that already got bound symbols here. This cache does that by mapping
-        # (foreign_shape_env_id, foreign_expr) -> the local symbol we
-        # already minted for it.
-        self.foreign_unbacked_symbol_cache: dict[
-            tuple[int, sympy.Expr], sympy.Symbol
-        ] = {}
+        # foreign ShapeEnv -> foreign expression -> the local symbol we
+        # already minted for it. Weak keys prevent this cache from extending
+        # the lifetime of foreign ShapeEnvs.
+        self.foreign_unbacked_symbol_cache: weakref.WeakKeyDictionary[
+            ShapeEnv, dict[sympy.Expr, sympy.Symbol]
+        ] = weakref.WeakKeyDictionary()
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
         # Maps from sympy ints to expressions representing them
@@ -4960,12 +4962,11 @@ class ShapeEnv:
                 f"to a foreign ShapeEnv, got {value!r} with shape_env=None"
             )
         expr = value.node.expr
+        foreign_cache = self.foreign_unbacked_symbol_cache.setdefault(src_shape_env, {})
 
         # Step 1: cache-only replacement.
         cache_map = {
-            sym: self.foreign_unbacked_symbol_cache[(id(src_shape_env), sym)]
-            for sym in expr.free_symbols
-            if (id(src_shape_env), sym) in self.foreign_unbacked_symbol_cache
+            sym: foreign_cache[sym] for sym in expr.free_symbols if sym in foreign_cache
         }
         new_expr = expr.xreplace(cache_map) if cache_map else expr
 
@@ -4988,13 +4989,12 @@ class ShapeEnv:
         # TODO we can do better here: we lose all structural info about the
         # foreign expression (e.g. that it was u0 + u1) by collapsing it to a
         # single opaque local symbol.
-        expr_key = (id(src_shape_env), expr)
-        cached = self.foreign_unbacked_symbol_cache.get(expr_key)
+        cached = foreign_cache.get(expr)
         if cached is None:
             with self.ignore_fresh_unbacked_symbols():
                 new_symint = self.create_unbacked_symint(source)
             cached = new_symint.node.expr
-            self.foreign_unbacked_symbol_cache[expr_key] = cached
+            foreign_cache[expr] = cached
             # Only carry the foreign optimization hint forward when every
             # free symbol in expr has an explicit backed value or hint
             # override; otherwise optimization_hint would return a generic
