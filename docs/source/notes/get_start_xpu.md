@@ -12,8 +12,8 @@
 
 | Supported OS | Validated Hardware |
 |---|---|
-| Windows 11 & Ubuntu 24.04/25.10/26.04 | Intel® Arc A-Series Graphics (CodeName: Alchemist)<br>Intel® Arc B-Series Graphics (CodeName: Battlemage)<br>Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)<br>Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)<br>Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
-| Windows 11 & Ubuntu 25.10/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake) |
+| Windows 11 & Ubuntu 24.04/25.10/26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Arc™ A-Series Graphics (CodeName: Alchemist)<br>Intel® Arc™ B-Series Graphics (CodeName: Battlemage)<br>Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)<br>Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)<br>Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+| Windows 11 & Ubuntu 25.10/26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake) |
 
 Intel GPUs support (Prototype) is ready from PyTorch\* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL\* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
@@ -23,11 +23,33 @@ To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. F
 
 Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to [PyTorch Installation Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
 
+### Additional Setup for WSL2
+
+Skip this section if you are not using WSL2.
+
+1. Install a validated guest distro from the Windows host, for example Ubuntu 26.04:
+
+   ```bash
+   wsl --install -d Ubuntu-26.04
+   ```
+
+   Run `wsl --list --online` to see the distro names available on your host.
+
+2. Install the Intel GPU driver on the **Windows host**, following the same [Intel GPUs Driver Installation](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) guide. WSL2 uses a paravirtualized driver model: the host driver owns the hardware and exposes it to the WSL2 distro. Do not install a Linux kernel-mode GPU driver inside the distro.
+
+3. Install the Intel GPU user-mode runtime **inside the distro**, following the WSL2 steps of the same guide. This is the only driver component that belongs in the distro.
+
+4. Run `wsl --shutdown` on the host after updating the host driver, so the distro picks up the new version.
+
 ## Installation
 
 ### Binaries
 
 Now that we have [Intel GPU Driver](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) installed, use the following commands to install `pytorch`, `torchvision`, `torchaudio`.
+
+:::{note}
+On WSL2, run these commands in the distro shell, not in Windows PowerShell: WSL2 uses the native Linux wheels from the same `xpu` index URL.
+:::
 
 #### Stable Releases
 
@@ -73,6 +95,12 @@ print(torch.xpu.is_available())  # torch.xpu is the API for Intel GPU support
 ```
 
 If the output is `False`, double check driver installation for Intel GPUs.
+
+On WSL2, check the following:
+
+- `/dev/dxg` exists inside the distro. If it is missing, the host GPU is not exposed to WSL2; update the Windows host driver and run `wsl --shutdown`.
+- The Intel GPU user-mode runtime is installed inside the distro, see [Additional Setup for WSL2](#additional-setup-for-wsl2).
+- The host driver and the guest runtime are both up to date.
 
 ## Minimum Code Change
 
