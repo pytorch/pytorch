@@ -6090,15 +6090,13 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_out
-    MPS: threshold_out_mps
+    CPU, CUDA, XPU, MPS: threshold_out
 
 - func: threshold_backward.grad_input(Tensor grad_output, Tensor self, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: threshold_backward_out
-    MPS: threshold_backward_out_mps
+    CPU, CUDA, XPU, MPS: threshold_backward_out
     SparseCPU, SparseCUDA, SparseXPU: threshold_backward_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: threshold_backward_sparse_compressed_out
 
@@ -12144,14 +12142,12 @@
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: hardtanh_backward_out
-    MPS: hardtanh_backward_out_mps
+    CPU, CUDA, XPU, MPS: hardtanh_backward_out
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: hardtanh_backward
-    MPS: hardtanh_backward_mps
+    CPU, CUDA, XPU, MPS: hardtanh_backward
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -13332,8 +13328,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA, XPU: tanh_backward_out
-    MPS: tanh_backward_out_mps
+    CPU, CUDA, MTIA, XPU, MPS: tanh_backward_out
   tags: pointwise
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
