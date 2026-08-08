@@ -136,10 +136,13 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.23.2; python_version == "3.10"
-numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
-numpy==2.3.4; python_version >= "3.14"
+# Cap below numpy 2.5: releases after 2.4.6 tightened scalar casting so a
+# negative Python int against an unsigned dtype raises OverflowError, which
+# breaks the nn.functional.threshold OpInfo reference (value=-9 -> uint8).
+numpy>=1.23.2,<2.5; python_version == "3.10"
+numpy>=1.26.4,<2.5; python_version == "3.11" or python_version == "3.12"
+numpy>=2.1.2,<2.5; python_version >= "3.13" and python_version < "3.14"
+numpy>=2.3.4,<2.5; python_version >= "3.14"
 
 pandas==2.0.3; python_version < "3.12"
 pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
