@@ -5664,11 +5664,26 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        choice = torch._fused_sdp_choice(q, k, v, dropout_p=dropout)
         if dropout > 0.0 or dtype not in [torch.float32, torch.bfloat16, torch.float16]:
-            if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.MATH.value:
+            if choice != SDPBackend.MATH.value:
                 raise AssertionError("expected MATH backend")
+        elif dtype in (torch.bfloat16, torch.float16):
+            # head_dim=64: heuristic prefers Flash when viable.
+            if choice == SDPBackend.FLASH_ATTENTION.value:
+                pass
+            elif choice == SDPBackend.OVERRIDEABLE.value:
+                if PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU:
+                    raise AssertionError(
+                        "expected FLASH_ATTENTION backend on Flash-capable XPU (head_dim<=64)"
+                    )
+            else:
+                raise AssertionError(
+                    f"expected FLASH_ATTENTION or OVERRIDEABLE backend, got {choice}"
+                )
         else:
-            if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.OVERRIDEABLE.value:
+            # fp32: Flash dtype gate fails; oneDNN Graph overrideable.
+            if choice != SDPBackend.OVERRIDEABLE.value:
                 raise AssertionError("expected OVERRIDEABLE backend")
 
     def test_fused_inputs_dim_3_xpu(self, device):
@@ -5714,21 +5729,42 @@ class TestSDPAXpuOnly(NNTestCase):
             _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_default_priority_order(self, device):
-        # The default priority order of xpu is overridable, math, flash, efficient, cudnn
-        # For xpu backend, we need to make sure that overridable > flash > math
+        # head_dim=1 (<=64): Flash preferred over overrideable.
         dtype = torch.bfloat16
         shape = SdpaShape(1, 1, 1, 1)
         make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)
         t = make_tensor()
-        # run sdp_choice to make sure priority_order is set by XPU default priority_order
         torch._fused_sdp_choice(t, t, t)
         from torch.nn.attention import _cur_sdpa_kernel_backends
         default_priority = _cur_sdpa_kernel_backends(with_priority=True)
         flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
         overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
         math_index = default_priority.index(SDPBackend.MATH)
-        self.assertTrue(overrideable_index < flash_index < math_index,
-                        lambda msg: f"{msg}\nExpected overrideable < flash < math, got {overrideable_index}, {flash_index}, {math_index}")
+        self.assertTrue(
+            flash_index < overrideable_index < math_index,
+            f"Expected flash < overrideable < math, got {flash_index}, {overrideable_index}, {math_index}",
+        )
+
+    def test_priority_order_large_head_dim(self, device):
+        # head_dim=128: prefer overrideable first (Flash slower on BMG decode A/B).
+        dtype = torch.bfloat16
+        shape = SdpaShape(2, 8, 128, 128)
+        make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        choice = torch._fused_sdp_choice(q, k, v)
+        from torch.nn.attention import _cur_sdpa_kernel_backends
+        priority = _cur_sdpa_kernel_backends(with_priority=True)
+        flash_index = priority.index(SDPBackend.FLASH_ATTENTION)
+        overrideable_index = priority.index(SDPBackend.OVERRIDEABLE)
+        self.assertTrue(
+            overrideable_index < flash_index,
+            f"Expected overrideable < flash for head_dim=128, got {overrideable_index}, {flash_index}",
+        )
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU:
+            if choice != SDPBackend.OVERRIDEABLE.value:
+                raise AssertionError(
+                    "expected OVERRIDEABLE backend for head_dim=128 on Flash-capable XPU"
+                )
 
     def test_onednn_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
