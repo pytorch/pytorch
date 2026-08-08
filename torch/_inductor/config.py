@@ -2652,8 +2652,6 @@ class xpu:
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
 
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
-
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -2957,9 +2955,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
