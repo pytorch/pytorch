@@ -1714,12 +1714,10 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu.size(), output_mps.size())
 
     def test_baddbmm(self):
-        def helper(input_shape, batch1_shape, batch2_shape):
+        def helper(input_shape, batch1_shape, batch2_shape, beta=0.8, alpha=1.2):
             M_cpu = torch.randn(input_shape)
             batch1_cpu = torch.randn(batch1_shape)
             batch2_cpu = torch.randn(batch2_shape)
-            alpha = 1.2
-            beta = 0.8
 
             M_mps = M_cpu.detach().clone().to("mps")
             batch1_mps = batch1_cpu.detach().clone().to("mps")
@@ -1734,6 +1732,9 @@ class TestMPS(TestCaseMPS):
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
+        helper(input_shape=(2, 0, 1), batch1_shape=(2, 0, 3), batch2_shape=(2, 3, 1), beta=0.5, alpha=100)
+        helper(input_shape=(2, 3, 5), batch1_shape=(2, 3, 0), batch2_shape=(2, 0, 5), beta=0.8)
+        helper(input_shape=(2, 3, 5), batch1_shape=(2, 3, 0), batch2_shape=(2, 0, 5), beta=0)
 
     def test_baddbmm_beta_zero_ignores_input(self):
         # When beta == 0 the input/bias must be ignored entirely. nan/inf in it

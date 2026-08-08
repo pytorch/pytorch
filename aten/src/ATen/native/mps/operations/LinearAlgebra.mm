@@ -1109,6 +1109,19 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
 
+  if (opType == BADDBMM_OP_TYPE) {
+    if (result.numel() == 0) {
+      return result;
+    } else if (batch1.size(2) == 0) {
+      if (beta.toComplexDouble() == 0.0) {
+        result.zero_();
+      } else {
+        result.mul_(beta);
+      }
+      return result;
+    }
+  }
+
   // Use Metal kernels for integer and complex types
   if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
