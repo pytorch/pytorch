@@ -16,9 +16,28 @@ TORCH_LIBRARY(c10d, m) {
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
   m.class_<ReduceOp>("ReduceOp")
       .def(torch::init<>())
-      .def("op", [](const c10::intrusive_ptr<ReduceOp>& self) -> int64_t {
-        return self->op_;
-      });
+      .def(
+          "op",
+          [](const c10::intrusive_ptr<ReduceOp>& self) -> int64_t {
+            return self->op_;
+          })
+      // PREMUL_SUM scaling factor (scalar -> 0-dim CPU double tensor).
+      .def(
+          "factor", [](const c10::intrusive_ptr<ReduceOp>& self) -> at::Tensor {
+            TORCH_CHECK(
+                self->op_ == ReduceOp::PREMUL_SUM,
+                "Only PREMUL_SUM supports accessing factor");
+            TORCH_CHECK(
+                self->supplement_.defined(),
+                "Invalid PREMUL_SUM ReduceOp: missing factor");
+            const auto* preMulSupplement =
+                reinterpret_cast<PreMulSumSupplement*>(self->supplement_.get());
+            if (preMulSupplement->tensor_factor.defined()) {
+              return preMulSupplement->tensor_factor;
+            }
+            return at::scalar_tensor(
+                preMulSupplement->double_factor, at::dtype(at::kDouble));
+          });
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
