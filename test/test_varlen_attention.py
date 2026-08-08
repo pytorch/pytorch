@@ -20,7 +20,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
-    SM120OrLater,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -101,7 +100,7 @@ def _use_cudnn_varlen(_should_use_cudnn, device):
 def _varlen_backends(*, include_fa4_paged_kv: bool) -> list[str]:
     fa4_supported = (
         SM100OrLater if include_fa4_paged_kv else SM90OrLater
-    ) and not SM120OrLater
+    ) and torch.cuda.get_device_capability()[0] in (9, 10)
     return ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if fa4_supported else [])
 
 
