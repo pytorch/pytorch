@@ -652,26 +652,40 @@ static void init_multicast_for_block(
   // Flip to true after all CUDA steps finish
   bool success_end = false;
 
-  // Phase 3: Import handle (non-0 ranks only)
-  if (rank != 0) {
-    if constexpr (!use_fabric_handle) {
-      // Convert back to a handle from the broadcasted POSIX file descriptor.
-      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle,
-          (void*)(uintptr_t)recv_handle,
-          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
-    } else {
-      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle, (void*)&(recv_handle), CU_MEM_HANDLE_TYPE_FABRIC), check_all);
-    }
+  // Phase 3: Import handle -- every rank, rank 0 included, which self-imports
+  // the handle it just exported so that every rank's multicast mapping has
+  // identical provenance. Rank 0's create reference is dropped further below,
+  // once every rank has imported.
+  //
+  // Provenance is not cosmetic: it selects the copy path the driver uses for a
+  // write into the multicast VA. Over a natively created handle the driver
+  // treats the write as a plain local device-to-device copy and schedules it on
+  // the copy engines that also service pinned HtoD/DtoH, so
+  // memcpy_to_multicast_ serializes behind concurrent host transfers; over an
+  // imported handle the same write takes the peer copy path on a separate
+  // engine. Only a rank 0 sitting on device 0 is affected, because the
+  // multicast aperture always reports device ordinal 0, so src != dst forces
+  // the peer path for every other device.
+  HandleType imported_mc_handle = 0;
+  if constexpr (!use_fabric_handle) {
+    // Convert back to a handle from the broadcasted POSIX file descriptor.
+    // The fd is the handle: widen it to pointer size, then reinterpret it as
+    // the void* osHandle the driver expects.
+    C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+        &imported_mc_handle,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(recv_handle)),
+        CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
+  } else {
+    C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+        &imported_mc_handle, static_cast<void*>(&recv_handle), CU_MEM_HANDLE_TYPE_FABRIC), check_all);
   }
 
   // Phase 4: Bind memory
   // All rank adds their physical allocation to the multicast object
   C10_CUDA_DRIVER_CHECK_GOTO(
-      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx), check_all);
+      driver_api->cuMulticastAddDevice_(imported_mc_handle, block->device_idx), check_all);
   C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMulticastBindMem_(
-      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0), check_all);
+      imported_mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0), check_all);
 
   success_end = true;
 
@@ -681,6 +695,18 @@ check_all:
   auto rank_successes = storeExchange.all_gather(store, rank, world_size, success_end);
   for (int r = 0; r < world_size; ++r) {
     all_succeed &= rank_successes[r];
+  }
+  if (imported_mc_handle != 0) {
+    // Rank 0 may only drop the reference cuMulticastCreate gave it once every
+    // rank has imported, which the all_gather above guarantees. The exported
+    // handle stops resolving to this multicast object as soon as that reference
+    // is gone: a late importer silently gets a fresh, empty object instead, and
+    // then every rank blocks forever in cuMulticastBindMem waiting for a device
+    // that was added to somebody else's object.
+    if (rank == 0) {
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(mc_handle));
+    }
+    mc_handle = imported_mc_handle;
   }
   // Close the file descriptor before exit
   if constexpr (!use_fabric_handle) {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 
-from .common import DeviceIdx, DeviceOpOverrides, register_device_op_overrides
+from .common import DeviceOpOverrides, register_device_op_overrides
 
 
 class CpuDeviceOpOverrides(DeviceOpOverrides):
@@ -17,13 +17,13 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
     def cpp_kernel_type(self) -> str:
         return "void*"
 
-    def set_device(self, device_idx: DeviceIdx) -> str:
+    def set_device(self, device_idx: int) -> str:
         return "pass"
 
     def synchronize(self) -> str:
         return "pass"
 
-    def device_guard(self, device_idx: DeviceIdx) -> str:
+    def device_guard(self, device_idx: int) -> str:
         return "torch._ops.contextlib.nullcontext()"
 
 

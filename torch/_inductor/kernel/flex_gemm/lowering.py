@@ -502,6 +502,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
         )
+    output_storage = outputs.output_storage
+    output_storage_dtype = (
+        output_meta.dtype
+        if output_storage is None
+        else output_storage.meta["val"].dtype
+    )
     logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
     physical_output_size = [
         *gemm_args[mat1_index].get_size()[:-1],
@@ -521,13 +527,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     output_stride = ir.convert_shape_to_inductor(output_meta.stride())
     if output_contraction is not None:
         # Output contractions use TMA stores with 16-byte-aligned outer strides.
-        output_alignment = max(16 // output_meta.dtype.itemsize, 1)
+        output_alignment = max(16 // output_storage_dtype.itemsize, 1)
         output_stride[-2] = (
             ceildiv(logical_output_size[-1], output_alignment) * output_alignment
         )
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
-        output_meta.dtype,
+        output_storage_dtype,
         logical_output_size,
         output_stride,
     )
@@ -665,6 +671,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         input_gen_fns=input_gen_fns or None,
         **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
+    if output_storage is not None and output_storage_dtype is not output_meta.dtype:
+        result = TensorBox(ir.DtypeView.create(result, output_meta.dtype))
     selected_config_key = (
         None
         if selected_choice is None

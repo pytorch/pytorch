@@ -293,6 +293,97 @@ class TestLibtorchAgnostic(TestCase):
         other_1d = torch.randint(0, other_high, (4,), device=device, dtype=torch.int64)
         self.assertEqual(stable_op(a, other_1d), torch_op(a, other_1d))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_permute(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(2, 3, 4, device=device)
+        result = libtorch_agnostic.ops.my_permute(t, [-1, -3, 1])
+        self.assertEqual(result, t.permute(-1, -3, 1))
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Permute a non-contiguous view
+        t_view = t[:, :, ::2]
+        result = libtorch_agnostic.ops.my_permute(t_view, [1, -1, 0])
+        self.assertEqual(result, t_view.permute(1, -1, 0))
+        self.assertEqual(result.data_ptr(), t_view.data_ptr())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_view_dtype(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(2, 4, device=device, dtype=torch.float32)
+
+        # Same element size: shape unchanged
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int32)
+        expected = t.view(torch.int32)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Smaller element size: last dim expands (float32 -> int16)
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int16)
+        expected = t.view(torch.int16)
+        self.assertEqual(result.shape, (2, 8))
+        self.assertEqual(result, expected)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+        # Larger element size: last dim shrinks (float32 -> int64)
+        result = libtorch_agnostic.ops.my_view_dtype(t, torch.int64)
+        expected = t.view(torch.int64)
+        self.assertEqual(result.shape, (2, 2))
+        self.assertEqual(result, expected)
+        self.assertEqual(result.data_ptr(), t.data_ptr())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_index_select(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(3, 4, device=device)
+        index = torch.tensor([0, 2], device=device)
+        result = libtorch_agnostic.ops.my_index_select(t, -2, index)
+        self.assertEqual(result, torch.index_select(t, -2, index))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_floor_divide(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        a = torch.randint(-19, 20, (3, 4), device=device, dtype=torch.int64)
+        b = torch.randint(1, 5, (3, 4), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, b), torch.floor_divide(a, b)
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, -b), torch.floor_divide(a, -b)
+        )
+
+        # Test broadcasting
+        b_1d = torch.randint(1, 5, (4,), device=device, dtype=torch.int64)
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, b_1d),
+            torch.floor_divide(a, b_1d),
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_floor_divide(a, -b_1d),
+            torch.floor_divide(a, -b_1d),
+        )
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_is_pinned_cpu_false(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(2, 3, device=device)
+        self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_is_pinned_cuda_true(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
+        self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
