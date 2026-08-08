@@ -568,7 +568,6 @@
   patterns:
   - '*'
   approved_by:
-  - 8Keep
   - aditvenk
   - AmesingFlank
   - amirafzali
@@ -587,7 +586,6 @@
   - digantdesai
   - dolpm
   - drisspg
-  - echen4096
   - egienvalue
   - fegin
   - frgossen
@@ -603,7 +601,6 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
@@ -619,8 +616,6 @@
   - sanketpurandare
   - scotts
   - seemethere
-  - sevenEng
-  - shawnxu26
   - SherlockNoMad
   - slayton58
   - soulitzer
@@ -633,7 +628,6 @@
   - xmfan
   - ydwu4
   - yushangdi
-  - ZainRizvi
   - zpcore
   mandatory_checks_name:
   - EasyCLA
