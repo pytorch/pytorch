@@ -5789,8 +5789,8 @@ def pad(
         See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
         :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
         for concrete examples on how each of the padding modes works. Constant
-        padding is implemented for arbitrary dimensions. Circular, replicate and
-        reflection padding are implemented for padding the last 3 dimensions of a
+        padding is implemented for arbitrary dimensions. Circular, replicate,
+        reflection and symmetric padding are implemented for padding the last 3 dimensions of a
         4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
         or the last dimension of a 2D or 3D input tensor.
 
@@ -5803,7 +5803,7 @@ def pad(
         input (Tensor): N-dimensional tensor
         pad (tuple): m-elements tuple, where
             :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
+        mode: ``'constant'``, ``'reflect'``, ``'replicate'``, ``'circular'`` or ``'symmetric'``.
             Default: ``'constant'``
         value: fill value for ``'constant'`` padding. Default: ``0``
 
