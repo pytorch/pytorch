@@ -62,7 +62,7 @@ class ChunkingApplier:
         self.num_chunk = num_chunk
 
         # tangent node to the all-one tensor
-        self.overriden_tangent: dict[Node, Node | None] = {}
+        self.overridden_tangent: dict[Node, Node | None] = {}
 
         self.subgraph_input: list[Node] = []
         self.subgraph_body: list[Node] = []
@@ -107,7 +107,7 @@ class ChunkingApplier:
             # skip tangent nodes since they are overridden as 1 and
             # reapplied later in the bwd graph
             if is_tangent_node(node):
-                self.overriden_tangent[node] = None  # will update the value later
+                self.overridden_tangent[node] = None  # will update the value later
                 continue
 
             # To check if a node is a placeholder for the chunking
@@ -140,7 +140,7 @@ class ChunkingApplier:
             raise AssertionError("expected non-empty subgraph body")
 
     def replace_tangent_to_one(self) -> None:
-        for idx, node in enumerate(self.overriden_tangent):
+        for idx, node in enumerate(self.overridden_tangent):
             if not is_tangent_node(node):
                 raise AssertionError(f"expected tangent node, got {node}")
 
@@ -149,11 +149,11 @@ class ChunkingApplier:
                 aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
             )
 
-            name = "tangent_overriden_as_one_{idx}"
+            name = "tangent_overridden_as_one_{idx}"
             one._rename(name)
             one.meta = copy.copy(node.meta)
             node.replace_all_uses_with(one)
-            self.overriden_tangent[node] = one
+            self.overridden_tangent[node] = one
 
     def chunk_subgraph_input(self) -> None:
         """
@@ -235,11 +235,11 @@ class ChunkingApplier:
         for node_idx, input_node in enumerate(self.subgraph_input):
             env[input_node] = _create_placeholder_node(input_node)
 
-        for overriden_tangent_node in self.overriden_tangent.values():
-            if overriden_tangent_node is None:
+        for overridden_tangent_node in self.overridden_tangent.values():
+            if overridden_tangent_node is None:
                 raise AssertionError("expected tangent node to be set")
-            env[overriden_tangent_node] = _create_placeholder_node(
-                overriden_tangent_node
+            env[overridden_tangent_node] = _create_placeholder_node(
+                overridden_tangent_node
             )
 
         for accum in self.accumulators.values():
@@ -366,7 +366,7 @@ class ChunkingApplier:
                     # not chunked
                     args.append(node)
 
-            args += list(self.overriden_tangent.values())  # type: ignore[arg-type]
+            args += list(self.overridden_tangent.values())  # type: ignore[arg-type]
 
             for accum in self.accumulators.values():
                 if accum is None:
