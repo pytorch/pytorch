@@ -638,6 +638,31 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
                                                                      bool train, double epsilon, std::array<bool,3> grad_input_mask) {
 
   using accscalar_t = at::acc_type<stat_scalar_t, true>;
+    if (train) {
+    const auto num_features = input_.size(1);
+
+    TORCH_CHECK(
+        save_mean_.defined(),
+        "save_mean must be defined in training mode");
+
+    TORCH_CHECK(
+        save_mean_.numel() == num_features,
+        "Expected save_mean to contain ",
+        num_features,
+        " elements, but got ",
+        save_mean_.numel());
+
+    TORCH_CHECK(
+        save_invstd_.defined(),
+        "save_invstd must be defined in training mode");
+
+    TORCH_CHECK(
+        save_invstd_.numel() == num_features,
+        "Expected save_invstd to contain ",
+        num_features,
+        " elements, but got ",
+        save_invstd_.numel());
+  }
   Tensor grad_input_;
   Tensor grad_input_reshaped;
   Tensor grad_weight_;
