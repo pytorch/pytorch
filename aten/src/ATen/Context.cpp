@@ -239,6 +239,14 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::allowReducedPrecisionReductionCuDNN() const {
+  return allow_reduced_precision_reduction_cudnn;
+}
+
+void Context::setAllowReducedPrecisionReductionCuDNN(bool b) {
+  allow_reduced_precision_reduction_cudnn = b;
+}
+
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
   // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
   TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),
