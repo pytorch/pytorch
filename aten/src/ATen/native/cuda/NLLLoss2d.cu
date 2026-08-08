@@ -165,7 +165,7 @@ __global__ void nll_loss2d_backward_no_reduce_kernel(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_backward_kernel(
   scalar_t* grad_input,
@@ -174,24 +174,27 @@ __global__ void nll_loss2d_backward_kernel(
   const scalar_t* weights,
   const scalar_t* total_weight,
   bool size_average,
-  int n_classes,
-  int map_nelem,
+  index_t n_classes,
+  index_t map_nelem,
   int blocks_per_sample,
   int64_t ignore_index
 ) {
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
 
-  const int sample = blockIdx.x / blocks_per_sample;
-  const int step = blockDim.x * blocks_per_sample;
+  const index_t sample = blockIdx.x / blocks_per_sample;
+  const index_t step =
+      static_cast<index_t>(blockDim.x) * blocks_per_sample;
 
-  const int toffset = sample * map_nelem;
+  const index_t toffset = sample * map_nelem;
   const auto* const target_thread = target + toffset;
 
-  const int ioffset = sample * map_nelem * n_classes;
+  const index_t ioffset = sample * map_nelem * n_classes;
   auto* const grad_input_thread = grad_input + ioffset;
 
-  for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
+  for (index_t i =
+           static_cast<index_t>(blockIdx.x % blocks_per_sample) * blockDim.x +
+           threadIdx.x;
        i < map_nelem;
        i += step) {
     const int64_t t = target_thread[i];
@@ -449,22 +452,29 @@ void nll_loss2d_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss2d_backward_kernel",
         [&] {
-          nll_loss2d_backward_kernel<scalar_t>
-              <<<total_blocks,
-                CUDA_NUM_THREADS,
-                0,
-                at::cuda::getCurrentCUDAStream()>>>(
-                  grad_input.mutable_data_ptr<scalar_t>(),
-                  grad_output.const_data_ptr<scalar_t>(),
-                  target_.const_data_ptr<int64_t>(),
-                  optional_data<scalar_t>(weight_),
-                  total_weight.const_data_ptr<scalar_t>(),
-                  reduction == at::Reduction::Mean,
-                  input.size(1),
-                  map_nelem,
-                  blocks_per_sample,
-                  ignore_index);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+          AT_DISPATCH_INDEX_TYPES(
+              at::native::canUse32BitIndexMath(input, INT_MAX)
+                  ? ScalarType::Int
+                  : ScalarType::Long,
+              "nll_loss2d_backward_launcher",
+              [&] {
+                nll_loss2d_backward_kernel<scalar_t, index_t>
+                    <<<total_blocks,
+                      CUDA_NUM_THREADS,
+                      0,
+                      at::cuda::getCurrentCUDAStream()>>>(
+                        grad_input.mutable_data_ptr<scalar_t>(),
+                        grad_output.const_data_ptr<scalar_t>(),
+                        target_.const_data_ptr<int64_t>(),
+                        optional_data<scalar_t>(weight_),
+                        total_weight.const_data_ptr<scalar_t>(),
+                        reduction == at::Reduction::Mean,
+                        input.size(1),
+                        map_nelem,
+                        blocks_per_sample,
+                        ignore_index);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              });
         });
   }
 }
