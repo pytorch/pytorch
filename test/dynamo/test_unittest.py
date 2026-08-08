@@ -3,10 +3,15 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 class TestUnittest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_unittest
