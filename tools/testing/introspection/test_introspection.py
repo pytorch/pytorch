@@ -25,14 +25,21 @@ class TestPlatforms(TestCase):
         with self.assertRaises(KeyError):
             platforms.get("does-not-exist")
 
-    def test_cuda_caps_sm_derived(self):
-        sm80 = platforms.get("linux-cuda-sm80")
-        sm90 = platforms.get("linux-cuda-sm90")
-        # FP8 needs SM89+, so it is off for SM80 and on for SM90.
-        self.assertFalse(sm80.caps["PLATFORM_SUPPORTS_FP8"])
-        self.assertTrue(sm90.caps["PLATFORM_SUPPORTS_FP8"])
-        # Flash attention is SM80+.
-        self.assertTrue(sm80.caps["PLATFORM_SUPPORTS_FLASH_ATTENTION"])
+    def test_cuda_caps_only_overrides_underivable_flags(self):
+        # Capability-derived flags are deliberately absent so common_cuda computes
+        # them; only flags reading the build or driver are pinned here.
+        for name in ("linux-cuda-sm80", "linux-cuda-sm86", "linux-cuda-sm90"):
+            caps = platforms.get(name).caps
+            self.assertNotIn("PLATFORM_SUPPORTS_FP8", caps)
+            self.assertNotIn("PLATFORM_SUPPORTS_FLASH_ATTENTION", caps)
+            self.assertTrue(caps["PLATFORM_SUPPORTS_FUSED_SDPA"])
+
+    def test_registry_covers_the_ciflow_runner_capabilities(self):
+        self.assertEqual(platforms.get("linux-cuda-sm86").cuda_capability, (8, 6))
+        self.assertEqual(platforms.get("linux-cuda-sm100").cuda_capability, (10, 0))
+        # MXFP8 grouped gemm reads the build, so it stays an explicit override.
+        sm100 = platforms.get("linux-cuda-sm100").caps
+        self.assertTrue(sm100["PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM"])
 
     def test_subprocess_env_hides_accelerators(self):
         env = platforms.get("linux-rocm").subprocess_env()

@@ -42,29 +42,22 @@ class Platform:
         return e
 
 
-# Attention/fp8 capability defaults as a function of CUDA SM version. These mirror the
-# common_cuda evaluate_* predicates closely enough for generation; exact build-flag
-# nuances can be overridden per platform via caps=.
+# Overrides for the PLATFORM_SUPPORTS_* flags that the descriptor cannot let
+# common_cuda compute for itself. Everything else is deliberately absent: those
+# predicates read only torch.cuda.get_device_capability and the SM* LazyVals, all
+# of which collector.apply_descriptor patches, so they self-heal to the right
+# value for the simulated capability. Re-deriving them here would be a second
+# copy of common_cuda's truth table, free to drift without anything noticing.
 def _cuda_caps(capability: tuple[int, int], rocm: bool) -> dict[str, bool]:
-    sm = capability
-    flash = sm >= (8, 0) or rocm
-    mem_eff = sm >= (5, 0) or rocm
-    cudnn_attn = sm >= (8, 0)
     return {
-        "PLATFORM_SUPPORTS_FLASH_ATTENTION": flash,
-        "PLATFORM_SUPPORTS_MEM_EFF_ATTENTION": mem_eff,
-        "PLATFORM_SUPPORTS_CUDNN_ATTENTION": cudnn_attn,
-        "PLATFORM_SUPPORTS_FUSED_ATTENTION": flash or mem_eff or cudnn_attn,
+        # A plain bool, not a LazyVal: frozen at common_cuda import time, when the
+        # descriptor has hidden the GPU, so it cannot self-heal.
         "PLATFORM_SUPPORTS_FUSED_SDPA": not rocm,
         "PLATFORM_SUPPORTS_CK_SDPA": rocm,
-        "PLATFORM_SUPPORTS_BF16": sm >= (8, 0) or rocm,
-        "PLATFORM_SUPPORTS_BF16_ATOMICS": sm >= (8, 0),
-        "PLATFORM_SUPPORTS_HALF_ATOMICS": sm >= (6, 0),
-        "PLATFORM_SUPPORTS_FP8": sm >= (8, 9) and not rocm,
+        # Read the build, not the device: torch.__config__.show() / cusparselt.
+        "PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM": capability >= (10, 0) and not rocm,
         "PLATFORM_SUPPORTS_FP8_SPARSE": False,
-        "PLATFORM_SUPPORTS_FP8_GROUPED_GEMM": sm >= (9, 0) and not rocm,
-        "PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM": sm >= (10, 0) and not rocm,
-        "PLATFORM_SUPPORTS_MX_GEMM": sm >= (10, 0) and not rocm,
+        # Probe the driver via green_contexts._ensure_supported().
         "PLATFORM_SUPPORTS_GREEN_CONTEXT": False,
         "PLATFORM_SUPPORTS_WORKQUEUE_CONFIG": False,
     }
