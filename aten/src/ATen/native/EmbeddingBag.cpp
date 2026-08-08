@@ -1132,6 +1132,20 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
                             const Tensor &offsets, const int64_t mode,
                             const std::optional<Tensor>& per_sample_weights,
                             bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+  // With no bags, offset2bag maps every index to bag -1 and the reduction
+  // kernels would read out of bounds on the empty output. bag_size still
+  // needs zeroing: the no-gradient SUM path sizes it like offsets, which is
+  // non-empty when include_last_offset is set.
+  // See https://github.com/pytorch/pytorch/issues/175370 for more details.
+  if (output.size(0) == 0) {
+    if (mode == EmbeddingBagMode::SUM) {
+      at::native::zero_(bag_size);
+      if (max_indices) {
+        max_indices->copy_(bag_size);
+      }
+    }
+    return;
+  }
   if (mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
       [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
