@@ -1715,7 +1715,17 @@ if(USE_KINETO)
     # the CI runner can glob them without sweeping up PyTorch's tests too.
     set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
     unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
