@@ -6073,6 +6073,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
 
+        # non-positive kernel_size / dilation / stride are rejected at the
+        # Python API boundary with ValueError (see gh-187299).
+        x = torch.randn(1, 12, 12)
+        with self.assertRaisesRegex(
+            ValueError, r"kernel_size must be greater than zero"
+        ):
+            F.fold(x, output_size=(4, 5), kernel_size=(0, 2))
+        with self.assertRaisesRegex(ValueError, r"dilation must be greater than zero"):
+            F.fold(x, output_size=(4, 5), kernel_size=(2, 2), dilation=(0, 1))
+        with self.assertRaisesRegex(ValueError, r"stride must be greater than zero"):
+            F.fold(x, output_size=(4, 5), kernel_size=(2, 2), stride=(0, 1))
+
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
@@ -9184,16 +9196,20 @@ class TestNNDeviceType(NNTestCase):
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2, device=device))
 
-        # im2col_shape_check invariants
+        # non-positive kernel_size / dilation / stride are rejected at the
+        # Python API boundary with ValueError (see gh-187299).
         x = torch.randn(1, 3, 8, 8, device=device)
-        with self.assertRaisesRegex(RuntimeError, r"kernel size should be greater than zero"):
+        with self.assertRaisesRegex(
+            ValueError, r"kernel_size must be greater than zero"
+        ):
             F.unfold(x, kernel_size=(0, 1))
-        with self.assertRaisesRegex(RuntimeError, r"dilation should be greater than zero"):
+        with self.assertRaisesRegex(ValueError, r"dilation must be greater than zero"):
             F.unfold(x, kernel_size=(3, 3), dilation=(0, 1))
+        with self.assertRaisesRegex(ValueError, r"stride must be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
+        # negative padding is a different class of error handled by the kernel.
         with self.assertRaisesRegex(RuntimeError, r"padding should be non-negative"):
             F.unfold(x, kernel_size=(3, 3), padding=(-1, 0))
-        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
-            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
 
         # Host-side overflow guard on kernel_size product.
         with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):

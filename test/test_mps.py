@@ -7214,9 +7214,6 @@ class TestMPS(TestCaseMPS):
             # input channels not divisible by kernel product (5 not divisible by 2*3=6)
             ((1, 5, 9), (4, 5), (2, 3), 0, 1,
              r"Expected size of input's dimension 1 to be divisible"),
-            # zero kernel size
-            ((1, 6, 9), (4, 5), (0, 3), 0, 1,
-             r"kernel size should be greater than zero"),
             # negative padding
             ((1, 6, 9), (4, 5), (2, 3), (-1, 0), 1,
              r"padding should be non-negative"),

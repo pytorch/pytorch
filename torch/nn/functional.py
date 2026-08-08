@@ -6168,9 +6168,23 @@ def unfold(
             padding=padding,
             stride=stride,
         )
-    return torch._C._nn.im2col(
-        input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
-    )
+    kernel_size_ = _pair(kernel_size)
+    dilation_ = _pair(dilation)
+    padding_ = _pair(padding)
+    stride_ = _pair(stride)
+    # Validate at the API boundary so invalid argument values raise ValueError
+    # (Python/NumPy convention) instead of a RuntimeError from the im2col kernel.
+    if kernel_size_[0] <= 0 or kernel_size_[1] <= 0:
+        raise ValueError(
+            f"kernel_size must be greater than zero, but got kernel_size={kernel_size_}"
+        )
+    if dilation_[0] <= 0 or dilation_[1] <= 0:
+        raise ValueError(
+            f"dilation must be greater than zero, but got dilation={dilation_}"
+        )
+    if stride_[0] <= 0 or stride_[1] <= 0:
+        raise ValueError(f"stride must be greater than zero, but got stride={stride_}")
+    return torch._C._nn.im2col(input, kernel_size_, dilation_, padding_, stride_)
 
 
 def fold(
@@ -6199,13 +6213,28 @@ def fold(
             padding=padding,
             stride=stride,
         )
+    kernel_size_ = _pair(kernel_size)
+    dilation_ = _pair(dilation)
+    stride_ = _pair(stride)
+    # Validate at the API boundary so invalid argument values raise ValueError
+    # (Python/NumPy convention) instead of a RuntimeError from the col2im kernel.
+    if kernel_size_[0] <= 0 or kernel_size_[1] <= 0:
+        raise ValueError(
+            f"kernel_size must be greater than zero, but got kernel_size={kernel_size_}"
+        )
+    if dilation_[0] <= 0 or dilation_[1] <= 0:
+        raise ValueError(
+            f"dilation must be greater than zero, but got dilation={dilation_}"
+        )
+    if stride_[0] <= 0 or stride_[1] <= 0:
+        raise ValueError(f"stride must be greater than zero, but got stride={stride_}")
     return torch._C._nn.col2im(
         input,
         _pair(output_size),
-        _pair(kernel_size),
-        _pair(dilation),
+        kernel_size_,
+        dilation_,
         _pair(padding),
-        _pair(stride),
+        stride_,
     )
 
 
