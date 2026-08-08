@@ -3336,6 +3336,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
 
+    @property
+    def uses_tma(self) -> bool:
+        return bool(self.host_tma_descriptor_args or self._emitted_device_tma)
+
+    @property
+    def uses_device_tma(self) -> bool:
+        return self._emitted_device_tma
+
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
 
@@ -6537,6 +6545,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
+                if self.uses_tma:
+                    self.body.writeline("xoffset += XBLOCK")
+
                 # no need to sum if XBLOCK == 1, or does that matter?
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
@@ -6958,6 +6969,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.uses_tma:
+            out["uses_tma"] = True
+        if self.uses_device_tma:
+            out["uses_device_tma"] = True
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:
@@ -7245,12 +7260,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._prescan_host_tma_materializability()
         self.codegen_body()
 
-        # TMA probing sets tma_min_block_sizes even when the access falls back
-        # to tl.load; a stale constraint regresses non-TMA kernels.
-        if (
-            not self.inductor_meta.get("host_tma_descriptor_args")
-            and not self._emitted_device_tma
-        ):
+        tma_fields = (
+            "tma_min_block_sizes",
+            "uses_tma",
+            "uses_device_tma",
+            "host_tma_descriptor_args",
+        )
+        final_kernel_meta = self.inductor_meta_per_kernel()
+        for field in tma_fields:
+            self.inductor_meta.pop(field, None)
+            if field in final_kernel_meta:
+                self.inductor_meta[field] = final_kernel_meta[field]
+
+        if not self.uses_tma:
+            # TMA probing sets tma_min_block_sizes even when the access falls
+            # back to tl.load; a stale constraint regresses non-TMA kernels.
             self.inductor_meta.pop("tma_min_block_sizes", None)
 
         self._filter_pdl(self.body)

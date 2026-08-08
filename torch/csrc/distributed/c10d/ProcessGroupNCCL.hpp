@@ -11,10 +11,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <iostream>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -384,6 +387,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    std::chrono::milliseconds getTimeout() const override {
+      return opTimeout_;
+    }
+
     const std::string& logPrefix() const;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -505,6 +512,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
+    std::string logPrefix_;
     friend class ProcessGroupNCCL;
   };
 
@@ -522,6 +530,24 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     static c10::intrusive_ptr<Options> create(
         bool is_high_priority_stream = false) {
       return c10::make_intrusive<Options>(is_high_priority_stream);
+    }
+
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      auto copy = c10::make_intrusive<Options>(*this);
+      if (config.netName != nullptr) {
+        // ncclConfig_t::netName is a strdup'ed const char* (see the NCCLConfig
+        // pybind setter) and ncclConfig_t records no owner, so a plain copy
+        // would leave two Options sharing one allocation. Give the clone its
+        // own and tie the allocation to it: copies of this Options share it and
+        // free it once, when the last of them goes away. A netName from
+        // anywhere else -- the pybind setter, a config also handed to NCCL --
+        // is untracked and untouched.
+        copy->owned_net_name_ = std::shared_ptr<const char>(
+            strdup(config.netName),
+            [](const char* p) { std::free(const_cast<char*>(p)); });
+        copy->config.netName = copy->owned_net_name_.get();
+      }
+      return copy;
     }
 
     // Schedule NCCL operations on high priority CUDA streams
@@ -545,6 +571,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+
+   private:
+    // Keeps clone()'s strdup'ed config.netName alive; see clone().
+    std::shared_ptr<const char> owned_net_name_;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -1024,23 +1054,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the given MemPool
   void deregisterMemPool(at::cuda::MemPool* pool);
 
-  // This method adds a temporary extension for the timeout period,
-  // applying to all collectives between the calling of this API and
-  // the completion of the first collective on the GPU. While this feature
-  // provides flexibility in specific scenarios, it introduces statefulness
-  // to timeout setting. Therefore, it is advisable to use this API sparingly
-  // and consider alternative approaches, such as directly setting the timeout
-  // or utilizing a barrier collective (one can set any timeout to the barrier),
-  // whenever feasible.
-  void addEphemeralTimeout(const std::chrono::milliseconds& timeout);
-
-  // This function is only intended for testing purposes because we don't
-  // want to expose the `WorkNCCL` via pybind. It verifies whether the
-  // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
-  // timeout.
-  bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work>& work,
-      const std::chrono::milliseconds& timeout);
+  // This method adds a temporary extension for the timeout period, applying to
+  // collectives issued after this call until the first such collective
+  // completes on the GPU. Existing work retains its original timeout.
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
 
   void setEnableNanCheck(bool enableNanCheck);
 
@@ -1481,6 +1498,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The number of ProcessGroupNCCL created on the current rank.
   size_t local_id_;
+
+  // Identity rank mapping [0, size_), used by groupRanks() when
+  // options_->global_ranks_in_group is empty. Filled in the constructor.
+  std::vector<uint64_t> defaultRanks_;
 
   std::string logPrefix_;
 
