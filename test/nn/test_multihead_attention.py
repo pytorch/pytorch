@@ -10,14 +10,13 @@ from torch.nn import MultiheadAttention
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyOn,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
-    TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
     xfailIfNoAcceleratorTriton,
@@ -34,10 +33,6 @@ if TEST_NUMPY:
 
 
 class TestMultiheadAttentionNN(NNTestCase):
-    if TEST_CUDA:
-        _do_cuda_memory_leak_check = True
-        _do_cuda_non_default_stream = True
-
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     @parametrize_test("average_attn_weights", [True, False])
     def test_multihead_attention(self, average_attn_weights):
@@ -842,6 +837,8 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         Multihead self-attention should take fast path when both attention mask (mask type 0)
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA and PrivateUse1
         """
+        # TODO(openreg): Replace hardcoded device list with a capability check
+        # once a fast-path support API exists.
         device = device.rstrip(":0123456789")
         if device not in [
             "cpu",
@@ -883,7 +880,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
                 # If mock was called, fastpath was taken
                 self.assertTrue(fastpath_mock.called)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
         embed_dim = 128
@@ -898,7 +895,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @onlyOn(["cuda", "xpu", torch._C._get_privateuse1_backend_name()])
+    @onlyAccelerator
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype_batch_first(self, device, dtype):
         embed_dim = 128
@@ -993,7 +990,9 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, key, key)
 
 
-instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
+instantiate_device_type_tests(
+    TestMultiheadAttentionNNDeviceType, globals(), allow_xpu=True
+)
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
 if __name__ == "__main__":
