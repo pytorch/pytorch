@@ -3478,6 +3478,64 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.common(fn4, [y])
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_logsigmoid_subnormal_outputs(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188541.
+        # For float32 x >= ~87.3, logsigmoid(x) ~= -exp(-x), which is a subnormal
+        # float32 (~6e-39 for x=88).  Triton kernels run with FTZ enabled (the default;
+        # disable_ftz: False in triton_meta).  libdevice inlines log1pf as a polynomial
+        # of fma.rn.ftz.f32 instructions; for subnormal input exp(-x), the final fma
+        # that would return ~exp(-x) is FTZ-flushed to 0, yielding 0 instead of the
+        # correct negative subnormal and flipping signbit.  The fix routes CUDA through
+        # the native ATen kernel which avoids this.
+        xs = torch.tensor([88.0, 90.0, 100.0], device=device_type, dtype=torch.float32)
+
+        def fn(x):
+            y = F.logsigmoid(x)
+            return y, torch.signbit(y), y == 0
+
+        cfn = torch.compile(fn, backend="inductor", fullgraph=True)
+        eager_y, eager_signbit, eager_zero = fn(xs)
+        compiled_y, compiled_signbit, compiled_zero = cfn(xs)
+
+        # logsigmoid of large positive x is a small negative subnormal.
+        # Use atol=0/rtol=0 because default tolerances are larger than subnormal
+        # values (e.g. default atol=1e-5 >> 6e-39) and would pass even with the bug.
+        self.assertEqual(compiled_y, eager_y, atol=0, rtol=0)
+        # These boolean checks are the primary regression guard.
+        self.assertEqual(compiled_signbit, eager_signbit)
+        self.assertEqual(compiled_zero, eager_zero)
+        self.assertTrue(
+            torch.all(eager_signbit), "logsigmoid outputs should be negative"
+        )
+        self.assertFalse(torch.any(eager_zero), "logsigmoid outputs should be non-zero")
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_logsigmoid_subnormal_backward(self):
+        # Companion to test_logsigmoid_subnormal_outputs: confirms that gradients
+        # agree between eager and compiled in the subnormal input range.
+        # The gradient of logsigmoid at large x is sigma(-x) = exp(-x)/(1+exp(-x))
+        # ~= exp(-x).  The backward decomposition computes z/(1+z) (not log1p), and
+        # z/(1+z) with subnormal z does not trigger the FTZ-in-log1p bug (gh-188541);
+        # this test checks overall backward correctness.  float64 avoids float32 ULP
+        # noise so all entries can be compared with tight rtol.
+        def fn(x):
+            return F.logsigmoid(x).sum()
+
+        cfn = torch.compile(fn, backend="inductor", fullgraph=True)
+        xs_eager = torch.tensor(
+            [1.0, 5.0, 50.0, 88.0, 90.0, 100.0],
+            device=device_type,
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        xs_compiled = xs_eager.detach().clone().requires_grad_(True)
+
+        fn(xs_eager).backward()
+        cfn(xs_compiled).backward()
+
+        self.assertEqual(xs_compiled.grad, xs_eager.grad, atol=0, rtol=1e-12)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

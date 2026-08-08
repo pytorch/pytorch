@@ -146,6 +146,10 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    # log_sigmoid_forward: excluded so the custom lowering in lowering.py runs on the
+    # original op.  The lowering branches for CUDA float32 to avoid an FTZ bug where
+    # libdevice's inlined log1pf flushes subnormal results to 0 (gh-188541).
+    aten.log_sigmoid_forward,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
