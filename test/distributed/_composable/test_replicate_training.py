@@ -45,7 +45,6 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
-    TEST_HPU,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -62,6 +61,12 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+
+
+def _should_skip_for_accelerator():
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type in ("npu", "hpu")
+
 
 
 class TestReplicateForwardInputs(FSDPTestMultiThread):
@@ -206,6 +211,8 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
     @wrapSwapTensorsTest(True)
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
+        if device_type.type == "npu":
+            self.skipTest("NPU backend does not fully support DTensor.to() for dtype conversion")
         # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
         # better numerics. The important part is changing the dtype.
 
@@ -304,7 +311,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
+    @unittest.skipIf(
+        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
+    )
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_groups(self):
         """
@@ -326,7 +335,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
+    @unittest.skipIf(
+        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
+    )
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity when using multiple parameter groups for
@@ -454,6 +465,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
+    )
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -597,7 +611,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        _should_skip_for_accelerator(), "Sleep kernel not supported for NPU/HPU"
+    )
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
