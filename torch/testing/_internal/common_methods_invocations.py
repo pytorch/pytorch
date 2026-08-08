@@ -14355,9 +14355,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                skipCPUIfNoLapack,
-               # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            ),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
@@ -14384,9 +14381,11 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+               # float64/complex128 aren't supported on MPS -> test_dtypes still xfails.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+               # complex64 forward works on MPS; noncontiguous inputs not yet supported.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
@@ -21248,9 +21247,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+            # complex64 forward works on MPS; backward (needs complex solve/inv)
+            # and noncontiguous inputs are not yet supported.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                         device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                         device_type='mps', dtypes=(torch.complex64,)),
         ),
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
