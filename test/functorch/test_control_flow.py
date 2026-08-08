@@ -13021,6 +13021,10 @@ class DynamicCondModel(torch.nn.Module):
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
 class TestControlFlowNN(TestCase):
+    # Multithreaded autograd keeps backward off the capturing thread, which
+    # still has dynamo's eval frame callback installed; compiling there during
+    # CUDA graph capture is an error.
+    @torch.autograd.set_multithreading_enabled(True)
     def test_cond_in_NN(self):
         model = DynamicCondModel().cuda()
 

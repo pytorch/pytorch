@@ -2177,7 +2177,13 @@ class TestCompositeCompliance(TestCase):
                         output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
-                    torch.autograd.grad(
+                    # COW non-materialization is an eager autograd property.
+                    # Under a dynamo-compiled test harness, backward runs on
+                    # the calling thread with the eval frame callback active,
+                    # so python kernels invoked by the engine (e.g. native op
+                    # override routers) would get compiled and materialize the
+                    # COW grads.
+                    torch._dynamo.disable(torch.autograd.grad)(
                         results,
                         leaf_tensors,
                         output_grads,

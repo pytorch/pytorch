@@ -60,7 +60,7 @@ struct C10_API InferenceMode {
         /* grad_mode */ !enabled,
         /* inference_mode */ enabled,
         /* fw_grad_mode */ !enabled,
-        /* multithreading_enabled*/ !enabled));
+        /* multithreading_enabled*/ prev_mode.get_multithreading_enabled()));
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
