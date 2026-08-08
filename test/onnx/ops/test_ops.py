@@ -10,6 +10,7 @@ import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -496,7 +497,6 @@ class SymbolicOpsTest(common_utils.TestCase):
             )
 
 
-@common_utils.instantiate_parametrized_tests
 class NativeOnnxOpsTest(common_utils.TestCase):
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
@@ -1581,7 +1581,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
 
         onnx_testing.assert_onnx_program(onnx_program)
-
+        
+instantiate_device_type_tests(NativeOnnxOpsTest, globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()
