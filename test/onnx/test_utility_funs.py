@@ -1797,6 +1797,37 @@ class TestUtilityFuns(_BaseTestCase):
     def test_deduplicate_initializers_torchscript(self):
         self._test_deduplicate_initializers(torchscript=True)
 
+    def test_deduplicate_initializers_bitwise(self):
+        # Value-based dedup (eval mode) must be bitwise: identical nan
+        # initializers dedup (IEEE nan != nan would keep both), while
+        # initializers differing only in sign of zero must NOT merge
+        # (IEEE -0.0 == 0.0 would merge them).
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.nan1 = torch.nn.Parameter(torch.tensor([float("nan"), 1.0]))
+                self.nan2 = torch.nn.Parameter(torch.tensor([float("nan"), 1.0]))
+                self.zero = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
+                self.negzero = torch.nn.Parameter(torch.tensor([-0.0, 1.0]))
+
+            def forward(self, x):
+                return x + self.nan1 + self.nan2 + self.zero + self.negzero
+
+        model = MyModule()
+        model.eval()
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (torch.randn(2),),
+            f,
+            opset_version=self.opset_version,
+            dynamo=False,
+        )
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(
+            {i.name for i in graph.graph.initializer}, {"nan1", "zero", "negzero"}
+        )
+
     @skipIfNoCuda
     def test_deduplicate_initializers_diff_devices(self):
         class Model(torch.nn.Module):
