@@ -1,10 +1,17 @@
 # Owner(s): ["module: autograd"]
 
 import torch
-from torch.testing._internal.common_utils import gradcheck, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    gradcheck,
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestAutogradComplex(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_view_func_for_complex_views(self):
         # case 1: both parent and child have view_func
         x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)
