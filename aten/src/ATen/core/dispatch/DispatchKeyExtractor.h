@@ -145,7 +145,8 @@ struct TORCH_API DispatchKeyExtractor final {
 
   C10_ALWAYS_INLINE DispatchKeySet getDispatchKeySetFromRawDispatchKeySet(
       DispatchKeySet ks,
-      DispatchKeySet key_mask = DispatchKeySet(DispatchKeySet::FULL)) const {
+      DispatchKeySet key_mask =
+          DispatchKeySet(DispatchKeySet::Full::FULL)) const {
     // Callers that already collected the raw tensor keyset still need the
     // operator-specific fallthrough and TLS logic below.
     c10::impl::LocalDispatchKeySet tls =
@@ -249,9 +250,10 @@ struct TORCH_API DispatchKeyExtractor final {
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
       : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse),
-        nonFallthroughKeys_(DispatchKeySet::FULL) {
+        nonFallthroughKeys_(DispatchKeySet::Full::FULL) {
     for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
-      nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
+      nonFallthroughKeysPerBackend_[i] =
+          DispatchKeySet(DispatchKeySet::Full::FULL);
     }
   }
 

@@ -283,7 +283,8 @@ std::string TensorCheck::check_verbose(
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
-                << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
+                << c10::DispatchKeySet(
+                       c10::DispatchKeySet::Raw::RAW, dispatch_key_)
                 << ", actual " << state.apply(v.key_set());
     return std::move(fail_reason).str();
   } else if (dtype_ != v.dtype().toScalarType()) {
@@ -7591,11 +7592,11 @@ PyObject* torch_c_dynamo_guards_init() {
             TORCH_CHECK(t.size() == 5, "LocalState expected 5 values");
             LocalState state;
             state.dispatch_modifier.included_ = c10::DispatchKeySet(
-                c10::DispatchKeySet::RAW, t[0].cast<uint64_t>());
+                c10::DispatchKeySet::Raw::RAW, t[0].cast<uint64_t>());
             state.dispatch_modifier.excluded_ = c10::DispatchKeySet(
-                c10::DispatchKeySet::RAW, t[1].cast<uint64_t>());
+                c10::DispatchKeySet::Raw::RAW, t[1].cast<uint64_t>());
             state.override_dispatch_key_set = c10::DispatchKeySet(
-                c10::DispatchKeySet::RAW, t[2].cast<uint64_t>());
+                c10::DispatchKeySet::Raw::RAW, t[2].cast<uint64_t>());
             state.grad_mode_enabled = t[3].cast<bool>();
             state.should_mask_python_keys = t[4].cast<bool>();
             return state;
