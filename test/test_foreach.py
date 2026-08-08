@@ -1300,6 +1300,38 @@ class TestForeach(TestCase):
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
 
+    @dtypes(torch.float64)
+    def test_tensor_overload_shared_tensor_grad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/144580
+        # _foreach_{add,mul,div}.Tensor share one 0-dim Tensor across every list
+        # element, so backward must reduce the per-element gradients into a
+        # single Tensor for that argument rather than emitting a length-N
+        # TensorList (which previously raised "inconsistent range for
+        # TensorList output" for lists longer than one element). The input
+        # tensors deliberately have different shapes to exercise the reduction.
+        shapes = [(2, 3), (4,), (5, 1)]
+        for foreach_op, ref_op in (
+            (torch._foreach_add, torch.add),
+            (torch._foreach_mul, torch.mul),
+            (torch._foreach_div, torch.div),
+        ):
+            self_tensors = [make_tensor(s, device=device, dtype=dtype) for s in shapes]
+            other = make_tensor((), device=device, dtype=dtype, low=0.5)
+
+            inputs = [t.detach().clone().requires_grad_() for t in self_tensors]
+            shared = other.detach().clone().requires_grad_()
+            outputs = foreach_op(inputs, shared)
+            torch.stack([out.sum() for out in outputs]).sum().backward()
+
+            ref_inputs = [t.detach().clone().requires_grad_() for t in self_tensors]
+            ref_shared = other.detach().clone().requires_grad_()
+            ref_outputs = [ref_op(t, ref_shared) for t in ref_inputs]
+            torch.stack([out.sum() for out in ref_outputs]).sum().backward()
+
+            self.assertEqual(shared.grad, ref_shared.grad)
+            for inp, ref_inp in zip(inputs, ref_inputs):
+                self.assertEqual(inp.grad, ref_inp.grad)
+
     @ops(
         filter(
             lambda op: op.backward_requires_result,
