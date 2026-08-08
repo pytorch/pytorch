@@ -2020,9 +2020,9 @@ def get_estimate_runtime_cache() -> torch._inductor.codecache.LocalCache:
 
 def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     python_kernel_name = getattr(snode.node, "python_kernel_name", "")
-    args = snode.node.inputs  # type: ignore[union-attr]
+    args = snode.node.get_call_args()  # type: ignore[union-attr]
     args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
+        args,
         snode.node.kwargs,  # type: ignore[union-attr]
     )
     kwargs = snode.node.kwargs  # type: ignore[union-attr]

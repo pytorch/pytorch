@@ -4632,7 +4632,7 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
     if isinstance(node, torch._inductor.ir.FallbackKernel):
         args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
     else:
-        args = [*node.inputs, *node.constant_args]
+        args = node.get_call_args()
         kwargs = node.kwargs
 
     args = node.fill_non_provided_args(args, kwargs)

@@ -205,6 +205,7 @@ class TestScheduler(TestCase):
         snode.node = Mock()
         snode.node.inputs = [torch.empty(2, 2), torch.empty(2, 2)]
         snode.node.constant_args = ()
+        snode.node.get_call_args.return_value = snode.node.inputs
         snode.node.kwargs = {"out_dtype": torch.float16}
         snode.node.op_overload = torch.ops.aten.mm.dtype_out
         snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: [
@@ -226,6 +227,7 @@ class TestScheduler(TestCase):
             torch.empty(2, 2),
         ]
         snode.node.constant_args = ()
+        snode.node.get_call_args.return_value = snode.node.inputs
         snode.node.kwargs = {"alpha": 2}
         snode.node.op_overload = torch.ops.aten.addmm.out
         snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: args
@@ -234,6 +236,32 @@ class TestScheduler(TestCase):
 
         self.assertEqual(len(args), 3)
         self.assertEqual(kwargs, {"alpha": 2})
+
+    def test_snode_args_kwargs_honors_custom_call_args(self):
+        input_a = torch.empty(2, 3, dtype=torch.float16)
+        input_b = torch.empty(4, 5, dtype=torch.float32)
+        node = object.__new__(ir.ExternKernel)
+        node.inputs = [input_a, input_b]
+        node.constant_args = ()
+        node.call_args = (
+            ir.ExternKernelInputRef(0),
+            None,
+            ir.ExternKernelInputRef(1),
+        )
+        node.kwargs = {}
+        node.op_overload = None
+        node.fill_non_provided_args = lambda args, kwargs: args
+        snode = Mock()
+        snode.node = node
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(args[0].shape, input_a.shape)
+        self.assertEqual(args[0].dtype, input_a.dtype)
+        self.assertIsNone(args[1])
+        self.assertEqual(args[2].shape, input_b.shape)
+        self.assertEqual(args[2].dtype, input_b.dtype)
+        self.assertEqual(kwargs, {})
 
     def test_snode_args_kwargs_unflattens_fallback_kernel_args(self):
         node = object.__new__(ir.FallbackKernel)
