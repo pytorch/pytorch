@@ -339,8 +339,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # TODO: fix accuracy failure of the triton template on XPU.
-    # and enable this test case.
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile

@@ -15,7 +15,7 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import mm_args, mm_grid
+from .mm_common import load_kernel_template, mm_args, mm_grid
 
 
 if TYPE_CHECKING:
@@ -125,6 +125,22 @@ mm_plus_mm_template = TritonTemplate(
 )
 
 
+# XPU-only variant of the mm_plus_mm template. The triton-xpu SPIR-V
+# backend miscompiles the descending-K loops (negative-step range with a
+# runtime start value) used by mm_plus_mm_template above, which fails
+# accuracy whenever the K loop runs more than one iteration. This template
+# uses ascending loops instead. On XPU it replaces the shared template in
+# the autotune candidate set (see tuned_mm_plus_mm); CUDA and ROCm keep
+# the original descending-K template unchanged.
+mm_plus_mm_xpu_template = TritonTemplate(
+    name="mm_plus_mm_xpu",
+    grid=mm_grid,
+    debug=False,
+    source=load_kernel_template("triton_mm_plus_mm_xpu"),
+    cache_codegen_enabled_for_template=True,
+)
+
+
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
@@ -166,7 +182,13 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         templates_to_use.append(aten_mm_plus_mm)
 
     if use_triton_template(layout1, check_max_autotune=False):
-        templates_to_use.append(mm_plus_mm_template)
+        if mat1.get_device_or_error().type == "xpu":
+            # The shared descending-K template is miscompiled by triton-xpu's
+            # SPIR-V backend; use the ascending-K XPU variant instead, so
+            # autotune cannot pick the miscompiling kernel on XPU.
+            templates_to_use.append(mm_plus_mm_xpu_template)
+        else:
+            templates_to_use.append(mm_plus_mm_template)
 
     # Single unified call for all templates
     choices.extend(
