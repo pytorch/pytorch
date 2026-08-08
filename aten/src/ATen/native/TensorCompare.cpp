@@ -980,13 +980,13 @@ TORCH_IMPL_FUNC(isin_Scalar_Tensor_out)
  bool assume_unique,
  bool invert,
  const Tensor& out) {
-  // redispatch
+  // Wrap at the promoted dtype so a Python float scalar doesn't force the
+  // computation to float64 (and so backends without float64 support work).
+  auto promoted = at::native::result_type(test_elements, elements);
+  auto wrapped =
+      at::scalar_tensor(elements, test_elements.options().dtype(promoted));
   at::isin_out(
-      const_cast<Tensor&>(out),
-      wrapped_scalar_tensor(elements, test_elements.device()),
-      test_elements,
-      assume_unique,
-      invert);
+      const_cast<Tensor&>(out), wrapped, test_elements, assume_unique, invert);
 }
 
 TORCH_IMPL_FUNC(isposinf_out)(const Tensor& self, const Tensor& result) {
