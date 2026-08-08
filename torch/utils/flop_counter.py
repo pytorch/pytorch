@@ -92,7 +92,7 @@ from typing import Any, TypeVar
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
-from collections import defaultdict
+from collections import defaultdict, Counter
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
 from functools import wraps
@@ -131,7 +131,58 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    """Register a FLOP counting formula for custom operations.
 
+    This allows FlopCounterMode to count FLOPs for custom operations by providing
+    a function that calculates FLOPs based on input tensor shapes.
+
+    Args:
+        targets: OpOverloadPacket(s) (e.g., torch.ops.mylib.my_op), Triton JITFunction(s),
+                or HigherOrderOperator(s) to register the formula for. Can be a single
+                target or a list of targets.
+        get_raw: If False (default), the formula receives tensor shapes.
+                If True, the formula receives actual tensors.
+
+    Returns:
+        Decorator that registers the FLOP counting formula.
+
+    Example::
+
+        from torch.utils.flop_counter import register_flop_formula
+
+        # Define a custom operation
+        @torch.library.custom_op("mylib::my_rope", mutates_args=())
+        def my_rope(x: torch.Tensor) -> torch.Tensor:
+            return x  # RoPE implementation
+
+        @my_rope.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        # Register FLOP formula (return 0 for negligible ops like RoPE)
+        @register_flop_formula(torch.ops.mylib.my_rope)
+        def my_rope_flops(x_shape, out_shape=None, **kwargs):
+            return 0  # RoPE doesn't add meaningful FLOPs
+
+        # Or calculate actual FLOPs based on shape, assuming mylib::my_attention
+        # is a custom op defined the same way as mylib::my_rope above
+        @register_flop_formula(torch.ops.mylib.my_attention)
+        def my_attention_flops(q_shape, k_shape, v_shape, out_shape=None, **kwargs):
+            b, h, s_q, d = q_shape
+            s_k = k_shape[2]
+            # Q @ K^T + Scores @ V
+            return b * h * s_q * s_k * 2 * d + b * h * s_q * d * 2 * s_k
+
+        # Now FlopCounterMode will count FLOPs for these operations
+        with FlopCounterMode(display=True) as mode:
+            result = my_rope(x)  # 0 FLOPs counted
+            result = my_attention(q, k, v)  # Actual FLOPs counted
+
+    Note:
+        This decorator also works for Higher Order Operators (HOPs) like flex_attention.
+        For HOPs without a registered formula, use skip_unsupported=True to execute
+        them without counting FLOPs (they will be tracked via get_unsupported_ops()).
+    """
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
@@ -897,6 +948,18 @@ class FlopCounterMode:
     ``get_total_flops()`` or ``get_flop_counts()`` to read the same information
     programmatically.
 
+    Args:
+        mods: Optional module or list of modules for hierarchical output (deprecated).
+        depth: Maximum depth for hierarchical display (default: 2).
+        display: Whether to print the FLOP table on exit (default: True).
+        custom_mapping: Optional dictionary mapping operations to custom FLOP counting functions.
+        skip_unsupported: If True, Higher Order Operators (HOPs) without registered FLOP
+                         formulas are executed with a warning and tracked via
+                         get_unsupported_ops() instead of failing (default: False).
+                         Note that FLOPs of operations inside a skipped HOP are not
+                         counted. Only affects HOPs: regular ops without formulas always
+                         execute and count 0 FLOPs regardless of this setting.
+
     Example usage:
 
     .. code-block:: python
@@ -909,6 +972,28 @@ class FlopCounterMode:
 
         total = flop_counter.get_total_flops()
 
+        # For models with custom kernels or unsupported operations
+        with FlopCounterMode(display=True, skip_unsupported=True) as flop_counter:
+            output = model(input)
+            total_flops = flop_counter.get_total_flops()
+            # Check what operations were skipped
+            unsupported = flop_counter.get_unsupported_ops()
+            if unsupported:
+                print(f"Warning: Could not count FLOPs for: {unsupported}")
+
+        # To register custom FLOP formulas for your operations
+        from torch.utils.flop_counter import register_flop_formula
+
+        @register_flop_formula(torch.ops.mylib.my_op)
+        def my_op_flops(x_shape, out_shape=None, **kwargs):
+            return 0  # Return 0 for ops with negligible FLOPs, or calculate actual FLOPs
+
+        with FlopCounterMode(display=True) as flop_counter:
+            result = my_op(x)  # FLOPs will be counted using registered formula
+
+    See Also:
+        :func:`register_flop_formula`: Register custom FLOP counting formulas for operations
+
     """
 
     def __init__(
@@ -916,11 +1001,14 @@ class FlopCounterMode:
             mods: torch.nn.Module | list[torch.nn.Module] | None = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: dict[Any, Any] | None = None) -> None:
+            custom_mapping: dict[Any, Any] | None = None,
+            skip_unsupported: bool = False) -> None:
         super().__init__()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
+        self.skip_unsupported = skip_unsupported
+        self._unsupported_ops: Counter[str] = Counter()
         self.mode: _FlopCounterMode | None = None
         if custom_mapping is None:
             custom_mapping = {}
@@ -934,6 +1022,15 @@ class FlopCounterMode:
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
+
+    def get_unsupported_ops(self) -> Counter[str]:
+        """Return a Counter of unsupported operations encountered.
+
+        Returns:
+            Counter[str]: A Counter mapping operation names to the number of times
+                         they were encountered without a registered FLOP formula.
+        """
+        return Counter(self._unsupported_ops)
 
     def get_flop_counts(self) -> dict[str, dict[Any, int]]:
         """Return the flop counts as a dictionary of dictionaries.
@@ -1012,6 +1109,7 @@ class FlopCounterMode:
     # NB: This context manager is NOT reentrant
     def __enter__(self):
         self.flop_counts.clear()
+        self._unsupported_ops.clear()
         self.mod_tracker.__enter__()
         self.mode = _FlopCounterMode(self)
         self.mode.__enter__()
@@ -1076,7 +1174,8 @@ class _FlopCounterMode(TorchDispatchMode):
                 else:
                     break
             return self.counter._count_flops(kernel_name, None, args, kwargs)
-        elif func is torch.ops.higher_order.cond:
+
+        if func is torch.ops.higher_order.cond:
             # The flop counter for cond counts the upper bound of flops.
             # For example, if a matmul is executed 2 times in true branch
             # but only 1 time in the false branch, the flop counter will
@@ -1119,8 +1218,24 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
-        else:
-            return NotImplemented
+
+        # HOPs with a registered formula (e.g., flex_attention)
+        if func in self.counter.flop_registry:
+            out = func(*args, **kwargs)
+            return self.counter._count_flops(func, out, args, kwargs)
+
+        if self.counter.skip_unsupported:
+            op_name = str(func)
+            self.counter._unsupported_ops[op_name] += 1
+            # The HOP executes with this mode popped, so FLOPs of ops inside
+            # it are not counted either.
+            warnings.warn(
+                f"FlopCounterMode does not have a registered FLOP formula for {op_name}. "
+                "Executing without counting FLOPs (including any operations inside it).",
+                stacklevel=2
+            )
+            return func(*args, **kwargs)
+        return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -1147,13 +1262,16 @@ class _FlopCounterMode(TorchDispatchMode):
         if isinstance(func, torch._ops.HigherOrderOperator):
             return self._handle_higher_order_ops(func, types, args, kwargs)
 
-        # If we don't have func in flop_registry, see if it can decompose
-        if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
+        # If we don't have func_packet in flop_registry, see if it can decompose
+        func_packet = func._overloadpacket
+        if func_packet not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
             with self:
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
 
         # no further decomposition; execute & count flops
+        # (_count_flops is a no-op for ops without a registered formula, so
+        # unregistered regular ops execute and count 0 FLOPs)
         out = func(*args, **kwargs)
-        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)
+        return self.counter._count_flops(func_packet, out, args, kwargs)
