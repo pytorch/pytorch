@@ -194,6 +194,71 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_inplace_on_strided_input_preserves_stride_for_as_strided(self):
+        def f(x):
+            x.add_(1)
+            return torch.as_strided_copy(x, (3,), (2,))
+
+        x_ref = torch.arange(10)[1::2]
+        x_test = torch.arange(10)[1::2]
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(x_test)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+
+    def test_foreach_inplace_mixed_base_and_view_preserves_strides(self):
+        def f(x, y):
+            y_view = y[::2]
+            torch._foreach_add_([x, y_view], 1)
+            return torch.as_strided_copy(x, (3,), (2,)), y
+
+        x_ref = torch.arange(10)[1::2]
+        y_ref = torch.arange(10)
+        x_test = torch.arange(10)[1::2]
+        y_test = torch.arange(10)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(
+            x_test, y_test
+        )
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+        self.assertEqual(y_ref, y_test)
+
+        traced_f = make_fx(_functionalize(f, reapply_views=True, crossref=False))(
+            torch.arange(10)[1::2], torch.arange(10)
+        )
+        copy_count = sum(
+            node.target == torch.ops.aten.copy.default for node in traced_f.graph.nodes
+        )
+        # Preserve the strided base input, but do not copy the transient view.
+        self.assertEqual(copy_count, 1)
+
+    @skipIfTorchDynamo("Test directly exercises torch.compile")
+    def test_compile_dynamic_inplace_on_strided_input_preserves_stride_for_as_strided(
+        self,
+    ):
+        def f(x):
+            x.add_(1)
+            return torch.as_strided_copy(x, (3,), (2,))
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=True)
+        x_ref = torch.arange(10)[1::2]
+        x_test = torch.arange(10)[1::2]
+        torch._dynamo.mark_dynamic(x_test, 0)
+
+        try:
+            out_ref = f(x_ref)
+            out_test = compiled_f(x_test)
+        finally:
+            torch._dynamo.reset()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref, x_test)
+
     def test_set_(self):
         def f(x):
             y = torch.ones(2)
@@ -204,6 +269,65 @@ class TestFunctionalization(TestCase):
         # but fixing it for Storage() objects is annoying.
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), "cpu")
+
+    def test_metadata_mutating_resize_as_does_not_preserve_strides(self):
+        def f(x):
+            template = torch.empty(x.shape)
+            x.resize_as_(template, memory_format=torch.contiguous_format)
+            return x
+
+        shape = (2, 3, 4, 5)
+        x_ref = torch.empty(shape, memory_format=torch.channels_last)
+        x_test = torch.empty(shape, memory_format=torch.channels_last)
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=self.crossref)(x_test)
+
+        self.assertEqual(out_ref.stride(), out_test.stride())
+
+    def test_resize_as_out_preserves_existing_strides(self):
+        def f(out):
+            x = torch.arange(120).reshape(2, 3, 4, 5)
+            template = torch.empty(x.shape)
+            torch.ops.aten.resize_as.out(
+                x,
+                template,
+                memory_format=torch.contiguous_format,
+                out=out,
+            )
+            return out
+
+        shape = (2, 3, 4, 5)
+        out_ref = torch.empty(
+            shape, memory_format=torch.channels_last, dtype=torch.long
+        )
+        out_test = torch.empty(
+            shape, memory_format=torch.channels_last, dtype=torch.long
+        )
+
+        result_ref = f(out_ref)
+        # FakeTensor's reference for this generated out variant does not accept
+        # the out= argument, so this regression exercises functionalization only.
+        result_test = _functionalize(f, reapply_views=True, crossref=False)(out_test)
+
+        self.assertEqual(result_ref, result_test)
+        self.assertEqual(result_ref.stride(), result_test.stride())
+
+    def test_metadata_mutating_set_does_not_preserve_strides(self):
+        source = torch.arange(6)
+
+        def f(x):
+            x.set_(source.untyped_storage(), 0, (2, 3), (1, 2))
+            return x
+
+        x_ref = torch.empty(2, 3)
+        x_test = torch.empty(2, 3)
+
+        out_ref = f(x_ref)
+        out_test = _functionalize(f, reapply_views=True, crossref=False)(x_test)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref.stride(), out_test.stride())
 
     def test_advanced_indexing(self):
         def f():
@@ -369,6 +493,31 @@ def forward(self, arg0_1):
     return mul
     """,
         )
+
+    def test_out_variant_unbacked_size_resize(self):
+        def f(x):
+            out = torch.empty((0, 1), dtype=torch.long)
+            torch.nonzero(x, out=out)
+            return out
+
+        functional_f = _functionalize(f, reapply_views=True, crossref=False)
+        traced_f = make_fx(functional_f, tracing_mode="symbolic")(
+            torch.tensor([0, 1, 1])
+        )
+        nonzero = next(
+            node
+            for node in traced_f.graph.nodes
+            if node.target == torch.ops.aten.nonzero.default
+        )
+
+        self.assertIsInstance(nonzero.meta["val"].shape[0], torch.SymInt)
+        self.assertTrue(nonzero.meta.get("unbacked_bindings"))
+        self.assertNotIn(
+            torch.ops.aten.copy.default,
+            {node.target for node in traced_f.graph.nodes},
+        )
+        x = torch.tensor([0, 1, 1])
+        self.assertEqual(traced_f(x), f(x))
 
     def test_multi_out(self):
         def f(x):
