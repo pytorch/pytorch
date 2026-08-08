@@ -11,10 +11,17 @@ from torch.optim.swa_utils import (
     update_bn,
 )
 from torch.testing._internal.common_device_type import onlyAccelerator, onlyCPU
-from torch.testing._internal.common_utils import parametrize, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    TestCase,
+)
 
 
 class TestSWAUtils(TestCase):
+    # Instantiated via instantiate_device_type_tests in test/test_optim.py.
+    hw_classification = HardwareClassification.ACCELERATOR
+
     class SWATestDNN(torch.nn.Module):
         def __init__(self, input_features):
             super().__init__()

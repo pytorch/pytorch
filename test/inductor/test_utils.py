@@ -1,14 +1,23 @@
 # Owner(s): ["module: inductor"]
 
+import builtins
 import importlib.util
+import os
+import sys
+import tempfile
 import unittest
 from collections.abc import Callable, Iterator
+from pathlib import Path
+from unittest import mock
 
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -17,8 +26,15 @@ from torch._inductor.fx_utils import (
     FakeTensorUpdater,
     get_fake,
 )
-from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
+from torch._inductor.utils import (
+    get_device_tflops,
+    load_template,
+    python_subprocess_env,
+    sympy_str,
+    sympy_subs,
+)
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -29,10 +45,27 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    def test_python_subprocess_env_prioritizes_loaded_torch(self):
+        torch_package_root = os.path.dirname(
+            os.path.dirname(os.path.abspath(torch.__file__))
+        )
+        with tempfile.TemporaryDirectory() as shadow_path:
+            with mock.patch.object(sys, "path", [shadow_path, *sys.path]):
+                env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], torch_package_root)
+
+    def test_python_subprocess_env_respects_override(self):
+        with mock.patch.dict(
+            os.environ, {"TORCH_CUSTOM_PYTHONPATH": "custom_python_path"}
+        ):
+            env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"], "custom_python_path")
+
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
             pass
@@ -233,20 +266,24 @@ class TestUtils(TestCase):
             for t, t2, args, kwargs in trues:
                 fx_node_1, fx_node_2 = create_fx_node(t, t2, args, kwargs)
                 self.assertTrue(
-                    countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_1}",
                 )
                 self.assertTrue(
-                    countable_fx(fx_node_2), f"Expected true {t}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_2}",
                 )
                 self.assertNotEqual(count_flops_fx(fx_node_1), None)
                 self.assertNotEqual(count_flops_fx(fx_node_2), None)
             for f, f2, args, kwargs in falses:
                 fx_node_1, fx_node_2 = create_fx_node(f, f2, args, kwargs)
                 self.assertFalse(
-                    countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_1}",
                 )
                 self.assertFalse(
-                    countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_2}",
                 )
 
     def test_flops_fx_higher_order_op(self):
@@ -309,6 +346,38 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestLoadTemplate(TestCase):
+    def test_load_template_uses_utf8(self):
+        # load_template must decode templates as UTF-8 regardless of the ambient
+        # locale. On a host whose default encoding is ascii, reading a template
+        # that contains a non-ascii byte otherwise raises UnicodeDecodeError,
+        # producing a host-dependent (flaky) compile failure.
+        real_open = builtins.open
+
+        def ascii_default_open(*args, **kwargs):
+            # Emulate an ascii-locale host: open() with no explicit encoding
+            # decodes as ascii (open's 4th positional arg is encoding).
+            if kwargs.get("encoding") is None and (len(args) < 4 or args[3] is None):
+                kwargs["encoding"] = "ascii"
+            return real_open(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "t.py.jinja").write_text("# unicode \u2014\n", encoding="utf-8")
+            with mock.patch("builtins.open", ascii_default_open):
+                content = load_template("t", Path(d))
+        self.assertIn("\u2014", content)
+
+    def test_load_template_invalid_utf8_names_the_file(self):
+        # A template that is genuinely not valid UTF-8 (e.g. saved in a non-UTF-8
+        # codepage) must raise an error that names the offending file, not an
+        # opaque UnicodeDecodeError that hides which template is bad.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "bad.py.jinja").write_bytes(b"# not utf-8: \x97\n")
+            with self.assertRaises(ValueError) as cm:
+                load_template("bad", Path(d))
+        self.assertIn("bad.py.jinja", str(cm.exception))
 
 
 class TestRuntimeEstimation(TestCase):
@@ -431,6 +500,44 @@ class TestFakeTensorUpdater(TestCase):
 
         yield from ((graph, n) for n in graph.graph.nodes if n.op == "call_function")
 
+    @staticmethod
+    def _make_inductor_lowering_function(
+        *,
+        output_metadata_ignores_input_storage: bool = False,
+        output_metadata_is_input: int | str | None = None,
+        output_metadata_fn: Callable[..., object] | None = None,
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        def lowering_fn(x: torch.Tensor) -> torch.Tensor:
+            raise AssertionError("lowering_fn should not run under FakeTensorUpdater")
+
+        lowering_fn._inductor_lowering_function = True  # type: ignore[attr-defined]
+        lowering_fn._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
+            output_metadata_ignores_input_storage
+        )
+        lowering_fn._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
+            output_metadata_is_input
+        )
+        lowering_fn._inductor_lowering_output_metadata_fn = output_metadata_fn  # type: ignore[attr-defined]
+        return lowering_fn
+
+    @classmethod
+    def _build_graph_with_inductor_lowering_node(
+        cls,
+    ) -> tuple[
+        torch.fx.GraphModule,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+    ]:
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(cls._make_inductor_lowering_function(), (neg,))
+        graph.output(lowered)
+        return torch.fx.GraphModule({}, graph), x, y, neg, lowered
+
     def _add_delete_nodes_test(self, graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(graph)
         fake_mode = self._get_faketensormode(graph)
@@ -515,6 +622,114 @@ class TestFakeTensorUpdater(TestCase):
         graph = self._get_graph(fn, a, b)
         self._add_delete_nodes_test(graph)
 
+    def test_flex_attention_backward_updates_subgraph_inputs(self):
+        with torch._subclasses.FakeTensorMode() as mode:
+            query = mode.from_tensor(torch.randn(2, 2, 4, 8))
+            logsumexp = mode.from_tensor(torch.randn(2, 2, 4))
+            score = query.new_zeros(())
+            index = query.new_zeros((), dtype=torch.int)
+            grad = query.new_zeros(())
+            score_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5).contiguous())
+            restrided_score_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+            mask_buffer = mode.from_tensor(torch.randn(2, 3, 4, 5))
+            restrided_mask_buffer = mode.from_tensor(
+                torch.randn(2, 3, 5, 4).permute(0, 1, 3, 2)
+            )
+
+            def fw(score, b, h, q_idx, kv_idx, score_buffer):
+                return score + score_buffer[0, 0, 0, 0]
+
+            def joint(score, b, h, q_idx, kv_idx, grad, score_buffer):
+                return grad, None, None, None, None, score_buffer
+
+            def mask(b, h, q_idx, kv_idx, mask_buffer):
+                return mask_buffer[0, 0, 0, 0] > 0
+
+            fw_subgraph = make_fx(fw, tracing_mode="fake")(
+                score, index, index, index, index, score_buffer
+            )
+            joint_subgraph = make_fx(joint, tracing_mode="fake")(
+                score, index, index, index, index, grad, score_buffer
+            )
+            mask_subgraph = make_fx(mask, tracing_mode="fake")(
+                index, index, index, index, mask_buffer
+            )
+
+            def flex_backward(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            ):
+                return torch.ops.higher_order.flex_attention_backward(
+                    query,
+                    query,
+                    query,
+                    query,
+                    logsumexp,
+                    query,
+                    None,
+                    fw_subgraph,
+                    joint_subgraph,
+                    (mask_subgraph,),
+                    1.0,
+                    {},
+                    (score_buffer,),
+                    (mask_buffer,),
+                )
+
+            gm = make_fx(flex_backward, tracing_mode="fake")(
+                query,
+                logsumexp,
+                score_buffer,
+                restrided_score_buffer,
+                mask_buffer,
+                restrided_mask_buffer,
+            )
+            flex_backward_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.higher_order.flex_attention_backward
+            )
+            placeholders = {
+                node.target: node for node in gm.graph.find_nodes(op="placeholder")
+            }
+            score_buffer_node = placeholders["score_buffer_1"]
+            restrided_score_buffer_node = placeholders["restrided_score_buffer_1"]
+            mask_buffer_node = placeholders["mask_buffer_1"]
+            restrided_mask_buffer_node = placeholders["restrided_mask_buffer_1"]
+            fw_subgraph = get_fake(flex_backward_node.args[7], gm)
+            joint_subgraph = get_fake(flex_backward_node.args[8], gm)
+            mask_subgraph = get_fake(flex_backward_node.args[9][-1], gm)
+            fw_placeholders = list(fw_subgraph.graph.find_nodes(op="placeholder"))
+            joint_placeholders = list(joint_subgraph.graph.find_nodes(op="placeholder"))
+            mask_placeholders = list(mask_subgraph.graph.find_nodes(op="placeholder"))
+
+            updater = FakeTensorUpdater(gm)
+            flex_backward_args = list(flex_backward_node.args)
+            self.assertEqual(flex_backward_args[12], (score_buffer_node,))
+            self.assertEqual(flex_backward_args[13], (mask_buffer_node,))
+            flex_backward_args[12] = (restrided_score_buffer_node,)
+            flex_backward_args[13] = (restrided_mask_buffer_node,)
+            flex_backward_node.args = tuple(flex_backward_args)
+
+            with V.set_fake_mode(mode):
+                updater.incremental_update()
+
+        self.assertIs(
+            fw_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            joint_placeholders[-1].meta["val"], restrided_score_buffer_node.meta["val"]
+        )
+        self.assertIs(
+            mask_placeholders[-1].meta["val"], restrided_mask_buffer_node.meta["val"]
+        )
+
     def test_reorder_nodes(self):
         def fn(*args: torch.Tensor) -> torch.Tensor:
             ret = torch.ones_like(args[0])
@@ -555,6 +770,480 @@ class TestFakeTensorUpdater(TestCase):
         # If recursion is broken, we'll get a recursion error here.
         self.assertTrue(_is_fake_tensor_same(l, l, {}))
         self.assertFalse(_is_fake_tensor_same(l, m, {}))
+
+    def test_unchanged_inductor_lowering_node_is_ignored(self):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_changed_node_back_to_previous_hash_updates_metadata(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+            self.assertEqual(num_updated, 1)
+            self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+
+            neg.args = (x,)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_with_metadata_is_ignored(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_marked_inductor_lowering_node_ignores_storage_only_dependency_change(
+        self,
+    ):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (neg,),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_marked_inductor_lowering_node_ignores_storage_only_kwarg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (),
+            {"other": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_pass_through_inductor_lowering_node_updates_from_input_metadata(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 2)
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (4, 5))
+
+    def test_inductor_lowering_node_metadata_fn_updates_direct_arg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                )
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (20,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (20,))
+
+    def test_inductor_lowering_node_metadata_fn_preserves_view_aliasing(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=False,
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                ),
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (6,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (6,))
+        self.assertEqual(
+            lowered.meta["val"].untyped_storage()._cdata,
+            y.meta["val"].untyped_storage()._cdata,
+        )
+
+    def test_pass_through_inductor_lowering_node_rejects_missing_input_metadata(
+        self,
+    ):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            del x.meta["val"]
+            lowered.kwargs = {"input_": x}
+
+            with self.assertRaisesRegex(RuntimeError, "metadata is unavailable"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_unmarked_inductor_lowering_node_rejects_storage_only_dependency_change(
+        self,
+    ):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_marked_inductor_lowering_node_rejects_dtype_dependency_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (neg,),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3, dtype=torch.float32))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3, dtype=torch.float64))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_new_inductor_lowering_node_with_changed_dependency_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_without_metadata_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            output.args = (lowered,)
+
+            with self.assertRaisesRegex(RuntimeError, "already carry fake metadata"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_changed_inductor_lowering_node_raises_before_stale_metadata(self):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            with gm.graph.inserting_before(lowered):
+                neg_replacement = gm.graph.call_function(aten.neg.default, (y,))
+            lowered.args = (neg_replacement,)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "_inductor_lowering_function nodes",
+            ):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+# Stand-in for any exception that is not TritonUnavailableError and must not
+# escape has_triton() for a sub-capable device. (The real GPUTooOldForTriton
+# is a RuntimeError subclass; this one deliberately is not, so an escape
+# cannot be mistaken for anything has_triton() legitimately catches.)
+class _GPUTooOldForTriton(Exception):
+    pass
+
+
+def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
+    class _FakeInterface(DeviceInterface):
+        @staticmethod
+        def is_available() -> bool:
+            return available
+
+        @staticmethod
+        def is_triton_capable(device=None) -> bool:
+            return capable
+
+        @classmethod
+        def raise_if_triton_unavailable(cls, device=None) -> None:
+            if raise_exc is not None:
+                raise raise_exc
+
+    return _FakeInterface
+
+
+class TestHasTriton(TestCase):
+    def tearDown(self):
+        triton_utils.has_triton.cache_clear()
+        super().tearDown()
+
+    def _run(self, registered, *, has_package=True, detection_disabled=False):
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registered,
+            ),
+        ):
+            triton_utils.has_triton.cache_clear()
+            return triton_utils.has_triton()
+
+    def test_no_triton_package(self):
+        result = self._run([("fake", _make_triton_interface())], has_package=False)
+        self.assertFalse(result)
+
+    def test_detection_disabled(self):
+        result = self._run(
+            [("fake", _make_triton_interface())], detection_disabled=True
+        )
+        self.assertFalse(result)
+
+    def test_capable_available_backend_built(self):
+        self.assertTrue(self._run([("fake", _make_triton_interface())]))
+
+    def test_device_not_available(self):
+        self.assertFalse(self._run([("fake", _make_triton_interface(available=False))]))
+
+    def test_device_not_triton_capable(self):
+        self.assertFalse(self._run([("fake", _make_triton_interface(capable=False))]))
+
+    def test_backend_missing_is_swallowed(self):
+        iface = _make_triton_interface(
+            raise_exc=TritonUnavailableError("backend not built")
+        )
+        self.assertFalse(self._run([("fake", iface)]))
+
+    def test_unexpected_runtime_error_propagates(self):
+        # A generic RuntimeError is NOT the "no triton backend" signal, so it
+        # must surface instead of being silently treated as "no triton".
+        iface = _make_triton_interface(raise_exc=RuntimeError("something else broke"))
+        with self.assertRaisesRegex(RuntimeError, "something else broke"):
+            self._run([("fake", iface)])
+
+    def test_indexed_device_name_skipped(self):
+        # "fake:0" is available+capable but must be skipped as an indexed alias.
+        self.assertFalse(self._run([("fake:0", _make_triton_interface())]))
+
+    def test_first_working_device_wins(self):
+        registered = [
+            ("bad", _make_triton_interface(capable=False)),
+            ("good", _make_triton_interface()),
+        ]
+        self.assertTrue(self._run(registered))
+
+    def test_capability_gate_precedes_backend_probe(self):
+        # A sub-capable device whose backend probe would throw a NON-RuntimeError.
+        # The capability gate must short-circuit before the probe is ever called;
+        # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
+        iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
+        self.assertFalse(self._run([("fake", iface)]))
 
 
 if __name__ == "__main__":

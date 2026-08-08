@@ -40,7 +40,7 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
         # TODO: This is probably the wrong thing to do long-term - but for now
         # let's share the cache so we can identify tests broken by this later.
         env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+        extra_env = {v: os.environ.get(v) for v in env_vars}
 
         return pool.submit(
             _SubprocessFxCompile._run_in_child_subprocess, input, extra_env
@@ -64,7 +64,7 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
     def _run_in_child_subprocess(
         cls,
         pickled_input: _WireProtocolPickledInput,
-        extra_env: Mapping[str, str] | None,
+        extra_env: Mapping[str, str | None] | None,
     ) -> _WireProtocolPickledOutput:
         # TODO: In subprocess mode we need to clear the inductor caches.
         # The problem:

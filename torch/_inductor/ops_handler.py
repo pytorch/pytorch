@@ -44,6 +44,7 @@ ReductionType = Literal[
     "welford_reduce",
     "welford_combine",
     "any",
+    "fmax",
     "max",
     "min",
     "prod",
@@ -150,7 +151,7 @@ class OpsHandler(Generic[T]):
         """
         Converts a sympy expression into a scalar of type ``dtype`` that
         participates in tensor value computation. Unlike ``index_expr``, the
-        result dtype is honored, so this is the right op when the user
+        result dtype is respected, so this is the right op when the user
         explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
         whose result is added to a tensor rather than used as an index).
         """
@@ -359,6 +360,9 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def maximum(self, x0: T, x1: T) -> T:
+        raise NotImplementedError
+
+    def fmaximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
     def cos(self, x0: T) -> T:
@@ -836,7 +840,10 @@ class DefaultHandler(OpsHandler[Any]):
                 for p in sig.parameters.values()
             ):
                 self_arg, *args = sig.parameters.keys()
-                assert self_arg == "self"
+                if self_arg != "self":
+                    raise AssertionError(
+                        f"expected first parameter 'self', got {self_arg!r}"
+                    )
                 code.write(
                     f"""
                     def {target}(self, {", ".join(args)}):

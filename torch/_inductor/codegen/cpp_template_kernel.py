@@ -41,11 +41,27 @@ def wrap_with_tensorbox(node) -> ir.TensorBox:
 
 
 class CppTemplateKernel(CppKernel):
+    """Code generation helpers shared by CPU C++ template kernels."""
+
+    integer_div_error_var = "inductor_cpu_integer_div_error"
+
     def __init__(self, kernel_name, num_threads):
         super().__init__(None, num_threads)
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
+
+    @classmethod
+    def declare_integer_div_error(cls) -> str:
+        return f"std::atomic<int> {cls.integer_div_error_var}{{0}};"
+
+    @classmethod
+    def check_integer_div_error(cls) -> str:
+        return f"inductor_cpu_throw_if_integer_div_error({cls.integer_div_error_var});"
+
+    @classmethod
+    def integer_div_error_arg(cls) -> str:
+        return f"std::atomic<int>& {cls.integer_div_error_var}"
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -59,6 +75,7 @@ class CppTemplateKernel(CppKernel):
         aliases: dict[str, str] | None = None,
         function_name: str = "",
         extra_sizevars: list[sympy.Expr] | None = None,
+        extra_cpp_args: list[str] | None = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -111,9 +128,11 @@ class CppTemplateKernel(CppKernel):
                     if alias in self.args.output_buffers:
                         self.args.output_buffers[alias] = REMOVED
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
+            cpp_argdefs.extend(extra_cpp_args or [])
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
-        assert placeholder not in self.render_hooks
+        if placeholder in self.render_hooks:
+            raise AssertionError(f"placeholder already registered: {placeholder}")
         self.render_hooks[placeholder] = hook
         return placeholder
 
@@ -154,16 +173,20 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
+        if len(ranges) != len(node.get_size()):
+            raise AssertionError(f"{ranges=}, {node=}")
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:
                 continue
-            assert len(_range) == 2
+            if len(_range) != 2:
+                raise AssertionError(f"expected range of length 2, got {len(_range)}")
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced, ir.TensorBox)
-        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        if not isinstance(sliced, ir.TensorBox):
+            raise AssertionError(f"expected ir.TensorBox, got {type(sliced)}")
+        if not isinstance(sliced.data, ir.ReinterpretView):
+            raise AssertionError(sliced.data)
         return sliced.data
 
     def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
@@ -172,18 +195,20 @@ class CppTemplateKernel(CppKernel):
         node = wrap_with_tensorbox(node)
         idx = ir.View.handle_negative_index(idx, node.get_size()[dim])
         sliced = L.squeeze(L.slice_(node, dim, idx, idx + 1, clamp=False), dim)
-        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        if not isinstance(sliced.data, ir.ReinterpretView):
+            raise AssertionError(sliced.data)
         return sliced.data
 
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data  # type: ignore[arg-type]
+        return L.view(node, sizes).data
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
         permuted = L.permute(node, dims).data
-        assert isinstance(permuted, ir.ReinterpretView)
+        if not isinstance(permuted, ir.ReinterpretView):
+            raise AssertionError(f"expected ir.ReinterpretView, got {type(permuted)}")
         return permuted
 
     def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
@@ -232,7 +257,8 @@ class CppTemplateKernel(CppKernel):
 
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
-        assert name in self.local_buffers
+        if name not in self.local_buffers:
+            raise AssertionError(f"unknown local buffer: {name}")
         buf = self.local_buffers[name]
         ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
@@ -240,7 +266,8 @@ class CppTemplateKernel(CppKernel):
 
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""
-        assert name in self.local_buffers
+        if name not in self.local_buffers:
+            raise AssertionError(f"unknown local buffer: {name}")
         return f"_{name}.release()"
 
     def store_pointwise_nodes(
@@ -259,7 +286,10 @@ class CppTemplateKernel(CppKernel):
             offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
-        assert len(offsets) == len(var_sizes[0])
+        if len(offsets) != len(var_sizes[0]):
+            raise AssertionError(
+                f"expected {len(var_sizes[0])} offsets, got {len(offsets)}"
+            )
         output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -269,12 +299,20 @@ class CppTemplateKernel(CppKernel):
         for i, node in enumerate(nodes):
             output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(node, ir.Pointwise), node
+            if not isinstance(node, ir.Pointwise):
+                raise AssertionError(node)
 
             def fn(*args):
-                assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
-                assert len(args[1]) == 0
+                if len(args) != 2:
+                    raise AssertionError(f"expected 2 args, got {len(args)}")
+                if len(args[0]) != len(var_sizes[0]):
+                    raise AssertionError(
+                        f"expected {len(var_sizes[0])} indices, got {len(args[0])}"
+                    )
+                if len(args[1]) != 0:
+                    raise AssertionError(
+                        f"expected no reduction vars, got {len(args[1])}"
+                    )
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
@@ -320,8 +358,10 @@ class CppTemplateKernel(CppKernel):
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
         }
-        assert offsets, "offsets should be set outside"
-        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
+        if not offsets:
+            raise AssertionError("offsets should be set outside")
+        if not all(len(offset) == len(var_sizes[0]) for offset in offsets):
+            raise AssertionError(f"expected all offsets of length {len(var_sizes[0])}")
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -331,12 +371,20 @@ class CppTemplateKernel(CppKernel):
         for i, node in enumerate(nodes):
             output_name = output_names[i]
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(node, ir.Pointwise), node
+            if not isinstance(node, ir.Pointwise):
+                raise AssertionError(node)
 
             def fn(*args):
-                assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
-                assert len(args[1]) == 0
+                if len(args) != 2:
+                    raise AssertionError(f"expected 2 args, got {len(args)}")
+                if len(args[0]) != len(var_sizes[0]):
+                    raise AssertionError(
+                        f"expected {len(var_sizes[0])} indices, got {len(args[0])}"
+                    )
+                if len(args[1]) != 0:
+                    raise AssertionError(
+                        f"expected no reduction vars, got {len(args[1])}"
+                    )
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
@@ -397,13 +445,18 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        if not isinstance(dst, (ir.Buffer, ir.ReinterpretView)):
+            raise AssertionError(
+                f"expected ir.Buffer or ir.ReinterpretView, got {type(dst)}"
+            )
+        if dst.get_size() != src.get_size():
+            raise AssertionError(f"{dst=}, {src=}")
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferContext(self.args) as scope:
-                assert orig_src is not None
+                if orig_src is None:
+                    raise AssertionError("orig_src must not be None")
                 if orig_src.get_name() != src.get_name():
                     scope.add_local_buffer(
                         src,
@@ -427,7 +480,8 @@ class CppTemplateKernel(CppKernel):
 
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
+                if dst.layout != src.layout:
+                    raise AssertionError(f"{dst=}, {src=}")
                 return ""
 
     def store_outputs(
@@ -440,8 +494,10 @@ class CppTemplateKernel(CppKernel):
         reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
         multi_output_buffers: tuple[ir.MultiOutput, ...] | None = None,
     ):
-        assert isinstance(dst, Iterable)
-        assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
+        if not isinstance(dst, Iterable):
+            raise AssertionError(f"expected Iterable, got {type(dst)}")
+        if not all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)):
+            raise AssertionError("src and dst sizes must match")
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         gemm_num = len(src)
@@ -451,7 +507,8 @@ class CppTemplateKernel(CppKernel):
             if not reindexers:
                 reindexers = [None] * len(epilogue_nodes)
             with LocalBufferContext(self.args) as scope:
-                assert orig_src is not None
+                if orig_src is None:
+                    raise AssertionError("orig_src must not be None")
                 localize_epilogue_nodes = []
                 all_read_names = []
                 for epilogue in epilogue_nodes:
@@ -476,7 +533,7 @@ class CppTemplateKernel(CppKernel):
                                 in all_read_names
                                 and orig_src[gemm_idx].get_name() not in all_read_names
                             ):
-                                # Epilogue might directly read the MultiOutput, Locallize MultiOutput to the local Buffer
+                                # Epilogue might directly read the MultiOutput, Localize MultiOutput to the local Buffer
                                 # if this MultiOutput has not been stored by in-template epilogue
                                 # otherwise, use the cse store cache if it will be stored before used
                                 global_buffers.append(multi_output_buffers[gemm_idx])
@@ -533,13 +590,15 @@ class CppTemplateKernel(CppKernel):
                         output_names=output_names,
                     )
             else:
-                assert all(
+                if not all(
                     _src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst)
-                )
-                assert all(
+                ):
+                    raise AssertionError("src and dst names must match")
+                if not all(
                     _src.get_layout() == _dst.get_layout()
                     for _src, _dst in zip(src, dst)
-                )
+                ):
+                    raise AssertionError("src and dst layouts must match")
                 return ""
 
     def check_bounds(self, expr, size, lower, upper):
@@ -586,11 +645,13 @@ class CppTemplateCaller(ir.ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("bmreq must not be None")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("bmreq must not be None")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
