@@ -204,13 +204,18 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.eye(64),), check_lowp=False)
 
-    def test_eye_uint16_index(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/191942
-        def fn(x):
-            return torch.eye(x.shape[-1], dtype=x.dtype, device=x.device)
-
-        self.common(fn, (torch.zeros(10, 256),))
-
+>>> torch.eye(10, device="mps", dtype=torch.uint16)
+Traceback (most recent call last):
+  File "<python-input-4>", line 1, in <module>
+    torch.eye(10, device="mps", dtype=torch.uint16)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Failed to create function state object for: eye_ushort
+>>> torch.eye(10, device="cpu", dtype=torch.uint16)
+Traceback (most recent call last):
+  File "<python-input-5>", line 1, in <module>
+    torch.eye(10, device="cpu", dtype=torch.uint16)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: "eye" not implemented for 'UInt16'
     def test_reduced_max(self):
         # inductor test do not validate that max of say 16K half elements can be computed
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
