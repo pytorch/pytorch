@@ -8,14 +8,21 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
+    FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
+    output_contraction_capture_supported,
+    output_contraction_config_supported,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_no_c_alpha_beta,
     validate_local_reduce_out_shape,
@@ -31,8 +38,9 @@ if TYPE_CHECKING:
 
 
 # swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
-# broadcast (and vice versa) while tile broadcasts only transpose their data.
-_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile"}
+# broadcast (and vice versa) while tile broadcasts only transpose their data and
+# scalars are orientation-invariant.
+_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile", "scalar": "scalar"}
 
 
 def inductor_quack_cache_dir() -> str:
@@ -86,17 +94,19 @@ def check_matrix_row_major_layout(name: str, tensor: torch.Tensor) -> None:
 
 
 def check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
-    """Require each epilogue arg kind to be row, col, or tile."""
+    """Require each epilogue arg kind to be row, col, tile, or scalar."""
     for kind in epilogue_arg_kinds:
-        if kind not in ("tile", "row", "col"):
+        if kind not in ("tile", "row", "col", "scalar"):
             raise NotImplementedError(
-                f"FlexGEMM supports only tile/row/col args, got {epilogue_arg_kinds}"
+                f"FlexGEMM supports only tile/row/col/scalar args, got {epilogue_arg_kinds}"
             )
 
 
 def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor) -> str:
     """Infer a captured epilogue tensor's broadcast kind from its shape."""
     m, n = a.shape[-2], b.shape[-1]
+    if tuple(arg.shape) == (1, 1):
+        return "scalar"
     if tuple(arg.shape) == (m, n):
         return "tile"
     if tuple(arg.shape) == (1, n):
@@ -105,7 +115,7 @@ def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor)
         return "col"
     raise NotImplementedError(
         "FlexGEMM captured tensor args must match the GEMM output "
-        "shape or broadcast as [1, N] / [M, 1]"
+        "shape or broadcast as [1, N] / [M, 1] / [1, 1]"
     )
 
 
@@ -121,6 +131,7 @@ def validate_epilogue_arg_shape(
         "tile": (m, n),
         "row": (1, n),
         "col": (m, 1),
+        "scalar": (1, 1),
     }
     if tuple(arg.shape) != expected_shapes[kind]:
         raise RuntimeError(
@@ -159,12 +170,16 @@ def split_epilogue_args(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
 ) -> tuple[
-    tuple[torch.Tensor, ...], tuple[torch.Tensor, ...], tuple[torch.Tensor, ...]
+    tuple[torch.Tensor, ...],
+    tuple[torch.Tensor, ...],
+    tuple[torch.Tensor, ...],
+    tuple[torch.Tensor, ...],
 ]:
-    """Group epilogue tensors into QuACK row, col, and tile argument lists."""
+    """Group epilogue tensors into QuACK row, col, tile, and scalar argument lists."""
     row_args = []
     col_args = []
     tile_args = []
+    scalar_args = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds):
         arg = quack_epilogue_arg(arg)
         match kind:
@@ -174,7 +189,9 @@ def split_epilogue_args(
                 col_args.append(arg.squeeze(-1).unsqueeze(0))
             case "tile":
                 tile_args.append(arg.unsqueeze(0))
-    return tuple(row_args), tuple(col_args), tuple(tile_args)
+            case "scalar":
+                scalar_args.append(arg.reshape(1))
+    return tuple(row_args), tuple(col_args), tuple(tile_args), tuple(scalar_args)
 
 
 def normalize_c(
@@ -219,6 +236,32 @@ class FlexGemmRuntimeLocalReducePlan:
     @property
     def axis(self) -> int:
         return self.geometry.axis
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmRuntimeOutputPlan:
+    """Bundle all user-visible output consumers into one generated ABI value."""
+
+    aux_outs: tuple[torch.Tensor, ...] = ()
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None
+    output_contraction: FlexGemmOutputContraction | None = None
+
+    def __post_init__(self) -> None:
+        if self.output_contraction is not None and (
+            self.aux_outs or self.local_reduce is not None
+        ):
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+
+    def output_shape(self, physical_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Return the logical shape after applying the output contraction."""
+        if self.output_contraction is None:
+            return physical_shape
+        if physical_shape[-1] % self.output_contraction.group != 0:
+            raise RuntimeError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
+        return (
+            *physical_shape[:-1],
+            physical_shape[-1] // self.output_contraction.group,
+        )
 
 
 def validate_runtime_local_reduce(
@@ -307,14 +350,14 @@ def dispatch_gemm_act(
     b: torch.Tensor,
     C: torch.Tensor | None,
     out: torch.Tensor,
-    aux_outs: tuple[torch.Tensor, ...],
-    local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    output_plan: FlexGemmRuntimeOutputPlan,
     local_reduce_callback_keys: tuple[str | None, str | None],
     epilogue_key: str,
     epilogue_arg_kinds: tuple[str, ...],
     row_args: tuple[torch.Tensor, ...],
     col_args: tuple[torch.Tensor, ...],
     tile_args: tuple[torch.Tensor, ...],
+    scalar_args: tuple[torch.Tensor, ...],
     alpha: float,
     beta: float,
     config,
@@ -327,12 +370,16 @@ def dispatch_gemm_act(
     ``out``/``C``/``aux_outs`` views, and swaps the row/col broadcast roles of
     captured epilogue tensors so each still aligns with the transposed accumulator.
     Tuple epilogues route the main result through QuACK ``D`` and aux outputs through
-    ``PostAct``/``mAuxOut``.
+    ``PostAct``/``mAuxOut``. Output contractions instead leave ``D`` unused and use
+    ``PostAct``/``mAuxOut`` as the contracted logical main store.
     """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
     # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
     quack_a, quack_b = a, b.mT
+    output_contraction = output_plan.output_contraction
+    aux_outs = output_plan.aux_outs
+    local_reduce = output_plan.local_reduce
     quack_out, quack_aux_outs, quack_local_reduce_out, quack_c = (
         out,
         aux_outs,
@@ -340,6 +387,10 @@ def dispatch_gemm_act(
         C,
     )
     if config.swap_ab:
+        if output_contraction is not None:
+            raise NotImplementedError(
+                "FlexGEMM output contractions do not support swap_ab configs yet"
+            )
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
         if local_reduce is not None:
@@ -396,6 +447,13 @@ def dispatch_gemm_act(
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
         tensor_epilogue_tile_biases=tile_args,
+        tensor_epilogue_scalar_biases=scalar_args,
+        main_output_transform_group=(
+            None if output_contraction is None else output_contraction.group
+        ),
+        concat_layout=(
+            () if output_contraction is None else output_contraction.concat_layout
+        ),
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,
@@ -414,11 +472,11 @@ def gemm_epilogue(
     beta: float = 1.0,
     out_dtype: torch.dtype | None = None,
     out: torch.Tensor | None = None,
-    aux_outs: tuple[torch.Tensor, ...] = (),
-    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
+    output_plan: FlexGemmRuntimeOutputPlan = FlexGemmRuntimeOutputPlan(),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
+    config_is_lowering_validated: bool = False,
     expected_ndim: int | None = None,
     device_capacity_override: tuple[int, int] | None = None,
     stream: int | None = None,
@@ -436,11 +494,12 @@ def gemm_epilogue(
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
         out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
-        aux_outs: Preallocated same-shape aux tensors for tuple epilogues.
-        local_reduce: Optional structural local-reduce plan from generated code.
+        output_plan: Structural plan for auxiliary and contracted outputs.
         epilogue_args: Optional tensor args captured by the epilogue.
-        epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
+        epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
+        config_is_lowering_validated: Whether generated lowering already checked the
+            config against the output-contraction contract.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
         stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
@@ -461,15 +520,32 @@ def gemm_epilogue(
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
-    expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
-    expected_dtype = a.dtype if out_dtype is None else out_dtype
-    effective_C = normalize_c(C, expected_shape, beta)
+    physical_output_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
+    aux_outs = output_plan.aux_outs
+    local_reduce = output_plan.local_reduce
+    output_contraction = output_plan.output_contraction
+    logical_output_shape = output_plan.output_shape(physical_output_shape)
+    if output_contraction is not None:
+        device_capacity = (
+            torch.cuda.get_device_capability(a.device)
+            if device_capacity_override is None
+            else device_capacity_override
+        )
+        output_contraction.validate_quack(device_capacity[0])
+        if output_contraction.chunked and b.stride(-1) == 1:
+            raise NotImplementedError(FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR)
+        if a.ndim != 2 or C is not None or alpha != 1.0 or beta != 1.0:
+            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
+    expected_dtype = out_dtype
+    if expected_dtype is None:
+        expected_dtype = out.dtype if out is not None else a.dtype
+    effective_C = normalize_c(C, physical_output_shape, beta)
     if out is not None:
         check_matrix("out", out)
         check_matrix_major_layout("out", out)
-        if tuple(out.shape) != expected_shape:
+        if tuple(out.shape) != logical_output_shape:
             raise RuntimeError(
-                f"out shape must be {expected_shape}, got {tuple(out.shape)}"
+                f"out shape must be {logical_output_shape}, got {tuple(out.shape)}"
             )
         if out.dtype != expected_dtype:
             raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
@@ -485,14 +561,15 @@ def gemm_epilogue(
         for index, aux_out in enumerate(aux_outs):
             check_matrix(f"aux_outs[{index}]", aux_out)
             check_matrix_major_layout(f"aux_outs[{index}]", aux_out)
-            if tuple(aux_out.shape) != expected_shape:
+            if tuple(aux_out.shape) != physical_output_shape:
                 raise RuntimeError(
-                    f"aux_outs[{index}] shape must be {expected_shape}, got {tuple(aux_out.shape)}"
+                    f"aux_outs[{index}] shape must be {physical_output_shape}, "
+                    f"got {tuple(aux_out.shape)}"
                 )
     validate_runtime_local_reduce(
         local_reduce,
         a,
-        expected_shape,
+        physical_output_shape,
         effective_C,
         alpha,
         beta,
@@ -518,9 +595,14 @@ def gemm_epilogue(
     inferred_arg_kinds = resolve_epilogue_arg_kinds(
         a, b, epilogue_args, epilogue_arg_kinds
     )
+    if output_contraction is not None and any(
+        not output_contraction_capture_supported(kind, arg.dtype is torch.bool)
+        for arg, kind in zip(epilogue_args, inferred_arg_kinds, strict=True)
+    ):
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR)
     for index, arg in enumerate(epilogue_args):
         check_matrix_major_layout(f"epilogue_args[{index}]", arg)
-    row_args, col_args, tile_args = split_epilogue_args(
+    row_args, col_args, tile_args, scalar_args = split_epilogue_args(
         epilogue_args, inferred_arg_kinds
     )
 
@@ -532,7 +614,7 @@ def gemm_epilogue(
         epilogue_key,
     )
     out = (
-        torch.empty(expected_shape, device=a.device, dtype=expected_dtype)
+        torch.empty(logical_output_shape, device=a.device, dtype=expected_dtype)
         if out is None
         else out
     )
@@ -541,6 +623,35 @@ def gemm_epilogue(
         gemm_config_from_key,
     )
     from torch._vendor.quack.cache import cache_dir_override
+
+    config = gemm_config_from_key(config_key) if config_key is not None else None
+    if config is None or (
+        output_contraction is not None and not config_is_lowering_validated
+    ):
+        candidates = candidate_gemm_configs_for_device(a.device)
+        if config is not None and config not in candidates:
+            raise NotImplementedError(
+                "FlexGEMM explicit QUACK config is not supported on this device"
+            )
+        if output_contraction is None:
+            config = candidates[0]
+        elif config is None:
+            config = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if output_contraction_config_supported(
+                        candidate, physical_output_shape[-1]
+                    )
+                ),
+                None,
+            )
+        elif not output_contraction_config_supported(config, physical_output_shape[-1]):
+            config = None
+        if config is None:
+            raise NotImplementedError(
+                "FlexGEMM QUACK config is incompatible with output contraction"
+            )
 
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
@@ -553,21 +664,17 @@ def gemm_epilogue(
             b,
             effective_C,
             out,
-            aux_outs,
-            local_reduce,
+            output_plan,
             local_reduce_callback_keys,
             epilogue_key,
             inferred_arg_kinds,
             row_args,
             col_args,
             tile_args,
+            scalar_args,
             alpha,
             beta,
-            config=(
-                gemm_config_from_key(config_key)
-                if config_key is not None
-                else candidate_gemm_configs_for_device(a.device)[0]
-            ),
+            config=config,
             device_capacity_override=device_capacity_override,
         )
     return out

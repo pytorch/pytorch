@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -49,7 +48,6 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181336")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -146,6 +144,20 @@ class DeterministicTest(TestCase):
                 lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
             )
             size //= 2
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
+    def test_cumsum_deterministic(self):
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(1_000_003, device=GPU_TYPE, dtype=torch.float32)
+        compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
+
+        torch.use_deterministic_algorithms(True, warn_only=False)
+        eager = torch.cumsum(x, dim=0)
+        result, (_,) = run_and_get_code(compiled, x)
+        for _ in range(5):
+            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
+        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
