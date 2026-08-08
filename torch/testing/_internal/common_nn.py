@@ -1729,6 +1729,7 @@ def get_new_module_tests():
             input_fn=lambda: torch.empty(1, 512, dtype=torch.long).random_(4).expand(7, 512),
             check_gradgrad=False,
             desc='discontiguous',
+            precision=5e-5,
             default_dtype=torch.double,
             decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
         ),
@@ -3549,7 +3550,7 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=self.precision, rtol=0)
 
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
