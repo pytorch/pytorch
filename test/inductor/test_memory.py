@@ -5,6 +5,7 @@ from unittest import mock
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
@@ -552,6 +553,62 @@ class TestOperatorReorderForPeakMemory(TestCase):
                     f"This can cause NCCL hangs when torch.cond contains collective operations "
                     f"because different ranks may execute collectives in different orders."
                 ),
+            )
+
+
+class TestEffectfulOpMemory(TestCase):
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @serialTest()
+    def test_effectful_op_inputs_are_freed(self):
+        # An ORDERED effectful op does not extend the lifetime of its input, so
+        # the input buffer must still be freed once the op has run. Adding those
+        # buffers to never_reuse_buffers makes codegen_free skip the free, and
+        # peak memory then grows with the number of effectful ops in the graph.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::observe", "(Tensor x) -> ()", lib=lib)
+            lib.impl("observe", lambda x: None, "CompositeExplicitAutograd")
+            lib.impl("observe", lambda x: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::observe", _EffectType.ORDERED, lib=lib
+            )
+
+            def make_fn(num_effectful_ops):
+                def fn(x):
+                    total = torch.zeros((), dtype=x.dtype, device=x.device)
+                    for _ in range(num_effectful_ops):
+                        # Each step depends on a reduction over the previous one,
+                        # so only one of them can be live at a time. Independent
+                        # steps would be fused into a single multi-output kernel
+                        # and be co-resident regardless of how they are freed.
+                        step = x + total
+                        torch.ops.mylib.observe(step)
+                        total = total + step.mean()
+                    return total
+
+                return fn
+
+            device_module = torch.get_device_module(GPU_TYPE)
+            peak_mems = []
+            for num_effectful_ops in (2, 8):
+                torch._dynamo.reset()
+                x = torch.ones(1024 * 1024 * 8, device=GPU_TYPE)
+                compiled = torch.compile(make_fn(num_effectful_ops), fullgraph=True)
+                compiled(x)  # compile before measuring
+                device_module.synchronize()
+                device_module.reset_peak_memory_stats()
+                allocated_before = device_module.memory_allocated()
+                compiled(x)
+                device_module.synchronize()
+                peak_mems.append(
+                    device_module.max_memory_allocated() - allocated_before
+                )
+                del x
+                device_module.empty_cache()
+
+            self.assertLess(
+                peak_mems[-1],
+                peak_mems[0] * 1.5,
+                f"peak memory grew with the effectful op count: {peak_mems}",
             )
 
 
