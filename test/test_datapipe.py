@@ -269,6 +269,26 @@ class TestStreamWrapper(TestCase):
             self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
 
 
+class TestDataPipeHookIterator(TestCase):
+    def test_invalid_iterator_message_ignores_failing_property(self):
+        from torch.utils.data.datapipes._hook_iterator import _check_iterator_valid
+
+        class BadDataPipe:
+            def __init__(self, source):
+                self._valid_iterator_id = 1
+                self._source = source
+
+            @property
+            def source(self):
+                raise RuntimeError("property exploded")
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"This iterator has been invalidated because another iterator has been created",
+        ):
+            _check_iterator_valid(BadDataPipe([1, 2, 3]), iterator_id=0)
+
+
 class TestIterableDataPipeBasic(TestCase):
     def setUp(self):
         super().setUp()
