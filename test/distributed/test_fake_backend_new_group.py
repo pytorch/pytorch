@@ -19,10 +19,16 @@ import os
 
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class FakeBackendNewGroupTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
         os.environ.setdefault("MASTER_PORT", "29517")
