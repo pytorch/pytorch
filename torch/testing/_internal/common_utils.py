@@ -178,6 +178,7 @@ TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
 HW_CLASSIFICATION : set[HardwareClassification] | None = None
+HW_REQUIRED_DEVICES: int | None = None
 
 
 def get_hw_classification(
@@ -196,19 +197,33 @@ def get_hw_classification(
     return requirement
 
 
+def get_hw_required_devices(
+    test_case_cls: type[unittest.TestCase],
+) -> int:
+    value = getattr(test_case_cls, "hw_required_devices", 1)
+    if not isinstance(value, int):
+        raise TypeError(
+            f"{test_case_cls.__module__}.{test_case_cls.__name__}."
+            "hw_required_devices must be an int"
+        )
+    return value
+
+
 def filter_by_hw_classification(
     items: Iterable[Any],
     requirement: set[HardwareClassification],
     get_class: Callable[[Any], type | None],
     *,
     on_match: Callable[[Any], None],
+    device_count: int | None = None,
 ) -> None:
-    """Filter items by hardware classification and print a summary.
+    """Filter items by hardware classification and device count, print a summary.
 
     For each item, `get_class` extracts the associated test class. Items whose
-    hardware classification is in `requirement` are passed to `on_match`, if
-    provided. Prints a summary of matched, mismatched, unclassified, and
-    classless items.
+    hardware classification is in `requirement` (and whose
+    ``hw_required_devices`` does not exceed `device_count`, when set) are
+    passed to `on_match`. Prints a summary of matched, mismatched,
+    unclassified, and classless items.
     """
     total = 0
     passed = 0
@@ -224,8 +239,11 @@ def filter_by_hw_classification(
         if classification is None:
             unclassified += 1
         elif classification in requirement:
-            passed += 1
-            on_match(item)
+            if device_count is not None and get_hw_required_devices(cls) > device_count:
+                pass
+            else:
+                passed += 1
+                on_match(item)
 
     mismatched = total - passed - unclassified - no_class
     parts = [
@@ -1115,6 +1133,7 @@ def parse_cmd_line_args():
     global UNITTEST_ARGS
     global USE_PYTEST
     global HW_CLASSIFICATION
+    global HW_REQUIRED_DEVICES
 
     is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
     parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -1137,6 +1156,7 @@ def parse_cmd_line_args():
     parser.add_argument('--pytest-single-test', type=str, nargs=1)
     parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--hw-classification', nargs='+', choices=[e.name for e in HardwareClassification], type=str.upper, default=None)
+    parser.add_argument('--hw-required-devices', type=int, default=None, help='only run tests needing at most N devices')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
     def run_unittest_help(argv):
@@ -1177,6 +1197,7 @@ def parse_cmd_line_args():
         if args.hw_classification is not None
         else None
     )
+    HW_REQUIRED_DEVICES = args.hw_required_devices
     if not getattr(expecttest, "ACCEPT", False):
         expecttest.ACCEPT = args.accept
     UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1392,9 +1413,10 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
-    def __init__(self, hw_classification):
+    def __init__(self, hw_classification, device_count=None):
         super().__init__()
         self.hw_classification = hw_classification
+        self.device_count = device_count
 
     @staticmethod
     def iter_test_cases_recursively(
@@ -1409,16 +1431,18 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
             yield from _iter(element)
 
     def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
-        if self.hw_classification is None:
+        if self.hw_classification is None and self.device_count is None:
             return tests
 
         filtered_suite = unittest.TestSuite()
         _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        requirement = self.hw_classification or set(HardwareClassification)
         filter_by_hw_classification(
             _iter(tests),
-            self.hw_classification,
+            requirement,
             get_class=lambda tc: tc.__class__,
             on_match=filtered_suite.addTest,
+            device_count=self.device_count,
         )
         return filtered_suite
 
@@ -1475,8 +1499,8 @@ def run_tests(argv=None):
         sys.exit(1)
 
     testLoader = unittest.loader.defaultTestLoader
-    if HW_CLASSIFICATION is not None:
-        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
+    if HW_CLASSIFICATION is not None or HW_REQUIRED_DEVICES is not None:
+        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION, HW_REQUIRED_DEVICES)
 
     if SHOWLOCALS:
         argv = [
@@ -1500,6 +1524,8 @@ def run_tests(argv=None):
             other_args += ['--save-xml', TEST_SAVE_XML]
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
+        if HW_REQUIRED_DEVICES is not None:
+            other_args += ['--hw-required-devices', str(HW_REQUIRED_DEVICES)]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1556,6 +1582,8 @@ def run_tests(argv=None):
         pytest_args = argv + ["--use-main-module"]
         if HW_CLASSIFICATION is not None:
             pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
+        if HW_REQUIRED_DEVICES is not None:
+            pytest_args += ['--hw-required-devices', str(HW_REQUIRED_DEVICES)]
         test_report_path = ""
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
