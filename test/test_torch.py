@@ -3950,6 +3950,55 @@ class TestTorchDeviceType(TestCase):
         dst = dst.masked_fill(mask, False)
         self.assertEqual(dst, torch.tensor([True, False, True], device=device))
 
+    def test_masked_fill_tensor_value(self, device):
+        # A 0-dim value tensor on the same device must match the Scalar overload.
+        dst = torch.arange(10, dtype=torch.float, device=device)
+        mask = (dst % 2 == 0)
+        ref = dst.clone().masked_fill_(mask, 3.5)
+        val = torch.tensor(3.5, device=device)
+        out = dst.clone().masked_fill_(mask, val)
+        self.assertEqual(out, ref, atol=0, rtol=0)
+
+        # A host-side value tensor keeps working too.
+        out_cpu_val = dst.clone().masked_fill_(mask, torch.tensor(3.5))
+        self.assertEqual(out_cpu_val, ref, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_masked_fill_tensor_value_no_host_sync(self, device):
+        dst = torch.arange(10, dtype=torch.float, device=device)
+        mask = (dst % 2 == 0)
+        val = torch.tensor(3.5, device=device)
+        ref = dst.clone().masked_fill_(mask, 3.5)
+        out = dst.clone()
+
+        with CudaSyncGuard("error"):
+            out.masked_fill_(mask, val)
+
+        self.assertEqual(out, ref, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_masked_fill_tensor_value_cuda_graph(self, device):
+        # A device value used to go through value.item(), whose device-to-host
+        # sync is illegal during CUDA graph capture. Reading the value
+        # on-device must let capture and replay succeed.
+        dst = torch.zeros(128, device=device)
+        mask = torch.randint(2, (128,), device=device).bool()
+        val = torch.tensor(7.0, device=device)
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            dst.clone().masked_fill_(mask, val)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        work = dst.clone()
+        with torch.cuda.graph(g):
+            work.masked_fill_(mask, val)
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(work, torch.where(mask, val, torch.zeros_like(work)))
+
     def test_tensor_shape_empty(self, device):
         x = torch.randn((0, 1, 3, 0), device=device)
         # flatten
