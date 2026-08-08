@@ -730,6 +730,7 @@ class DTensor(torch.Tensor):
         3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
         4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
         5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
+        6. ``Shard(dim)`` -> ``Partial("sum")``: local zero-filling
 
 
         ``redistribute`` would correctly figure out the necessary redistribute steps for DTensors
@@ -781,10 +782,16 @@ class DTensor(torch.Tensor):
         placements = list(placements)
         for i, placement in enumerate(placements):
             if placement.is_partial() and self.placements[i] != placement:
-                raise RuntimeError(
-                    f"Can not redistribute from {self.placements[i]} to {placement}, "
-                    "redistributing to Partial is for internal use only!"
-                )
+                source = self.placements[i]
+                if not (
+                    isinstance(source, Shard)
+                    and type(placement) is Partial
+                    and placement.reduce_op == "sum"
+                ):
+                    raise RuntimeError(
+                        f"Can not redistribute from {source} to {placement}, "
+                        "only Shard to Partial(sum) redistribution is supported!"
+                    )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
