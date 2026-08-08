@@ -2510,11 +2510,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (
-            torch.float16,
-            torch.bfloat16,
-            torch.float8_e4m3fnuz,
-            torch.float8_e4m3fn,
+        if dtype in (torch.float16, torch.bfloat16) or (
+            dtype.is_floating_point and dtype.itemsize == 1
         ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
@@ -2815,6 +2812,14 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     The TMA and non-TMA should build on top of this
     """
 
+    @staticmethod
+    def _get_scaled_mm_scalars(kernel_inputs: KernelInputs) -> dict[str, float | int]:
+        return {
+            "has_bias": int(kernel_inputs.get_scalar("has_bias")),
+            "has_scale_result": int(kernel_inputs.get_scalar("has_scale_result")),
+            "apply_scale_result": int(kernel_inputs.get_scalar("apply_scale_result")),
+        }
+
     def adjust_kernel_inputs(
         self, kernel_inputs: KernelInputs, op_name: str
     ) -> KernelInputs:
@@ -2825,13 +2830,19 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             raise AssertionError("Expect MMKernelInputs for scaled MM")
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
-        mat_a, mat_b, scale_a, scale_b, *bias = nodes
-        bias = bias[0] if bias else None
+        mat_a, mat_b, scale_a, scale_b, *optional_nodes = nodes
+        scalars = self._get_scaled_mm_scalars(kernel_inputs)
+        has_bias = bool(scalars["has_bias"])
+        has_scale_result = bool(scalars["has_scale_result"])
+
+        bias = optional_nodes[0] if has_bias else None
+        scale_result_idx = 1 if has_bias else 0
+        scale_result = optional_nodes[scale_result_idx] if has_scale_result else None
         # Prepare triton input nodes and create kernel_inputs at the top
         from ...lowering import lowerings as L
 
         aten = torch.ops.aten
-        if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
+        if bias is not None and len(mat_b.get_size()) == len(bias.get_size()) + 1:
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
@@ -2856,9 +2867,13 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         # rank > 2 is invalid.
         scale_a = normalize_tensorwise_scale(scale_a, allow_high_rank=True)
         scale_b = normalize_tensorwise_scale(scale_b, allow_high_rank=False)
+        if scale_result is not None:
+            scale_result = L[aten.reshape](scale_result, [1, 1])
         nodes = [mat_a, mat_b, scale_a, scale_b]
-        if bias:
+        if bias is not None:
             nodes.append(bias)
+        if scale_result is not None:
+            nodes.append(scale_result)
         return MMKernelInputs(
             nodes,
             scalars=kernel_inputs._scalars,
@@ -2936,11 +2951,22 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         from ...kernel.mm_common import scale_mm_epilogue
 
+        scalars = self._get_scaled_mm_scalars(kernel_inputs)
+        has_bias = bool(scalars["has_bias"])
+        has_scale_result = bool(scalars["has_scale_result"])
+        apply_scale_result = bool(scalars["apply_scale_result"])
+
         return {
             **kwargs,
             "suffix_args": kernel_inputs.count - 2,
-            "epilogue_fn": scale_mm_epilogue(),
-            "epilogue_fn_hash": "scale_mm_epilogue",
+            "epilogue_fn": scale_mm_epilogue(
+                has_bias=has_bias,
+                has_scale_result=has_scale_result,
+                apply_scale_result=apply_scale_result,
+            ),
+            "epilogue_fn_hash": (
+                f"scale_mm_epilogue:{has_bias}:{has_scale_result}:{apply_scale_result}"
+            ),
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
