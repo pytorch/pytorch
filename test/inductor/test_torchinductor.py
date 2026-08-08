@@ -19539,6 +19539,44 @@ if RUN_GPU or HAS_MPS:
         device = GPU_TYPE
 
         @requires_cuda_and_triton
+        def test_noncontiguous_reshape_cat_backward(self):
+            # Cross the 1024-element padding threshold with a non-aligned width.
+            width = 342
+
+            def fn(x, offset, weight):
+                query, key, value = (
+                    part.view(2, 3, 1, width) + offset
+                    for part in (x @ weight.T).chunk(3, -1)
+                )
+                query_sigmoid = torch.sigmoid(query).transpose(1, 2)
+                query_tanh = torch.tanh(query).transpose(1, 2)
+                key_sigmoid = torch.sigmoid(key).transpose(1, 2)
+                key_tanh = torch.tanh(key).transpose(1, 2)
+                scores = (
+                    query_sigmoid @ key_sigmoid.transpose(-2, -1)
+                    + query_tanh @ key_tanh.transpose(-2, -1)
+                    - query_sigmoid @ key_tanh.transpose(-2, -1)
+                )
+                return scores @ value.transpose(1, 2)
+
+            torch.manual_seed(0xC0FFEE)
+            self.common(
+                fn,
+                (
+                    torch.randn(2, 3, 1, requires_grad=True),
+                    torch.randn(2, 3, 1, width, requires_grad=True),
+                    torch.randn(3 * width, 1, requires_grad=True),
+                ),
+                atol=1e-4,
+                check_gradient=True,
+                check_lowp=False,
+                grad_atol=2e-3,
+                grad_rtol=1e-5,
+                reference_in_float=False,
+                rtol=1e-4,
+            )
+
+        @requires_cuda_and_triton
         def test_special_bessel_inf_matches_eager(self):
             ops = (
                 ("bessel_j0", torch.special.bessel_j0),
