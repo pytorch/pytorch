@@ -780,6 +780,47 @@ class TestConvolutionNN(NNTestCase):
             torch.Size([2, 6, 1, 1]),
         )
 
+    @parametrize_test("dim", [1, 2, 3])
+    def test_conv_transpose_shapecheck_meta_output_padding(self, dim):
+        """Meta tensors should reject invalid output_padding like eager does.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178127
+        """
+        conv = [F.conv_transpose1d, F.conv_transpose2d, F.conv_transpose3d][dim - 1]
+        input_tensor = torch.randn(1, 4, *([5] * dim))
+        weight_tensor = torch.randn(4, 8, *([3] * dim))
+        input_meta = input_tensor.to("meta")
+        weight_meta = weight_tensor.to("meta")
+        invalid = dict(stride=2, output_padding=2, dilation=2)
+
+        msg = "output padding must be smaller than either stride or dilation"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            conv(input_tensor, weight_tensor, **invalid)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            conv(input_meta, weight_meta, **invalid)
+
+        torch._dynamo.reset()
+        compiled_invalid = torch.compile(
+            lambda inp, w: conv(inp, w, **invalid), backend="aot_eager"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_invalid(input_tensor, weight_tensor)
+
+        neg_msg = "negative output_padding is not supported"
+        with self.assertRaisesRegex(RuntimeError, neg_msg):
+            conv(input_tensor, weight_tensor, stride=2, output_padding=-1)
+        with self.assertRaisesRegex(RuntimeError, neg_msg):
+            conv(input_meta, weight_meta, stride=2, output_padding=-1)
+
+        # Boundary: output_padding only needs to be smaller than one of
+        # stride and dilation, so these are valid and shapes must match eager.
+        for valid in (
+            dict(stride=2, output_padding=2, dilation=3),
+            dict(stride=3, output_padding=2, dilation=1),
+        ):
+            expected = conv(input_tensor, weight_tensor, **valid).shape
+            self.assertEqual(conv(input_meta, weight_meta, **valid).shape, expected)
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = torch.randn(2, 3, 6, 6)
