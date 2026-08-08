@@ -18,6 +18,12 @@ TORCH_API Tensor& _compressed_row_strided_addmm_out(
     const Scalar& alpha,
     Tensor& result);
 
+TORCH_API void add_out_sparse_compressed_blocked(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Tensor& result);
+
 namespace cpu {
 
 void addmv_out_sparse_csr(
