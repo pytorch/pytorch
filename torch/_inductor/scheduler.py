@@ -361,10 +361,6 @@ class MixOrderReduction:
         if not config.triton.mix_order_reduction:
             return False
 
-        # TODO: Mix order reduction is not supported with cpp_wrapper yet
-        if V.graph.cpp_wrapper:
-            return False
-
         if not _is_gpu_triton_backend(node1, node2):
             return False
         if not node1.is_reduction() or not node2.is_reduction():

@@ -2435,6 +2435,115 @@ class SIMDScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         raise NotImplementedError
 
+    def _codegen_mix_order_workspace_reduction(
+        self,
+        kernel,
+        ws_name,
+        idx,
+        partial_accum,
+        numel,
+        rnumel,
+        split_size,
+    ):
+        """Codegen the mix-order outer reduction over the workspace as a kernel.
+
+        The python wrapper emits this reduction as raw tensor ops (``ws[...].view(...).sum(dim=0)``)
+        which cpp_wrapper backend cannot compile. Express the reduction as IR over a view of
+        the workspace and graft it onto the original output buffer so it goes through the regular
+        Triton kernel codegen that cpp_wrapper already supports.
+        """
+        from .. import lowering
+
+        buffer_name = partial_accum.buffer_name
+        buffer = V.graph.get_buffer(buffer_name)
+        if not isinstance(buffer, ir.ComputedBuffer):
+            raise AssertionError(
+                f"mix-order outer reduction expected a ComputedBuffer for {buffer_name}, got {type(buffer).__name__}"
+            )
+
+        device = buffer.get_device()
+        if device is None:
+            raise AssertionError("expected output buffer to have a device")
+        buffer_dtype = buffer.get_dtype()
+        final_shape = list(buffer.get_layout().size)
+
+        nsplit = (numel + split_size - 1) // split_size
+        total_numel = len(kernel.saved_partial_accumulate) * nsplit * rnumel
+
+        # Expose the workspace (always torch.float) as a readable input buffer
+        # so the reduction IR can load from it.
+        if ws_name not in V.graph.name_to_buffer:
+            V.graph.name_to_buffer[ws_name] = ir.InputBuffer(
+                name=ws_name, layout=ir.FixedLayout(device, torch.float, [total_numel])
+            )
+        ws_buf = V.graph.name_to_buffer[ws_name]
+        # Register the workspace with the scheduler too so codegen helpers.
+        # (e.g. buffer-layout/alignment lookups) can resolve it.
+        if self.scheduler is not None and ws_name not in self.scheduler.name_to_buf:
+            self.scheduler.name_to_buf[ws_name] = scheduler.SchedulerBuffer(
+                scheduler=self.scheduler, node=ws_buf, defining_op=None
+            )
+
+        view_size = [nsplit, *final_shape]
+        view = ir.TensorBox(
+            ir.ReinterpretView(
+                data=ws_buf,
+                layout=ir.FixedLayout(
+                    device,
+                    torch.float,
+                    view_size,
+                    ir.FlexibleLayout.contiguous_strides(view_size),
+                    idx * nsplit * rnumel,
+                ),
+            )
+        )
+
+        reduction_type = partial_accum.reduction_type
+        kwargs = lowering._make_reduction_inner(
+            view,
+            axis=[0],
+            keepdims=False,
+            dtype=None,
+            override_return_dtype=buffer_dtype,
+            reduction_type=reduction_type,
+        )
+        # Build a single (non-split) reduction directly. Reduction.create
+        # would apply the split-reduction heuristic and emit an extra
+        # intermediate buffer that is not wired into codegen here.
+        loops = ir.Reduction(
+            device=kwargs["device"],
+            dtype=kwargs["dst_dtype"],
+            inner_fn=kwargs["inner_fn"],
+            ranges=kwargs["ranges"],
+            reduction_ranges=kwargs["reduction_ranges"],
+            reduction_type=reduction_type,
+            src_dtype=kwargs["src_dtype"],
+            reduction_hint=ir.ReductionHint.DEFAULT,
+        )
+
+        # Graft the workspace reduction onto the original output buffer so it
+        # keeps its name, layout and origins; downstream consumers are unchanged.
+        buffer.data = loops
+        buffer._split_size = None
+        # The buffer cached its LoopBody/read-writes during scheduelr init
+        # (reading the now-replaced inputs); invalidate so codegen uses the
+        # new workspace reduction body.
+        ir.ComputedBuffer.get_default_sizes_body.clear_cache(buffer)
+        if self.scheduler is None:
+            raise AssertionError("expected self.scheduler to be set")
+        # buffer's op was marked removed for the mix-order fusion (the python
+        # wrapper materializes it via tenosr ops). Temporarily un-remove it so
+        # our replacement kernel skipping the original (stale) node.
+        op_name = buffer.get_operation_name()
+        was_removed = op_name in self.scheduler.removed_ops
+        self.scheduler.removed_ops.discard(op_name)
+        snode = self.scheduler.create_scheduler_node(buffer)
+        if not isinstance(snode, scheduler.SchedulerNode):
+            raise AssertionError(f"expected SchedulerNode, got {type(snode).__name__}")
+        self.codegen_node(snode)
+        if was_removed:
+            self.scheduler.removed_ops.add(op_name)
+
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
@@ -2548,7 +2657,7 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
-        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
+        V.graph.wrapper_code.make_comment(f"{V.graph.wrapper_code.comment} Call mix order reduction kernel")
         self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
@@ -2567,6 +2676,13 @@ class SIMDScheduling(BaseScheduling):
         )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
+
+            if V.graph.cpp_wrapper:
+                # The python wrapper emits the outer reduction as raw tensor
+                # ops (ws[...].view(...).sum(dim=0)), which cpp_wrapper cannot
+                # compile. Route it through normal kernel codegen instead.
+                self._codegen_mix_order_workspace_reduction(kernel, ws_name, idx, partial_accum, numel, rnumel, split_size)
+                continue
 
             stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
