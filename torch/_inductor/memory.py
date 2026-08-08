@@ -347,6 +347,7 @@ def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
+    inplace_reuses: dict[str, str] | None = None,
 ) -> tuple[
     list[BufferInfo],
     dict[BaseSchedulerNode, int],
@@ -432,6 +433,15 @@ def compute_memory_timeline(
                 )
             )
 
+    if inplace_reuses:
+        reused_inputs = OrderedSet(inplace_reuses.values())
+        for buf_info in buf_info_list:
+            name = buf_info.buffer.get_name()
+            if name in inplace_reuses:
+                buf_info.size_alloc = 0
+            if name in reused_inputs:
+                buf_info.size_free = 0
+
     return buf_info_list, node_to_step, buf_to_snode_last_use
 
 
@@ -487,6 +497,7 @@ def estimate_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
+    inplace_reuses: dict[str, str] | None = None,
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -497,7 +508,7 @@ def estimate_peak_memory(
         List[int]: memory usage at each node (or each step).
     """
     buf_info_list, _, _ = compute_memory_timeline(
-        nodes, name_to_freeable_input_buf, graph_outputs
+        nodes, name_to_freeable_input_buf, graph_outputs, inplace_reuses
     )
     return peak_memory_from_buf_info_list(buf_info_list, len(nodes))
 
