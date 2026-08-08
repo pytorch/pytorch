@@ -4824,6 +4824,224 @@ class AOTInductorTestsTemplate:
                 r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_\w*index_put"
             ).run(code)
 
+    def test_common_fallback_shims_run_below_autograd(self):
+        if self.device != "cpu" or self.allow_stack_allocation:
+            raise unittest.SkipTest("normal CPU ABI-only dispatch check")
+
+        from torch._inductor import ir
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class Model(torch.nn.Module):
+            def forward(self, self_tensor, index, src, values):
+                return (
+                    torch.scatter(self_tensor, 0, index, src),
+                    torch.scatter_reduce(
+                        self_tensor, 0, index, src, "sum", include_self=True
+                    ),
+                    torch.index_put(self_tensor, (index,), values, accumulate=True),
+                    self_tensor.to(torch.complex64),
+                )
+
+        inputs = (
+            torch.zeros(4),
+            torch.tensor([0, 1, 2, 3]),
+            torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            torch.tensor([5.0, 6.0, 7.0, 8.0]),
+        )
+        expected = Model()(*inputs)
+
+        # Current generated backend shims bypass the dispatcher. Force the
+        # retained, BC-compatible common shims so their internal guards remain
+        # covered even though new artifacts normally do not call them.
+        original_set_cpp_kernel_name = ir.ScatterFallback.set_cpp_kernel_name
+
+        def use_common_scatter_shim(node, cpp_kernel_name=None):
+            if node.op_overload is torch.ops.aten.scatter_.src:
+                cpp_kernel_name = "aoti_torch_scatter"
+            elif node.op_overload is torch.ops.aten.scatter_reduce_.two:
+                cpp_kernel_name = "aoti_torch_scatter_reduce"
+            return original_set_cpp_kernel_name(node, cpp_kernel_name)
+
+        with (
+            DeterministicGuard(True),
+            patch.object(
+                ir.ScatterFallback,
+                "set_cpp_kernel_name",
+                use_common_scatter_shim,
+            ),
+            config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": (
+                        self.use_minimal_arrayref_interface
+                    ),
+                }
+            ),
+        ):
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), inputs
+            )
+        compiled = torch._inductor.aoti_load_package(package_path)
+
+        target_ops = {
+            torch.ops.aten.scatter.src_out,
+            torch.ops.aten.scatter_reduce.two_out,
+            torch.ops.aten.index_put.out,
+            torch.ops.aten.copy_.default,
+        }
+        for shim in (
+            "aoti_torch_scatter_out(",
+            "aoti_torch_scatter_reduce_out(",
+            "aoti_torch_index_put_out(",
+            "aoti_torch_copy_below_autograd_",
+        ):
+            self.assertIn(shim, code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
+        guarded_keys = (
+            torch._C.DispatchKey.AutogradFunctionality,
+            torch._C.DispatchKey.AutogradOther,
+            torch._C.DispatchKey.AutogradNestedTensor,
+            torch._C.DispatchKey.ADInplaceOrView,
+        )
+        observed = {op: [] for op in target_ops}
+
+        class RecordShimDispatch(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func in observed:
+                    # Python dispatch temporarily masks lower keys. Restore the
+                    # entry snapshot to inspect the state established by the C
+                    # shim, then leave that state before redispatching.
+                    with torch._C._RestorePythonTLSSnapshot():
+                        observed[func].append(
+                            tuple(
+                                torch._C._dispatch_tls_is_dispatch_key_excluded(key)
+                                for key in guarded_keys
+                            )
+                        )
+                return func(*args, **(kwargs or {}))
+
+        with RecordShimDispatch():
+            actual = compiled(*inputs)
+
+        torch.testing.assert_close(actual, expected)
+        for op, states in observed.items():
+            self.assertEqual(states, [(True,) * len(guarded_keys)], msg=str(op))
+
+    def test_special_fallback_guard_stays_out_of_aoti_codegen(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-only ABI codegen check")
+
+        def copy_fn(x):
+            return x.to(torch.complex64)
+
+        inputs = (torch.randn(4, device=self.device),)
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": (
+                    self.use_minimal_arrayref_interface
+                ),
+            }
+        ):
+            actual, code = run_and_get_cpp_code(AOTIRunnerUtil.run, copy_fn, inputs)
+        torch.testing.assert_close(actual, copy_fn(*inputs))
+        self.assertIn("#include <torch/csrc/stable/macros.h>", code)
+        self.assertIn("TORCH_DYNAMIC_VERSION_CALL_2_14_0(", code)
+        self.assertIn("aoti_torch_copy_below_autograd_", code)
+        self.assertNotIn("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(", code)
+        self.assertNotIn("ATen/core/LegacyTypeDispatch.h", code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
+    def test_proxy_executor_fallback_dispatch_runs_below_autograd(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-only proxy executor dispatch check")
+
+        namespace = f"aoti_fallback_dispatch_{uuid.uuid4().hex}"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            calls = {"autograd": 0, "cpu": 0}
+            op = getattr(torch.ops, namespace).foo.default
+
+            def foo_cpu(x):
+                calls["cpu"] += 1
+                return x.sin()
+
+            def foo_meta(x):
+                return torch.empty_like(x)
+
+            def foo_autograd(keyset, x):
+                calls["autograd"] += 1
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x)
+
+            lib.impl("foo", foo_cpu, "CPU")
+            lib.impl("foo", foo_meta, "Meta")
+            lib.impl("foo", foo_autograd, "Autograd", with_keyset=True)
+
+            from torch._inductor.lowering import make_fallback
+
+            make_fallback(op, warn=False)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return op(x).cos()
+
+            inputs = (torch.randn(4),)
+            expected = Model()(*inputs)
+            with config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": (
+                        self.use_minimal_arrayref_interface
+                    ),
+                }
+            ):
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), inputs
+                )
+                compiled = torch._inductor.aoti_load_package(package_path)
+
+            calls["autograd"] = 0
+            calls["cpu"] = 0
+            torch.testing.assert_close(compiled(*inputs), expected)
+            self.assertEqual(calls, {"autograd": 0, "cpu": 1})
+            self.assertIn("aoti_torch_proxy_executor_call_function", code)
+
+    def test_dual_wrapper_fallback_jit_headers_stay_out_of_aoti_codegen(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires a Triton dual wrapper")
+        if config.triton.autotune_at_compile_time:
+            raise unittest.SkipTest("requires lazy autotuning dual-wrapper codegen")
+
+        namespace = f"aoti_dual_fallback_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(f"{namespace}::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        from torch._inductor.lowering import make_fallback
+
+        make_fallback(foo._opoverload, warn=False)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return foo(x).cos()
+
+        inputs = (torch.randn(4, device=self.device),)
+        package_path = AOTIRunnerUtil.compile(Model(), inputs)
+        with zipfile.ZipFile(package_path, "r") as package:
+            code = "\n".join(
+                package.read(name).decode("utf-8")
+                for name in package.namelist()
+                if name.endswith("wrapper.cpp")
+            )
+        self.assertNotIn("ATen/core/LegacyTypeDispatch.h", code)
+        self.assertNotIn("at::AutoDispatchBelowADInplaceOrView guard;", code)
+
     def test_narrow_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

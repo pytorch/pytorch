@@ -124,12 +124,26 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
       TORCH_VERSION_2_13_0, SHIM_FUNCTION, FALLBACK_FUNCTION, __VA_ARGS__)
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
+// Entry point for dynamic version calls for shims added in 2.14.0.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+// Target version already includes the shim, call it directly.
+#define TORCH_DYNAMIC_VERSION_CALL_2_14_0( \
+    SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
+  ([&]() { return SHIM_FUNCTION(__VA_ARGS__); })()
+#else
+// Target version predates the shim, try a dynamic lookup.
+#define TORCH_DYNAMIC_VERSION_CALL_2_14_0( \
+    SHIM_FUNCTION, FALLBACK_FUNCTION, ...) \
+  TORCH_DYNAMIC_VERSION_CALL(              \
+      TORCH_VERSION_2_14_0, SHIM_FUNCTION, FALLBACK_FUNCTION, __VA_ARGS__)
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 [[maybe_unused]] C10_NOINLINE static void throw_exception(
     const char* call,
     const char* file,
     int64_t line) {
-  std::stringstream ss;
+  std::stringstream ss{};
   const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_exception_get_what_without_backtrace, torch_shim_bc_const_char_ptr);
   if (error_msg_without) {

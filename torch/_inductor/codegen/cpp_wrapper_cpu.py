@@ -319,7 +319,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
-        self._included_extra_headers: OrderedSet[str] = OrderedSet()
+        self._included_extra_headers_jit: OrderedSet[str] = OrderedSet()
+        self._included_extra_headers_aot: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
         self.needs_vec_isa = self.device == "cpu"
 
@@ -587,12 +588,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 }
                 """)
 
-    def include_extra_header(self, header: str):
-        # This is needed for cpp to python dtype conversion
-        if header in self._included_extra_headers:
-            return
-        self._included_extra_headers.add(header)
-        self.header.splice(f"#include <{header}>")
+    def include_extra_header(self, header: str, *, jit_only: bool = False):
+        """Add a generated include, optionally only to the JIT half of a dual wrapper."""
+        line = f"#include <{header}>"
+
+        if isinstance(self.header, DualIndentedBuffer):
+            if header not in self._included_extra_headers_jit:
+                self.header.splice_jit(line)
+                self._included_extra_headers_jit.add(header)
+            if not jit_only and header not in self._included_extra_headers_aot:
+                self.header.splice_aot(line)
+                self._included_extra_headers_aot.add(header)
+        elif isinstance(self.header, AotOnlyBuffer):
+            if jit_only or header in self._included_extra_headers_aot:
+                return
+            self.header.splice(line)
+            self._included_extra_headers_aot.add(header)
+        elif header not in self._included_extra_headers_jit:
+            self.header.splice(line)
+            self._included_extra_headers_jit.add(header)
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -1869,6 +1883,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_c_shim_extern_kernel_call(
         self,
+        extern_kernel: ir.ExternKernel,
         kernel: str,
         args: list[str],
         device: str,
@@ -1918,7 +1933,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         "}",
                     ]
                 )
+            if isinstance(extern_kernel, (ir.FallbackKernel, ir.FallbackKernelOut)):
+                shim_fn_codes = self.wrap_fallback_dispatch_cpp(shim_fn_codes)
             self.writelines(shim_fn_codes)
+
+    def wrap_fallback_dispatch_cpp(self, lines: list[str]) -> list[str]:
+        if V.graph.aot_mode:
+            return lines
+        # Some libtorch-owned shims also guard internally for AOTI. Keep the
+        # generated guard for non-AOT calls; the dispatch-key guard is idempotent.
+        self.include_extra_header("ATen/core/LegacyTypeDispatch.h", jit_only=True)
+        return [
+            "{",
+            "at::AutoDispatchBelowADInplaceOrView guard;",
+            *lines,
+            "}",
+        ]
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1938,7 +1968,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            extern_kernel,
+            extern_kernel.get_kernel_name(),
+            args,
+            device,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1998,6 +2031,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device = d.type if (d := fallback_kernel.get_device()) else self.device
 
         self.generate_c_shim_extern_kernel_call(
+            fallback_kernel,
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
@@ -2007,6 +2041,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def _generate_extern_kernel_out_helper(
         self,
+        extern_kernel: ir.ExternKernelOut,
         kernel: str,
         out: str,
         out_view: str | None,
@@ -2022,7 +2057,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, stack_traces=stack_traces
+            extern_kernel,
+            kernel,
+            args,
+            device,
+            stack_traces=stack_traces,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -2070,7 +2109,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 "Expect reduce to be None for aten.scatter_ with scalar src"
             )
         line += ")"
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({line});")
+        self.writelines(
+            self.wrap_fallback_dispatch_cpp([f"AOTI_TORCH_ERROR_CODE_CHECK({line});"])
+        )
 
     def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
@@ -2090,7 +2131,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure surfaces instead
         # of being silently swallowed.
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
+        self.writelines(
+            self.wrap_fallback_dispatch_cpp(
+                [f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));"]
+            )
+        )
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
@@ -2723,6 +2768,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def sync_d2h_copy(self, buffer_name: str) -> None:
         # TODO: add AOTI C API for event-based D2H copy synchronization
         pass
+
+    def codegen_fallback_line(self, line: str) -> None:
+        self.writelines(self.wrap_fallback_dispatch_cpp([line]))
+
+    def codegen_fallback_copy_call(self, dst, src, non_blocking: bool | str) -> str:
+        if V.graph.aot_mode:
+            self.include_extra_header("torch/csrc/stable/macros.h")
+            return (
+                "TORCH_DYNAMIC_VERSION_CALL_2_14_0("
+                f"aoti_torch_copy_below_autograd_, aoti_torch_copy_, {dst}, {src}, {non_blocking})"
+            )
+        return f"aoti_torch_copy_({dst}, {src}, {non_blocking})"
+
+    def codegen_fallback_device_copy(self, src, dst, non_blocking: bool | str):
+        self.codegen_fallback_line(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({self.codegen_fallback_copy_call(dst, src, non_blocking)});"
+        )
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
@@ -3629,6 +3691,7 @@ if (!custom_op_wrapper) {
 
         In the future, we may switch over to directly calling c10::Dispatcher if we need
         to support more datatypes."""
+        self.include_extra_header("ATen/core/LegacyTypeDispatch.h", jit_only=True)
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
@@ -3709,12 +3772,16 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline(
                 f"std::array<StableIValue, {array_len}> dispatch_vars{{{', '.join(ivalue_args)}}};"
             )
-            dispatch_lines.writeline("AOTI_TORCH_ERROR_CODE_CHECK(")
+            dispatch_lines.writeline("{")
             with dispatch_lines.indent():
-                dispatch_lines.writeline(
-                    f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'
-                )
-            dispatch_lines.writeline(");")
+                dispatch_lines.writeline("at::AutoDispatchBelowADInplaceOrView guard;")
+                dispatch_lines.writeline("AOTI_TORCH_ERROR_CODE_CHECK(")
+                with dispatch_lines.indent():
+                    dispatch_lines.writeline(
+                        f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'
+                    )
+                dispatch_lines.writeline(");")
+            dispatch_lines.writeline("}")
 
             # assign result(s), ignoring None
             for idx, output_arg in enumerate(output_args):
@@ -3739,10 +3806,13 @@ if (!custom_op_wrapper) {
         This covers custom C++ ops whose schemas are outside StableIValue's
         supported subset without routing through Python.
         """
-        self.include_extra_header("ATen/core/dispatch/Dispatcher.h")
-        self.include_extra_header("ATen/core/ivalue.h")
-        self.include_extra_header("ATen/core/jit_type.h")
-        self.include_extra_header("torch/csrc/inductor/aoti_torch/utils.h")
+        self.include_extra_header("ATen/core/dispatch/Dispatcher.h", jit_only=True)
+        self.include_extra_header("ATen/core/ivalue.h", jit_only=True)
+        self.include_extra_header("ATen/core/jit_type.h", jit_only=True)
+        self.include_extra_header("ATen/core/LegacyTypeDispatch.h", jit_only=True)
+        self.include_extra_header(
+            "torch/csrc/inductor/aoti_torch/utils.h", jit_only=True
+        )
 
         if raw_outputs:
             declarations_before_scope = [
@@ -3962,7 +4032,11 @@ if (!custom_op_wrapper) {
                 "static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("
                 f'"{op_overload._schema.name}", "{op_overload._schema.overload_name}");'
             )
-            dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
+            dispatch_lines.writeline("{")
+            with dispatch_lines.indent():
+                dispatch_lines.writeline("at::AutoDispatchBelowADInplaceOrView guard;")
+                dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
+            dispatch_lines.writeline("}")
 
             stack_idx = 0
             for output_arg, raw_output_arg in zip(output_args, raw_outputs):
@@ -3993,6 +4067,7 @@ if (!custom_op_wrapper) {
 
         This function calls into Python to dispatch, which allows it to handle datatypes
         that cannot be contained in StableIValue, at the cost of some performance."""
+        self.include_extra_header("ATen/core/LegacyTypeDispatch.h", jit_only=True)
         self.load_custom_op_wrapper()
 
         num_args = len(raw_args)
@@ -4015,7 +4090,11 @@ if (!custom_op_wrapper) {
 
         lines += textwrap.dedent(f"""
             // Call the custom op in Python
-            RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
+            RAIIPyObject py_{buf_name};
+            {{
+                at::AutoDispatchBelowADInplaceOrView guard;
+                py_{buf_name} = RAIIPyObject(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
+            }}
             if (!py_{buf_name}) {{
                 if (PyErr_Occurred()) {{
                     return;
@@ -4108,13 +4187,17 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
-        self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
-            f"{extern_kernel_node_index}, "
-            f"{len(int_call_args)}, "
-            f"{int_call_str}, "
-            f"{len(tensor_call_args)}, "
-            f"{tensor_call_str}));"
+        self.writelines(
+            self.wrap_fallback_dispatch_cpp(
+                [
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
+                    f"{extern_kernel_node_index}, "
+                    f"{len(int_call_args)}, "
+                    f"{int_call_str}, "
+                    f"{len(tensor_call_args)}, "
+                    f"{tensor_call_str}));"
+                ]
+            )
         )
 
     def codegen_runtime_lookup_tensor_call_args(

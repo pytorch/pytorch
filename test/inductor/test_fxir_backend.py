@@ -26,6 +26,7 @@ from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
+    call_fallback_below_autograd,
     FxConverter,
     replace_floor_div,
     WrapperFxCodegen,
@@ -76,8 +77,29 @@ test_config = {
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
+    def _find_ops(
+        self, gm: torch.fx.GraphModule, target: Callable
+    ) -> list[torch.fx.Node]:
+        return [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and (
+                node.target == target
+                or (
+                    node.target is call_fallback_below_autograd
+                    and node.args[0] == target
+                )
+            )
+        ]
+
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
-        return len(gm.graph.find_nodes(op="call_function", target=target))
+        return len(self._find_ops(gm, target))
+
+    def _get_op_args(self, node: torch.fx.Node) -> tuple:
+        if node.target is call_fallback_below_autograd:
+            return node.args[1:]
+        return node.args
 
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
@@ -222,8 +244,10 @@ class FxirTestCase(InductorTestCase):
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
-        num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
-        self.assertEqual(num_extern, 1)
+        (extern_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.addmm.out
+        )
+        self.assertIsNot(extern_node.target, call_fallback_below_autograd)
 
     def test_fallback(self):
         """
@@ -248,6 +272,18 @@ class FxirTestCase(InductorTestCase):
             gm, torch.ops.aten.randint.low_out
         ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
         self.assertEqual(num_fallback, 2)
+
+    def test_fallback_helper_survives_dead_code_elimination(self):
+        graph = torch.fx.Graph()
+        fallback = graph.call_function(
+            call_fallback_below_autograd,
+            args=(torch.ops.aten.rand.default, [2]),
+        )
+        graph.output(())
+
+        graph.eliminate_dead_code()
+
+        self.assertIn(fallback, graph.nodes)
 
     def test_cat_inputs(self):
         """
@@ -388,9 +424,7 @@ class FxirTestCase(InductorTestCase):
             (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
         # Check for the reshape.
-        (reshape_node,) = gm.graph.find_nodes(
-            op="call_function", target=torch.ops.aten.reshape.default
-        )
+        (reshape_node,) = self._find_ops(gm, torch.ops.aten.reshape.default)
 
     def test_extern_multi_output(self):
         """
@@ -686,7 +720,8 @@ class FxirTestCase(InductorTestCase):
             )
 
         # Check for the fallback op.
-        self.assertEqual(self._count_ops(gm, torch.ops.aten.index_put_.default), 1)
+        (index_put_node,) = self._find_ops(gm, torch.ops.aten.index_put_.default)
+        self.assertTrue(index_put_node.is_impure())
 
     def test_scatter_reduce_fallback(self):
         """
@@ -893,17 +928,11 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(num_fallback, 1)
 
         # Verify the permute node has the correct tuple argument
-        permute_node = next(
-            iter(
-                gm.graph.find_nodes(
-                    op="call_function", target=torch.ops.aten.permute.default
-                )
-            )
-        )
+        (permute_node,) = self._find_ops(gm, torch.ops.aten.permute.default)
 
         # The second argument should be the permutation (0, 2, 1)
         # Check that it's not flattened
-        perm_arg = permute_node.args[1]
+        perm_arg = self._get_op_args(permute_node)[1]
         self.assertIsInstance(
             perm_arg, list, "Permutation argument should not be flattened"
         )
