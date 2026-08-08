@@ -2559,6 +2559,7 @@ def aot_stage2_autograd(
         try_save_cache_entry,  # type: ignore[arg-type]
         entry,  # type: ignore[arg-type]
         _indices_of_inps_to_detach,
+        num_fw_outs_saved_for_bw,
         num_symints_saved_for_bw,
     )
 
@@ -2577,6 +2578,7 @@ def _aot_stage2c_make_autograd_function(
     try_save_cache_entry: Callable[..., Any],
     entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
+    num_fw_outs_saved_for_bw: int,
     num_symints_saved_for_bw: int,
 ) -> DispatchReturn:
     backward_state_indices = [
@@ -2592,6 +2594,7 @@ def _aot_stage2c_make_autograd_function(
         compiled_fw_func=compiled_fw_func,
         compiled_bw_func=compiled_bw_func,
         maybe_subclass_meta=maybe_subclass_meta,
+        num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
         num_symints_saved_for_bw=num_symints_saved_for_bw,
         backward_state_indices=backward_state_indices,
         disable_amp=disable_amp,
