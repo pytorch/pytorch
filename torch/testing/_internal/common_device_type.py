@@ -2,6 +2,7 @@
 
 import copy
 import gc
+import importlib.util
 import inspect
 import logging
 import os
@@ -12,7 +13,7 @@ import unittest
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
@@ -318,6 +319,96 @@ def _update_param_kwargs(param_kwargs, name, value):
     # Leave param_kwargs as-is when value is None.
 
 
+class Capability:
+    """Registry of common test capability constants.
+
+    These constants are used in two places:
+
+    1. As arguments to ``@requires_capabilities`` when tests declare their
+       required capabilities::
+
+            @requires_capabilities(
+                Capability.dtype.fp8,
+                Capability.lib.triton,
+            )
+
+    2. As keys in ``_capabilities()`` implementations when device test bases
+       declare supported capabilities::
+
+            return {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                },
+                Capability.lib: {
+                    Capability.lib.triton: lambda: has_triton(),
+                },
+            }
+    """
+
+    class dtype:
+        fp8 = "dtype.fp8"
+        bf16 = "dtype.bf16"
+
+    class lib:
+        safetensors = "lib.safetensors"
+        triton = "lib.triton"
+
+    class attention:
+        flash_attention = "attention.flash_attention"
+        mem_efficient_attention = "attention.mem_efficient_attention"
+
+    class distributed:
+        backend = "distributed.backend"
+        dtensor = "distributed.dtensor"
+        fsdp = "distributed.fsdp"
+
+    class memory:
+        non_blocking_copy = "memory.non_blocking_copy"
+
+    class stream:
+        generic = "stream.generic"
+
+
+def _check_capabilities(test_case, required_capabilities) -> None:
+    capabilities = type(test_case).get_capabilities()
+    unsupported = {
+        cap for cap in required_capabilities if not capabilities.get(cap, True)
+    }
+    missing = set(required_capabilities) - capabilities.keys()
+
+    if missing:
+        raise unittest.SkipTest(
+            f"Missing capabilities on device '{type(test_case).device_type}': "
+            f"{', '.join(sorted(missing))}"
+        )
+    if unsupported:
+        raise unittest.SkipTest(
+            f"Unsupported capabilities: {', '.join(sorted(unsupported))}"
+        )
+
+
+def _distributed_backend_available(device_type: str) -> bool:
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        return False
+    try:
+        backend = dist.get_default_backend_for_device(device_type)
+    except (AttributeError, ValueError):
+        return False
+    is_backend_available = getattr(dist, "is_backend_available", None)
+    if is_backend_available is not None:
+        return is_backend_available(backend)
+    return backend in dist.Backend.backend_list
+
+
+def _device_module_available(device_type: str) -> bool:
+    try:
+        return torch.get_device_module(device_type).is_available()
+    except (AttributeError, RuntimeError):
+        return False
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -385,6 +476,45 @@ class DeviceTypeTestBase(TestCase):
     #   @ops-generated dtype variants and other parametrized arguments are
     #   ignored for now.
     test_exclusions: ClassVar[dict[str, Any] | None] = None
+
+    # Returns the capability map used by @requires_capabilities.
+    # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
+    # declare supported capabilities grouped by namespace. This method flattens
+    # the nested map, evaluates the support checks, and caches the result.
+    @classmethod
+    @lru_cache(maxsize=1)
+    def get_capabilities(cls) -> dict[str, bool]:
+        return {
+            k: fn() for sub in cls._capabilities().values() for k, fn in sub.items()
+        }
+
+    # Returns a nested capability map grouped by namespace.
+    # Each namespace (e.g. Capability.dtype) groups related capabilities
+    # (e.g. Capability.dtype.fp8) mapped to callables that determine whether
+    # the current device supports them.
+    @classmethod
+    def _capabilities(cls) -> dict[type, dict[str, Callable[[], bool]]]:
+        return {
+            Capability.lib: {
+                Capability.lib.safetensors: lambda: importlib.util.find_spec(
+                    "safetensors"
+                )
+                is not None,
+            }
+        }
+
+    def setUp(self) -> None:
+        test_method = getattr(self, self._testMethodName)
+        required_capabilities = getattr(test_method, "_required_capabilities", ())
+        if required_capabilities:
+            _check_capabilities(self, required_capabilities)
+
+        from torch.testing._internal.common_distributed import (
+            _check_required_world_size,
+        )
+
+        _check_required_world_size(self)
+        super().setUp()
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -740,6 +870,45 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+        from torch.utils._triton import has_triton
+
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                    Capability.dtype.bf16: lambda: False,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: False,
+                    Capability.attention.mem_efficient_attention: lambda: False,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: False,
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: False,
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: False,
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
+
+
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
@@ -752,6 +921,55 @@ class CUDATestBase(DeviceTypeTestBase):
 
     def has_cudnn(self):
         return not self.no_cudnn
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            PLATFORM_SUPPORTS_FP8,
+            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            SM80OrLater,
+        )
+        from torch.utils._triton import has_triton
+
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                    Capability.dtype.bf16: lambda: SM80OrLater,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                    Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -833,6 +1051,54 @@ class MPSTestBase(DeviceTypeTestBase):
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            PLATFORM_SUPPORTS_FP8,
+            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        )
+        from torch.utils._triton import has_triton
+
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype: {
+                    Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                    Capability.dtype.bf16: lambda: False,
+                },
+                Capability.attention: {
+                    Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                    Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                },
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.memory: {
+                    Capability.memory.non_blocking_copy: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+                Capability.stream: {
+                    Capability.stream.generic: lambda: _device_module_available(
+                        cls.device_type
+                    ),
+                },
+            }
+        )
+        capabilities[Capability.lib].update(
+            {Capability.lib.triton: lambda: has_triton()}
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -1094,6 +1360,30 @@ def get_desired_device_type_test_bases(
 #
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
+
+
+def requires_capabilities(*caps: str):
+    """Declare that a test method requires device capabilities.
+
+    Wraps the test to call ``type(self).get_capabilities()`` at runtime
+    and skip if any required capability is missing.
+    """
+    caps_set = frozenset(caps)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            _check_capabilities(self, caps_set)
+            return fn(self, *args, **kwargs)
+
+        wrapper._required_capabilities = (
+            frozenset(getattr(fn, "_required_capabilities", ())) | caps_set
+        )
+        return wrapper
+
+    return decorator
+
+
 def instantiate_device_type_tests(
     generic_test_class,
     scope,

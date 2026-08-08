@@ -16,8 +16,17 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -80,9 +89,11 @@ class FineTuningModel(nn.Module):
 
 
 class TestFineTuning(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(4, torch.accelerator.device_count())
+        return 4
 
     @property
     def backend(self):
@@ -182,6 +193,11 @@ class TestFineTuning(DTensorTestBase):
             )
 
     @skip_if_lt_x_gpu(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @with_comms
     @with_temp_dir
     def test_fine_tuning(self) -> None:
@@ -199,6 +215,11 @@ class TestFineTuning(DTensorTestBase):
 
         self.pretrain(pretrain_dir)
         self.finetune(pretrain_dir, finetune_dir)
+
+
+instantiate_device_type_tests(
+    TestFineTuning, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
