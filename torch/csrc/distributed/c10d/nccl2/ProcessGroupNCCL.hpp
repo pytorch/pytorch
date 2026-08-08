@@ -63,6 +63,15 @@ TORCH_API void waitForNcclCompletion(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+TORCH_API void waitForNcclChildComm(
+    NcclApi& nccl_api,
+    ncclComm_t parent_comm,
+    ncclComm_t* child_comm,
+    ncclResult_t status,
+    bool expect_child,
+    std::chrono::milliseconds timeout,
+    std::string_view operation);
+
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
  public:
