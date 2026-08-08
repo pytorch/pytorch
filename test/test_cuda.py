@@ -197,6 +197,10 @@ def _check_allocator_settings_on_tear_down(test_case):
     # Regression check: no test in `test_case` should leave the runtime
     # expandable_segments knob mismatched against the suite's env-derived
     # baseline. This should be called in the class's `tearDown` method.
+    if TEST_CUDAMALLOCASYNC:
+        # _snapshot() intentionally raises on the cudaMallocAsync backend, and
+        # expandable_segments does not apply to it.
+        return
     md = torch.cuda.memory._snapshot()["allocator_settings"]
     test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
@@ -8208,6 +8212,54 @@ class TestMemPool(TestCase):
         # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
+
+    @unittest.skipUnless(TEST_CUDAMALLOCASYNC, "requires cudaMallocAsync")
+    def test_mempool_cudamallocasync(self):
+        pool = torch.cuda.MemPool(use_on_oom=False, no_split=True)
+        self.assertEqual(pool.use_count(), 1)
+        for _ in range(2):
+            with torch.cuda.use_mem_pool(pool):
+                self.assertEqual(pool.use_count(), 2)
+                x = torch.ones(4, device="cuda")
+            self.assertEqual(pool.use_count(), 1)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, pool=pool):
+            y = x + 1
+        self.assertEqual(pool.use_count(), 1)
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertTrue(torch.equal(y, torch.full((4,), 2.0, device="cuda")))
+        g.reset()
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "already running under cudaMallocAsync")
+    @unittest.skipIf(TEST_WITH_ROCM, "hipMallocAsync path not validated")
+    def test_mempool_cudamallocasync_subprocess(self):
+        env = os.environ.copy()
+        env["PYTORCH_ALLOC_CONF"] = "backend:cudaMallocAsync"
+        env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+        torch_parent = os.path.dirname(os.path.dirname(torch.__file__))
+        env["PYTHONPATH"] = os.pathsep.join(
+            dict.fromkeys(filter(None, [torch_parent, *sys.path]))
+        )
+        module = os.path.splitext(os.path.basename(__file__))[0]
+        test = f"{module}.TestMemPool.test_mempool_cudamallocasync"
+        child_code = (
+            "import sys, unittest; "
+            "sys.modules['torchvision'] = None; "
+            "import torch; "
+            "assert torch.cuda.get_allocator_backend() == 'cudaMallocAsync'; "
+            f"suite = unittest.defaultTestLoader.loadTestsFromName({test!r}); "
+            "result = unittest.TextTestRunner(verbosity=2).run(suite); "
+            "raise SystemExit(0 if result.wasSuccessful() else 1)"
+        )
+        subprocess.check_call(
+            [sys.executable, "-S", "-c", child_code],
+            env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            timeout=600,
+        )
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
