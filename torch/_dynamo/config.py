@@ -541,7 +541,10 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
-# Trace through torch.autograd.grad or graphbreak
+# Trace through Tensor.backward() by rewriting it to autograd.grad() + accumulate_grad,
+# and enable experimental higher-order or non-checkpoint HOP-nested autograd.grad()
+# capture. Root first-order autograd.grad() is handled natively; activation
+# checkpoint bodies are always rejected.
 trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile

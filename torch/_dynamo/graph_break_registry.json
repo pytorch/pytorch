@@ -1917,6 +1917,17 @@
       "Hints": []
     }
   ],
+  "GB0927": [
+    {
+      "Gb_type": "torch.autograd.grad with non-constant retain_graph",
+      "Context": "retain_graph={retain_graph}",
+      "Explanation": "The retain_graph argument to torch.autograd.grad must be a Python constant when tracing with Dynamo.",
+      "Hints": [
+        "Pass a Python bool for retain_graph.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0130": [
     {
       "Gb_type": "Unsupported Tensor.sparse_resize_and_clear_() call",
@@ -2963,6 +2974,16 @@
       ]
     }
   ],
+  "GB2836": [
+    {
+      "Gb_type": "using `torch.autograd.grad(create_graph=True)` with `torch._dynamo.config.trace_autograd_ops=False`",
+      "Context": "trace_autograd_ops={config.trace_autograd_ops}",
+      "Explanation": "Attempted to call `torch.autograd.grad` with `create_graph=True` while config `torch._dynamo.config.trace_autograd_ops` is `False`. Capturing higher-order autograd is still experimental.",
+      "Hints": [
+        "Change `torch._dynamo.config.trace_autograd_ops` to `True`."
+      ]
+    }
+  ],
   "GB0192": [
     {
       "Gb_type": "input iterator to itertools.cycle has too many items",
@@ -3521,6 +3542,28 @@
       "Explanation": "Data node op should be placeholder or get_attr.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB7880": [
+    {
+      "Gb_type": "torch.autograd.grad with non-constant create_graph",
+      "Context": "create_graph={create_graph}",
+      "Explanation": "The create_graph argument to torch.autograd.grad must be a Python constant when tracing with Dynamo.",
+      "Hints": [
+        "Pass a Python bool for create_graph.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5133": [
+    {
+      "Gb_type": "autograd.grad inside a higher-order operator",
+      "Context": "higher-order operator subgraph",
+      "Explanation": "torch.autograd.grad() cannot be safely captured by default inside a higher-order operator. Higher-order operator subgraphs may manage autograd or dispatch modes that do not preserve the inner autograd graph.",
+      "Hints": [
+        "Move the autograd.grad() call outside the higher-order operator.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5566,6 +5609,26 @@
       ]
     }
   ],
+  "GB9745": [
+    {
+      "Gb_type": "autograd.grad inside activation checkpoint",
+      "Context": "activation checkpoint body",
+      "Explanation": "torch.autograd.grad() cannot be safely captured inside torch.utils.checkpoint.checkpoint(). Activation checkpoint bodies manage autograd state and may run under saved-tensor hooks or dispatch modes that are incompatible with capturing an inner backward graph.",
+      "Hints": [
+        "Move the autograd.grad() call outside the checkpointed function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad inside activation checkpoint",
+      "Context": "activation checkpoint body",
+      "Explanation": "torch.autograd.grad() cannot be safely captured inside torch.utils.checkpoint.checkpoint(). Checkpoint's caching dispatch modes do not support running backward while the checkpoint body is active.",
+      "Hints": [
+        "Move the autograd.grad() call outside the checkpointed function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0340": [
     {
       "Gb_type": "torch.cond: unsupported branch return type",
@@ -6166,6 +6229,17 @@
     }
   ],
   "GB0372": [
+    {
+      "Gb_type": "autograd.grad with external grad_fn",
+      "Context": "context",
+      "Explanation": "torch.autograd.grad() received a tensor that was created outside the compiled region and has a grad_fn attached. Dynamo cannot guard on the topology of an external autograd graph, so reusing the compiled graph could compute incorrect gradients.",
+      "Hints": [
+        "Detach the tensor before entering the compiled region: ",
+        "`tensor.detach().requires_grad_(True)`.",
+        "Otherwise, move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "autograd.grad with external grad_fn",
       "Context": "context",

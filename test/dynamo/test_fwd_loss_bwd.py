@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import copy
 import re
 import textwrap
@@ -8,15 +9,421 @@ import torch
 import torch._dynamo
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
+    CompileCounterWithBackend,
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+@skipIfTorchDynamo()
+class TestAutogradGradDefault(TestCase):
+    @skipIfCrossRef
+    def test_autograd_grad_manual_update_default(self):
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = copy.deepcopy(mod_eager)
+        x = torch.randn(2, 4)
+
+        def step_fn(mod):
+            res = mod(x)
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            param_grads = torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+            for p, g_p in zip(params, param_grads):
+                if p.grad is None:
+                    p.grad = g_p
+                elif g_p is not None:
+                    p.grad.add_(g_p)
+            return loss.detach()
+
+        eager_loss = step_fn(mod_eager)
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_step_fn = torch.compile(
+            lambda: step_fn(mod_compiled), backend=backend, fullgraph=True
+        )
+        compiled_loss = compiled_step_fn()
+
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertTrue(
+            any(
+                node.target is torch.autograd.grad
+                for node in backend.graphs[0].graph.nodes
+            )
+        )
+
+    @skipIfCrossRef
+    def test_autograd_grad_default_rejects_external_grad_fn(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step(res):
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            return torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            step(mod(x))
+
+    @skipIfCrossRef
+    def test_autograd_grad_default_rejects_external_grad_fn_kwargs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step(res):
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            return torch.autograd.grad(
+                outputs=loss,
+                inputs=params,
+                materialize_grads=False,
+                allow_unused=True,
+            )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            step(mod(x))
+
+    @skipIfCrossRef
+    def test_autograd_grad_external_grad_fn_cache_guard(self):
+        def fn(ext, parameter):
+            return torch.autograd.grad(
+                outputs=ext.sum(),
+                inputs=parameter,
+                allow_unused=True,
+                materialize_grads=True,
+            )[0]
+
+        backend = CompileCounterWithBackend("aot_eager")
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        parameter = torch.randn(4, requires_grad=True)
+        independent = torch.randn(4, requires_grad=True)
+        self.assertEqual(
+            compiled_fn(independent, parameter), torch.zeros_like(parameter)
+        )
+
+        base = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            compiled_fn(base * parameter, parameter)
+        self.assertEqual(backend.frame_count, 1)
+
+    @skipIfCrossRef
+    def test_autograd_grad_rejects_external_nested_targets(self):
+        def fn(ext, parameter):
+            return torch.autograd.grad(
+                ext.sum(),
+                (ext, parameter),
+                allow_unused=True,
+                materialize_grads=True,
+            )
+
+        base = torch.randn(4, requires_grad=True)
+        parameter = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                base * parameter, parameter
+            )
+
+    def test_autograd_grad_signature_error_precedes_safety_checks(self):
+        from torch.autograd.graph import GradientEdge
+
+        def fn(edge):
+            return torch.autograd.grad(outputs=edge)
+
+        x = torch.randn(4, requires_grad=True)
+        edge = GradientEdge((x * 2).grad_fn, 0)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "missing a required argument: 'inputs'",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(edge)
+
+    @skipIfCrossRef
+    def test_tensor_backward_still_gated_by_trace_autograd_ops(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step():
+            loss = mod(x).sum()
+            loss.backward(inputs=list(mod.parameters()))
+            return loss.detach()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "trace_autograd_ops is off",
+        ):
+            step()
+
+    def test_autograd_grad_positional_create_graph_still_gated(self):
+        def fn(x):
+            return torch.autograd.grad(x.sin().sum(), x, None, None, True)[0]
+
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Capturing higher-order autograd is still experimental",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_autograd_grad_nonconstant_create_graph_rejected(self):
+        def shape_flag(x):
+            return torch.autograd.grad(x.sin().sum(), x, create_graph=x.shape[0] > 2)[0]
+
+        def tensor_flag(x, flag):
+            return torch.autograd.grad(x.sin().sum(), x, create_graph=flag)[0]
+
+        x = torch.randn(4, requires_grad=True)
+        cases = (
+            (shape_flag, (x,), {"dynamic": True}),
+            (tensor_flag, (x, torch.tensor(2)), {}),
+        )
+        for fn, args, compile_options in cases:
+            with (
+                self.subTest(fn=fn.__name__),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "create_graph argument to torch.autograd.grad must be a Python constant",
+                ),
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True, **compile_options)(
+                    *args
+                )
+            torch._dynamo.reset()
+
+    def test_autograd_grad_nonconstant_retain_graph_rejected(self):
+        def fn(x, flag):
+            return torch.autograd.grad(x.sin().sum(), x, retain_graph=flag)[0]
+
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "retain_graph argument to torch.autograd.grad must be a Python constant",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.tensor(False))
+
+    def test_autograd_grad_positional_retain_graph_preserves_graph(self):
+        def fn(x):
+            y = x.sin()
+            grad = torch.autograd.grad(y.sum(), x, None, 2)[0]
+            return y, grad
+
+        x_eager = torch.randn(4, requires_grad=True)
+        y_eager, grad_eager = fn(x_eager)
+        second_grad_eager = torch.autograd.grad(y_eager.sum(), x_eager)[0]
+
+        x_compiled = x_eager.detach().clone().requires_grad_()
+        y_compiled, grad_compiled = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(x_compiled)
+        second_grad_compiled = torch.autograd.grad(y_compiled.sum(), x_compiled)[0]
+
+        self.assertEqual(y_compiled, y_eager)
+        self.assertEqual(grad_compiled, grad_eager)
+        self.assertEqual(second_grad_compiled, second_grad_eager)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_autograd_grad_positional_create_graph_preserves_graph(self):
+        def fn(x):
+            y = x.sin()
+            grad = torch.autograd.grad(y.sum(), x, None, None, 2)[0]
+            return y, grad
+
+        x_eager = torch.randn(4, requires_grad=True)
+        y_eager, grad_eager = fn(x_eager)
+        second_grad_eager = torch.autograd.grad(y_eager.sum(), x_eager)[0]
+
+        x_compiled = x_eager.detach().clone().requires_grad_()
+        y_compiled, grad_compiled = torch.compile(
+            fn, backend="aot_eager", fullgraph=True
+        )(x_compiled)
+        second_grad_compiled = torch.autograd.grad(y_compiled.sum(), x_compiled)[0]
+
+        self.assertEqual(y_compiled, y_eager)
+        self.assertEqual(grad_compiled, grad_eager)
+        self.assertEqual(second_grad_compiled, second_grad_eager)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_create_graph_does_not_override_explicit_retain_graph(self):
+        def fn(x):
+            y = x.sin()
+            grad = torch.autograd.grad(y.sum(), x, None, False, True)[0]
+            return y, grad
+
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad consumed returned tensor's grad_fn",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_autograd_grad_inside_cond_rejected(self):
+        def branch(x):
+            return torch.autograd.grad(x.sin().sum(), x)[0]
+
+        def fn(pred, x):
+            return torch.cond(pred, branch, branch, (x,))
+
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "autograd.grad inside a higher-order operator",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(True), x)
+
+    def test_autograd_grad_inside_invoke_subgraph_rejected(self):
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return torch.autograd.grad(x.sin().sum(), x)[0]
+
+        def fn(x):
+            return region(x) + region(x)
+
+        x = torch.randn(4, requires_grad=True)
+        with (
+            torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "autograd.grad inside a higher-order operator",
+            ),
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_autograd_grad_inside_checkpoint_graph_breaks(self):
+        def checkpointed(x):
+            out = x.sin().exp().sin()
+            return torch.autograd.grad(out.sum(), x)[0]
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                checkpointed, x.sin(), use_reentrant=False
+            ).cos()
+
+        for functionalize_rng_ops in (False, True):
+            with (
+                self.subTest(functionalize_rng_ops=functionalize_rng_ops),
+                torch._functorch.config.patch(
+                    functionalize_rng_ops=functionalize_rng_ops
+                ),
+            ):
+                counters.clear()
+                x_eager = torch.randn(4, requires_grad=True)
+                expected = fn(x_eager)
+
+                x_compiled = x_eager.detach().clone().requires_grad_()
+                backend = CompileCounterWithBackend("eager")
+                actual = torch.compile(fn, backend=backend)(x_compiled)
+
+                self.assertEqual(actual, expected)
+                self.assertEqual(backend.frame_count, 2)
+                self.assertEqual(backend.op_count, 2)
+                self.assertTrue(
+                    any(
+                        reason.startswith("autograd.grad inside activation checkpoint")
+                        for reason in counters["graph_break"]
+                    )
+                )
+                counters.clear()
+
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "autograd.grad inside activation checkpoint",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x_compiled)
+                torch._dynamo.reset()
+
+    def test_autograd_grad_inside_checkpoint_variants_graph_break(self):
+        def checkpointed(x):
+            out = x.sin().exp().sin()
+            return torch.autograd.grad(out.sum(), x)[0]
+
+        def reentrant_fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                checkpointed, x.sin(), use_reentrant=True
+            ).cos()
+
+        def context_fn():
+            return torch.utils.checkpoint.create_selective_checkpoint_contexts(
+                lambda ctx, op, *args, **kwargs: (
+                    torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                )
+            )
+
+        def selective_fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                checkpointed,
+                x.sin(),
+                use_reentrant=False,
+                context_fn=context_fn,
+            ).cos()
+
+        x = torch.randn(4, requires_grad=True)
+        for fn in (reentrant_fn, selective_fn):
+            for trace_autograd_ops in (False, True):
+                with (
+                    self.subTest(fn=fn.__name__, trace_autograd_ops=trace_autograd_ops),
+                    torch._dynamo.config.patch(trace_autograd_ops=trace_autograd_ops),
+                    self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported,
+                        "autograd.grad inside activation checkpoint",
+                    ),
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+                torch._dynamo.reset()
+
+    def test_autograd_grad_inside_checkpoint_nested_cond_rejected(self):
+        def branch(x):
+            return torch.autograd.grad(x.sin().sum(), x, create_graph=True)[0]
+
+        def checkpointed(pred, x):
+            return torch.cond(pred, branch, branch, (x,))
+
+        def fn(pred, x):
+            return torch.utils.checkpoint.checkpoint(
+                checkpointed, pred, x, use_reentrant=False
+            )
+
+        x = torch.randn(4, requires_grad=True)
+        for trace_autograd_ops in (False, True):
+            with (
+                self.subTest(trace_autograd_ops=trace_autograd_ops),
+                torch._dynamo.config.patch(trace_autograd_ops=trace_autograd_ops),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.UncapturedHigherOrderOpError,
+                    "autograd.grad inside activation checkpoint",
+                ),
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.tensor(True), x
+                )
+            torch._dynamo.reset()
 
 
 @torch._dynamo.config.patch(trace_autograd_ops=True)
@@ -170,6 +577,44 @@ class <lambda>(torch.nn.Module):
 
         for e, c in zip(eager_result, compiled_result):
             self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_autograd_grad_dict_runtime_keys_and_order_guarded(self):
+        output = torch.randn(4, requires_grad=True)
+
+        def fn(inputs):
+            return torch.autograd.grad(
+                output.sin().sum(),
+                inputs,
+                allow_unused=True,
+                materialize_grads=True,
+            )
+
+        params = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        cases = (
+            {"a": params[0], "b": params[1]},
+            {"b": params[1], "a": params[0]},
+            {"a": params[0], "b": params[1], "c": params[2]},
+        )
+        backend = CompileCounterWithBackend("eager")
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        for inputs in cases:
+            with self.subTest(keys=list(inputs)):
+                expected = fn(inputs)
+                actual = compiled_fn(inputs)
+                self.assertEqual(list(actual), list(inputs))
+                self.assertEqual(actual, expected)
+        self.assertEqual(backend.frame_count, 3)
+
+    @skipIfCrossRef
+    def test_autograd_grad_rejects_non_exact_dict(self):
+        def fn(inputs):
+            loss = sum(value.square().sum() for value in inputs.values())
+            return torch.autograd.grad(loss, inputs)
+
+        inputs = collections.OrderedDict([("x", torch.randn(4, requires_grad=True))])
+        with self.assertRaisesRegex(TypeError, "must be a dict, not OrderedDict"):
+            torch.compile(fn, backend="eager")(inputs)
 
     @skipIfCrossRef
     def test_backward_dict_inputs(self):
@@ -365,14 +810,10 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(weight_eager.grad, weight_compile.grad)
 
     @skipIfCrossRef
-    def test_autograd_grad_with_external_grad_fn_as_grad_target(self):
-        mod_eager = torch.nn.Linear(4, 4)
-        x_eager = torch.randn(2, 4, requires_grad=True)
-        external_computation_eager = x_eager * 2
-
-        mod_compile = copy.deepcopy(mod_eager)
-        x_compile = copy.deepcopy(x_eager).requires_grad_(True)
-        external_computation_compile = x_compile * 2
+    def test_autograd_grad_rejects_external_grad_fn_as_grad_target(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4, requires_grad=True)
+        external_computation = x * 2
 
         def fn(mod, external_input):
             res = mod(external_input)
@@ -380,14 +821,13 @@ class <lambda>(torch.nn.Module):
             grads = torch.autograd.grad(loss, external_input)
             return loss.detach(), grads
 
-        # This should work because we're computing grad w.r.t. external_input itself
-        # The gradient computation stops at external_input, never traversing its grad_fn
-        loss_eager, grads_eager = fn(mod_eager, external_computation_eager)
-        loss_compile, grads_compile = torch.compile(
-            fn, fullgraph=True, backend="aot_eager"
-        )(mod_compile, external_computation_compile)
-        self.assertEqual(loss_eager, loss_compile)
-        self.assertEqual(grads_eager, grads_compile)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                mod, external_computation
+            )
 
     @skipIfCrossRef
     def test_autograd_grad_rejects_external_grad_fn_on_output(self):
@@ -407,16 +847,7 @@ class <lambda>(torch.nn.Module):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            re.escape(
-                """\
-autograd.grad with external grad_fn
-  Explanation: torch.autograd.grad() cannot trace through the autograd graph because it's output depends on a tensor that was created outside the compiled region and has a grad_fn attached. The autograd graph extends beyond the compiled region boundary, which Dynamo cannot trace.
-  Hint: If you don't need gradients to flow back to the original tensor outside the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.
-  Hint: Otherwise, move the autograd.grad() call outside the compiled region.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: inputs with external grad_fn: ["L['external_input']"]"""
-            ),
+            re.escape("inputs with external grad_fn: [\"L['external_input']\"]"),
         ):
             fn(external_computation)
 
@@ -464,16 +895,7 @@ autograd.grad with external grad_fn
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            re.escape(
-                """\
-autograd.grad with external grad_fn
-  Explanation: torch.autograd.grad() cannot trace through the autograd graph because it's output depends on a tensor that was created outside the compiled region and has a grad_fn attached. The autograd graph extends beyond the compiled region boundary, which Dynamo cannot trace.
-  Hint: If you don't need gradients to flow back to the original tensor outside the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.
-  Hint: Otherwise, move the autograd.grad() call outside the compiled region.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: inputs with external grad_fn: ["L['ext']"]"""
-            ),
+            "autograd.grad with external grad_fn",
         ):
             fn(external)
 
@@ -668,6 +1090,29 @@ autograd.grad consumed returned tensor's grad_fn
         ):
             compiled_fn(torch.randn(4, requires_grad=True))
 
+    def test_autograd_grad_consumed_nested_target(self):
+        def fn(x):
+            intermediate = x * 2
+            output = intermediate * 3
+            grads = torch.autograd.grad(output.sum(), (intermediate, x))
+            return intermediate, grads
+
+        x_eager = torch.randn(4, requires_grad=True)
+        intermediate_eager, _ = fn(x_eager)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Trying to backward through the graph a second time",
+        ):
+            intermediate_eager.sum().backward()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"autograd\.grad consumed returned tensor's grad_fn",
+        ):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(
+                torch.randn(4, requires_grad=True)
+            )
+
     def test_autograd_grad_leaked_tensor_names_in_error(self):
         """Test that the error message includes the names of all leaked tensors."""
         torch._dynamo.reset()
@@ -689,12 +1134,13 @@ autograd.grad consumed returned tensor's grad_fn
             compiled_fn(torch.randn(4, requires_grad=True))
 
     @skipIfCrossRef
-    def test_autograd_grad_external_grad_fn_detached(self):
+    def test_autograd_grad_external_grad_fn_must_be_detached_before_compile(self):
         torch._dynamo.reset()
 
         @torch.compile(fullgraph=True, backend="aot_eager")
         def fn(y_ext, x_internal):
-            # y_ext has external grad_fn but we detach it
+            # Detaching inside the region is too late: the incoming topology is
+            # external state that cannot be represented by Dynamo's tensor guards.
             y_detached = y_ext.detach()
             z = y_detached + x_internal * 3
             return torch.autograd.grad(z.sum(), x_internal)
@@ -703,9 +1149,11 @@ autograd.grad consumed returned tensor's grad_fn
         y_external = x_external * 2  # has grad_fn
         x_internal = torch.randn(3, requires_grad=True)
 
-        # This should work because y_external's grad_fn is detached
-        result = fn(y_external, x_internal)
-        self.assertEqual(result[0], torch.full((3,), 3.0))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            fn(y_external, x_internal)
 
     @skipIfCrossRef
     def test_autograd_grad_rejects_external_gradient_edge(self):

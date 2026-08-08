@@ -422,6 +422,38 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
     return grad_fns
 
 
+def _autograd_grad_stop_fns(
+    input_grad_fns: set[torch.autograd.graph.Node],
+) -> set[torch.autograd.graph.Node]:
+    """Return the input grad_fns where autograd traversal actually stops.
+
+    If one requested input is upstream of another, autograd must traverse through
+    the downstream input's grad_fn to compute the upstream input's gradient. A
+    collective ``stop_at=input_grad_fns`` would therefore undercount consumed
+    nodes. Only retain targets that cannot reach another requested target.
+    """
+    stop_fns = set(input_grad_fns)
+    for input_grad_fn in input_grad_fns:
+        visited: set[torch.autograd.graph.Node] = set()
+        stack = [
+            next_fn
+            for next_fn, _ in input_grad_fn.next_functions
+            if next_fn is not None
+        ]
+        while stack:
+            node = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            if node in input_grad_fns:
+                stop_fns.discard(input_grad_fn)
+                break
+            stack.extend(
+                next_fn for next_fn, _ in node.next_functions if next_fn is not None
+            )
+    return stop_fns
+
+
 def _collect_tensors_with_sources(
     var: VariableTracker,
 ) -> list[tuple[torch.Tensor, str | None]]:
@@ -2989,11 +3021,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             We validate two things:
 
-            1. External grad_fns cannot be consumed: The grad_fn on external inputs
-               could change at runtime, so we would need to guard on it if we wanted
-               to trace through it. For now, we reject this case.
-               We compute "consumed" grad_fns (reachable from outputs, excluding
-               autograd.grad inputs parameter) and verify no graph input's grad_fn is in this set.
+            1. External grad_fns are not supported: Tensor guards do not describe
+               the topology of an external autograd graph. Reusing a compiled graph
+               with different external edges can silently compute the wrong gradients,
+               even when the tensors have identical metadata and grad_fn types. We
+               guard whether graph inputs are leaves and reject any trace with an
+               external grad_fn.
 
             2. Returned tensors cannot have consumed grad_fns: If autograd.grad
                consumes a grad_fn and we return a tensor connected to it, the user
@@ -3001,32 +3034,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                consumed grad_fns and check at output time. If violated, we retry
                with a graph break at autograd.grad.
 
-            Safe vs Unsafe Cases:
-
-            Case 1 - Safe (external tensor is autograd.grad input):
-                x = torch.randn(4, requires_grad=True)
-                external = x * 2  # has external grad_fn
-
-                @torch.compile
-                def fn(external_input):
-                    loss = external_input.sum()
-                    return torch.autograd.grad(loss, external_input)
-
-                Safe because autograd.grad stops at external_input, never consuming
-                its external grad_fn.
-
-            Case 2 - Unsafe (external grad_fn in path):
+            Case 1 - Unsafe (external grad_fn):
                 @torch.compile
                 def fn(external_input):
                     loss = mod(external_input).sum()
                     return torch.autograd.grad(loss, mod.weight)
 
-                Unsafe because autograd.grad must traverse through external_input's
-                grad_fn to reach mod.weight. The external grad_fn could change at
-                runtime, so we would need to guard on it (like AOTAutograd does).
-                For now, we reject this case.
+                The external grad_fn could change at runtime without invalidating the
+                normal tensor guards. Guarding the full autograd topology is outside
+                Dynamo's current scope, so we reject this case.
 
-            Case 3 - Unsafe (returning tensor with consumed grad_fn):
+            Case 2 - Unsafe (returning tensor with consumed grad_fn):
                 @torch.compile
                 def fn(x):
                     y = x * 2
@@ -3036,23 +3054,127 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 Unsafe because y's grad_fn was consumed by autograd.grad. Trying to
                 backward through y later would error.
             """
-            from .. import compiled_autograd, config
+            from torch._higher_order_ops.wrap import (
+                tag_activation_checkpoint,
+                wrap_activation_checkpoint,
+            )
+
+            from .. import compiled_autograd
             from .builder import wrap_fx_proxy
-            from .constant import ConstantVariable
-            from .dicts import ConstDictVariable
+            from .dicts import ConstDictVariable, MappingProxyVariable
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
-            if not config.trace_autograd_ops:
+            try:
+                inspect.signature(torch.autograd.grad).bind(*args, **kwargs)
+            except TypeError as exc:
+                raise_type_error(tx, str(exc))
+
+            outputs = args[0] if len(args) > 0 else kwargs.get("outputs")
+            inputs = args[1] if len(args) > 1 else kwargs.get("inputs")
+            if (
+                isinstance(inputs, ConstDictVariable)
+                and inputs.python_type() is not dict
+            ) or isinstance(
+                inputs, (variables.UserDefinedDictVariable, MappingProxyVariable)
+            ):
+                raise_type_error(
+                    tx,
+                    f"`inputs` argument to `grad()` must be a dict, not "
+                    f"{inputs.python_type().__name__}. Other Mapping types are not supported.",
+                )
+
+            retain_graph = args[3] if len(args) > 3 else kwargs.get("retain_graph")
+            create_graph = args[4] if len(args) > 4 else kwargs.get("create_graph")
+            if retain_graph is not None and not retain_graph.is_python_constant():
                 unimplemented(
-                    gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
+                    gb_type="torch.autograd.grad with non-constant retain_graph",
+                    context=f"retain_graph={retain_graph}",
+                    explanation=(
+                        "The retain_graph argument to torch.autograd.grad must be "
+                        "a Python constant when tracing with Dynamo."
+                    ),
+                    hints=[
+                        "Pass a Python bool for retain_graph.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            if create_graph is not None and not create_graph.is_python_constant():
+                unimplemented(
+                    gb_type="torch.autograd.grad with non-constant create_graph",
+                    context=f"create_graph={create_graph}",
+                    explanation=(
+                        "The create_graph argument to torch.autograd.grad must be "
+                        "a Python constant when tracing with Dynamo."
+                    ),
+                    hints=[
+                        "Pass a Python bool for create_graph.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            create_graph_value = (
+                create_graph.as_python_constant() if create_graph is not None else False
+            )
+            create_graph_enabled = bool(create_graph_value)
+
+            tracer = tx.output.current_tracer
+            while tracer is not None:
+                if tracer.source_target in (
+                    tag_activation_checkpoint,
+                    wrap_activation_checkpoint,
+                ):
+                    unimplemented(
+                        gb_type="autograd.grad inside activation checkpoint",
+                        context="activation checkpoint body",
+                        explanation=(
+                            "torch.autograd.grad() cannot be safely captured inside "
+                            "torch.utils.checkpoint.checkpoint(). Activation checkpoint "
+                            "bodies manage autograd state and may run under saved-tensor "
+                            "hooks or dispatch modes that are incompatible with capturing "
+                            "an inner backward graph."
+                        ),
+                        hints=[
+                            "Move the autograd.grad() call outside the checkpointed function.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                tracer = tracer.parent
+
+            if not config.trace_autograd_ops and create_graph_enabled:
+                unimplemented(
+                    gb_type="using `torch.autograd.grad(create_graph=True)` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
                     explanation=(
-                        "Attempted to call `torch.autograd.grad` with config "
-                        "`torch._dynamo.config.trace_autograd_ops` set to `False`."
+                        "Attempted to call `torch.autograd.grad` with "
+                        "`create_graph=True` while config "
+                        "`torch._dynamo.config.trace_autograd_ops` is `False`. "
+                        "Capturing higher-order autograd is still experimental."
                     ),
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
+                    ],
+                )
+
+            # trace_autograd_ops explicitly opts into the pre-existing experimental
+            # behavior inside HOP subgraphs. The default path rejects them because
+            # HOPs may manage autograd or dispatch modes that hide the inner graph.
+            if (
+                not config.trace_autograd_ops
+                and tx.output.current_tracer.parent is not None
+            ):
+                unimplemented(
+                    gb_type="autograd.grad inside a higher-order operator",
+                    context="higher-order operator subgraph",
+                    explanation=(
+                        "torch.autograd.grad() cannot be safely captured by default "
+                        "inside a higher-order operator. Higher-order operator "
+                        "subgraphs may manage autograd or dispatch modes that do not "
+                        "preserve the inner autograd graph."
+                    ),
+                    hints=[
+                        "Move the autograd.grad() call outside the higher-order operator.",
+                        *graph_break_hints.SUPPORTABLE,
                     ],
                 )
 
@@ -3098,108 +3220,99 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ],
                 )
 
-            # Check for external GradientEdge objects in outputs and inputs args
-            # if there is it will be a graph break
-            if len(args) >= 1:
-                _check_for_gradient_edge(args[0], "outputs")
-            if len(args) >= 2:
-                _check_for_gradient_edge(args[1], "inputs")
+            # Check for external GradientEdge objects in outputs and inputs.
+            if outputs is not None:
+                _check_for_gradient_edge(outputs, "outputs")
+            if inputs is not None:
+                _check_for_gradient_edge(inputs, "inputs")
 
-            # Collect external grad_fn objects from graph inputs, along with their sources.
-            # We need to collect ALL grad_fns associated with each input tensor:
-            # - Direct grad_fn, base tensor's grad_fn (for views)
-            # - Inner tensors (for subclasses)
-            external_grad_fns: set[torch.autograd.graph.Node] = set()
-            # Map grad_fn -> source name for better error messages
-            grad_fn_to_source: dict[torch.autograd.graph.Node, str] = {}
+            # TENSOR_MATCH does not guard is_leaf/grad_fn. Install the narrow leaf
+            # guard explicitly so a cache traced with leaf inputs cannot be reused
+            # after external autograd linkage appears (including in subclass inners).
+            external_grad_fn_sources: set[str] = set()
+            has_external_grad_fn = False
             for var in tx.output.input_source_to_var.values():
-                if isinstance(var, TensorVariable):
+                if (
+                    isinstance(var, TensorVariable)
+                    and var.source is not None
+                    and var.source.subguards_allowed()
+                ):
+                    install_guard(
+                        AttrSource(var.source, "is_leaf").make_guard(
+                            GuardBuilder.CONSTANT_MATCH
+                        )
+                    )
                     fake_tensor = var.as_proxy().node.meta.get("example_value")
                     if not isinstance(fake_tensor, torch.Tensor):
                         raise AssertionError(
                             f"Expected fake_tensor to be a torch.Tensor, got {type(fake_tensor)}"
                         )
                     tensor_grad_fns = _collect_all_grad_fns(fake_tensor)
-                    external_grad_fns.update(tensor_grad_fns)
-                    # Track source name for error messages
-                    if var.source is not None:
-                        for gf in tensor_grad_fns:
-                            grad_fn_to_source[gf] = var.source.name
+                    if tensor_grad_fns:
+                        has_external_grad_fn = True
+                        external_grad_fn_sources.add(var.source.name)
 
-            # Collect tensors from outputs and inputs args
-            from ..output_graph import collect_reachable_grad_fns
-
-            outputs_with_sources = (
-                _collect_tensors_with_sources(args[0]) if len(args) >= 1 else []
-            )
-            inputs_with_sources = (
-                _collect_tensors_with_sources(args[1]) if len(args) >= 2 else []
-            )
-
-            # Collect grad_fns from the autograd.grad inputs tensors to use as stop points.
-            # For non-leaf tensors: we stop at their grad_fn
-            # For leaf tensors (requires_grad=True, grad_fn=None): we don't add anything here,
-            # but this is fine because their AccumulateGrad is created during fake tensor
-            # tracing and is not in external_grad_fns, so it won't trigger a false positive.
-            inputs_grad_fns: set[torch.autograd.graph.Node] = set()
-            for tensor, _ in inputs_with_sources:
-                if isinstance(tensor, torch.Tensor) and tensor.grad_fn is not None:
-                    inputs_grad_fns.add(tensor.grad_fn)
-
-            # Collect all consumed grad_fns that are reachable from outputs, stopping at inputs.
-            #
-            # Note: Do not try to "optimize" by only checking inputs in the `inputs` arg.
-            # Without guarding on the autograd graph, we can't distinguish:
-            #   Case 1: x, y are independent leaves -> OK, y's path not consumed
-            #   Case 2: y = x * 2 (y.grad_fn external) -> BAD, we hit external grad_fn
-            # Since the same compiled code could be called with either, we must check
-            # ALL graph inputs for external grad_fns.
-            consumed_grad_fns = collect_reachable_grad_fns(
-                outputs_with_sources, stop_at=inputs_grad_fns
-            )
-
-            # Check if any graph input's grad_fn is in the consumed set.
-            # If so, autograd.grad would need to traverse through external autograd nodes,
-            # which we cannot trace. (If a graph input is also an autograd.grad input,
-            # its grad_fn is already excluded from consumed_grad_fns via stop_at.)
-            external_in_consumed = consumed_grad_fns & external_grad_fns
-
-            if external_in_consumed:
-                sources = [
-                    grad_fn_to_source[gf]
-                    for gf in external_in_consumed
-                    if gf in grad_fn_to_source
-                ]
+            if has_external_grad_fn:
+                sources = sorted(external_grad_fn_sources)
                 context = f"inputs with external grad_fn: {sources}" if sources else ""
                 unimplemented(
                     gb_type="autograd.grad with external grad_fn",
                     context=context,
                     explanation=(
-                        "torch.autograd.grad() cannot trace through the autograd graph because "
-                        "it's output depends on a tensor that was created outside "
-                        "the compiled region and has a grad_fn attached. The autograd graph "
-                        "extends beyond the compiled region boundary, which Dynamo cannot trace."
+                        "torch.autograd.grad() received a tensor that was created "
+                        "outside the compiled region and has a grad_fn attached. "
+                        "Dynamo cannot guard on the topology of an external autograd "
+                        "graph, so reusing the compiled graph could compute incorrect "
+                        "gradients."
                     ),
                     hints=[
-                        "If you don't need gradients to flow back to the original tensor outside "
-                        "the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.",
+                        "Detach the tensor before entering the compiled region: "
+                        "`tensor.detach().requires_grad_(True)`.",
                         "Otherwise, move the autograd.grad() call outside the compiled region.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
 
+            # Collect tensors from outputs and inputs.
+            from ..output_graph import collect_reachable_grad_fns
+
+            outputs_with_sources = (
+                _collect_tensors_with_sources(outputs) if outputs is not None else []
+            )
+            inputs_with_sources = (
+                _collect_tensors_with_sources(inputs) if inputs is not None else []
+            )
+
+            # Collect gradient-edge nodes from in-graph autograd.grad inputs to use
+            # as stop points. Leaf inputs need their AccumulateGrad node here so we
+            # can tell when a non-leaf target lies on the path to a requested leaf.
+            inputs_grad_fns: set[torch.autograd.graph.Node] = set()
+            for tensor, _ in inputs_with_sources:
+                if isinstance(tensor, torch.Tensor) and tensor.requires_grad:
+                    inputs_grad_fns.add(
+                        torch.autograd.graph.get_gradient_edge(tensor).node
+                    )
+
+            # Stop only at requested inputs that do not lead to another requested
+            # input. For nested targets, autograd traverses through the downstream
+            # target to compute the upstream target's gradient.
+            stop_grad_fns = _autograd_grad_stop_fns(inputs_grad_fns)
+
+            # Collect all consumed grad_fns that are reachable from outputs.
+            consumed_grad_fns = collect_reachable_grad_fns(
+                outputs_with_sources, stop_at=stop_grad_fns
+            )
+
             # Track consumed grad_fns for later validation
             # (to detect returning tensors whose grad_fn was consumed by autograd.grad)
-            # Skip if retain_graph=True or create_graph=True since the graph is not
-            # consumed in those cases and can be traversed again.
-            retain_graph = kwargs.get("retain_graph")
-            create_graph = kwargs.get("create_graph")
+            # retain_graph defaults to create_graph only when it is omitted or None.
+            retain_graph_value = (
+                retain_graph.as_python_constant() if retain_graph is not None else None
+            )
             graph_preserved = (
-                isinstance(retain_graph, ConstantVariable)
-                and retain_graph.value is True
-            ) or (
-                isinstance(create_graph, ConstantVariable)
-                and create_graph.value is True
+                create_graph_enabled
+                if retain_graph_value is None
+                else bool(retain_graph_value)
             )
             if not graph_preserved:
                 # Filter out AccumulateGrad nodes - they're never actually "consumed"
@@ -3233,9 +3346,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             # Convert dict inputs to tuple for the FX graph. The engine
             # always operates on flat tuples; we reconstruct the dict after.
-            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
-            if isinstance(inputs_var, ConstDictVariable):
-                inputs_as_tuple = TupleVariable(list(inputs_var.items.values()))
+            if isinstance(inputs, ConstDictVariable):
+                inputs.install_dict_keys_match_guard()
+                if inputs.source is not None:
+                    tx.output.guard_on_key_order.add(inputs.source)
+                inputs_as_tuple = TupleVariable(list(inputs.items.values()))
                 if len(args) >= 2:
                     args = (args[0], inputs_as_tuple, *args[2:])
                 else:
@@ -3252,7 +3367,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             result = wrap_fx_proxy(tx=tx, proxy=proxy)
 
-            if isinstance(inputs_var, ConstDictVariable):
+            if isinstance(inputs, ConstDictVariable):
                 if not isinstance(result, BaseListVariable):
                     raise AssertionError(
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
@@ -3260,7 +3375,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 items: dict[VariableTracker, VariableTracker] = dict(
                     zip(
-                        inputs_var.items.keys(),
+                        inputs.items.keys(),
                         result.items,
                         strict=True,
                     )
