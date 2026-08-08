@@ -4,6 +4,7 @@
 
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
@@ -42,9 +43,47 @@ bool typeListEqual(
   return true;
 }
 
-template <typename attribute_type> // int64_t, bool, double
+template <typename attribute_type> // int64_t, bool
 bool attributesEqual(attribute_type a1, attribute_type a2) {
   return a1 == a2;
+}
+
+// Constant identity for CSE/constant pooling must be bitwise: IEEE eq would
+// never merge NaN constants and would wrongly merge -0.0 with 0.0.
+bool attributesEqual(double a1, double a2) {
+  return c10::bit_cast<int64_t>(a1) == c10::bit_cast<int64_t>(a2);
+}
+
+bool attributesEqual(c10::complex<double> a1, c10::complex<double> a2) {
+  return attributesEqual(a1.real(), a2.real()) &&
+      attributesEqual(a1.imag(), a2.imag());
+}
+
+bool attributesEqual(
+    const std::vector<double>& a1,
+    const std::vector<double>& a2) {
+  if (a1.size() != a2.size()) {
+    return false;
+  }
+  return std::equal(
+      a1.begin(), a1.end(), a2.begin(), [](double x, double y) {
+        return attributesEqual(x, y);
+      });
+}
+
+bool attributesEqual(
+    const std::vector<c10::complex<double>>& a1,
+    const std::vector<c10::complex<double>>& a2) {
+  if (a1.size() != a2.size()) {
+    return false;
+  }
+  return std::equal(
+      a1.begin(),
+      a1.end(),
+      a2.begin(),
+      [](c10::complex<double> x, c10::complex<double> y) {
+        return attributesEqual(x, y);
+      });
 }
 
 bool attributesEqual(const at::Tensor& a1, const at::Tensor& a2) {
@@ -91,7 +130,10 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return a1.toBool() == a2.toBool();
   }
   if (a1.isDouble()) {
-    return a1.toDouble() == a2.toDouble();
+    return attributesEqual(a1.toDouble(), a2.toDouble());
+  }
+  if (a1.isComplexDouble()) {
+    return attributesEqual(a1.toComplexDouble(), a2.toComplexDouble());
   }
   if (a1.isTensor()) {
     return attributesEqual(a1.toTensor(), a2.toTensor());
