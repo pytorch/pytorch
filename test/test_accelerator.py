@@ -35,6 +35,19 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.set_device_index("cpu")
 
+    def test_set_current_accelerator(self):
+        accelerator = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(accelerator)
+
+        torch.accelerator.set_current_accelerator(accelerator)
+        self.assertEqual(torch.accelerator.current_accelerator(), accelerator)
+
+        with self.assertRaisesRegex(ValueError, "without an index"):
+            torch.accelerator.set_current_accelerator(torch.device(accelerator.type, 0))
+
+        with self.assertRaisesRegex(RuntimeError, "is not an accelerator"):
+            torch.accelerator.set_current_accelerator("cpu")
+
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
         orig_device = torch.accelerator.current_device_index()
