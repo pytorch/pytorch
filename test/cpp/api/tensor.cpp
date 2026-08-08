@@ -399,6 +399,32 @@ TEST(TensorTest, TorchTensorCtorScalarFloatingType) {
       /*default_dtype=*/torch::kDouble);
 }
 
+TEST(TensorTest, TorchTensorCtorScalarBFloat16Type) {
+  AutoDefaultDtypeMode dtype_mode(torch::kBFloat16);
+
+  auto tensor = at::tensor(
+      at::ArrayRef<c10::BFloat16>{c10::BFloat16(1.0f), c10::BFloat16(2.0f)},
+      at::dtype(at::kBFloat16));
+  ASSERT_EQ(tensor.numel(), 2);
+  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2}));
+  ASSERT_EQ(tensor.dtype(), torch::kBFloat16);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.0f));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.0f));
+}
+
+TEST(TensorTest, TorchTensorCtorScalarHalfType) {
+  AutoDefaultDtypeMode dtype_mode(torch::kHalf);
+
+  auto tensor = at::tensor(
+      at::ArrayRef<c10::Half>{c10::Half(1.0f), c10::Half(2.0f)},
+      at::dtype(at::kHalf));
+  ASSERT_EQ(tensor.numel(), 2);
+  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2}));
+  ASSERT_EQ(tensor.dtype(), torch::kHalf);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.0f));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.0f));
+}
+
 TEST(TensorTest, TorchTensorCtorScalarBoolType) {
   auto tensor = torch::tensor(true);
   ASSERT_EQ(tensor.numel(), 1);
