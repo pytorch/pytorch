@@ -6,7 +6,9 @@ import itertools
 import os
 import tempfile
 import unittest
+import weakref
 from collections.abc import Callable
+from typing import cast
 from unittest.mock import MagicMock
 
 import torch
@@ -129,8 +131,12 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: bool | int
-    ):
+        self,
+        params: list[nn.Parameter],
+        reshard_after_forward: bool | int,
+        mp_policy: MixedPrecisionPolicy | None = None,
+        lazy_init: bool = True,
+    ) -> FSDPParamGroup:
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
         post_forward_mesh_info = _get_post_forward_mesh_info(
@@ -143,10 +149,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             post_forward_mesh_info,
             self.device,
             None,  # shard_placement_fn
-            MixedPrecisionPolicy(),
+            mp_policy if mp_policy is not None else MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
-        fsdp_param_group.lazy_init()
+        if lazy_init:
+            fsdp_param_group.lazy_init()
         return fsdp_param_group
 
     @skip_if_lt_x_gpu(1)
@@ -175,6 +182,134 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 async_op=async_op,
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
+            )
+
+    @skip_if_lt_x_gpu(1)
+    def test_flat_param_buffer_layout_and_param_identity(self) -> None:
+        orig_params = self._init_params(self._get_param_sizes())
+        fsdp_param_group = self._init_fsdp_param_group(
+            orig_params,
+            reshard_after_forward=True,
+            lazy_init=False,
+        )
+        sharded_params = [param.sharded_param for param in fsdp_param_group.fsdp_params]
+        optimizer = torch.optim.SGD(sharded_params, lr=0.1)
+        fsdp_param_group.lazy_init()
+        for optim_param, sharded_param, fsdp_param in zip(
+            optimizer.param_groups[0]["params"],
+            sharded_params,
+            fsdp_param_group.fsdp_params,
+        ):
+            self.assertIs(sharded_param, fsdp_param.sharded_param)
+            self.assertIs(optim_param, sharded_param)
+
+        flat_param_buffer = fsdp_param_group._flat_param_buffer
+        self.assertIsNotNone(flat_param_buffer)
+        flat_param_buffer = cast(torch.Tensor, flat_param_buffer)
+        self.assertEqual(flat_param_buffer.dtype, orig_params[0].dtype)
+        offset = 0
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            sharded_param = fsdp_param.sharded_param
+            self.assertIsInstance(sharded_param, DTensor)
+            sharded_param = cast(DTensor, sharded_param)
+            self.assertEqual(
+                sharded_param._local_tensor.untyped_storage().data_ptr(),
+                flat_param_buffer.untyped_storage().data_ptr(),
+            )
+            self.assertEqual(sharded_param.storage_offset(), offset)
+            self.assertEqual(sharded_param._local_tensor.storage_offset(), offset)
+            offset += fsdp_param._sharded_param_data.numel()
+
+    @skip_if_lt_x_gpu(1)
+    def test_flat_param_buffer_falls_back_for_weakref(self) -> None:
+        orig_params = self._init_params(self._get_param_sizes())
+        fsdp_param_group = self._init_fsdp_param_group(
+            orig_params,
+            reshard_after_forward=True,
+            lazy_init=False,
+        )
+        sharded_param = fsdp_param_group.fsdp_params[0].sharded_param
+        param_ref = weakref.ref(sharded_param)
+
+        fsdp_param_group.lazy_init()
+
+        self.assertIsNone(fsdp_param_group._flat_param_buffer)
+        self.assertFalse(fsdp_param_group._flat_param_buffer_supported)
+        self.assertIs(param_ref(), sharded_param)
+
+    @skip_if_lt_x_gpu(1)
+    @parametrize("param_dtype", [None, torch.bfloat16])
+    def test_all_gather_with_flat_param_buffer(
+        self, param_dtype: torch.dtype | None
+    ) -> None:
+        class RecordingAllGather(DefaultAllGather):
+            def __init__(self) -> None:
+                self.output_tensor: torch.Tensor | None = None
+                self.input_tensor: torch.Tensor | None = None
+
+            def __call__(
+                self,
+                output_tensor: torch.Tensor,
+                input_tensor: torch.Tensor,
+                group: dist.ProcessGroup,
+                async_op: bool = False,
+            ) -> dist.Work | None:
+                self.output_tensor = output_tensor
+                self.input_tensor = input_tensor
+                return super().__call__(output_tensor, input_tensor, group, async_op)
+
+        orig_params = self._init_params(self._get_param_sizes())
+        fsdp_param_group = self._init_fsdp_param_group(
+            orig_params,
+            reshard_after_forward=True,
+            mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype),
+        )
+        flat_param_buffer = fsdp_param_group._flat_param_buffer
+        self.assertIsNotNone(flat_param_buffer)
+        flat_param_buffer = cast(torch.Tensor, flat_param_buffer)
+
+        all_gather_comm = RecordingAllGather()
+        all_gather_result = foreach_all_gather(
+            fsdp_param_group.fsdp_params,
+            fsdp_param_group.mesh_info.shard_process_group,
+            async_op=False,
+            all_gather_copy_in_stream=device_module.current_stream(),
+            all_gather_stream=device_module.current_stream(),
+            device=self.device,
+            all_gather_comm=all_gather_comm,
+        )
+        all_gather_input = all_gather_comm.input_tensor
+        all_gather_output = all_gather_comm.output_tensor
+        self.assertIsNotNone(all_gather_input)
+        self.assertIsNotNone(all_gather_output)
+        all_gather_input = cast(torch.Tensor, all_gather_input)
+        all_gather_output = cast(torch.Tensor, all_gather_output)
+        self.assertEqual(
+            all_gather_input.untyped_storage().data_ptr(),
+            all_gather_output.untyped_storage().data_ptr(),
+        )
+        self.assertEqual(
+            all_gather_input.storage_offset(),
+            fsdp_param_group.mesh_info.shard_process_group.rank()
+            * flat_param_buffer.numel(),
+        )
+        all_gather_dtype = param_dtype or flat_param_buffer.dtype
+        self.assertEqual(all_gather_input.dtype, all_gather_dtype)
+        self.assertEqual(all_gather_input, flat_param_buffer.to(all_gather_dtype))
+        foreach_all_gather_copy_out(
+            all_gather_result,
+            fsdp_param_group.fsdp_params,
+            fsdp_param_group.mesh_info.shard_process_group,
+        )
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            fsdp_param.init_unsharded_param()
+        fsdp_param_group._to_unsharded()
+        for orig_param, param in zip(
+            orig_params, fsdp_param_group.modules[0].parameters()
+        ):
+            self.assertEqual(
+                param,
+                orig_param if param_dtype is None else orig_param.to(param_dtype),
             )
 
     def _test_all_gather(
@@ -336,6 +471,9 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+
+
+instantiate_parametrized_tests(TestFullyShardCollectiveOps)
 
 
 class TestFullyShardCommunication(FSDPTest):
