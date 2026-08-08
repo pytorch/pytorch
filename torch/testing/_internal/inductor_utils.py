@@ -67,15 +67,17 @@ if HAS_TRITON:
     import triton
 
     TRITON_HAS_CPU = "cpu" in triton.backends.backends
+    TRITON_HAS_XPU = "intel" in triton.backends.backends
 else:
     TRITON_HAS_CPU = False
+    TRITON_HAS_XPU = False
 
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
 HAS_MTIA_AND_TRITON = torch.mtia.is_available() and HAS_TRITON
 
-HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and TRITON_HAS_XPU
 
 HAS_MPS = torch.mps.is_available()
 
