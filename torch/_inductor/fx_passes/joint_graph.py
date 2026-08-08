@@ -849,12 +849,14 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
-        # A narrower intermediate can be worth materializing before upcasting.
-        if dtype1.itemsize < dtype2.itemsize:
-            return
         if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
             arg_val.dtype, dtype1
         ):
+            return
+        # Preserve narrow intermediates when the final dtype is not restoring
+        # the original dtype. AMP round trips like fp32 -> fp16 -> fp32 should
+        # collapse when precision emulation is disabled.
+        if dtype1.itemsize < dtype2.itemsize and dtype2 != arg_val.dtype:
             return
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

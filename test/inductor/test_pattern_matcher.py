@@ -872,8 +872,8 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 2),
-            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.bfloat16, False, 1),
             (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
@@ -903,6 +903,22 @@ class TestPatternMatcher(TestCase):
         gm = make_fx(fn_int)(x)
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    @parametrize("emulate_precision_casts", [False, True])
+    def test_pointless_convert_preserves_non_roundtrip_narrow_intermediate(
+        self, emulate_precision_casts
+    ):
+        def fn(x):
+            x = torch.ops.prims.convert_element_type.default(x, torch.float16)
+            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+            return x
+
+        x = torch.randn(8, device=GPU_TYPE, dtype=torch.float64)
+        gm = make_fx(fn)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        with inductor_config.patch(emulate_precision_casts=emulate_precision_casts):
+            joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
     # Constant folding was explicitly turned off due to issue #108388
