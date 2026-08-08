@@ -1174,7 +1174,10 @@ class Module: ...
 # Defined in torch/csrc/Module.cpp
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
 def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
-def _add_docstr(obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
+class _AddDocstr(Protocol):
+    def __call__(self, obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
+
+_add_docstr: _AddDocstr
 def _init_names(arg: Sequence[type]) -> None: ...  # THPModule_initNames
 def _has_distributed() -> _bool: ...  # THPModule_hasDistributed
 def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorType
