@@ -1,16 +1,18 @@
+#include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/core/GraphImplInterface.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/MemPool.h>
-#include <ATen/Functions.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <cstddef>
 #include <optional>
+#include <utility>
 
 namespace at::cuda {
 
@@ -411,10 +413,16 @@ void CUDAGraph::reset() {
 #endif
 }
 
-// Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
+// Returns an id another graph's capture_begin can use to share the same memory
+// pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-  TORCH_CHECK(capture_ended_,
-              "Called CUDAGraph::pool() without a preceding successful capture.");
+  return std::as_const(*this).pool();
+}
+
+MempoolId_t CUDAGraph::pool() const {
+  TORCH_CHECK(
+      capture_ended_,
+      "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
 }
 
@@ -692,5 +700,80 @@ std::function<bool(cudaStream_t)> CUDAGraph::create_child_allocate_filter() {
 #endif
 }
 
+namespace {
+
+// Adapt the portable graph interface without changing CUDAGraph's public ABI.
+// CUDA-specific graph extensions remain available through CUDAGraph itself.
+class CUDAAcceleratorGraphImpl final : public GraphImplInterface {
+ public:
+  explicit CUDAAcceleratorGraphImpl(const GraphImplArgs& args)
+      : graph_(args.keep_graph) {}
+
+  void capture_begin(MempoolId_t pool, GraphCaptureMode capture_mode) override {
+    auto cuda_capture_mode = cudaStreamCaptureModeGlobal;
+    switch (capture_mode) {
+      case GraphCaptureMode::Default:
+      case GraphCaptureMode::Global:
+        break;
+      case GraphCaptureMode::ThreadLocal:
+        cuda_capture_mode = cudaStreamCaptureModeThreadLocal;
+        break;
+      case GraphCaptureMode::Relaxed:
+        cuda_capture_mode = cudaStreamCaptureModeRelaxed;
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Invalid GraphCaptureMode value: ",
+            static_cast<int>(capture_mode));
+    }
+    graph_.capture_begin(pool, cuda_capture_mode);
+  }
+
+  void capture_end() override {
+    graph_.capture_end();
+  }
+
+  void instantiate() override {
+    graph_.instantiate();
+  }
+
+  void replay() override {
+    if (!graph_.has_graph_exec()) {
+      graph_.instantiate();
+    }
+    graph_.replay();
+  }
+
+  void reset() override {
+    graph_.reset();
+  }
+
+  MempoolId_t pool() const override {
+    return graph_.pool();
+  }
+
+  void enable_debug_mode() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "torch.accelerator.Graph.enable_debug_mode is not supported for "
+        "CUDA. To dump a CUDA graph, capture it with torch.cuda.CUDAGraph.");
+  }
+
+  void debug_dump(const std::string& /*path*/) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "CUDA graphs captured through torch.accelerator.Graph cannot be "
+        "dumped. Recapture the graph with torch.cuda.CUDAGraph and use "
+        "torch.cuda.CUDAGraph.debug_dump instead.");
+  }
+
+ private:
+  CUDAGraph graph_;
+};
+
+REGISTER_GRAPH_IMPL(CUDA, CUDAAcceleratorGraphImpl)
+
+} // namespace
 
 } // namespace at::cuda

@@ -2788,6 +2788,76 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @parametrize("capture_error_mode", ["default", "global", "thread_local", "relaxed"])
+    def test_accelerator_graph_capture_modes(self, capture_error_mode):
+        stream = torch.Stream()
+        value = torch.zeros((), device="cuda")
+        graph = torch.accelerator.Graph(
+            capture_error_mode=capture_error_mode,
+        )
+
+        with stream, graph:
+            value.add_(1)
+        torch.accelerator.current_stream().wait_stream(stream)
+
+        value.zero_()
+        graph.replay()
+        self.assertEqual(value, 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_accelerator_graph_keep_graph_pool_reset(self):
+        stream = torch.Stream()
+        value = torch.zeros((), device="cuda")
+
+        first = torch.accelerator.Graph()
+        with stream, first:
+            value.add_(1)
+
+        pool = first.pool()
+        self.assertNotEqual(pool, (0, 0))
+
+        second = torch.accelerator.Graph(keep_graph=True, pool=pool)
+        with stream, second:
+            value.add_(2)
+        torch.accelerator.current_stream().wait_stream(stream)
+
+        self.assertEqual(second.pool(), pool)
+
+        value.zero_()
+        first.replay()
+        second.replay()
+        self.assertEqual(value, 3)
+
+        second.reset()
+        value.zero_()
+        with stream, second:
+            value.add_(4)
+        torch.accelerator.current_stream().wait_stream(stream)
+
+        self.assertEqual(second.pool(), pool)
+        second.instantiate()
+
+        value.zero_()
+        second.replay()
+        self.assertEqual(value, 4)
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "torch.accelerator.Graph.enable_debug_mode is not supported for CUDA",
+        ):
+            second.enable_debug_mode()
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "CUDA graphs captured through torch.accelerator.Graph cannot be dumped",
+        ):
+            second.debug_dump("unused.dot")
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_capture_stale_default_stream_error(self):
         """Default-stream warmup + side-stream capture raises a clear error
         (not an opaque CUDA crash) when override is not enabled."""

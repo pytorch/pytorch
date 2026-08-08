@@ -85,7 +85,8 @@ void THCPGraph_init(PyObject* module) {
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))
       .def(
           "pool",
-          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
+          torch::wrap_pybind_function_no_gil(
+              py::overload_cast<>(&at::cuda::CUDAGraph::pool)))
       .def(
           "pools",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pools))
