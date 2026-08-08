@@ -661,7 +661,7 @@ class ParameterList(Module):
     method will convert any :class:`~torch.Tensor` into :class:`~torch.nn.Parameter`.
 
     Args:
-        parameters (iterable, optional): an iterable of elements to add to the list.
+        values (iterable, optional): an iterable of elements to add to the list.
 
     Example::
 
@@ -815,7 +815,7 @@ class ParameterDict(Module):
     :class:`~torch.nn.Parameter`.
 
     Args:
-        values (iterable, optional): a mapping (dictionary) of
+        parameters (iterable, optional): a mapping (dictionary) of
             (string : Any) or an iterable of key-value pairs
             of type (string, Any)
 
