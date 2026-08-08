@@ -35,6 +35,7 @@ from torch.distributed.elastic.multiprocessing.api import (
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_LINUX,
     IS_MACOS,
@@ -42,15 +43,17 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
 
 
 class RunProcResultsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -94,6 +97,8 @@ class RunProcResultsTest(TestCase):
 
 
 class StdTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_from_value(self):
         self.assertEqual(Std.NONE, Std.from_str("0"))
         self.assertEqual(Std.OUT, Std.from_str("1"))
@@ -296,6 +301,7 @@ class _StartProcessesTest(TestCase):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
     class StartProcessesAsFuncTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         def test_to_map(self):
             local_world_size = 2
             self.assertEqual(
@@ -450,9 +456,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
-        @unittest.skipIf(
-            TEST_WITH_ROCM,
-            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        @skipIfRocm(
+            msg="Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
         )
         def test_function_raise(self):
             """
@@ -552,6 +557,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 )
 
     class StartProcessesAsBinaryTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         ########################################
         # start_processes as binary tests
         ########################################
@@ -643,6 +649,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
     class StartProcessesListAsFuncTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         def test_function(self):
             for start_method, redirs in product(
                 self._start_methods, redirects_oss_test()
@@ -683,6 +690,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             )
 
     class StartProcessesListAsBinaryTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         ########################################
         # start_processes as binary tests
         ########################################
@@ -724,9 +732,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             )
 
         @unittest.skipIf(
-            IS_LINUX or TEST_WITH_ROCM,
+            IS_LINUX,
             "https://github.com/pytorch/pytorch/issues/163230",
         )
+        @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163230")
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",
@@ -795,6 +804,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCIAsFuncTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         @skip_if_pytest
         def test_wrap_bad(self):
             none = ""
@@ -985,6 +995,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 self._test_zombie_workflow(wait_fn, s)
 
     class StartProcessesNotCIAsBinaryTest(_StartProcessesTest):
+        hw_classification = HardwareClassification.GENERIC
         def test_binary_signal(self):
             pc = start_processes(
                 name="echo",
@@ -1021,6 +1032,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
         StartProcessesListAsFuncTest,
         StartProcessesNotCIAsFuncTest,
     ):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self._start_methods = ["forkserver"]
@@ -1036,6 +1049,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
 
 class BoundedCloseTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Verify that _close in MultiprocessContext / SubprocessContext returns
     within a bounded time when child processes refuse to die (simulating a
     Linux D-state worker, which SIGKILL cannot reap).
