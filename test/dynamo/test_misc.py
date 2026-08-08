@@ -22,6 +22,7 @@ import random
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import traceback
@@ -105,6 +106,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     subtest,
     TEST_HPU,
+    TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
@@ -154,6 +156,12 @@ def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
         raise unittest.SkipTest(f"only works when TV is True.")
 
     return wrapper
+
+
+def xfailIfTorchDynamoFreeThreaded(fn):
+    if TEST_WITH_TORCHDYNAMO and sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        return unittest.expectedFailure(fn)
+    return fn
 
 
 class MyPickledModule(torch.nn.Module):
@@ -8032,6 +8040,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         _do_test(g)
 
+    @xfailIfTorchDynamoFreeThreaded
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
 

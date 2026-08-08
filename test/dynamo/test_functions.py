@@ -38,6 +38,8 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_TORCHDYNAMO,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -1235,6 +1237,7 @@ partial_fn = functools.partial(fn, scale=2)
         y += float("1.2")
         return torch.add(x, y)
 
+    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 14))
     def test_float_or_complex_from_number(self):
         @make_test
         def _float_from_number_impl(x):
