@@ -12,7 +12,7 @@ import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
-     make_tensor, skipIfTorchDynamo)
+     make_tensor, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
@@ -361,22 +361,6 @@ class TestFFT(TestCase):
             result.dtype in (torch.complex64, torch.float32),
             f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
         )
-
-    @onlyNativeDeviceTypes
-    @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
-    def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
-        t = make_tensor(13, 13, device=device, dtype=dtype)
-        err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            op(t)
-
-        if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD):
-            kwargs = {'s': (12, 12)}
-        else:
-            kwargs = {'n': 12}
-
-        with self.assertRaisesRegex(RuntimeError, err_msg):
-            op(t, **kwargs)
 
     # nd-fft tests
     @onlyNativeDeviceTypes
@@ -855,96 +839,6 @@ class TestFFT(TestCase):
     @dtypes(torch.double)
     def test_fft_ifft_rfft_irfft(self, device, dtype):
         self._test_fft_ifft_rfft_irfft(device, dtype)
-
-    @deviceCountAtLeast(1)
-    @onlyCUDA
-    @dtypes(torch.double)
-    def test_cufft_plan_cache(self, devices, dtype):
-        @contextmanager
-        def plan_cache_max_size(device, n):
-            if device is None:
-                plan_cache = torch.backends.cuda.cufft_plan_cache
-            else:
-                plan_cache = torch.backends.cuda.cufft_plan_cache[device]
-            original = plan_cache.max_size
-            plan_cache.max_size = n
-            try:
-                yield
-            finally:
-                plan_cache.max_size = original
-
-        with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
-            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
-
-        with plan_cache_max_size(devices[0], 0):
-            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
-
-        torch.backends.cuda.cufft_plan_cache.clear()
-
-        # check that stll works after clearing cache
-        with plan_cache_max_size(devices[0], 10):
-            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
-
-        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
-            torch.backends.cuda.cufft_plan_cache.max_size = -1
-
-        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
-            torch.backends.cuda.cufft_plan_cache.size = -1
-
-        with self.assertRaisesRegex(RuntimeError, r"but got device with index"):
-            torch.backends.cuda.cufft_plan_cache[torch.cuda.device_count() + 10]
-
-        # Multigpu tests
-        if len(devices) > 1:
-            # Test that different GPU has different cache
-            x0 = torch.randn(2, 3, 3, device=devices[0])
-            x1 = x0.to(devices[1])
-            self.assertEqual(torch.fft.rfftn(x0, dim=(-2, -1)), torch.fft.rfftn(x1, dim=(-2, -1)))
-            # If a plan is used across different devices, the following line (or
-            # the assert above) would trigger illegal memory access. Other ways
-            # to trigger the error include
-            #   (1) setting CUDA_LAUNCH_BLOCKING=1 (pytorch/pytorch#19224) and
-            #   (2) printing a device 1 tensor.
-            x0.copy_(x1)
-
-            # Test that un-indexed `torch.backends.cuda.cufft_plan_cache` uses current device
-            with plan_cache_max_size(devices[0], 10):
-                with plan_cache_max_size(devices[1], 11):
-                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
-                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
-
-                    self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
-                    with torch.cuda.device(devices[1]):
-                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
-                        with torch.cuda.device(devices[0]):
-                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
-
-                self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
-                with torch.cuda.device(devices[1]):
-                    with plan_cache_max_size(None, 11):  # default is cuda:1
-                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
-                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
-
-                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
-                        with torch.cuda.device(devices[0]):
-                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
-                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
-
-    @onlyCUDA
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_cufft_context(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/109448
-        x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
-        dout = torch.zeros(32, dtype=dtype, device=device)
-
-        # compute iFFT(FFT(x))
-        out = torch.fft.ifft(torch.fft.fft(x))
-        out.backward(dout, retain_graph=True)
-
-        dx = torch.fft.fft(torch.fft.ifft(dout))
-
-        self.assertTrue((x.grad - dx).abs().max() == 0)
-        self.assertFalse((x.grad - x).abs().max() == 0)
 
     @onlyCUDA
     @largeTensorTest("18GB")
@@ -1621,26 +1515,6 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
-    @onlyCUDA
-    @requires_mkl
-    def test_stft_window_device(self, device):
-        # Test the (i)stft window must be on the same device as the input
-        x = torch.randn(1000, dtype=torch.complex64)
-        window = torch.randn(100, dtype=torch.complex64)
-
-        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
-            torch.stft(x, n_fft=100, window=window.to(device))
-
-        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
-            torch.stft(x.to(device), n_fft=100, window=window)
-
-        X = torch.stft(x, n_fft=100, window=window)
-
-        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
-            torch.istft(X, n_fft=100, window=window.to(device))
-
-        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
-            torch.istft(x.to(device), n_fft=100, window=window)
 
 
 class FFTDocTestFinder:
@@ -1686,12 +1560,141 @@ def generate_doc_test(doc_test):
 
     setattr(TestFFTDocExamples, 'test_' + doc_test.name, skipCPUIfNoFFT(test))
 
+class TestCUFFT(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @deviceCountAtLeast(1)
+    @dtypes(torch.double)
+    def test_cufft_plan_cache(self, devices, dtype):
+        @contextmanager
+        def plan_cache_max_size(device, n):
+            if device is None:
+                plan_cache = torch.backends.cuda.cufft_plan_cache
+            else:
+                plan_cache = torch.backends.cuda.cufft_plan_cache[device]
+            original = plan_cache.max_size
+            plan_cache.max_size = n
+            try:
+                yield
+            finally:
+                plan_cache.max_size = original
+
+        with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
+
+        with plan_cache_max_size(devices[0], 0):
+            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(devices[0], 10):
+            self._test_fft_ifft_rfft_irfft(devices[0], dtype)
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"but got device with index"):
+            torch.backends.cuda.cufft_plan_cache[torch.cuda.device_count() + 10]
+
+        # Multigpu tests
+        if len(devices) > 1:
+            # Test that different GPU has different cache
+            x0 = torch.randn(2, 3, 3, device=devices[0])
+            x1 = x0.to(devices[1])
+            self.assertEqual(torch.fft.rfftn(x0, dim=(-2, -1)), torch.fft.rfftn(x1, dim=(-2, -1)))
+            # If a plan is used across different devices, the following line (or
+            # the assert above) would trigger illegal memory access. Other ways
+            # to trigger the error include
+            #   (1) setting CUDA_LAUNCH_BLOCKING=1 (pytorch/pytorch#19224) and
+            #   (2) printing a device 1 tensor.
+            x0.copy_(x1)
+
+            # Test that un-indexed `torch.backends.cuda.cufft_plan_cache` uses current device
+            with plan_cache_max_size(devices[0], 10):
+                with plan_cache_max_size(devices[1], 11):
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                    with torch.cuda.device(devices[1]):
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(devices[0]):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+
+                self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                with torch.cuda.device(devices[1]):
+                    with plan_cache_max_size(None, 11):  # default is cuda:1
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(devices[0]):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+
+    @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_cufft_context(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/109448
+        x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
+        dout = torch.zeros(32, dtype=dtype, device=device)
+
+        # compute iFFT(FFT(x))
+        out = torch.fft.ifft(torch.fft.fft(x))
+        out.backward(dout, retain_graph=True)
+
+        dx = torch.fft.fft(torch.fft.ifft(dout))
+
+        self.assertTrue((x.grad - dx).abs().max() == 0)
+        self.assertFalse((x.grad - x).abs().max() == 0)
+
+    @onlyCUDA
+    @requires_mkl
+    def test_stft_window_device(self, device):
+        # Test the (i)stft window must be on the same device as the input
+        x = torch.randn(1000, dtype=torch.complex64)
+        window = torch.randn(100, dtype=torch.complex64)
+
+        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
+            torch.stft(x, n_fft=100, window=window.to(device))
+
+        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
+            torch.stft(x.to(device), n_fft=100, window=window)
+
+        X = torch.stft(x, n_fft=100, window=window)
+
+        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
+            torch.istft(X, n_fft=100, window=window.to(device))
+
+        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
+            torch.istft(x.to(device), n_fft=100, window=window)
+
+    @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
+    def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
+        t = make_tensor(13, 13, device=device, dtype=dtype)
+        err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            op(t)
+
+        if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD):
+            kwargs = {'s': (12, 12)}
+        else:
+            kwargs = {'n': 12}
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            op(t, **kwargs)
+
 for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
     generate_doc_test(doc_test)
 
 
 instantiate_device_type_tests(TestFFT, globals())
 instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
+instantiate_device_type_tests(TestCUFFT, globals(), only_for='cuda')
 
 if __name__ == '__main__':
     run_tests()
