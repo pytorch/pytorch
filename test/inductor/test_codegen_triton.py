@@ -47,6 +47,70 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
+if has_triton_package():
+    import triton
+    import triton as triton_alias
+    import triton.language as tl
+    from triton import jit as triton_jit
+
+    @triton.jit(
+        noinline=True,
+        debug=True,
+        do_not_specialize=["x"],
+    )
+    def noinline_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_noinline_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = noinline_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    @triton_jit(noinline=True, debug=True)
+    def aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_aliased_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    @triton_alias.jit(noinline=True, debug=True)
+    def module_aliased_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_module_aliased_jit_helper(
+        x, out, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = module_aliased_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+    def repr_for_codegen(*args, **kwargs):
+        return "repr"
+
+    @triton.jit(repr=repr_for_codegen)
+    def global_option_jit_helper_for_codegen(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_global_option_jit_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = global_option_jit_helper_for_codegen(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
+
+
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -719,6 +783,141 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_root_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        class FakeSizeVars:
+            class ShapeEnv:
+                @staticmethod
+                def has_guarding_hint(x):
+                    return True
+
+            shape_env = ShapeEnv()
+
+            @staticmethod
+            def statically_known_equals(x, y):
+                return False
+
+            @staticmethod
+            def statically_known_true(x):
+                return bool(x)
+
+            @staticmethod
+            def statically_known_multiple_of(x, y):
+                return False
+
+            @staticmethod
+            def guarding_hint_or_throw(x):
+                return int(x)
+
+            @staticmethod
+            def check_leq(x, y):
+                pass
+
+        class FakeGraph:
+            sizevars = FakeSizeVars()
+
+            @staticmethod
+            def get_current_device_or_throw():
+                return torch.device("cuda")
+
+        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.user_defined_kernel_cache = {}
+        captured = {}
+
+        def define_kernel(name, body, metadata=None):
+            captured["body"] = body
+
+        wrapper.define_kernel = define_kernel
+        props = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+        )
+        with (
+            V.set_graph_handler(FakeGraph()),
+            patch.object(DeviceProperties, "create", return_value=props),
+        ):
+            wrapper.define_user_defined_triton_kernel(
+                noinline_helper_for_codegen,
+                configs=[],
+                kwargs={"x": 2},
+                restore_value_args=[],
+                reset_to_zero_args=[],
+                grids=[[1, 1, 1]],
+                epilogue_fusion=None,
+                launch_kwargs=(),
+            )
+
+        self.assertIn("@triton.jit(", captured["body"])
+        self.assertIn("noinline=True", captured["body"])
+        self.assertIn("debug=True", captured["body"])
+        self.assertIn('do_not_specialize=["x"]', captured["body"])
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_noinline_helper
+        )
+        decorator_idx = source.index("@triton.jit(")
+        helper_idx = source.index("def noinline_helper_for_codegen")
+        self.assertLess(decorator_idx, helper_idx)
+        self.assertIn("noinline=True", source)
+        self.assertIn("debug=True", source)
+        self.assertIn('do_not_specialize=["x"]', source)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_preserves_aliased_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        test_cases = (
+            (root_for_aliased_jit_helper, "def aliased_jit_helper_for_codegen"),
+            (
+                root_for_module_aliased_jit_helper,
+                "def module_aliased_jit_helper_for_codegen",
+            ),
+        )
+        for root, helper_def in test_cases:
+            source = user_defined_triton_kernel_transitive_closure_source_code(root)
+            decorator_idx = source.index("@triton.jit(")
+            helper_idx = source.index(helper_def)
+            self.assertLess(decorator_idx, helper_idx)
+            self.assertIn("noinline=True", source)
+            self.assertIn("debug=True", source)
+
+    def test_user_defined_triton_kernel_jit_decorator_parse_failure_falls_back(self):
+        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
+
+        for raw_src in (None, "", "@triton.jit(\n", ["@triton.jit(\n"]):
+            self.assertEqual(
+                _triton_jit_decorator_from_source(SimpleNamespace(raw_src=raw_src)),
+                "@triton.jit",
+            )
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_rejects_global_jit_decorator_option(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        msg = (
+            "global_option_jit_helper_for_codegen: @triton.jit decorator options "
+            "must be Python literals for Inductor codegen"
+        )
+        with self.assertRaisesRegex(AssertionError, msg):
+            user_defined_triton_kernel_transitive_closure_source_code(
+                root_for_global_option_jit_helper
+            )
 
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a

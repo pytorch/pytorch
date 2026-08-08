@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -13,6 +14,7 @@ import os
 import random
 import re
 import tempfile
+import textwrap
 from collections.abc import Callable
 from enum import Enum
 from itertools import chain, count
@@ -358,6 +360,64 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def _triton_jit_decorator_from_source(symbol) -> str:
+    raw_src = getattr(symbol, "raw_src", None)
+    if raw_src:
+        # Triton .src strips decorators; raw_src preserves them in current Triton.
+        # Joining handles both string raw_src and list-of-lines raw_src variants.
+        try:
+            import triton
+
+            src = textwrap.dedent("".join(raw_src))
+            fn_def = ast.parse(src).body[0]
+            if isinstance(fn_def, ast.FunctionDef):
+                global_symbols = getattr(getattr(symbol, "fn", None), "__globals__", {})
+
+                def is_triton_jit(decorator: ast.expr) -> bool:
+                    if isinstance(decorator, ast.Call):
+                        decorator = decorator.func
+                    if isinstance(decorator, ast.Name):
+                        return global_symbols.get(decorator.id) is triton.jit
+                    if isinstance(decorator, ast.Attribute):
+                        base = decorator.value
+                        return (
+                            decorator.attr == "jit"
+                            and isinstance(base, ast.Name)
+                            and getattr(global_symbols.get(base.id), "jit", None)
+                            is triton.jit
+                        )
+                    return False
+
+                def check_triton_jit_decorator_literals(
+                    decorator: ast.Call,
+                ) -> None:
+                    try:
+                        for arg in decorator.args:
+                            ast.literal_eval(arg)
+                        for keyword in decorator.keywords:
+                            if keyword.arg is None:
+                                raise ValueError
+                            ast.literal_eval(keyword.value)
+                    except ValueError as exc:
+                        raise AssertionError(
+                            f"{symbol.__name__}: @triton.jit decorator options "
+                            "must be Python literals for Inductor codegen"
+                        ) from exc
+
+                for decorator in fn_def.decorator_list:
+                    if is_triton_jit(decorator):
+                        if isinstance(decorator, ast.Call):
+                            check_triton_jit_decorator_literals(decorator)
+                            decorator_src = ast.get_source_segment(src, decorator)
+                            func_src = ast.get_source_segment(src, decorator.func)
+                            if decorator_src and func_src:
+                                return f"@triton.jit{decorator_src[len(func_src) :]}"
+                        return "@triton.jit"
+        except (ImportError, IndexError, SyntaxError, TypeError, ValueError):
+            pass
+    return "@triton.jit"
+
+
 def user_defined_triton_kernel_transitive_closure_source_code(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
 ) -> str:
@@ -400,7 +460,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                 symbol = cur_kernel.fn.__globals__[symbol_name]
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
-                    compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(
+                        _triton_jit_decorator_from_source(symbol), strip=True
+                    )
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -3697,9 +3759,9 @@ class PythonWrapperCodegen(CodeGen):
                 filename=__file__,
                 custom_kernel=True,
             )
-            @triton.jit
             """
         )
+        compile_wrapper.splice(_triton_jit_decorator_from_source(kernel), strip=True)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )
