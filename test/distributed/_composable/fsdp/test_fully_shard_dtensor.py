@@ -344,7 +344,7 @@ class TestFullyShardDTensor(FSDPTest):
                 self.assertIsInstance(param.placements[1], Replicate)
 
     @skip_if_lt_x_gpu(4)
-    def test_reduce_scatter_unused_dtensor_param(self):
+    def test_reduce_scatter_globally_unused_dtensor_param(self):
         class TwoExpertParams(nn.Module):
             def __init__(self, ep_mesh) -> None:
                 super().__init__()
@@ -360,6 +360,7 @@ class TestFullyShardDTensor(FSDPTest):
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # all ranks only use the "used" tensor. "Unused" is globally untouched.
                 return self.used.to_local().float().sum() + (x.float().sum() * 0)
 
         mesh = init_device_mesh(
@@ -376,11 +377,65 @@ class TestFullyShardDTensor(FSDPTest):
         torch.get_device_module(device_type).synchronize()
 
         unused_grad = model.unused.grad
-        self.assertIsNotNone(unused_grad)
-        self.assertIsInstance(unused_grad, DTensor)
-        self.assertEqual(
-            unused_grad.to_local(), torch.zeros_like(unused_grad.to_local())
+        used_grad = model.used.grad
+        self.assertIsNone(unused_grad)
+        self.assertIsNotNone(used_grad)
+        self.assertIsInstance(used_grad, DTensor)
+        self.assertNotEqual(used_grad, torch.zeros_like(used_grad))
+
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_diff_exp_dtensor_param(self):
+        """
+        Test MoE scenario where parameters are locally unused but used on other ranks.
+        Also for the edge case where there is not enough rows for the experts to be
+            sharded along the dp dimension.
+        """
+
+        class TwoExpertParams(nn.Module):
+            def __init__(self, mesh) -> None:
+                super().__init__()
+                experts = torch.randn(2, 4, device=device_type)
+                self.register_parameter(
+                    "experts",
+                    nn.Parameter(distribute_tensor(experts, mesh["ep"], [Shard(0)])),
+                )
+                self.dp_mesh = mesh["dp"]
+                self.ep_mesh = mesh["ep"]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                local_expert = self.experts.to_local()
+                dp_rank = self.dp_mesh.get_local_rank()
+                ep_rank = self.ep_mesh.get_local_rank()
+                if dp_rank == ep_rank:
+                    return local_expert.sum() + (x.sum() * 0)
+                else:
+                    return x.sum() * 0
+
+        mesh = init_device_mesh(
+            device_type.type, (self.world_size // 2, 2), mesh_dim_names=("dp", "ep")
         )
+        model = TwoExpertParams(mesh)
+        fully_shard(model, mesh=mesh["dp"], reshard_after_forward=True)
+        model.set_reduce_scatter_unused_params(True)
+
+        loss = model(torch.ones(1, device=device_type, requires_grad=True))
+        loss.backward()
+        torch.get_device_module(device_type).synchronize()
+
+        dp_rank = mesh["dp"].get_local_rank()
+        if dp_rank == 0:
+            # DP rank 0 holds a non-empty (1, 4) shard. Reduce-scatter
+            # delivers real gradient values here regardless of whether
+            # this rank used the expert, because the contributing rank's
+            # gradient spans both shard rows.
+            self.assertIsNotNone(model.experts.grad)
+            self.assertIsInstance(model.experts.grad, DTensor)
+            self.assertTrue(model.experts.grad.to_local().any())
+        else:
+            # DP rank 1 holds an empty (0, 4) shard because the (1, 4)
+            # local tensor cannot be split into 2 rows. No gradient
+            # data can be received, so grad is None.
+            self.assertIsNone(model.experts.grad)
 
     @skip_if_lt_x_gpu(2)
     def test_validation_non_replicate_dp_placement(self):
