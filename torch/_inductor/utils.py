@@ -26,6 +26,7 @@ from collections.abc import (
     Callable,
     Collection,
     Generator,
+    Iterable,
     Iterator,
     Mapping,
     MutableMapping,
@@ -39,6 +40,7 @@ from typing import (
     Concatenate,
     Generic,
     Literal,
+    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
@@ -153,6 +155,90 @@ _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = torch.Tensor | int | torch.SymInt | None
+
+
+class ImportableConstexprType(NamedTuple):
+    module: str
+    qualname: str
+    root_name: str
+
+
+def _constexpr_type_repr_prefix(value: object) -> str | None:
+    value_type = type(value)
+    type_name = getattr(value_type, "__name__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    if type_name is None or type_qualname is None:
+        return None
+    value_repr = repr(value)
+    for prefix in (f"{type_qualname}(", f"{type_name}("):
+        if value_repr.startswith(prefix):
+            return prefix
+    return None
+
+
+def _collect_importable_constexpr_types(
+    value: object,
+    result: dict[str, ImportableConstexprType],
+    seen: OrderedSet[int],
+) -> None:
+    if id(value) in seen:
+        return
+    seen.add(id(value))
+
+    value_type = type(value)
+    type_module = getattr(value_type, "__module__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    if (
+        type_module is not None
+        and type_qualname is not None
+        and type_module != "builtins"
+        and _constexpr_type_repr_prefix(value) is not None
+    ):
+        if type_module == "__main__" or "<locals>" in type_qualname:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} is not importable. "
+                "Define constexpr config classes at module scope in an importable module."
+            )
+        root_name = type_qualname.split(".", 1)[0]
+        existing = result.get(root_name)
+        if existing is not None and (
+            existing.module != type_module or existing.qualname != type_qualname
+        ):
+            raise ImportError(
+                "Triton constexpr values require conflicting imports for "
+                f"{root_name}: {existing.module}.{existing.qualname} and "
+                f"{type_module}.{type_qualname}"
+            )
+        result[root_name] = ImportableConstexprType(
+            module=type_module,
+            qualname=type_qualname,
+            root_name=root_name,
+        )
+
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for field in dataclasses.fields(value):
+            _collect_importable_constexpr_types(
+                getattr(value, field.name), result, seen
+            )
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            _collect_importable_constexpr_types(key, result, seen)
+            _collect_importable_constexpr_types(item, result, seen)
+    elif isinstance(value, (list, tuple, OrderedSet, frozenset)):
+        for item in value:
+            _collect_importable_constexpr_types(item, result, seen)
+
+
+def get_importable_constexpr_types(
+    values: Iterable[object],
+) -> list[ImportableConstexprType]:
+    result: dict[str, ImportableConstexprType] = {}
+    seen: OrderedSet[int] = OrderedSet()
+    for value in values:
+        _collect_importable_constexpr_types(value, result, seen)
+    return list(result.values())
+
 
 XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")

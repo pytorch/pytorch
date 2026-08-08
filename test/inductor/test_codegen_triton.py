@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import ast
 import contextlib
+import dataclasses
 import unittest
 from collections import namedtuple
 from enum import Enum, IntEnum
@@ -31,6 +32,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -45,6 +47,18 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
+
+
+try:
+    from triton_constexpr_configs import (
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelNestedConfig,
+    )
+except ImportError:
+    from test.inductor.triton_constexpr_configs import (
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelNestedConfig,
+    )
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -148,6 +162,40 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_importable_constexpr_types_nested_values(self):
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    "cfg": UserDefinedTritonKernelNestedConfig(
+                        nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                    )
+                }
+            ]
+        )
+        self.assertEqual(
+            type_specs,
+            [
+                (
+                    UserDefinedTritonKernelNestedConfig.__module__,
+                    "UserDefinedTritonKernelNestedConfig",
+                    "UserDefinedTritonKernelNestedConfig",
+                ),
+                (
+                    UserDefinedTritonKernelConfigNamespace.__module__,
+                    "UserDefinedTritonKernelConfigNamespace.Nested",
+                    "UserDefinedTritonKernelConfigNamespace",
+                ),
+            ],
+        )
+
+    def test_importable_constexpr_types_local_class_error(self):
+        @dataclasses.dataclass(frozen=True)
+        class LocalConfig:
+            offset: int
+
+        with self.assertRaisesRegex(ImportError, "not importable"):
+            get_importable_constexpr_types([LocalConfig(offset=2)])
 
     def test_escape_triton_kernel_source_for_wrapper(self):
         source = """\
@@ -719,6 +767,51 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_non_builtin_constexpr(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_constexpr_kernel(
+            x,
+            out,
+            n_elements,
+            cfg: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.nested.offset, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_constexpr_kernel[grid](
+                x,
+                out,
+                n_elements,
+                cfg=UserDefinedTritonKernelNestedConfig(
+                    nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                ),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, x + 2)
 
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a

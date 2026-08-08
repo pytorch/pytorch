@@ -58,6 +58,7 @@ from ..utils import (
     DelayReplaceLine,
     get_benchmark_name,
     get_dtype_size,
+    get_importable_constexpr_types,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -3683,6 +3684,13 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        for type_spec in get_importable_constexpr_types(
+            triton_meta.get("constants", {}).values()
+        ):
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
