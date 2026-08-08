@@ -1138,9 +1138,27 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
                                   IntArrayRef stride,
                                   IntArrayRef dilation,
                                   int64_t groups) {
-  bool is_unsupported_3d_dtype =
-      (input_t.dim() == 5 && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16));
-  TORCH_CHECK(!is_unsupported_3d_dtype, "ConvTranspose 3D with BF16 or FP16 types is not supported on MPS");
+  // ConvTranspose3d (5-D input) in fp16/bf16 used to hard-fail here (see
+  // gh-160739; gh-130256 tracks the earlier missing-kernel state for this op
+  // more generally). The 3D enablement in #154696 (fixing #154615) intentionally
+  // left half types unsupported because running the MPSGraph transpose-conv
+  // path directly in half precision showed a CPU-vs-GPU accuracy gap too large
+  // to sign off on without further study. Rather than reject the op, upcast
+  // to fp32 for the actual compute -- identical in spirit to the CPU reference
+  // path and to how other MPS ops (e.g. reductions) recover precision -- and
+  // cast the result back to the caller's dtype. This removes the accuracy gap
+  // because the math itself now runs in fp32 instead of fp16/bf16.
+  const bool is_3d = input_t.dim() == 5;
+  const bool needs_fp32_upcast = is_3d && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16);
+
+  if (needs_fp32_upcast) {
+    const auto orig_dtype = input_t.scalar_type();
+    const auto input_fp32 = input_t.to(at::kFloat);
+    const auto weight_fp32 = weight_t.to(at::kFloat);
+    auto output_fp32 =
+        mps_convolution_transpose_forward(input_fp32, weight_fp32, padding, output_padding, stride, dilation, groups);
+    return output_fp32.to(orig_dtype);
+  }
 
   auto output_t =
       mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);
@@ -1177,6 +1195,33 @@ std::tuple<Tensor, Tensor> mps_convolution_transpose_backward(const Tensor& inpu
                                                               IntArrayRef dilation,
                                                               int64_t groups,
                                                               std::array<bool, 2> output_mask) {
+  // Mirror the fp32-upcast path used in the forward op (see comment above
+  // `_mps_convolution_transpose`) so that autograd through a half-precision
+  // ConvTranspose3d works end to end instead of failing only on the forward
+  // pass.
+  const bool is_3d = input.dim() == 5;
+  const bool needs_fp32_upcast = is_3d && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
+
+  if (needs_fp32_upcast) {
+    const auto orig_dtype = input.scalar_type();
+    const auto input_fp32 = input.to(at::kFloat);
+    const auto grad_output_fp32 = grad_output.to(at::kFloat);
+    const auto weight_fp32 = weight.to(at::kFloat);
+
+    Tensor grad_input, grad_weight;
+    if (output_mask[0]) {
+      grad_input = mps_convolution_transpose_backward_input(
+          grad_output_fp32, weight_fp32, padding, stride, dilation, groups, input_fp32.sizes());
+      grad_input = grad_input.to(orig_dtype);
+    }
+    if (output_mask[1]) {
+      grad_weight = mps_convolution_transpose_backward_weight(
+          weight_fp32.sizes(), grad_output_fp32, input_fp32, padding, stride, dilation, groups);
+      grad_weight = grad_weight.to(orig_dtype);
+    }
+    return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
+  }
+
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
     grad_input =
