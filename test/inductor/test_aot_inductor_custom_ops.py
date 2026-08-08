@@ -15,6 +15,7 @@ from torch.export import Dim, export
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -140,6 +141,9 @@ _memory_format_test_lib.impl(
 _memory_format_test_lib.impl(
     "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "XPU"
 )
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "PRIVATEUSEONE"
+)
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_memory_format_arg")
@@ -159,6 +163,7 @@ def _fn_with_layout_arg_impl(x, layout):
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CPU")
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CUDA")
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "XPU")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "PRIVATEUSEONE")
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_layout_arg")
@@ -532,6 +537,11 @@ class AOTInductorTestsTemplate:
                 aoti_torch_xpu_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
+                        """
+                AOTITorchError
+                aoti_torch_privateuseone_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
                     ],
                 },
             ),
@@ -544,6 +554,8 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -565,6 +577,8 @@ common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
 class AOTICustomOpTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         if IS_SANDCASTLE or IS_FBCODE:
             torch.ops.load_library("//caffe2/test/inductor:custom_ops")
@@ -610,6 +624,8 @@ GPU_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -629,6 +645,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
