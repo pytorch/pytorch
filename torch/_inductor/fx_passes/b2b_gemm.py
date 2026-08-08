@@ -358,6 +358,72 @@ b2b_gemm_configs = [
 ]
 
 
+# XPU-specific configs: num_stages=1 with smaller tiles. Appended to the
+# autotune candidate set only on XPU (see tuned_b2b_gemm). The triton-xpu
+# SPIR-V backend regresses on num_stages>=2 for the nested b2b loops, so
+# these simpler-pipeline configs (no software pipelining, lower register
+# pressure) keep the Triton template at parity with the unfused fallback.
+# Gated to XPU so CUDA/HIP autotune sees no extra candidates.
+b2b_gemm_xpu_configs = [
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 1,
+        "num_warps": 2,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 1,
+        "num_warps": 2,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+]
+
+
 def is_b2b_gemm_good_on(
     is_left_assoc: bool,
     A_node: torch.fx.Node,
@@ -392,6 +458,16 @@ def is_b2b_gemm_good_on(
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
     O, P = C.shape
+
+    # ceildiv() requires int arguments, but FakeTensor shapes may be
+    # torch.SymInt (even wrapping concrete values). Convert to int.
+    # With dynamic shapes enabled, SymInt may be symbolic -> can't compute
+    # the heuristic statically, so skip b2b_gemm.
+    try:
+        M, N, O, P = int(M), int(N), int(O), int(P)
+    except TypeError:
+        return False
+
     ratios = []
     if is_left_assoc:
         for config in b2b_gemm_configs:
@@ -569,8 +645,19 @@ def tuned_b2b_gemm(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
+    # XPU gets extra num_stages=1 / small-tile candidates: triton-xpu's
+    # SPIR-V backend regresses on deeper pipelines (num_stages>=2) for the
+    # nested b2b loops, so simpler-pipeline configs keep the Triton template
+    # at parity with the unfused fallback. Gated by device so that CUDA and
+    # HIP share the original CUDA-oriented b2b_gemm_configs candidate set.
+    device = A.get_device_or_error()
+    candidate_configs = (
+        b2b_gemm_configs + b2b_gemm_xpu_configs
+        if device.type == "xpu"
+        else b2b_gemm_configs
+    )
     choices: list[TritonTemplateCaller] = []
-    for config in b2b_gemm_configs:
+    for config in candidate_configs:
         if is_left_assoc:
             b2b_gemm_left_template.maybe_append_choice(
                 choices,
