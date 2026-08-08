@@ -103,7 +103,7 @@ static void scatter_set_metal(const Tensor& self, int64_t dim, const Tensor& ind
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_set_{}_{}", scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
@@ -206,7 +206,7 @@ static void scatter_reduce_metal(const Tensor& self,
   // intrinsic is only available at runtime on macOS 15+.
   const bool needs_signbit_xor = self.scalar_type() == ScalarType::Long && (op == "amin" || op == "amax");
   if (needs_signbit_xor) {
-    TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS),
+    TORCH_CHECK(is_macos_at_least(MacOSVersion::MACOS_15_0),
                 "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
     TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
   }
@@ -237,7 +237,7 @@ static void scatter_reduce_metal(const Tensor& self,
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_{}_strided_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
@@ -311,7 +311,7 @@ static void gather_metal(const Tensor& self, int64_t dim, const Tensor& index, c
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("gather_strided_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];

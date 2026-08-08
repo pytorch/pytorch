@@ -173,6 +173,11 @@ using opmath_t = typename detail::OpMathType<T>::type;
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
 
+template <typename T, int N>
+struct alignas(sizeof(T) * N) aligned_vector {
+  T v[N];
+};
+
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>
 using result_of = decltype(::metal::declval<F>()(::metal::declval<Args>()...));
@@ -212,6 +217,28 @@ template <
         bool> = true>
 inline common_dtype<T, U> floor_divide(T x, U y) {
   return ::metal::floor(x / y);
+}
+
+// Python floor-division semantics (torch `rounding_mode="floor"`), a port of
+// c10::div_floor_floating. Unlike floor_divide's naive floor(x/y), this handles
+// non-finite and signed-zero inputs (e.g. inf // 1 -> nan, 1 // -inf -> -1).
+template <
+    typename T,
+    ::metal::enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+inline T div_floor(const T a, const T b) {
+  if (b == 0) {
+    return a / b;
+  }
+  const auto mod = ::metal::fmod(a, b);
+  auto div = (a - mod) / b;
+  if (mod != 0 && (b < 0) != (mod < 0)) {
+    div -= T(1);
+  }
+  if (div == 0) {
+    return ::metal::copysign(T(0), a / b);
+  }
+  const auto floordiv = ::metal::floor(div);
+  return div - floordiv > T(0.5) ? floordiv + T(1) : floordiv;
 }
 
 // Workaround for Metal compiler bug: the compiler produces wrong results
@@ -332,6 +359,28 @@ inline common_dtype<T, U> div(const T x, const U y) {
     return T(x.x / y.x, x.y / y.x);
   }
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return ::metal::fma(x, y, z);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return z + mul(x, y);
 }
 
 // Remainder operator
@@ -517,6 +566,9 @@ inline float2 conj(float2 a) {
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
 //
+// Case 0: Either input is inf
+//  Return inf
+//
 // Case 1: `a == b`
 //   The formula simplifies to `h = a sqrt(2)`.
 //
@@ -528,6 +580,9 @@ inline float2 conj(float2 a) {
 // Case 3: All other cases.
 //   Use `h = a sqrt(1 + r)`.
 inline float hypot(float a_, float b_) {
+  if (::metal::isinf(a_) || ::metal::isinf(b_)) {
+    return INFINITY;
+  }
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
@@ -559,6 +614,38 @@ inline float hypot(float a_, float b_) {
   MACRO(float);                            \
   MACRO(half);                             \
   MACRO(bfloat);
+
+// Copy n bytes from src to dst using the widest vector their combined alignment
+// allows (uint4 -> uint2 -> uint -> ushort -> byte), with a scalar tail.
+inline void copy_bytes_aligned(device uchar* dst, constant uchar* src, uint n) {
+  const uint align =
+      (reinterpret_cast<ulong>(dst) | reinterpret_cast<ulong>(src)) & 15;
+  uint i = 0;
+  if (align == 0) {
+    for (; i + 16 <= n; i += 16) {
+      *reinterpret_cast<device uint4*>(dst + i) =
+          *reinterpret_cast<constant uint4*>(src + i);
+    }
+  } else if ((align & 7) == 0) {
+    for (; i + 8 <= n; i += 8) {
+      *reinterpret_cast<device uint2*>(dst + i) =
+          *reinterpret_cast<constant uint2*>(src + i);
+    }
+  } else if ((align & 3) == 0) {
+    for (; i + 4 <= n; i += 4) {
+      *reinterpret_cast<device uint*>(dst + i) =
+          *reinterpret_cast<constant uint*>(src + i);
+    }
+  } else if ((align & 1) == 0) {
+    for (; i + 2 <= n; i += 2) {
+      *reinterpret_cast<device ushort*>(dst + i) =
+          *reinterpret_cast<constant ushort*>(src + i);
+    }
+  }
+  for (; i < n; ++i) {
+    dst[i] = src[i];
+  }
+}
 
 } // namespace metal
 } // namespace c10
