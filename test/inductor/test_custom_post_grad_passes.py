@@ -18,7 +18,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
 
 
@@ -92,6 +92,8 @@ class RecordCustomPass(CustomGraphPass):
 
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
+    hw_classification = HardwareClassification.GENERIC
+
     #  mkldnn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/mkldnn_fusion.py),
     # and apply it to custom post_grad_passes.
