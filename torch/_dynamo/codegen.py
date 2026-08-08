@@ -46,8 +46,9 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
-from .variables.script_object import TorchScriptObjectVariable
+from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -304,7 +305,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            # Recompute from the operands at runtime instead of burning in the value
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -349,7 +359,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
@@ -521,6 +531,19 @@ class PyCodegen:
 
     def call_method(self, nargs: int) -> None:
         self.extend_output(create_call_method(nargs))
+
+    def create_list_append(self) -> list[Instruction]:
+        # Append TOS to the list at TOS-1, leaving the list on the stack
+        # (same stack effect as LIST_APPEND with arg=1).
+        #
+        # The bare LIST_APPEND opcode does not lock the list and so requires
+        # the target be uniquely owned (refcnt == 1) on free-threaded builds.
+        # Dynamo can't enforce this, so instead use LIST_EXTEND, which does
+        # lock
+        return [
+            create_instruction("BUILD_LIST", arg=1),
+            create_instruction("LIST_EXTEND", arg=1),
+        ]
 
     def create_load_attr(self, name: str) -> Instruction:
         if name not in self.code_options["co_names"]:

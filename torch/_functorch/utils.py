@@ -1,12 +1,10 @@
 import contextlib
 from collections.abc import Generator
-from typing import Any
 
-import torch
 from torch._C._functorch import (
     get_single_level_autograd_function_allowed,
     set_single_level_autograd_function_allowed,
-    unwrap_if_dead,
+    unwrap_dead_wrappers,
 )
 from torch.utils._exposed_in import exposed_in
 
@@ -27,14 +25,6 @@ def enable_single_level_autograd_function() -> Generator[None, None, None]:
         yield
     finally:
         set_single_level_autograd_function_allowed(prev_state)
-
-
-def unwrap_dead_wrappers(args: tuple[Any, ...]) -> tuple[Any, ...]:
-    # NB: doesn't use tree_map_only for performance reasons
-    result = tuple(
-        unwrap_if_dead(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
-    )
-    return result
 
 
 argnums_t = int | tuple[int, ...]

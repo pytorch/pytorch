@@ -13,12 +13,14 @@ to runtime changes in module state and structure.
 """
 
 import functools
+import inspect
 import weakref
 from collections.abc import MutableMapping
 from typing import Any
 
 import torch.nn
 from torch.nn import Module
+from torch.utils.hooks import _register_hook_dict_mutation_observer
 
 from . import config
 from .utils import ExactWeakKeyDictionary, nn_module_has_global_hooks
@@ -70,6 +72,14 @@ def on_mutation(obj: Any, name: str) -> None:
     tracker = MutationTracker.db.get(obj)
     if tracker is not None:
         tracker.on_mutation(name)
+
+
+def _on_hook_dict_mutation(hooks_dict: Any) -> None:
+    if not torch.compiler.is_dynamo_compiling():
+        on_mutation(hooks_dict, "hook dictionary")
+
+
+_register_hook_dict_mutation_observer(_on_hook_dict_mutation)
 
 
 def ensure_patched(cls: Any) -> None:
@@ -131,8 +141,10 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         # A monkey patched `.forward` indicates something wacky is going on
         # Similarly a nn module also subclassed as a dict is unusual.
         return True
-    if hasattr(obj, "torchdynamo_force_dynamic"):
-        return obj.torchdynamo_force_dynamic
+    try:
+        return inspect.getattr_static(obj, "torchdynamo_force_dynamic")
+    except AttributeError:
+        pass
     if isinstance(obj, torch.nn.Module) and (
         not is_export or config.install_free_tensors
     ):

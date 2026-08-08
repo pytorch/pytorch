@@ -9,7 +9,7 @@ However, its support doesn't end there; by default it integrates with the torch
 dispatcher, inheriting its backend
 [support matrix](https://docs.pytorch.org/docs/stable/backends.html). Moreover,
 it supports the execution of
-[AOTInductor](https://github.com/pytorch/pytorch/blob/main/docs/source/torch.compiler_aot_inductor.rst)-lowered
+[AOTInductor](https://docs.pytorch.org/docs/main/torch.compiler_aot_inductor.html)-lowered
 artifacts, and can be extended to support other delegate backends as seen fit.
 
 This document is intended to provide an overview of the foundational NativeRT
@@ -363,7 +363,7 @@ additions to enable memory planning.
 │    owned buffer offsets                    │ │ │ │   Frame_1    │  │                                                │   │executor.execute(args, frame)    │ │ │ │
 │                                            │ │ │ ├──────────────┤  │                                                │   │...                              │ │ │ │
 │    3. telling the layout planner           │ │ │ │   Frame_N    │◀─┼────return_frame()────────────5─────────────────┴───│frame.layout_manager.deallocate()│ │ │ │
-│    when a tensor have outgrown             │ │ │ └──────────────┘  │                                   ┌───────4────────┴─────────────────────────────────┘ │ │ │
+│    when a tensor has outgrown              │ │ │ └──────────────┘  │                                   ┌───────4────────┴─────────────────────────────────┘ │ │ │
 │                                            │ │ └───────────────────┘                                   │                                                    │ │ │
 │                                            │ │ ┌───────────────────┐                                   │                                                    │ │ │
 │                                            │ │ │                   │                                   │                                                    │ │ │

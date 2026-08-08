@@ -8,6 +8,26 @@ from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
+
+_hook_dict_mutation_observers: list[Callable[[Any], None]] = []
+
+
+def _register_hook_dict_mutation_observer(observer: Callable[[Any], None]) -> None:
+    """Register a process-lifetime observer for hook dictionary mutations.
+
+    Observers receive the exact dictionary after it is mutated. Hook registration
+    can run under tracing, so observers must be safe to trace.
+    """
+    if observer not in _hook_dict_mutation_observers:
+        _hook_dict_mutation_observers.append(observer)
+
+
+def _notify_hook_dict_mutation(hooks_dict: Any) -> None:
+    """Notify registered observers after a hook dictionary is mutated."""
+    for observer in _hook_dict_mutation_observers:
+        observer(hooks_dict)
+
+
 class RemovableHandle:
     r"""
     A handle which provides the capability to remove a hook.
@@ -22,17 +42,10 @@ class RemovableHandle:
     id: int
     next_id: int = 0
 
-    def __init__(
-        self,
-        hooks_dict: Any,
-        *,
-        extra_dict: Any = None,
-        remove_callback: Callable[[Any], None] | None = None,
-    ) -> None:
+    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
-        self.remove_callback = remove_callback
 
         self.extra_dict_ref: tuple = ()
         if isinstance(extra_dict, dict):
@@ -44,15 +57,13 @@ class RemovableHandle:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
-            if self.remove_callback is not None:
-                self.remove_callback(hooks_dict)
+            _notify_hook_dict_mutation(hooks_dict)
 
         for ref in self.extra_dict_ref:
             extra_dict = ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
-                if self.remove_callback is not None:
-                    self.remove_callback(extra_dict)
+                _notify_hook_dict_mutation(extra_dict)
 
     def __getstate__(self):
         if self.extra_dict_ref is None:
@@ -68,7 +79,6 @@ class RemovableHandle:
             self.hooks_dict_ref = weakref.ref(state[0])
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
-        self.remove_callback = None
 
         if len(state) < 3 or state[2] is None:
             self.extra_dict_ref = ()
@@ -236,17 +246,21 @@ class BackwardHook:
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
-                    warnings.warn("Full backward hook is firing when gradients are computed "
-                                  "with respect to module outputs since no inputs require gradients. See "
-                                  "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
-                                  "for more details.",
-                                  stacklevel=5)
-                    grad_inputs = self._pack_with_none([], [], self.n_inputs)
-                    for user_hook in self.user_hooks:
-                        res = user_hook(self.module, grad_inputs, self.grad_outputs)
-                        if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
-                            raise RuntimeError("Backward hook for Modules where no input requires "
-                                               "gradient should always return None or None for all gradients.")
+                    # Only full backward hooks (not pre-hooks) receive grad_input
+                    # and are the subject of the warning; pre-hooks already ran
+                    # above from grad_output. Skip both when none are registered.
+                    if self.user_hooks:
+                        warnings.warn("Full backward hook is firing when gradients are computed "
+                                      "with respect to module outputs since no inputs require gradients. See "
+                                      "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
+                                      "for more details.",
+                                      stacklevel=5)
+                        grad_inputs = self._pack_with_none([], [], self.n_inputs)
+                        for user_hook in self.user_hooks:
+                            res = user_hook(self.module, grad_inputs, self.grad_outputs)
+                            if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
+                                raise RuntimeError("Backward hook for Modules where no input requires "
+                                                   "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
                 if local_grad_outputs is not None:

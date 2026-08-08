@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import shutil
@@ -14,13 +15,18 @@ from ..cuda.compile_utils import _cutlass_include_paths
 log = logging.getLogger(__name__)
 
 
+@functools.cache
+def icpx_exist(icpx_path: str | None = "icpx") -> bool:
+    return icpx_path is not None and shutil.which(icpx_path) is not None
+
+
 def _sycl_compiler() -> str:
     # Search order:
     # 0) which icpx
     # 1) config.xpu.oneapi_root
     # 2) ONEAPI_ROOT environment variable
     # 3) default system search PATH.
-    if shutil.which("icpx"):
+    if icpx_exist("icpx"):
         return "icpx"
 
     if os.path.exists(config.xpu.oneapi_root or ""):
@@ -37,8 +43,10 @@ def _sycl_compiler() -> str:
         else:
             os.environ["CPLUS_INCLUDE_PATH"] = oneapi_inclue
         return os.path.realpath(os.path.join(oneapi_root, "bin/icpx"))
-    else:
-        raise RuntimeError("Can not find Intel compiler.")
+
+    # Mirrors _cuda_compiler(): return the bare name and let the compile
+    # subprocess produce the error, so callers can probe with icpx_exist().
+    return "icpx"
 
 
 def _sycl_lib_options() -> list[str]:
@@ -68,9 +76,9 @@ def _sycl_lib_options() -> list[str]:
 
 
 def _sycl_arch_as_compile_option() -> str:
-    arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg_g21"}
+    arc_option_map = {"Xe12": "pvc", "Xe20": "bmg-g21,bmg-g31"}
     arch = get_xpu_arch()
-    return arc_option_map.get(arch, "intel_gpu_pvc")
+    return arc_option_map.get(arch, "pvc")
 
 
 def _sycl_compiler_options() -> list[str]:
@@ -83,7 +91,7 @@ def _sycl_compiler_options() -> list[str]:
         "-std=c++20",
         "-fPIC",
         "-fsycl",
-        f"-fsycl-targets={_sycl_arch_as_compile_option()}",
+        "-fsycl-targets=spir64_gen",
         "-Xspirv-translator",
         "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate",
         "-fno-sycl-instrument-device-code",
@@ -91,6 +99,7 @@ def _sycl_compiler_options() -> list[str]:
         "-MD",
         "-Xs",
         (
+            f"-device {_sycl_arch_as_compile_option()} "
             "-options \"-igc_opts 'VISAOptions=-perfmodel,VectorAliasBBThreshold=100000000000,"
             "ExtraOCLOptions=-cl-intel-256-GRF-per-thread'\" "
             "-options -ze-opt-large-register-file"

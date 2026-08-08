@@ -3,7 +3,6 @@
 import functools
 import inspect
 import itertools
-import sys
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
@@ -16,7 +15,7 @@ from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.hooks import BackwardHook, RemovableHandle
+from torch.utils.hooks import _notify_hook_dict_mutation, BackwardHook, RemovableHandle
 
 
 __all__ = [
@@ -134,19 +133,6 @@ def _has_any_global_hook():
     )
 
 
-def _dynamo_module_state_changed(target: Any, name: str) -> None:
-    if torch.compiler.is_compiling():
-        return
-    if "torch._dynamo.mutation_guard" in sys.modules:
-        from torch._dynamo.mutation_guard import on_mutation
-
-        on_mutation(target, name)
-
-
-def _dynamo_hook_dict_changed(hooks_dict: Any) -> None:
-    _dynamo_module_state_changed(hooks_dict, "hook dictionary")
-
-
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
 
@@ -255,12 +241,9 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = RemovableHandle(
-        _global_forward_pre_hooks,
-        remove_callback=_dynamo_hook_dict_changed,
-    )
+    handle = RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
-    _dynamo_module_state_changed(_global_forward_pre_hooks, "_global_forward_pre_hooks")
+    _notify_hook_dict_mutation(_global_forward_pre_hooks)
     return handle
 
 
@@ -306,21 +289,15 @@ def register_module_forward_hook(
             _global_forward_hooks_always_called,
             _global_forward_hooks_with_kwargs,
         ],
-        remove_callback=_dynamo_hook_dict_changed,
     )
     _global_forward_hooks[handle.id] = hook
-    _dynamo_module_state_changed(_global_forward_hooks, "_global_forward_hooks")
+    _notify_hook_dict_mutation(_global_forward_hooks)
     if with_kwargs:
         _global_forward_hooks_with_kwargs[handle.id] = True
-        _dynamo_module_state_changed(
-            _global_forward_hooks_with_kwargs, "_global_forward_hooks_with_kwargs"
-        )
+        _notify_hook_dict_mutation(_global_forward_hooks_with_kwargs)
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
-        _dynamo_module_state_changed(
-            _global_forward_hooks_always_called,
-            "_global_forward_hooks_always_called",
-        )
+        _notify_hook_dict_mutation(_global_forward_hooks_always_called)
     return handle
 
 
@@ -348,12 +325,9 @@ def register_module_backward_hook(
 
     _global_is_full_backward_hook = False
 
-    handle = RemovableHandle(
-        _global_backward_hooks,
-        remove_callback=_dynamo_hook_dict_changed,
-    )
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
-    _dynamo_module_state_changed(_global_backward_hooks, "_global_backward_hooks")
+    _notify_hook_dict_mutation(_global_backward_hooks)
     return handle
 
 
@@ -379,14 +353,9 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    handle = RemovableHandle(
-        _global_backward_pre_hooks,
-        remove_callback=_dynamo_hook_dict_changed,
-    )
+    handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
-    _dynamo_module_state_changed(
-        _global_backward_pre_hooks, "_global_backward_pre_hooks"
-    )
+    _notify_hook_dict_mutation(_global_backward_pre_hooks)
     return handle
 
 
@@ -421,12 +390,9 @@ def register_module_full_backward_hook(
 
     _global_is_full_backward_hook = True
 
-    handle = RemovableHandle(
-        _global_backward_hooks,
-        remove_callback=_dynamo_hook_dict_changed,
-    )
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
-    _dynamo_module_state_changed(_global_backward_hooks, "_global_backward_hooks")
+    _notify_hook_dict_mutation(_global_backward_hooks)
     return handle
 
 
@@ -977,12 +943,14 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
+        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
+        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(
                 tensor, tensor_applied
-            ) and not isinstance(tensor_applied, FakeTensor):
+            ) and not isinstance(tensor_applied, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -1013,7 +981,7 @@ class Module:
             p_should_use_swap_tensors = (
                 should_use_swap_tensors
                 or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                or isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             )
 
             param_grad = param.grad
@@ -1470,14 +1438,11 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = RemovableHandle(
-            self._backward_pre_hooks,
-            remove_callback=_dynamo_hook_dict_changed,
-        )
+        handle = RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
-        _dynamo_module_state_changed(self._backward_pre_hooks, "_backward_pre_hooks")
+        _notify_hook_dict_mutation(self._backward_pre_hooks)
         return handle
 
     def register_backward_hook(
@@ -1502,12 +1467,9 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = RemovableHandle(
-            self._backward_hooks,
-            remove_callback=_dynamo_hook_dict_changed,
-        )
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
-        _dynamo_module_state_changed(self._backward_hooks, "_backward_hooks")
+        _notify_hook_dict_mutation(self._backward_hooks)
         return handle
 
     def register_full_backward_hook(
@@ -1570,14 +1532,11 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = RemovableHandle(
-            self._backward_hooks,
-            remove_callback=_dynamo_hook_dict_changed,
-        )
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
-        _dynamo_module_state_changed(self._backward_hooks, "_backward_hooks")
+        _notify_hook_dict_mutation(self._backward_hooks)
         return handle
 
     def _get_backward_hooks(self):
@@ -1733,19 +1692,15 @@ class Module:
         handle = RemovableHandle(
             self._forward_pre_hooks,
             extra_dict=self._forward_pre_hooks_with_kwargs,
-            remove_callback=_dynamo_hook_dict_changed,
         )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_pre_hooks_with_kwargs[handle.id] = True
-            _dynamo_module_state_changed(
-                self._forward_pre_hooks_with_kwargs,
-                "_forward_pre_hooks_with_kwargs",
-            )
+            _notify_hook_dict_mutation(self._forward_pre_hooks_with_kwargs)
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
-        _dynamo_module_state_changed(self._forward_pre_hooks, "_forward_pre_hooks")
+        _notify_hook_dict_mutation(self._forward_pre_hooks)
         return handle
 
     def register_forward_hook(
@@ -1805,22 +1760,17 @@ class Module:
                 self._forward_hooks_with_kwargs,
                 self._forward_hooks_always_called,
             ],
-            remove_callback=_dynamo_hook_dict_changed,
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
-            _dynamo_module_state_changed(
-                self._forward_hooks_with_kwargs, "_forward_hooks_with_kwargs"
-            )
+            _notify_hook_dict_mutation(self._forward_hooks_with_kwargs)
         if always_call:
             self._forward_hooks_always_called[handle.id] = True
-            _dynamo_module_state_changed(
-                self._forward_hooks_always_called, "_forward_hooks_always_called"
-            )
+            _notify_hook_dict_mutation(self._forward_hooks_always_called)
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
-        _dynamo_module_state_changed(self._forward_hooks, "_forward_hooks")
+        _notify_hook_dict_mutation(self._forward_hooks)
         return handle
 
     def _slow_forward(self, *input, **kwargs):
@@ -2497,7 +2447,7 @@ class Module:
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
-                # non-lazy modules, since they dont have the hook to do the checks
+                # non-lazy modules, since they don't have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
                 is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
@@ -2736,6 +2686,10 @@ class Module:
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
+
+        The exact order of the returned parameters is unspecified, but repeated
+        calls to the ``parameters()`` method of an unchanged module return the
+        parameters in the same order.
 
         This is typically passed to an optimizer.
 
