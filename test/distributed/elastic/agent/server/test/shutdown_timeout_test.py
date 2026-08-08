@@ -17,7 +17,11 @@ from torch.distributed.elastic.agent.server.api import SimpleElasticAgent, Worke
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
 from torch.distributed.launcher.api import LaunchConfig
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _sleep_long(duration: int):
@@ -26,8 +30,26 @@ def _sleep_long(duration: int):
     return int(os.environ["RANK"])
 
 
+class _TestElasticAgent(SimpleElasticAgent):
+    """Minimal concrete subclass so SimpleElasticAgent can be instantiated in unit tests."""
+
+    def _start_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _stop_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _monitor_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _shutdown(self, death_sig=signal.SIGTERM, timeout=30):
+        raise NotImplementedError
+
+
 class ShutdownTimeoutTest(TestCase):
     """Tests for the configurable shutdown_timeout feature."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_launch_config_default_shutdown_timeout(self):
         config = LaunchConfig(
@@ -68,8 +90,9 @@ class ShutdownTimeoutTest(TestCase):
     def test_simple_elastic_agent_receives_shutdown_timeout(self):
         mock_spec = Mock(spec=WorkerSpec)
         mock_spec.max_restarts = 3
+        mock_spec.local_world_size = 1
 
-        agent = SimpleElasticAgent(
+        agent = _TestElasticAgent(
             spec=mock_spec,
             exit_barrier_timeout=300,
             shutdown_timeout=180,
@@ -80,8 +103,9 @@ class ShutdownTimeoutTest(TestCase):
     def test_simple_elastic_agent_default_shutdown_timeout(self):
         mock_spec = Mock(spec=WorkerSpec)
         mock_spec.max_restarts = 3
+        mock_spec.local_world_size = 1
 
-        agent = SimpleElasticAgent(
+        agent = _TestElasticAgent(
             spec=mock_spec,
             exit_barrier_timeout=300,
         )
@@ -92,6 +116,7 @@ class ShutdownTimeoutTest(TestCase):
         mock_spec = Mock(spec=WorkerSpec)
         mock_spec.max_restarts = 3
         mock_spec.rdzv_handler = Mock()
+        mock_spec.local_world_size = 1
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
@@ -110,6 +135,7 @@ class ShutdownTimeoutTest(TestCase):
         mock_spec = Mock(spec=WorkerSpec)
         mock_spec.max_restarts = 3
         mock_spec.rdzv_handler = Mock()
+        mock_spec.local_world_size = 1
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
