@@ -337,6 +337,11 @@ file(GLOB mem_eff_attention_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cuda
 if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   add_library(flash_attention OBJECT EXCLUDE_FROM_ALL ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
 
+  if(WIN32)
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS flash_attention_compile=2)
+    set_property(TARGET flash_attention PROPERTY JOB_POOL_COMPILE flash_attention_compile)
+  endif()
+
   target_include_directories(flash_attention SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc
     ${PROJECT_SOURCE_DIR}/third_party/flash-attention/include
