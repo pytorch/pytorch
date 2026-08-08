@@ -98,8 +98,12 @@ kernel void exponential(
     // Only `u = 1` is the failure mode (`log(0)`); `u = 0` gives `log(1) = 0`.
     float u = ::metal::min(
         c10::metal::detail::uint32_to_uniform_float(raw[i]), 1.0f - eps);
-    output[base + i] =
-        static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
+
+    // Negation of `log(1)` can produce `-0.0` for `u = 0` and
+    // can lead to `0 / -0.0 = NaN` in n=1 Gumbel fast path.
+    float val = -::metal::precise::log(1.0f - u) / lambda;
+    val = ::metal::max(val, FLT_MIN);
+    output[base + i] = static_cast<T>(val);
   }
 }
 

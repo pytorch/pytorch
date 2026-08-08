@@ -1017,6 +1017,72 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    def test_multinomial_zero_probability_regression(self):
+        """Regression test for #192577: multinomial must not select zero-probability entries on MPS."""
+        if not torch.backends.mps.is_available():
+            self.skipTest("MPS not available")
+
+        torch.manual_seed(0)
+
+        V = 151_936
+        logits = torch.randn(V) * 2.0
+        logits[12345] += 200.0
+        p = torch.softmax(logits, dim=-1).to("mps")
+
+        self.assertTrue((p == 0.0).any())
+
+        num_draws = 20_000
+        for _ in range(num_draws):
+            idx = torch.multinomial(p, 1)
+            self.assertGreater(
+                p[idx].item(),
+                0.0,
+                "torch.multinomial selected a zero-probability index on MPS",
+            )
+
+
+    def test_multinomial_zero_probability_deterministic_regression(self):
+        """Regression test for #192577 using a known-bad MPS RNG state."""
+        if not torch.backends.mps.is_available():
+            self.skipTest("MPS not available")
+
+        BAD_RNG_STATE = [
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            96, 102, 28, 0,
+            0, 0, 0, 0,
+        ]
+
+        torch.manual_seed(0)
+
+        V = 151_936
+        logits = torch.randn(V) * 2.0
+        logits[12345] += 200.0
+        p = torch.softmax(logits, dim=-1).to("mps")
+
+        self.assertTrue((p == 0.0).any())
+
+        bad_rng_state = torch.tensor(BAD_RNG_STATE, dtype=torch.uint8)
+
+        self.assertEqual(bad_rng_state.numel(), torch.mps.get_rng_state().numel())
+
+        torch.mps.set_rng_state(bad_rng_state)
+
+        idx = torch.multinomial(p, 1)
+
+        self.assertGreater(
+            p[idx].item(),
+            0.0,
+            "torch.multinomial selected a zero-probability index on MPS",
+        )
+
     def test_exp_complex_real_axis_extremes(self):
         # Regression: exp/expm1/sinh/cosh(re + 0i) must stay real even when re
         # is inf/nan (naive exp(a)*sin(b) gives inf*0=NaN / nan*0=NaN otherwise).
