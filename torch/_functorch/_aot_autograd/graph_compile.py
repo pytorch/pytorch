@@ -2365,12 +2365,12 @@ def _aot_stage2b_bw_compile(
 
                 # Inductor can choose different strides for activations than
                 # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
+                # strides are the same, we assume they are not. real_stride may
+                # be symbolic (see set_tracing_context_output_strides), so compare
+                # it directly rather than materializing it to an int hint.
                 with suppress_ctx:
                     for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
+                        if guard_or_true(ph_arg.stride()[k] != real_stride[k]):
                             stride_different = True
                             break
 
