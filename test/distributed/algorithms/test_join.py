@@ -16,7 +16,8 @@ if not dist.is_available():
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    require_n_gpus_for_nccl_backend,
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
@@ -28,8 +29,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+BACKEND = dist.get_default_backend_for_device(device_type)
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 # Constants used for testing post-hooks
 BEFORE_CONSTANT = 41
@@ -97,7 +99,9 @@ class AllReducer(Joinable):
         All-reduces a dim-1 one tensor ``num_allreduces``-many times, and
         returns the total result.
         """
-        Join.notify_join_context(self)
+        work = Join.notify_join_context(self)
+        if work is not None:
+            work.wait()
         device = self.device
         total = 0
         for _ in range(num_allreduces):
@@ -148,7 +152,7 @@ class TestJoin(MultiProcessTestCase):
     def device(self):
         return (
             torch.device(self.rank)
-            if BACKEND == dist.Backend.NCCL
+            if BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
             else torch.device("cpu")
         )
 
@@ -280,7 +284,8 @@ class TestJoin(MultiProcessTestCase):
             for allreducer in allreducers:
                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_main_hooks(self):
         r"""Tests the main hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -304,7 +309,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_post_hooks(self):
         r"""Tests the post-hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -321,7 +327,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable(self):
         r"""
         Tests the main hooks and post-hooks of a single :class:`Joinable`
@@ -349,7 +356,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinables(self):
         r"""
         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
@@ -378,7 +386,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_disable(self):
         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
         num_joinables = 1
@@ -399,7 +408,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinable_disable(self):
         r"""
         Tests ``enable=False`` for multiple :class:`Joinable` s.
@@ -425,7 +435,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_single_joinable_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for a single
@@ -446,7 +457,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_multiple_joinables_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
@@ -470,7 +482,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_join_kwargs(self):
         r"""
         Tests passing keyword arguments to the context manager.
