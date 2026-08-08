@@ -517,6 +517,7 @@ class SideEffects:
         name: str,
         value: VariableTracker,
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
+        mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -545,9 +546,12 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        item_source = getattr(item, "source", None)
-        if item_source is not None:
-            self.mutated_sources.add(AttrSource(item_source, name))
+        if mutated_source is not None:
+            self.mutated_sources.add(mutated_source)
+        else:
+            item_source = getattr(item, "source", None)
+            if item_source is not None:
+                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -648,6 +652,15 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(gvar)} in load_global"
             )
+        # This path serves the read out of side effects, bypassing
+        # VariableBuilder, so record the source here the way load_cell does --
+        # otherwise a subgraph reading a rebound global has no traced source to
+        # intersect with mutated_sources and is wrongly considered reusable.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            output_graph.current_tx.output.current_tracer.traced_sources.add(
+                GlobalSource(name)
+            )
         return self.load_attr(gvar, name)
 
     def store_global(
@@ -661,7 +674,11 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
-        self.store_attr(gvar, name, value)
+        # gvar is a per-global sentinel holder whose own source already names
+        # the global, so store_attr's default AttrSource(item.source, name)
+        # would name a nonexistent `G.G`. Record the source readers actually
+        # use, so mutated_sources intersects with traced_sources.
+        self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -756,6 +773,16 @@ class SideEffects:
             mutation_type_cls=AttributeMutationExisting,
         )
 
+    def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
+        """Register a sourceless VT (e.g. a synthetic exception) as a new
+        attribute-mutation object so its attribute mutations are codegen'd.
+        Keyed by the VT's id since there is no backing Python object."""
+        if id(variable) in self.id_to_variable:
+            return
+        variable.mutation_type = AttributeMutationNew()
+        self.id_to_variable[id(variable)] = variable
+        self.keepalive.append(variable)
+
     def track_object_new(
         self,
         cls_source: Source | None,
@@ -778,7 +805,7 @@ class SideEffects:
 
         from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
-        from .variables.user_defined import is_forbidden_context_manager
+        from .variables.user_defined import is_generic_ctx_manager_cls
 
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
@@ -787,19 +814,15 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif (
-            hasattr(user_cls, "__enter__")
-            and hasattr(user_cls, "__exit__")
-            and not is_forbidden_context_manager(user_cls)
-        ):
+        elif is_generic_ctx_manager_cls(user_cls):
             variable_cls = GenericContextWrappingVariable
         elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
-        elif issubclass(user_cls, collections.OrderedDict):
-            variable_cls = variables.OrderedDictVariable
         elif issubclass(user_cls, dict):
+            # Includes collections.OrderedDict and its subclasses; the
+            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
@@ -1207,6 +1230,14 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.ExceptionVariable):
+                # Exceptions cannot be built via object.__new__ (CPython rejects
+                # it), so reconstruct() constructs by calling the type. Cache
+                # the result so later references load the single instance; any
+                # __dict__ attributes replay in codegen_update_mutated.
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
