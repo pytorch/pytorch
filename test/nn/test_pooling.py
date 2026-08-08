@@ -686,6 +686,18 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
             mod(inp1)
 
+    def test_FractionalMaxPool2d_errors(self, device):
+        samples = torch.rand([0, 16, 2], device=device)
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
+            nn.FractionalMaxPool2d(0, output_size=[1, 1], _random_samples=samples)
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
+            nn.FractionalMaxPool2d([0, 0], output_size=[1, 1], _random_samples=samples)
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
+            nn.FractionalMaxPool2d(
+                kernel_size=-1,
+                output_size=[1, 1],
+            )
+
     def test_FractionalMaxPool3d_errors(self, device):
         samples = torch.rand([0, 16, 3], device=device)
         with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
