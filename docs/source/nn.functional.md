@@ -66,6 +66,7 @@ scaled_dot_product_attention.
     :nosignatures:
 
     scaled_dot_product_attention
+    rotary_embedding
 ```
 
 ## Non-linear activation functions
