@@ -42,6 +42,23 @@ if ($env:ENABLE_APL -eq "1") {
     $env:OpenBLAS_HOME = Join-Path $env:DEPENDENCIES_DIR "OpenBLAS\install"
 }
 
+if ($env:USE_CUDA -eq "1") {
+    $env:USE_CUDNN = "1"
+    if (-not $env:CUDA_PATH) { $env:CUDA_PATH = $env:CUDA_HOME }
+    $env:CUDA_HOME = $env:CUDA_PATH
+    $env:CUDACXX = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
+    $env:CUDNN_ROOT_DIR = $env:CUDNN_HOME
+    $env:CUDNN_INCLUDE_DIR = Join-Path $env:CUDNN_HOME "include"
+    $env:CUDNN_LIB_DIR = Join-Path $env:CUDNN_HOME "lib\arm64"
+    $env:TORCH_CUDA_ARCH_LIST = "TODO"
+    $env:CMAKE_CUDA_ARCHITECTURES = "TODO"
+    $env:USE_MAGMA = "0"
+    $env:TH_BINARY_BUILD = "0"
+    $env:CMAKE_CUDA_FLAGS = "$($env:CMAKE_CUDA_FLAGS) -Xcompiler /Zc:preprocessor"
+    $env:CFLAGS = "/Zc:preprocessor /EHsc"
+    $env:CXXFLAGS = "/Zc:preprocessor /EHsc"
+}
+
 # Change to source directory
 Set-Location $env:PYTORCH_ROOT
 
