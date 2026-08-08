@@ -84,7 +84,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(func=None, init_rpc=True, backend="nccl"):
+def with_comms(func=None, init_rpc=True, backend=None):
     if func is None:
         return partial(
             with_comms,
@@ -94,16 +94,24 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        # Skip test if backend requires accelerator but not enough devices available
         acc = torch.accelerator.current_accelerator()
-        if backend in ["nccl", "xccl", "hccl"]:
+        if backend is None:
+            resolved_backend = (
+                dist.get_default_backend_for_device(acc)
+                if acc is not None
+                else "gloo"
+            )
+        else:
+            resolved_backend = backend
+
+        if resolved_backend in ["nccl", "xccl", "hccl"]:
             if (
                 acc is None
-                or backend != dist.get_default_backend_for_device(acc)
+                or resolved_backend != dist.get_default_backend_for_device(acc)
                 or torch.accelerator.device_count() < self.world_size
             ):
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc=init_rpc, backend=backend)
+        self.init_comms(init_rpc=init_rpc, backend=resolved_backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
 
