@@ -2896,7 +2896,10 @@ def to_gpu(obj, type_map=None):
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            if not torch.accelerator.is_available():
+                raise AssertionError("expected torch.accelerator to be available")
+            device_type = torch.accelerator.current_accelerator(check_available=True).type
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -6655,3 +6658,123 @@ def run_concurrently(worker_func, num_threads=None, args=(), kwargs=None):
         raise exc_value
 
     return results
+
+
+@contextlib.contextmanager
+def tf32_off():
+    old_allow_tf32_matmul = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision("highest")
+        if TEST_CUDA:
+            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+                yield
+        else:
+            yield
+    finally:
+        torch.set_float32_matmul_precision(old_allow_tf32_matmul)
+
+
+@contextlib.contextmanager
+def tf32_on(self, tf32_precision=1e-5):
+    old_allow_tf32_matmul = torch.get_float32_matmul_precision()
+    old_precision = self.precision
+    try:
+        torch.set_float32_matmul_precision("high")
+        self.precision = tf32_precision
+        if TEST_CUDA:
+            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+                yield
+        else:
+            yield
+    finally:
+        torch.set_float32_matmul_precision(old_allow_tf32_matmul)
+        self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for CUDA operations.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision("high")
+        if TEST_CUDA:
+            with torch.backends.cudnn.flags(
+                enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+            ):
+                yield
+        else:
+            yield
+    finally:
+        torch.set_float32_matmul_precision(old_allow_tf32_matmul)
+
+
+# This is a wrapper that wraps a test to run this test twice, one with
+# allow_tf32=True, another with allow_tf32=False. When running with
+# allow_tf32=True, it will use reduced precision as specified by the
+# argument. For example:
+#    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+#    @tf32_on_and_off(0.005)
+#    def test_matmul(self, device, dtype):
+#        a = ...; b = ...;
+#        c = torch.matmul(a, b)
+#        self.assertEqual(c, expected)
+# In the above example, the matmul will be running at TF32 mode and TF32 mode off.
+#
+# This decorator can be used for function with or without device/dtype, such as
+# @tf32_on_and_off(0.005)
+# def test_my_op(self)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device, dtype)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, dtype)
+# if neither device nor dtype is specified, it will check if the system has ampere device
+# if device is specified, it will check if device is cuda
+# if dtype is specified, it will check if dtype is float32 or complex64
+# tf32 and fp32 are different only when all the three checks pass
+def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
+    def with_tf32_disabled(self, function_call):
+        with tf32_off():
+            function_call()
+
+    def with_tf32_enabled(self, function_call):
+        with tf32_on(self, tf32_precision):
+            function_call()
+
+    def wrapper(f):
+        params = inspect.signature(f).parameters
+        arg_names = tuple(params.keys())
+
+        @functools.wraps(f)
+        def wrapped(*args, **kwargs):
+            kwargs.update(zip(arg_names, args, strict=False))
+            cond = (torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()) and only_if
+            if 'device' in kwargs:
+                cond = cond and (torch.device(kwargs['device']).type in ['cuda', 'xpu'])
+            if 'dtype' in kwargs:
+                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
+            if cond:
+                with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
+                with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))
+            else:
+                f(**kwargs)
+
+        return wrapped
+    return wrapper
+
+# This is a wrapper that wraps a test to run it with TF32 turned off.
+# This wrapper is designed to be used when a test uses matmul or convolutions
+# but the purpose of that test is not testing matmul or convolutions.
+# Disabling TF32 will enforce torch.float tensors to be always computed
+# at full precision.
+def with_tf32_off(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        with tf32_off():
+            return f(*args, **kwargs)
+
+    return wrapped
