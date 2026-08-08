@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -116,8 +116,12 @@ from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
 from .autocast_utils import (
+    DTYPE_CAST_METHOD_DTYPES,
     force_low_precision_pointwise_barriers,
     low_precision_autocast_enabled,
+    LOW_PRECISION_CAST_BOUNDARY,
+    LOW_PRECISION_CAST_METHODS,
+    LOW_PRECISION_CAST_OPS,
     LOW_PRECISION_FP_DTYPES,
 )
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
@@ -3082,18 +3086,53 @@ def _maybe_wrap_and_compile_fx_main(
     )
 
 
-def _is_low_precision_cast_node(node: torch.fx.Node) -> bool:
-    if node.op != "call_function":
+def _is_low_precision_cast_node(
+    node: torch.fx.Node,
+    input_dtypes: dict[torch.fx.Node, torch.dtype] | None = None,
+) -> bool:
+    is_cast = (
+        node.op == "call_function" and node.target in LOW_PRECISION_CAST_OPS
+    ) or (node.op == "call_method" and node.target in LOW_PRECISION_CAST_METHODS)
+    if not is_cast:
         return False
 
-    if node.target is torch.ops.aten._to_copy.default:
-        dtype = node.kwargs.get("dtype")
+    static_dtype = None
+    if node.target in (
+        torch.ops.aten._to_copy.default,
+        torch.ops.aten.to.dtype_layout,
+    ):
+        static_dtype = node.kwargs.get("dtype")
+    elif node.target is torch.ops.aten.to.device:
+        static_dtype = node.args[2] if len(node.args) > 2 else node.kwargs.get("dtype")
+    elif node.target is torch.ops.aten.to.dtype:
+        static_dtype = node.args[1] if len(node.args) > 1 else node.kwargs.get("dtype")
     elif node.target is torch.ops.prims.convert_element_type.default:
-        dtype = node.args[1] if len(node.args) > 1 else None
-    else:
-        return False
+        static_dtype = node.args[1] if len(node.args) > 1 else None
+    elif node.op == "call_method":
+        method = cast(str, node.target)
+        static_dtype = DTYPE_CAST_METHOD_DTYPES.get(method)
+        if static_dtype is None:
+            static_dtype = node.kwargs.get("dtype")
+        if static_dtype is None:
+            static_dtype = next(
+                (arg for arg in node.args[1:] if isinstance(arg, torch.dtype)),
+                None,
+            )
+    if static_dtype in LOW_PRECISION_FP_DTYPES:
+        return True
 
-    return dtype in LOW_PRECISION_FP_DTYPES
+    def dtype(value: torch.fx.Node) -> torch.dtype | None:
+        tensor = value.meta.get("val", value.meta.get("example_value"))
+        if isinstance(tensor, torch.Tensor):
+            return tensor.dtype
+        return input_dtypes.get(value) if input_dtypes is not None else None
+
+    dtypes = OrderedSet(
+        value_dtype
+        for value_dtype in [dtype(node), *(dtype(n) for n in node.all_input_nodes)]
+        if value_dtype is not None
+    )
+    return bool(dtypes.intersection(LOW_PRECISION_FP_DTYPES)) and len(dtypes) > 1
 
 
 def _iter_graph_modules(model: torch.nn.Module) -> Iterable[GraphModule]:
@@ -3110,12 +3149,91 @@ def _has_low_precision_pointwise_barrier(model: torch.nn.Module) -> bool:
     )
 
 
-def _has_low_precision_cast(model: torch.nn.Module) -> bool:
-    return any(
-        _is_low_precision_cast_node(node)
-        for graph_module in _iter_graph_modules(model)
-        for node in graph_module.graph.nodes
-    )
+def _has_low_precision_autocast(model: torch.nn.Module) -> bool:
+    for graph_module in _iter_graph_modules(model):
+        for node in graph_module.graph.nodes:
+            if (
+                node.op != "call_function"
+                or node.target is not torch.amp.autocast_mode._enter_autocast
+            ):
+                continue
+
+            enabled = node.kwargs.get(
+                "enabled", node.args[2] if len(node.args) > 2 else True
+            )
+            if enabled is False:
+                continue
+            dtype = node.kwargs.get(
+                "dtype", node.args[1] if len(node.args) > 1 else None
+            )
+            if dtype is None:
+                device_type = node.kwargs.get(
+                    "device_type", node.args[0] if node.args else None
+                )
+                if isinstance(device_type, str):
+                    dtype = torch.get_autocast_dtype(device_type)
+            if dtype in LOW_PRECISION_FP_DTYPES:
+                return True
+    return False
+
+
+def _mark_explicit_low_precision_casts(
+    model: torch.nn.Module, example_inputs: Sequence[InputType]
+) -> bool:
+    if not isinstance(model, GraphModule):
+        return False
+
+    graph_modules = list(_iter_graph_modules(model))
+    input_dtypes = {
+        node: value.dtype
+        for node, value in zip(
+            (node for node in model.graph.nodes if node.op == "placeholder"),
+            example_inputs,
+        )
+        if isinstance(value, torch.Tensor)
+    }
+
+    def has_low_precision_cast() -> bool:
+        return any(
+            _is_low_precision_cast_node(
+                node, input_dtypes if graph_module is model else None
+            )
+            for graph_module in graph_modules
+            for node in graph_module.graph.nodes
+        )
+
+    if not has_low_precision_cast():
+        has_cast = any(
+            (node.op == "call_function" and node.target in LOW_PRECISION_CAST_OPS)
+            or (node.op == "call_method" and node.target in LOW_PRECISION_CAST_METHODS)
+            for graph_module in graph_modules
+            for node in graph_module.graph.nodes
+        )
+        if not has_cast:
+            return False
+
+        # symbolic_trace does not attach dtype metadata. Propagate fake values
+        # only when static arguments and input dtypes could not classify a cast.
+        fake_tensor_prop(model, example_inputs, True)
+        if not has_low_precision_cast():
+            return False
+
+    # AOTAutograd retraces direct FX inputs. Use FX's allowlisted custom
+    # metadata to distinguish casts in the input graph from casts introduced
+    # inside non-pointwise decompositions during that retrace.
+    for graph_module in graph_modules:
+        for node in graph_module.graph.nodes:
+            is_cast = (
+                node.op == "call_function" and node.target in LOW_PRECISION_CAST_OPS
+            ) or (
+                node.op == "call_method" and node.target in LOW_PRECISION_CAST_METHODS
+            )
+            if not is_cast:
+                continue
+            custom = dict(node.meta.get("custom", {}))
+            custom[LOW_PRECISION_CAST_BOUNDARY] = True
+            node.meta["custom"] = custom
+    return True
 
 
 def _compile_fx_main(
@@ -3159,10 +3277,14 @@ def _compile_fx_main(
 
         # Direct FX inputs are retraced by AOTAutograd outside autocast, so use
         # explicit low-precision casts as the signal for barrier marking.
+        has_explicit_low_precision_cast = _mark_explicit_low_precision_casts(
+            model_, example_inputs_
+        )
         low_precision_pointwise_barrier = (
             low_precision_autocast_enabled()
-            or _has_low_precision_cast(model_)
+            or has_explicit_low_precision_cast
             or _has_low_precision_pointwise_barrier(model_)
+            or _has_low_precision_autocast(model_)
         )
         decompositions = get_decomp_fn()
         if low_precision_pointwise_barrier:

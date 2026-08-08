@@ -13,6 +13,41 @@ if TYPE_CHECKING:
 
 
 LOW_PRECISION_FP_DTYPES = (torch.bfloat16, torch.float16)
+LOW_PRECISION_CAST_BOUNDARY = "inductor_low_precision_cast_boundary"
+LOW_PRECISION_CAST_OPS = OrderedSet(
+    [
+        torch.ops.aten._to_copy.default,
+        torch.ops.aten.to.device,
+        torch.ops.aten.to.dtype,
+        torch.ops.aten.to.dtype_layout,
+        torch.ops.aten.to.other,
+        torch.ops.aten.type_as.default,
+        torch.ops.prims.convert_element_type.default,
+    ]
+)
+DTYPE_CAST_METHOD_DTYPES = {
+    "bfloat16": torch.bfloat16,
+    "bool": torch.bool,
+    "byte": torch.uint8,
+    "cdouble": torch.complex128,
+    "cfloat": torch.complex64,
+    "chalf": torch.complex32,
+    "char": torch.int8,
+    "double": torch.float64,
+    "float": torch.float32,
+    "half": torch.float16,
+    "int": torch.int32,
+    "long": torch.int64,
+    "short": torch.int16,
+}
+LOW_PRECISION_CAST_METHODS = OrderedSet(
+    [
+        *DTYPE_CAST_METHOD_DTYPES,
+        "to",
+        "type",
+        "type_as",
+    ]
+)
 _FORCE_LOW_PRECISION_POINTWISE_BARRIERS: contextvars.ContextVar[bool] = (
     contextvars.ContextVar("force_low_precision_pointwise_barriers", default=False)
 )
@@ -61,9 +96,7 @@ def force_low_precision_pointwise_barriers() -> Generator[None, None, None]:
 def needs_low_precision_pointwise_barrier(func: object) -> bool:
     return (
         isinstance(func, torch._ops.OpOverload)
-        # _to_copy is the explicit eager cast boundary but is not tagged pointwise.
-        and (
-            torch.Tag.pointwise in func.tags or func is torch.ops.aten._to_copy.default
-        )
+        # Eager cast boundaries other than the prim are not tagged pointwise.
+        and (torch.Tag.pointwise in func.tags or func in LOW_PRECISION_CAST_OPS)
         and func not in LOW_PRECISION_POINTWISE_BARRIER_EXEMPT_OPS
     )

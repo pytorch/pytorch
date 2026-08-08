@@ -1113,12 +1113,22 @@ def _maybe_record_pointwise_barrier(
         if not low_precision_pointwise_barriers_enabled():
             return
 
-    from torch._inductor.autocast_utils import needs_low_precision_pointwise_barrier
+    last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
+    from torch._inductor.autocast_utils import (
+        LOW_PRECISION_CAST_BOUNDARY,
+        LOW_PRECISION_CAST_OPS,
+        needs_low_precision_pointwise_barrier,
+    )
 
     if not needs_low_precision_pointwise_barrier(func):
         return
+    if (
+        func in LOW_PRECISION_CAST_OPS
+        and not proxy_mode.emulate_precision_casts
+        and not last_node.meta.get("custom", {}).get(LOW_PRECISION_CAST_BOUNDARY, False)
+    ):
+        return
 
-    last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
     t = last_node.meta.get("val")
     from torch._inductor.autocast_utils import LOW_PRECISION_FP_DTYPES
 
@@ -2153,13 +2163,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             torch.fx.GraphModule | FunctionalizeCtxWrapper, str
         ] = {}
         from torch._inductor import config
-        from torch._inductor.autocast_utils import (
-            low_precision_pointwise_barriers_enabled,
-        )
 
-        self.emulate_precision_casts: bool = (
-            config.emulate_precision_casts or low_precision_pointwise_barriers_enabled()
-        )
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(
