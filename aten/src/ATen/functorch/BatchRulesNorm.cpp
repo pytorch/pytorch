@@ -134,7 +134,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
     const std::optional<at::Tensor> & running_var_opt, std::optional<int64_t> running_var_bdim,
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
     const at::Tensor & rstd, std::optional<int64_t> rstd_bdim,
-    bool training, double eps) {
+    bool training, double eps, at::ScalarType dummy_weight_dtype) {
   c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
   const Tensor& running_mean = *running_mean_maybe_owned;
   c10::MaybeOwned<Tensor> running_var_maybe_owned = at::borrow_from_optional_tensor(running_var_opt);
@@ -144,7 +144,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
     // for either of these to have bdims, the input, running_mean, or running_var must have had a bdim
     TORCH_INTERNAL_ASSERT(!mean_bdim);
     TORCH_INTERNAL_ASSERT(!rstd_bdim);
-    const auto dummy_weight = at::ones(input.size(1), mean.options());
+    const auto dummy_weight = at::ones(input.size(1), input.options().dtype(dummy_weight_dtype));
     auto result =Func(
         grad_out.to(input.scalar_type()), input, dummy_weight, running_mean_opt, running_var_opt, mean, rstd, training, eps, {true, false, false});
     return {std::move(std::get<0>(result)), std::nullopt};
@@ -182,7 +182,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
   rstd_ = reshape_dim_into(0, 0, rstd_);
   grad_out_ = grad_out_.transpose(0, 1).flatten(1, 2); // [B0, B, C, *] -> [B, (B0, C), *]
 
-  const auto dummy_weight = at::ones(input_.size(1), mean_.options());
+  const auto dummy_weight = at::ones(input_.size(1), input_.options().dtype(dummy_weight_dtype));
   auto result = at::native_batch_norm_backward(
       grad_out_.contiguous(),
       input_.contiguous(),
@@ -276,6 +276,8 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
+    const auto dummy_weight_dtype = weight_value.has_value() ? weight_value->scalar_type() :
+      running_mean_value.has_value() ? running_mean_value->scalar_type() : save_mean_value.scalar_type();
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     auto results = batch_norm_backward_no_weight_bias_batch_rule<F, Func>(
         grad_normalized_input_value, grad_normalized_input_bdim,
@@ -284,7 +286,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
         running_var_value, running_var_bdim,
         save_mean_value, save_mean_bdim,
         save_rstd_value, save_rstd_bdim,
-        training, eps);
+        training, eps, dummy_weight_dtype);
     grad_input = makeBatched(std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
