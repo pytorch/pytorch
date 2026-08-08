@@ -1238,6 +1238,15 @@ class TestAutograd(TestCase):
 
         self.assertEqual(ref, new)
 
+    def test_grad_accepts_tuple_subclass_inputs(self):
+        class InputsTuple(tuple):
+            pass
+
+        x = torch.rand(2, requires_grad=True)
+        y = (x * x).sum()
+        grads = torch.autograd.grad(y, InputsTuple((x,)))
+        self.assertEqual(grads, (2 * x,))
+
     def test_grad_to_node_materialize(self):
         x = torch.rand(2, requires_grad=True).clone()
         edge_x = GradientEdge(x.grad_fn, x.output_nr)
