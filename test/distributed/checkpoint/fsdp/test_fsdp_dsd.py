@@ -601,6 +601,73 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
                 self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
 
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp2_ranks_only(self):
+        self.run_subtests(
+            {
+                "ranks_only": [(0,), (), (1,), (0, 1), None],
+                "cpu_offload": [True, False],
+            },
+            self._test_fsdp2_ranks_only,
+        )
+
+    def _test_fsdp2_ranks_only(self, ranks_only, cpu_offload):
+        """
+        Test ranks_only behavior for FSDP2 state_dict.
+        """
+        orig_model = self._get_base_model()
+        fsdp_model = copy.deepcopy(orig_model)
+        for module in fsdp_model:
+            fully_shard(module)
+        fully_shard(fsdp_model)
+
+        optim = torch.optim.AdamW(fsdp_model.parameters(), lr=1e-4)
+
+        # Run one training step to populate optimizer state
+        inp = torch.randn((2, 2), device="cuda")
+        fsdp_model(inp).sum().backward()
+        optim.step()
+
+        options = StateDictOptions(
+            full_state_dict=True, cpu_offload=cpu_offload, ranks_only=ranks_only
+        )
+        dsd = get_model_state_dict(fsdp_model, options=options)
+        osd = get_optimizer_state_dict(fsdp_model, optim, options=options)
+
+        # Determine expected ranks that should receive the state dict
+        if ranks_only is not None:
+            expected_ranks = ranks_only if ranks_only else tuple(range(self.world_size))
+        else:
+            expected_ranks = (0,) if cpu_offload else tuple(range(self.world_size))
+
+        if self.rank in expected_ranks:
+            self.assertTrue(len(dsd) > 0)
+            self.assertTrue(len(osd) > 0)
+
+            if cpu_offload:
+                cpu_device = torch.device("cpu")
+                self.assertTrue(
+                    tree_all_only(
+                        (torch.Tensor, DTensor),
+                        lambda v: v.device == cpu_device,
+                        dsd,
+                    )
+                )
+            else:
+                self.assertTrue(
+                    tree_all_only(
+                        (torch.Tensor, DTensor),
+                        lambda v: v.device.type == "cuda",
+                        dsd,
+                    )
+                )
+
+            orig_sd = orig_model.state_dict()
+            self.assertEqual(set(orig_sd.keys()), set(dsd.keys()))
+        else:
+            self.assertEqual(dsd, {})
+            self.assertEqual(osd, {})
+
 
 if __name__ == "__main__":
     run_tests()
