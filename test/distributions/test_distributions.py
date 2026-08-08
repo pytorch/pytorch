@@ -125,12 +125,12 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
+    onlyAccelerator,
+    HardwareClassification,
     TEST_XPU,
     TestCase,
 )
 
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1343,11 +1343,6 @@ class TestDistributions(DistributionsTestCase):
         torch.set_default_device(None)
         super().tearDown()
 
-    def test_default_device(self, device):
-        device_type = torch.device(device).type
-        self.assertEqual(torch.get_default_device().type, device_type)
-        self.assertEqual(torch.randn(10).device.type, device_type)
-
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -2103,26 +2098,6 @@ class TestDistributions(DistributionsTestCase):
         dist = Poisson(rate_zero)
         dist.log_prob(torch.ones_like(rate_zero)).backward()
         self.assertEqual(rate_zero.grad, torch.inf)
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_poisson_sample(self, device):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
-        saved_dtype = torch.get_default_dtype()
-        try:
-            dtypes = [torch.float, torch.bfloat16, torch.half]
-            if torch.device(device).type != "mps":
-                dtypes += [torch.double]
-            for dtype in dtypes:
-                torch.set_default_dtype(dtype)
-                for rate in [0.1, 1.0, 5.0]:
-                    self._check_sampler_discrete(
-                        Poisson(rate),
-                        scipy.stats.poisson(rate),
-                        f"Poisson(lambda={rate})",
-                        failure_rate=1e-3,
-                    )
-        finally:
-            torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_tensor_sample(self):
@@ -3719,67 +3694,6 @@ class TestDistributions(DistributionsTestCase):
                 failure_rate=7e-4,
             )
 
-    def test_gumbel(self, device):
-        loc = torch.randn(2, 3, requires_grad=True)
-        scale = torch.randn(2, 3).abs().requires_grad_()
-        loc_1d = torch.randn(1, requires_grad=True)
-        scale_1d = torch.randn(1).abs().requires_grad_()
-        self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
-        self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
-        self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Gumbel(1.0, 1.0).sample().size(), ())
-        self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
-        self.assertEqual(
-            Gumbel(
-                torch.tensor(0.0, dtype=torch.float32),
-                torch.tensor(1.0, dtype=torch.float32),
-                validate_args=False,
-            ).cdf(20.0),
-            1.0,
-            atol=1e-4,
-            rtol=0,
-        )
-        self.assertEqual(
-            Gumbel(
-                torch.tensor(0.0, dtype=torch.float32),
-                torch.tensor(1.0, dtype=torch.float32),
-                validate_args=False,
-            ).cdf(-5.0),
-            0.0,
-            atol=1e-4,
-            rtol=0,
-        )
-        if torch.device(device).type != "mps":
-            self.assertEqual(
-                Gumbel(
-                    torch.tensor(0.0, dtype=torch.float64),
-                    torch.tensor(1.0, dtype=torch.float64),
-                    validate_args=False,
-                ).cdf(50.0),
-                1.0,
-                atol=1e-4,
-                rtol=0,
-            )
-            self.assertEqual(
-                Gumbel(
-                    torch.tensor(0.0, dtype=torch.float64),
-                    torch.tensor(1.0, dtype=torch.float64),
-                    validate_args=False,
-                ).cdf(-10.0),
-                0.0,
-                atol=1e-8,
-                rtol=0,
-            )
-
-        def ref_log_prob(idx, x, log_prob):
-            l = loc.view(-1)[idx].detach().cpu()
-            s = scale.view(-1)[idx].detach().cpu()
-            expected = scipy.stats.gumbel_r.logpdf(x.cpu(), loc=l, scale=s)
-            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
-
-        self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
-
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @set_default_dtype_if_supported(torch.double)
     def test_gumbel_sample(self):
@@ -3973,29 +3887,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @set_default_dtype_if_supported(torch.double)
-    def test_dirichlet_log_prob(self, device):
-        num_samples = 10
-        alpha = torch.exp(torch.randn(5))
-        dist = Dirichlet(alpha)
-        x = dist.sample((num_samples,))
-        actual_log_prob = dist.log_prob(x)
-        for i in range(num_samples):
-            xi_cpu = x[i].cpu()
 
-            # Since MPS doesn't support doubles, the sum of `x[i]` can be
-            # slightly more or less than 1, with relative error around 1e-7,
-            # which is larger than scipy allows. So convert to double and divide
-            # by the sum to bring it much closer to 1.
-            if torch.device(device).type == "mps":
-                xi_cpu = xi_cpu.double()
-                xi_cpu = xi_cpu / xi_cpu.sum()
-
-            expected_log_prob = scipy.stats.dirichlet.logpdf(
-                xi_cpu, alpha.cpu().numpy()
-            )
-            self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_log_prob_zero(self):
@@ -4079,29 +3971,6 @@ class TestDistributions(DistributionsTestCase):
                 np.isfinite(x) and x > 0,
                 lambda msg: f"{msg}\nInvalid Beta.sample(): {x}",
             )
-
-    @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
-    @dtypesIfCUDA(torch.double)
-    @dtypesIfXPU(torch.double)
-    def test_beta_underflow(self, dtype, device):
-        # For low values of (alpha, beta), the gamma samples can underflow
-        # with float32 and result in a spurious mode at 0.5. To prevent this,
-        # torch._sample_dirichlet works with double precision for intermediate
-        # calculations.
-        set_rng_seed(1)
-        num_samples = 50000
-        conc = torch.tensor(1e-2, dtype=dtype)
-        beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
-        # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
-        # TODO: increase precision once imbalance on GPU is fixed.
-        atol = 0.12 if torch.device(device).type in ["cuda", "xpu", "mps"] else 0.05
-        self.assertEqual(frac_zeros, 0.5, atol=atol, rtol=0)
-        self.assertEqual(frac_ones, 0.5, atol=atol, rtol=0)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -4684,25 +4553,29 @@ class TestDistributions(DistributionsTestCase):
 
                 self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
 
-
-# TODO: Enable CUDA/XPU in `instantiate_device_type_tests` and remove the following class
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestDistributionsGPU(DistributionsTestCase):
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_zero_excluded_binomial(self):
+class TestDistributionsDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    def test_default_device(self, device):
+        device_type = torch.device(device).type
+        self.assertEqual(torch.get_default_device().type, device_type)
+        self.assertEqual(torch.randn(10).device.type, device_type)
+
+    @onlyAccelerator
+    def test_zero_excluded_binomial(self, device):
         vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.9).to(device_type),
+            total_count=torch.tensor(1.0, device=device),
+            probs=torch.tensor(0.9, device=device),
         ).sample(torch.Size((100000000,)))
         self.assertTrue((vals >= 0).all())
         vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.1).to(device_type),
+            total_count=torch.tensor(1.0, device=device),
+            probs=torch.tensor(0.1, device=device),
         ).sample(torch.Size((100000000,)))
         self.assertTrue((vals < 2).all())
         vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.5).to(device_type),
+            total_count=torch.tensor(1.0, device=device),
+            probs=torch.tensor(0.5, device=device),
         ).sample(torch.Size((10000,)))
         # vals should be roughly half zeroes, half ones
         zeros_count = (vals == 0.0).sum()
@@ -4716,18 +4589,16 @@ class TestDistributionsGPU(DistributionsTestCase):
                 f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
             )
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_torch_binomial_dtype_errors(self):
+    @onlyAccelerator
+    def test_torch_binomial_dtype_errors(self, device):
         dtypes = [torch.int, torch.long, torch.short]
-        device = device_type
-
         for count_dtype in dtypes:
             total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
             total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
 
             with self.assertRaisesRegex(
                 ValueError,
-                "binomial only supports floating-point dtypes for count.*",
+                "binomial only supports floating-point dtypes for count.*"
             ):
                 torch.binomial(total_count, total_prob)
 
@@ -4737,29 +4608,110 @@ class TestDistributionsGPU(DistributionsTestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "binomial only supports floating-point dtypes for prob.*",
+                "binomial only supports floating-point dtypes for prob.*"
             ):
                 torch.binomial(total_count, total_prob)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_poisson_gpu_sample(self):
+    def test_poisson_sample(self, device):
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        saved_dtype = torch.get_default_dtype()
+        try:
+            dtypes = [torch.float, torch.bfloat16, torch.half]
+            if torch.device(device).type != "mps":
+                dtypes += [torch.double]
+            for dtype in dtypes:
+                torch.set_default_dtype(dtype)
+                for rate in [0.1, 1.0, 5.0]:
+                    self._check_sampler_discrete(
+                        Poisson(torch.tensor([rate], device=device)),
+                        scipy.stats.poisson(rate),
+                        f"Poisson(lambda={rate}, {torch.device(device).type})",
+                        failure_rate=1e-3,
+                    )
+        finally:
+            torch.set_default_dtype(saved_dtype)
+
+    @onlyAccelerator
+    def test_poisson_sample_on_device(self, device):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
             self._check_sampler_discrete(
-                Poisson(torch.tensor([rate]).to(device_type)),
+                Poisson(torch.tensor([rate], device=device)),
                 scipy.stats.poisson(rate),
-                f"Poisson(lambda={rate}, {device_type})",
+                f"Poisson(lambda={rate}, {torch.device(device).type})",
                 failure_rate=1e-3,
             )
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gamma_gpu_shape(self):
-        alpha = torch.randn(2, 3).to(device_type).exp().requires_grad_()
-        beta = torch.randn(2, 3).to(device_type).exp().requires_grad_()
-        alpha_1d = torch.randn(1).to(device_type).exp().requires_grad_()
-        beta_1d = torch.randn(1).to(device_type).exp().requires_grad_()
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_gumbel(self, device):
+        loc = torch.randn(2, 3, device=device, requires_grad=True)
+        scale = torch.randn(2, 3, device=device).abs().requires_grad_()
+        loc_1d = torch.randn(1, device=device, requires_grad=True)
+        scale_1d = torch.randn(1, device=device).abs().requires_grad_()
+        self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
+        self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device)).sample().size(), ())
+        self.assertEqual(Gumbel(torch.tensor(1.0, device=device), torch.tensor(1.0, device=device)).sample((1,)).size(),
+                         (1,))
+        self.assertEqual(
+            Gumbel(
+                torch.tensor(0.0, dtype=torch.float32, device=device),
+                torch.tensor(1.0, dtype=torch.float32, device=device),
+                validate_args=False,
+            ).cdf(torch.tensor(20.0, device=device)),
+            torch.tensor(1.0, device=device),
+            atol=1e-4,
+            rtol=0,
+        )
+        self.assertEqual(
+            Gumbel(
+                torch.tensor(0.0, dtype=torch.float32, device=device),
+                torch.tensor(1.0, dtype=torch.float32, device=device),
+                validate_args=False,
+            ).cdf(torch.tensor(-5.0, device=device)),
+            torch.tensor(0.0, device=device),
+            atol=1e-4,
+            rtol=0,
+        )
+        if torch.device(device).type != "mps":
+            self.assertEqual(
+                Gumbel(
+                    torch.tensor(0.0, dtype=torch.float64, device=device),
+                    torch.tensor(1.0, dtype=torch.float64, device=device),
+                    validate_args=False,
+                ).cdf(torch.tensor(50.0, device=device)),
+                torch.tensor(1.0, device=device),
+                atol=1e-4,
+                rtol=0,
+            )
+            self.assertEqual(
+                Gumbel(
+                    torch.tensor(0.0, dtype=torch.float64, device=device),
+                    torch.tensor(1.0, dtype=torch.float64, device=device),
+                    validate_args=False,
+                ).cdf(torch.tensor(-10.0, device=device)),
+                torch.tensor(0.0, device=device),
+                atol=1e-8,
+                rtol=0,
+            )
+
+        def ref_log_prob(idx, x, log_prob):
+            l = loc.view(-1)[idx].detach().cpu()
+            s = scale.view(-1)[idx].detach().cpu()
+            expected = scipy.stats.gumbel_r.logpdf(x.cpu(), loc=l, scale=s)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
+
+    @onlyAccelerator
+    def test_gamma_shape_on_device(self, device):
+        alpha = torch.randn(2, 3, device=device).exp().requires_grad_()
+        beta = torch.randn(2, 3, device=device).exp().requires_grad_()
+        alpha_1d = torch.randn(1, device=device).exp().requires_grad_()
+        beta_1d = torch.randn(1, device=device).exp().requires_grad_()
         self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
         self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
@@ -4775,14 +4727,13 @@ class TestDistributionsGPU(DistributionsTestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_gamma_gpu_sample(self):
+    @onlyAccelerator
+    def test_gamma_sample_on_device(self, device):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             a, b = (
-                torch.tensor([alpha]).to(device_type),
-                torch.tensor([beta]).to(device_type),
+                torch.tensor([alpha], device=device),
+                torch.tensor([beta], device=device),
             )
             self._check_sampler_sampler(
                 Gamma(a, b),
@@ -4791,11 +4742,42 @@ class TestDistributionsGPU(DistributionsTestCase):
                 failure_rate=1e-4,
             )
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_beta_underflow_gpu(self):
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @set_default_dtype_if_supported(torch.double)
+    def test_dirichlet_log_prob(self, device):
+        num_samples = 10
+        alpha = torch.exp(torch.randn(5, device=device))
+        dist = Dirichlet(alpha)
+        x = dist.sample((num_samples,))
+        actual_log_prob = dist.log_prob(x)
+        for i in range(num_samples):
+            xi_cpu = x[i].cpu()
+
+            # Since MPS doesn't support doubles, the sum of `x[i]` can be
+            # slightly more or less than 1, with relative error around 1e-7,
+            # which is larger than scipy allows. So convert to double and divide
+            # by the sum to bring it much closer to 1.
+            if torch.device(device).type == "mps":
+                xi_cpu = xi_cpu.double()
+                xi_cpu = xi_cpu / xi_cpu.sum()
+
+            expected_log_prob = scipy.stats.dirichlet.logpdf(
+                xi_cpu, alpha.cpu().numpy()
+            )
+            self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
+
+    @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @dtypesIfCUDA(torch.double)
+    @dtypesIfXPU(torch.double)
+    def test_beta_underflow(self, dtype, device):
+        # For low values of (alpha, beta), the gamma samples can underflow
+        # with float32 and result in a spurious mode at 0.5. To prevent this,
+        # torch._sample_dirichlet works with double precision for intermediate
+        # calculations.
         set_rng_seed(1)
         num_samples = 50000
-        conc = torch.tensor(1e-2, dtype=torch.float64).to(device_type)
+        conc = torch.tensor(1e-2, dtype=dtype, device=device)
         beta_samples = Beta(conc, conc).sample([num_samples])
         self.assertEqual((beta_samples == 0).sum(), 0)
         self.assertEqual((beta_samples == 1).sum(), 0)
@@ -4803,9 +4785,11 @@ class TestDistributionsGPU(DistributionsTestCase):
         frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
-        self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
-        self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
-
+        dev_type = torch.device(device).type
+        # Use atol=0.12 for accelerated devices (cuda/xpu/mps/npu etc.), atol=0.05 for CPU.
+        atol = 0.12 if dev_type != "cpu" else 0.05
+        self.assertEqual(frac_zeros, 0.5, atol=atol, rtol=0)
+        self.assertEqual(frac_ones, 0.5, atol=atol, rtol=0)
 
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
@@ -7360,13 +7344,8 @@ class TestJit(DistributionsTestCase):
 
 
 instantiate_device_type_tests(
-    TestDistributions,
+    TestDistributionsDevice,
     globals(),
-    allow_mps=True,
-    except_for=(
-        "cuda",
-        "xpu",
-    ),
 )
 
 if __name__ == "__main__" and torch._C.has_lapack:
