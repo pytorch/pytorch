@@ -1207,6 +1207,21 @@ class TestUnaryUfuncs(TestCase):
         )
         gradcheck(torch.sinc, a)
 
+    # bessel_j1 and modified_bessel_i1 have a 0/0 closed-form gradient at x = 0
+    # whose analytic limit is 1/2. OpInfo sample generation does not reliably emit
+    # exact zeros, so this special-cased value is not covered there; check it here.
+    @dtypes(torch.double)
+    @parametrize(
+        "name",
+        ("bessel_j1", "modified_bessel_i1"),
+    )
+    def test_bessel_zero_limit_gradient(self, device, dtype, name):
+        op = getattr(torch.special, name)
+        x = torch.zeros(4, dtype=dtype, device=device, requires_grad=True)
+        (grad,) = torch.autograd.grad(op(x).sum(), x)
+        self.assertFalse(torch.isnan(grad).any())
+        self.assertEqual(grad, torch.full_like(grad, 0.5))
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_mish(self, device, dtype):

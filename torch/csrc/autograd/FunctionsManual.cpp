@@ -6299,6 +6299,32 @@ Tensor i1_backward(
   });
 }
 
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  return AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "bessel_j1_backward", [&]() {
+        // J1'(x) = J0(x) - J1(x) / x. At x = 0 this is 0/0, but the analytic
+        // limit is 0.5. Replace the singular points with a safe input so the
+        // reciprocal stays finite, then select the 0.5 limit there.
+        auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_not_tiny = self.abs() > eps;
+
+        // Following `where` is needed as `where` computes gradients.
+        auto safe_self = at::where(
+            self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
+        auto gradx =
+            (at::special_bessel_j0(safe_self) -
+             (result * safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_not_tiny,
+                   gradx,
+                   at::scalar_tensor(0.5, self.options()));
+      });
+}
+
 Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
