@@ -3715,6 +3715,22 @@ class TestBinaryUfuncsDevice(TestCase):
             ):
                 input.heaviside_(values)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32, torch.float64, torch.bfloat16)
+    def test_heaviside_nan(self, device, dtype):
+        input = torch.tensor(
+            [float("nan"), 0.0, -1.0, 1.0],
+            device=device,
+            dtype=dtype,
+        )
+        values = torch.ones_like(input)
+        result = torch.heaviside(input, values)
+        self.assertTrue(torch.isnan(result[0]))
+        self.assertEqual(
+            result[1:],
+            torch.tensor([1.0, 0.0, 1.0], device=device, dtype=dtype),
+        )
+
     @onlyOn(["cuda", "xpu"])
     def test_heaviside_cross_device(self, device):
         x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
