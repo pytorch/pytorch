@@ -803,10 +803,9 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
-    @onlyCUDA
     @dtypes(torch.complex64)
-    def test_tan_complex_cuda_matches_numpy(self, device, dtype):
-        # Focused accuracy check for complex tan on CUDA against NumPy reference
+    def test_tan_complex_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tan against NumPy reference
         # Includes values near tan singularities on the real axis
         eps = 1e-3
         specials = torch.tensor(
@@ -836,10 +835,9 @@ class TestUnaryUfuncs(TestCase):
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
-    @onlyCUDA
     @dtypes(torch.complex64)
-    def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
-        # Focused accuracy check for complex tanh on CUDA against NumPy reference
+    def test_tanh_complex_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tanh against NumPy reference
         real = torch.randn(2048, device=device, dtype=torch.float32) * (2 * math.pi)
         imag = torch.randn(2048, device=device, dtype=torch.float32) * 5.0
         z = torch.complex(real, imag).to(dtype)
@@ -891,79 +889,43 @@ class TestUnaryUfuncs(TestCase):
         positives = torch.randint(1, 100, (2 * sz,), device=device).double()
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
-            ("abs", doubles, True, True, "cpu"),
-            ("abs", doubles, True, True, "cuda"),
-            ("acos", doubles, True, True, "cpu"),
-            ("acos", doubles, True, True, "cuda"),
-            ("asin", doubles, True, True, "cpu"),
-            ("asin", doubles, True, True, "cuda"),
-            ("atan", doubles, True, True, "cpu"),
-            ("atan", doubles, True, True, "cuda"),
-            ("acosh", doubles, True, True, "cpu"),
-            ("acosh", doubles, True, True, "cuda"),
-            ("asinh", doubles, True, True, "cpu"),
-            ("asinh", doubles, True, True, "cuda"),
-            ("atanh", doubles, True, True, "cpu"),
-            ("atanh", doubles, True, True, "cuda"),
-            ("bitwise_not", ints, True, True, "cpu"),
-            ("bitwise_not", ints, True, True, "cuda"),
-            ("ceil", doubles, True, True, "cpu"),
-            ("ceil", doubles, True, True, "cuda"),
-            ("cos", doubles, True, True, "cpu"),
-            ("cos", doubles, True, True, "cuda"),
-            ("cosh", doubles, True, True, "cpu"),
-            ("cosh", doubles, True, True, "cuda"),
-            ("digamma", doubles, True, True, "cpu"),
-            ("erf", doubles, True, True, "cpu"),
-            ("erf", doubles, True, True, "cuda"),
-            ("erfc", doubles, True, True, "cpu"),
-            ("erfc", doubles, True, True, "cuda"),
-            ("erfinv", doubles, True, True, "cpu"),
-            ("erfinv", doubles, True, True, "cuda"),
-            ("exp", doubles, True, True, "cpu"),
-            ("exp", doubles, True, True, "cuda"),
-            ("exp2", doubles, True, True, "cpu"),
-            ("exp2", doubles, True, True, "cuda"),
-            ("expm1", doubles, True, True, "cpu"),
-            ("expm1", doubles, True, True, "cuda"),
-            ("floor", doubles, True, True, "cpu"),
-            ("floor", doubles, True, True, "cuda"),
-            ("frac", doubles, True, True, "cpu"),
-            ("frac", doubles, True, True, "cuda"),
-            ("i0", doubles, True, True, "cpu"),
-            ("i0", doubles, True, True, "cuda"),
-            ("log", positives, True, True, "cpu"),
-            ("log", positives, True, True, "cuda"),
-            ("log10", positives, True, True, "cpu"),
-            ("log10", positives, True, True, "cuda"),
-            ("log1p", positives, True, True, "cpu"),
-            ("log1p", positives, True, True, "cuda"),
-            ("log2", positives, True, True, "cpu"),
-            ("log2", positives, True, True, "cuda"),
-            ("neg", doubles, True, True, "cpu"),
-            ("neg", doubles, True, True, "cuda"),
-            ("reciprocal", doubles, True, True, "cpu"),
-            ("reciprocal", doubles, True, True, "cuda"),
-            ("round", doubles, True, True, "cpu"),
-            ("round", doubles, True, True, "cuda"),
-            ("rsqrt", positives, True, True, "cpu"),
-            ("rsqrt", positives, True, True, "cuda"),
-            ("sin", doubles, True, True, "cpu"),
-            ("sin", doubles, True, True, "cuda"),
-            ("sinh", doubles, True, True, "cpu"),
-            ("sinh", doubles, True, True, "cuda"),
-            ("sigmoid", doubles, True, True, "cpu"),
-            ("sigmoid", doubles, True, True, "cuda"),
-            ("logit", doubles, True, True, "cpu"),
-            ("logit", doubles, True, True, "cuda"),
-            ("sqrt", doubles, True, True, "cpu"),
-            ("sqrt", doubles, True, True, "cuda"),
-            ("tan", doubles, True, True, "cpu"),
-            ("tan", doubles, True, True, "cuda"),
-            ("tanh", doubles, True, True, "cpu"),
-            ("tanh", doubles, True, True, "cuda"),
-            ("trunc", doubles, True, True, "cpu"),
-            ("trunc", doubles, True, True, "cuda"),
+            ("abs", doubles, True, True),
+            ("acos", doubles, True, True),
+            ("asin", doubles, True, True),
+            ("atan", doubles, True, True),
+            ("acosh", doubles, True, True),
+            ("asinh", doubles, True, True),
+            ("atanh", doubles, True, True),
+            ("bitwise_not", ints, True, True),
+            ("ceil", doubles, True, True),
+            ("cos", doubles, True, True),
+            ("cosh", doubles, True, True),
+            ("digamma", doubles, True, True),
+            ("erf", doubles, True, True),
+            ("erfc", doubles, True, True),
+            ("erfinv", doubles, True, True),
+            ("exp", doubles, True, True),
+            ("exp2", doubles, True, True),
+            ("expm1", doubles, True, True),
+            ("floor", doubles, True, True),
+            ("frac", doubles, True, True),
+            ("i0", doubles, True, True),
+            ("log", positives, True, True),
+            ("log10", positives, True, True),
+            ("log1p", positives, True, True),
+            ("log2", positives, True, True),
+            ("neg", doubles, True, True),
+            ("reciprocal", doubles, True, True),
+            ("round", doubles, True, True),
+            ("rsqrt", positives, True, True),
+            ("sin", doubles, True, True),
+            ("sinh", doubles, True, True),
+            ("sigmoid", doubles, True, True),
+            ("logit", doubles, True, True),
+            ("sqrt", doubles, True, True),
+            ("tan", doubles, True, True),
+            ("tanh", doubles, True, True),
+            ("trunc", doubles, True, True),
         ]
 
         for (
@@ -971,10 +933,7 @@ class TestUnaryUfuncs(TestCase):
             inputs,
             has_input_output_mem_overlap_check,
             has_internal_mem_overlap_check,
-            dev,
         ) in unary_mem_overlap_cases:
-            if dev != self.device_type:
-                continue
             out_fn = getattr(torch, fn)
             in_fn = getattr(torch.Tensor, fn + "_")
 
@@ -989,7 +948,7 @@ class TestUnaryUfuncs(TestCase):
                 in_fn,
                 1,
                 dtype,
-                dev,
+                device,
                 expected_failure=not has_internal_mem_overlap_check,
             )
 
@@ -1817,7 +1776,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
         self.assertEqual(
             out[size_inp // 4 :],
-            torch.tensor(10, device="cuda").expand_as(out[size_inp // 4 :]),
+            torch.tensor(10, device=device).expand_as(out[size_inp // 4 :]),
         )
         # correct fill for 2d
         x = x.view(2, size_inp // 2)
@@ -1827,7 +1786,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(ref, res[: size_inp // 2])
         self.assertEqual(
             res[size_inp // 2 :],
-            torch.tensor(-1, device="cuda").expand_as(res[size_inp // 2 :]),
+            torch.tensor(-1, device=device).expand_as(res[size_inp // 2 :]),
         )
 
     # TODO: rationalize with exp OpInfo
