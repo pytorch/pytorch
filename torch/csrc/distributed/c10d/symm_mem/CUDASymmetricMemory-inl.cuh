@@ -173,6 +173,59 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
   }
 }
 
+// One-sided signal send over the symmetric-memory signal pads, shared by the
+// backends that use the CAS-based signaling protocol. Sets the caller's slot
+// in dst_rank's signal pad; the matching wait_signal_kernel on dst_rank
+// consumes it.
+[[maybe_unused]] static __global__ void put_signal_kernel(
+    uint32_t** signal_pads,
+    int dst_rank,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    bool success = try_put_signal<std::memory_order_release>(
+        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] SymmetricMemory::put_signal: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          dst_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+}
+
+// Counterpart of put_signal_kernel: consumes the signal that src_rank set in
+// the caller's own signal pad, resetting the slot to zero.
+[[maybe_unused]] static __global__ void wait_signal_kernel(
+    uint32_t** signal_pads,
+    int src_rank,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x == 0) {
+    bool success = try_wait_signal<std::memory_order_acquire>(
+        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] SymmetricMemory::wait_signal: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          src_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+  __threadfence_system();
+}
+
 // Synchronizes blocks with matching blockIdx across participating devices.
 // Note: sync_remote_block itself is not a system level barrier/fence. It is a
 // building block for expressing different synchronization patterns.
