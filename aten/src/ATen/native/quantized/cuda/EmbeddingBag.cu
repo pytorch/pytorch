@@ -24,11 +24,14 @@ namespace at::native {
 // BEGIN QUANTIZE HELPER FUNCTIONS
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
 #ifdef USE_ROCM
-  return *reinterpret_cast<float*>((val >> pos) && ((1u << len) - 1u ));
+  // Extract the [pos, pos+len) bit field and convert to float. Use bitwise-AND
+  // (`&`), not logical-AND (`&&`): the logical form yielded a bool that the
+  // prior code reinterpret_cast to float* and dereferenced, faulting on ROCm.
+  return __uint2float_rn((val >> pos) & ((1u << len) - 1u));
 #else
   uint32_t ret;
   // Get the bit field of [pos, pos+len) bits from val:
-  // (val >> pos) && ( (1u << len) - 1u )
+  // (val >> pos) & ((1u << len) - 1u)
   asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
   return __uint2float_rn(ret);
 #endif
