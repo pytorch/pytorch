@@ -8037,6 +8037,11 @@ def _new_window(
     """
     Create a new one-sided (RMA) communication window on ``group``.
 
+    This is a collective operation. Every rank in ``group`` must call it in
+    the same order. If ``tensor`` is omitted, the subsequent
+    ``Window.tensor_register`` call is also collective and must be called by
+    every rank in the same order.
+
     Args:
         tensor (torch.Tensor, optional): If provided, the tensor is registered
             with the new window.
