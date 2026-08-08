@@ -145,6 +145,28 @@ class TestOptimRenewed(TestCase):
         * Grads can also be None, empty, or zero-valued, and this should not disrupt training.
     """
 
+    _default_optim_tolerance_multiplier = 5
+
+    def _get_optim_tolerances(
+        self,
+        dtype,
+        *,
+        multiplier=_default_optim_tolerance_multiplier,
+        rtol=None,
+        atol=None,
+    ):
+        if rtol is not None and atol is not None:
+            return rtol, atol
+
+        single_rtol, single_atol = torch.testing._comparison.get_tolerances(
+            dtype, rtol=rtol, atol=atol
+        )
+        return multiplier * single_rtol, multiplier * single_atol
+
+    def assertEqualWithOptimTolerances(self, actual, expected, dtype, **kwargs):
+        rtol, atol = self._get_optim_tolerances(dtype, **kwargs)
+        self.assertEqual(actual, expected, rtol=rtol, atol=atol)
+
     @onlyCPU
     @optims(optim_db)
     def test_optim_infos_do_not_specify_global_cliquey_kwargs(
@@ -580,7 +602,13 @@ class TestOptimRenewed(TestCase):
                             scheduler.step()
                     # Tolerance is increased due to floating point error from different
                     # code path for dense case: x v.s. x - x / 4.0 + x / 4.0
-                    self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
+                    self.assertEqualWithOptimTolerances(
+                        params,
+                        params_c,
+                        dtype,
+                        rtol=5e-6,
+                        atol=5e-6,
+                    )
 
             if not kwargs.get("maximize", False):
                 self.assertLessEqual(
@@ -978,15 +1006,7 @@ class TestOptimRenewed(TestCase):
 
             og_state, new_state = state
             for og_p, new_p in zip(updated_params[0], updated_params[1]):
-                # Increasing the tolerance as we are collating lots of ops together for optimizers and
-                # the designated tolerances are for single op only.
-                single_rtol, single_atol = torch.testing._comparison.get_tolerances(
-                    new_p.dtype, rtol=None, atol=None
-                )
-                rtol = 5 * single_rtol
-                atol = 5 * single_atol
-
-                self.assertEqual(og_p, new_p, rtol=rtol, atol=atol)
+                self.assertEqualWithOptimTolerances(og_p, new_p, new_p.dtype)
 
                 # check that optimizer states are the same
                 og_p_state = og_state[og_p]
@@ -994,7 +1014,9 @@ class TestOptimRenewed(TestCase):
 
                 for k in og_p_state:
                     actual = new_p_state[k]
-                    self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
+                    self.assertEqualWithOptimTolerances(
+                        og_p_state[k], actual, new_p.dtype
+                    )
 
     @skipMPS  # MPS does not support float64
     @onlyAccelerator
