@@ -237,7 +237,7 @@ class TestCodegenOutputAlias(TestCase):
         """
         Training path with mixed differentiable and non-differentiable
         outputs. Exercises non-differentiable output collection in
-        _transform_raw_returns codegen and backward correctness.
+        the compiled-forward codegen and backward correctness.
         """
         with (
             self._capture_codegen_source("compiled_fn_wrapper") as xform_captured,
@@ -470,7 +470,7 @@ class TestCodegenOutputAlias(TestCase):
 
     def test_xform_unsafe_view_output(self):
         """
-        _transform_raw_returns codegen: when an output is a view of an
+        Compiled-forward codegen: when an output is a view of an
         intermediate and is the only output aliasing that intermediate
         (unsafe_view_alias), the codegen emits an _unsafe_view call.
         """
@@ -495,11 +495,11 @@ class TestCodegenOutputAlias(TestCase):
     @skipIfTorchDynamo("dynamo handles metadata mutations in-graph")
     def test_xform_metadata_only_mutation(self):
         """
-        _transform_raw_returns codegen: when an input has a metadata-only
+        Compiled-forward codegen: when an input has a metadata-only
         mutation (mutates_metadata=True, mutates_data=False), the codegen
         wraps the corresponding mutated input return in TensorAlias.
         Uses aot_function directly because dynamo handles metadata
-        mutations in-graph, so they never reach the _transform_raw_returns
+        mutations in-graph, so they never reach the compiled-forward
         codegen path.
         """
         with self._capture_codegen_source("compiled_fn_wrapper") as captured:
@@ -543,7 +543,7 @@ class TestCodegenOutputAlias(TestCase):
 
     def test_xform_aliased_output_tensoralias_wrapping(self):
         """
-        _transform_raw_returns codegen: aliased outputs get wrapped in
+        Compiled-forward codegen: aliased outputs get wrapped in
         TensorAlias so autograd.Function doesn't treat them as regular
         tensors. Verifies the TensorAlias wrapping path for aliased
         outputs (distinct from the metadata-only mutation wrapping).
