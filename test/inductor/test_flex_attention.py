@@ -2690,7 +2690,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
-    @skip_on_cpu
     def test_return_max(self, device, dtype, score_mod):
         # MPS has forward-only flex_attention
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
@@ -2780,6 +2779,86 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                         grad,
                         lambda msg: f"{msg}\n{input_name} should receive gradients in {description}",
                     )
+
+    @supported_platform
+    @skip_on_mps
+    def test_cpu_aux_outputs_decode_and_masked(self, device):
+        # Forward-only aux outputs (lse, max_scores) for the two CPU flex
+        # templates: the flash-decoding path (q_len == 1, long kv) and fully
+        # masked query rows/blocks, where lse/max must match eager's -inf
+        # convention.
+        dtype = torch.float32
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        aux = AuxRequest(lse=True, max_scores=True)
+
+        def make(b, hq, hkv, sq, skv):
+            return (
+                torch.randn(b, hq, sq, 64, device=device, dtype=dtype),
+                torch.randn(b, hkv, skv, 64, device=device, dtype=dtype),
+                torch.randn(b, hkv, skv, 64, device=device, dtype=dtype),
+            )
+
+        def check(q, k, v, *, score_mod=None, block_mask=None, req=aux):
+            out_e, aux_e = flex_attention(
+                q, k, v, score_mod=score_mod, block_mask=block_mask, return_aux=req
+            )
+            out_c, aux_c = flex_compile(
+                q, k, v, score_mod=score_mod, block_mask=block_mask, return_aux=req
+            )
+            self.assertEqual(out_c, out_e, atol=2e-3, rtol=2e-3)
+            self.assertEqual(aux_c.lse, aux_e.lse, atol=2e-3, rtol=2e-3)
+            if req.max_scores:
+                self.assertEqual(
+                    aux_c.max_scores, aux_e.max_scores, atol=2e-3, rtol=2e-3
+                )
+            else:
+                self.assertIsNone(aux_c.max_scores)
+            return aux_e, aux_c
+
+        # Flash-decoding path: single query token attending over a long kv.
+        q, k, v = make(1, 8, 8, 1, 2048)
+        check(q, k, v)
+
+        # Flash-decoding slow path (per-head mask -> non-independent mod) with an
+        # additive score_mod that makes every post-mod score negative and leaves
+        # empty partitions. max_scores must be the true (negative) max, not 0.
+        def neg_score(score, b, h, q_idx, kv_idx):
+            return score * 0.0 - 200.0
+
+        def head_mask(b, h, q_idx, kv_idx):
+            return kv_idx < (512 + h * 256)
+
+        qd, kd, vd = make(1, 4, 4, 1, 2048)
+        block_mask = create_block_mask(head_mask, 1, 4, 1, 2048, device=device)
+        aux_e, _ = check(qd, kd, vd, score_mod=neg_score, block_mask=block_mask)
+        self.assertTrue((aux_e.max_scores < 0).all())
+
+        # Partially masked rows (regular template): rows < 64 fully masked.
+        def band(b, h, q_idx, kv_idx):
+            return (kv_idx >= 64) & (q_idx >= 64)
+
+        q, k, v = make(1, 2, 2, 128, 128)
+        block_mask = create_block_mask(band, 1, 2, 128, 128, device=device)
+        _, aux_c = check(q, k, v, block_mask=block_mask)
+        self.assertTrue(torch.isneginf(aux_c.lse[:, :, :64]).all())
+        self.assertTrue(torch.isneginf(aux_c.max_scores[:, :, :64]).all())
+
+        # Fully masked query BLOCK (regular template): the whole first q block
+        # has no valid kv, so is_skip_kv is taken and the kv loop never runs.
+        def drop_block(b, h, q_idx, kv_idx):
+            return q_idx >= 128
+
+        q, k, v = make(1, 2, 2, 256, 256)
+        block_mask = create_block_mask(drop_block, 1, 2, 256, 256, device=device)
+        _, aux_c = check(q, k, v, block_mask=block_mask)
+        self.assertTrue(torch.isneginf(aux_c.lse[:, :, :128]).all())
+        self.assertTrue(torch.isneginf(aux_c.max_scores[:, :, :128]).all())
+
+        # Legacy return_lse=True and lse-only aux both hit the single-buffer path.
+        out_c, lse_c = flex_compile(q, k, v, block_mask=block_mask, return_lse=True)
+        _, lse_e = flex_attention(q, k, v, block_mask=block_mask, return_lse=True)
+        self.assertEqual(lse_c, lse_e, atol=2e-3, rtol=2e-3)
+        check(q, k, v, block_mask=block_mask, req=AuxRequest(lse=True))
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -6500,24 +6579,6 @@ class GraphModule(torch.nn.Module):
             compiled_out = torch.compile(model)(x)
 
         torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
-
-    @supported_platform
-    @skip_on_cuda
-    def test_cpu_error_message_return_lse(self, device):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.float32,
-            requires_grad=False,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
-        ):
-            attention(query, key, value, return_lse=True)
 
     @supported_platform
     @skip_on_cpu
