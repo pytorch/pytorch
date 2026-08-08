@@ -36,7 +36,7 @@ class TestInput(FSDPTestContinuous):
     @skip_if_lt_x_gpu(1)
     @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
     def test_input_type(self, device, input_cls):
-        """Test FSDP with input being a list or a dict, only single GPU."""
+        """Test FSDP with input being a list or a dict on one accelerator."""
 
         class Model(Module):
             def __init__(self):
@@ -114,7 +114,7 @@ class TestInput(FSDPTestContinuous):
             self.assertIn("added", in_data)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(TestInput, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
