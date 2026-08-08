@@ -1042,6 +1042,16 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
+    # composable_kernel has no gfx1250 support yet. If gfx1250 is the only arch,
+    # disable CK GEMM here (before -DUSE_ROCM_CK_GEMM is added) so that both the
+    # CK GEMM sources and their call sites (guarded by USE_ROCM_CK_GEMM in
+    # CUDABlas.cpp/GroupedBlas.cpp) are compiled out consistently. Doing this in
+    # aten/src/ATen/CMakeLists.txt instead excludes the sources but still defines
+    # USE_ROCM_CK_GEMM, leaving undefined references to gemm_internal_ck at link.
+    if("${PYTORCH_ROCM_ARCH}" STREQUAL "gfx1250")
+      message(WARNING "gfx1250 is the only arch in PYTORCH_ROCM_ARCH: disabling USE_ROCM_CK_GEMM (composable_kernel lacks gfx1250 support)")
+      caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+    endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
