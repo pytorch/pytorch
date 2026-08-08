@@ -13,9 +13,27 @@ inline int64_t sliding_window_count(
     int64_t dilation,
     int64_t kernel,
     int64_t stride) {
-  return div_rtn<int64_t>(
-             input_size + 2 * pad - (dilation * (kernel - 1) + 1), stride) +
-      1;
+  // Guard the derived-dimension arithmetic: with adversarial dilation/kernel/pad
+  // (e.g. kernel=2**63-2) the int64_t products/sums silently overflow and yield a
+  // spuriously valid positive count, which later drives an out-of-bounds kernel
+  // launch. Compute with checked arithmetic and reject overflow on the host.
+  int64_t kernel_extent = 0; // dilation * (kernel - 1) + 1
+  int64_t two_pad = 0;
+  int64_t numerator = 0;
+  const bool overflow =
+      c10::mul_overflows(dilation, kernel - 1, &kernel_extent) ||
+      c10::add_overflows(kernel_extent, static_cast<int64_t>(1), &kernel_extent) ||
+      c10::mul_overflows(pad, static_cast<int64_t>(2), &two_pad) ||
+      c10::add_overflows(input_size, two_pad, &numerator) ||
+      // kernel_extent came from checked arithmetic, so it cannot be INT64_MIN
+      // and negating it here is safe.
+      c10::add_overflows(numerator, -kernel_extent, &numerator);
+  TORCH_CHECK(
+      !overflow,
+      "Sliding-window count overflowed with input_size=", input_size,
+      ", pad=", pad, ", dilation=", dilation, ", kernel=", kernel,
+      ", stride=", stride);
+  return div_rtn<int64_t>(numerator, stride) + 1;
 }
 
 inline void col2im_shape_check(
