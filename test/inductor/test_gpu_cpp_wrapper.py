@@ -23,6 +23,7 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
@@ -103,6 +104,7 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 
 
 class TestGpuWrapper(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     device = GPU_TYPE
 
     def test_cpp_wrapper_compile_timing_recorded(self):
@@ -433,8 +435,10 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertEqual(
                     xblocks,
                     [DEFAULT_COMBO_BLOCK_SIZE_1D],
-                    lambda msg: f"{msg}\n{name} got xblocks={xblocks}, "
-                    f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
+                    lambda msg: (
+                        f"{msg}\n{name} got xblocks={xblocks}, "
+                        f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]"
+                    ),
                 )
 
     def test_cudagraph_no_partition(self):
@@ -653,6 +657,7 @@ for i, (a, r) in enumerate(zip(args, ref_args)):
 
 
 class TestLazyCompileKernelCollision(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     device = GPU_TYPE
 
     def test_lazy_compile_kernel_name_collision_across_modules(self):
@@ -725,6 +730,7 @@ compiled(x)
 
 
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     device = GPU_TYPE
 
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
@@ -760,7 +766,9 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         self.assertEqual(
             r.returncode,
             0,
-            lambda msg: f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+            lambda msg: (
+                f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}"
+            ),
         )
 
 
@@ -867,6 +875,7 @@ run()
 
 
 class TestLazyTmaGlobalScratch(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     device = GPU_TYPE
 
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
@@ -900,13 +909,16 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         self.assertEqual(
             result.returncode,
             0,
-            lambda msg: f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
-            f"returncode: {result.returncode}\n"
-            f"stderr tail:\n{stderr_tail}",
+            lambda msg: (
+                f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
+                f"returncode: {result.returncode}\n"
+                f"stderr tail:\n{stderr_tail}"
+            ),
         )
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     device = GPU_TYPE
 
     def test_annotation_training(self):
@@ -976,7 +988,7 @@ def make_test_case(
                 )
 
                 _, code = test_torchinductor.run_and_get_cpp_code(
-                    func, *func_inputs if func_inputs else []
+                    func, *func_inputs or []
                 )
                 if check_code:
                     self.assertEqual("CppWrapperCodeCache" in code, True)
