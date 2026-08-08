@@ -2560,6 +2560,45 @@ class CPUReproTests(TestCase):
         p1 = torch.randn(1)
         self.common(fn, (p0, p1))
 
+    def test_division_by_zero(self):
+        @torch.compile(backend="inductor")
+        def test_division(x, y, rounding_mode=None):
+            return torch.div(x, y, rounding_mode=rounding_mode)
+
+        def run_division(x, y, rounding_mode=None):
+            try:
+                ret = test_division(x, y, rounding_mode=rounding_mode)
+                return ret
+            except Exception as e:
+                detected = "ZeroDivisionError" in str(e)
+                self.assertTrue(detected)
+                return None
+
+        x1 = torch.randint(0, 10, size=(1,))
+        y1 = torch.zeros((1,), dtype=torch.int32)
+        ret = run_division(x1, y1, rounding_mode="trunc")
+        self.assertTrue(ret is None)
+
+        x2 = torch.randint(0, 10, size=(3, 4))
+        y2 = torch.zeros((3, 4), dtype=torch.int32)
+        ret = run_division(x2, y2, rounding_mode="trunc")
+        self.assertTrue(ret is None)
+
+        x3 = torch.tensor([-32768, -32768, -32768, -32768], dtype=torch.int16)
+        y3 = torch.tensor([-1, -1, -1, -1], dtype=torch.int16)
+        ret = run_division(x3, y3, rounding_mode="trunc")
+        self.assertTrue(torch.equal(ret, x3))
+
+        x4 = torch.randint(0, 10, size=(1,))
+        ret = run_division(x4, 1, rounding_mode="trunc")
+        ret = run_division(x4, 0, rounding_mode="trunc")
+        self.assertTrue(ret is None)
+
+        x5 = torch.randint(0, 10, size=(1,))
+        y5 = torch.zeros((1,), dtype=torch.int32)
+        ret = run_division(x5, y5, rounding_mode="floor")
+        self.assertTrue(ret is None)
+
     def test_no_op_squeeze(self):
         @torch.compile(backend="inductor")
         def forward(arg0_1):

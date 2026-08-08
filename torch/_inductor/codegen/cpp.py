@@ -644,6 +644,67 @@ def arith_promoted(op, a, b):
     return f"{cpp_type}({a} {op} {b})"
 
 
+def is_const_and_nonzero(x) -> bool:
+    """
+    Check whether `x` is provably != 0 at codegen time by tracing its source.
+
+    A value is considered a "const" (compile-time known) if:
+      - It is a Python int/float literal
+      - It is a sympy numeric expression (no free symbols)
+      - It is a CppCSEVariable whose `dependent_itervars` is empty, meaning it
+        does not depend on any loop iteration variable and is therefore a
+        compile-time constant.
+
+    For const values, we then check whether 0 falls outside the known value
+    range.  For CppCSEVariable this uses the `bounds` attribute (a
+    ValueRanges object with `.lower` and `.upper`).  If the entire range is
+    strictly positive (lower > 0) or strictly negative (upper < 0), we can
+    safely conclude x != 0.
+
+    Returns True if we can prove x != 0, False otherwise (conservative).
+    """
+    if isinstance(x, (int, float)):
+        return x != 0
+
+    if isinstance(x, sympy.Expr):
+        if x.is_number:
+            try:
+                return int(x) != 0
+            except Exception:
+                return False
+        try:
+            return V.graph.sizevars.guard_or_false(sympy.Ne(x, 0))
+        except Exception:
+            return False
+
+    if isinstance(x, OpsValue):
+        return is_const_and_nonzero(x.value)
+
+    if isinstance(x, CppCSEVariable):
+        if x.dependent_itervars:
+            return False
+
+        def _try_numeric(val):
+            if isinstance(val, (int, float)):
+                return val
+            if isinstance(val, sympy.Expr) and val.is_number:
+                try:
+                    return int(val)
+                except Exception:
+                    try:
+                        return float(val)
+                    except Exception:
+                        return None
+            return None
+
+        lo = _try_numeric(x.bounds.lower)
+        hi = _try_numeric(x.bounds.upper)
+        if lo is not None and hi is not None:
+            return lo > 0 or hi < 0
+        return False
+    return False
+
+
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
@@ -859,7 +920,9 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # a and b are integer type
-        return f"floor_divide_integral({a}, {b})"
+        if is_const_and_nonzero(b):
+            return f"c10::div_floor_integer({a}, {b})"
+        return f"floor_divide_integral({a}, {b}, &inductor_cpu_integer_div_error)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -875,7 +938,9 @@ class CppOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # a and b are integer type
-        return f"{a} / {b}"
+        if is_const_and_nonzero(b):
+            return f"c10::trunc_floor_integer({a}, {b})"
+        return f"trunc_divide_integral({a}, {b}, &inductor_cpu_integer_div_error)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1026,7 +1091,9 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def mod(a, b):
-        return f"mod({a}, {b})"
+        if is_const_and_nonzero(b):
+            return f"mod({a}, {b})"
+        return f"mod({a}, {b}, &inductor_cpu_integer_div_error)"
 
     @staticmethod
     def constant(val, dtype):
@@ -1552,7 +1619,7 @@ class CppVecOverrides(CppOverrides):
             _t = f"decltype({a})"
             if V.kernel._get_raw_num_vectors(b.dtype) < 1:
                 b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-            return f"remainder_integral({a}, {b})"
+            return f"remainder_integral({a}, {b}, &inductor_cpu_integer_div_error)"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1694,14 +1761,14 @@ class CppVecOverrides(CppOverrides):
             # a and b are integer type
             _t = f"decltype({b})"
             b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
-            return f"floor_divide_integral({a}, {b})"
+            return f"floor_divide_integral({a}, {b}, &inductor_cpu_integer_div_error)"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
         _t = f"decltype({b})"
         b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
-        return f"{a} / {b}"
+        return f"trunc_divide_integral({a}, {b}, &inductor_cpu_integer_div_error)"
 
     @staticmethod
     def minimum(a, b):
@@ -6152,9 +6219,6 @@ class KernelGroup:
         # 3. Function body
         with code.indent():
             code.writeline("std::atomic<int> inductor_cpu_integer_div_error{0};")
-            code.writeline(
-                "inductor_cpu_integer_div_error_flag = &inductor_cpu_integer_div_error;"
-            )
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
@@ -6169,7 +6233,6 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
-            code.writeline("inductor_cpu_integer_div_error_flag = nullptr;")
             code.writeline(
                 "inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);"
             )
