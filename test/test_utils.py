@@ -618,7 +618,7 @@ class TestDataLoaderUtils(TestCase):
         # not a Dataset subclass, but needs to stay working so add ignore's
         # for type checking with mypy
         dataloader: DataLoader = DataLoader(
-            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type, no-matching-overload]
             batch_size=3,
             num_workers=0,
             drop_last=False,
@@ -628,7 +628,7 @@ class TestDataLoaderUtils(TestCase):
 
     def test_single_drop(self):
         dataloader: DataLoader = DataLoader(
-            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type, no-matching-overload]
             batch_size=3,
             num_workers=0,
             drop_last=True,
@@ -641,7 +641,7 @@ class TestDataLoaderUtils(TestCase):
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
-            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type, no-matching-overload]
             batch_size=3,
             num_workers=2,
             drop_last=False,
@@ -652,7 +652,7 @@ class TestDataLoaderUtils(TestCase):
 
     def test_multi_drop(self):
         dataloader: DataLoader = DataLoader(
-            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type, no-matching-overload]
             batch_size=3,
             num_workers=2,
             drop_last=True,
