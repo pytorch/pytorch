@@ -2526,6 +2526,25 @@ class aot_inductor:
     aoti_shim_library: str | list[str] | None = None
     aoti_shim_library_path: str | None = None
 
+    # Optional symbol prefix applied to every aoti_torch_* C-ABI shim the
+    # generated model references (both codegen-emitted calls and the calls in
+    # the AOTI runtime headers compiled into the model).
+    #
+    # Empty string (default) = current behavior, byte-for-byte: no prefix, no
+    # extra compile define, identical generated source and build flags.
+    #
+    # When non-empty (e.g. "executorch_"), the model calls
+    # <prefix>aoti_torch_* instead of aoti_torch_*, so the shim symbols it
+    # binds to are disjoint from libtorch's aoti_torch_*. The environment that
+    # loads the model MUST provide definitions for every <prefix>aoti_torch_*
+    # symbol it references; a bare libtorch does NOT, so this is only for
+    # backends that ship their own shim implementations (e.g. ExecuTorch).
+    #
+    # Must be a valid C identifier prefix ([A-Za-z_][A-Za-z0-9_]*). It is
+    # passed to the compiler as -DAOTI_SHIM_SYMBOL_PREFIX=<prefix>, which a
+    # macro layer in aoti_torch/c/macros.h uses to rename the references.
+    shim_symbol_prefix: str = ""
+
 
 # a convenient class that automatically sets a group of the configs in aot_inductor
 # it should only control the flags in aot_inductor.

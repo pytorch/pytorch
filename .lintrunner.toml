@@ -96,6 +96,7 @@ exclude_patterns = [
     'c10/util/strong_type.h',
     '**/fb/**',
     'torch/csrc/inductor/aoti_torch/generated/**',
+    'torch/csrc/inductor/aoti_torch/c/shim_symbol_prefix.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'aten/src/ATen/dlpack.h',
