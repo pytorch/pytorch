@@ -1268,6 +1268,19 @@ class TestTypedExpr(TestCase):
         typed_I = TypedExpr(I, torch.int32)
         self.assertEqual(typed_I.expr, 1)
 
+    def test_non_comparable_max_min(self):
+        from torch._inductor.index_propagation import SymPyOps, TypedExpr
+
+        nan_expr = TypedExpr(sympy.nan, torch.float32)
+        int_expr = TypedExpr(sympy.Integer(1), torch.int32)
+
+        self.assertIs(NotImplemented, SymPyOps.maximum(nan_expr, int_expr))
+        self.assertIs(NotImplemented, SymPyOps.minimum(nan_expr, int_expr))
+
+        a = TypedExpr(sympy.Integer(3), torch.int32)
+        b = TypedExpr(sympy.Integer(7), torch.int32)
+        self.assertEqual(SymPyOps.maximum(a, b).expr, 7)
+        self.assertEqual(SymPyOps.minimum(a, b).expr, 3)
 
 class TestCCodePrinting(TestCase):
     """Test _ccode methods on sympy function classes."""
