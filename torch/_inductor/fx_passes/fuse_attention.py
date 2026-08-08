@@ -946,6 +946,13 @@ def _warn_tf32_disabled() -> None:
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
+    if "inv_scale" in match.kwargs:
+        inv_scale = match.kwargs["inv_scale"]
+        # Non-constant FX arguments store their value type in node metadata.
+        if isinstance(inv_scale, torch.fx.Node):
+            inv_scale = inv_scale.meta.get("val")
+        if not isinstance(inv_scale, (float, int, torch.SymInt, torch.SymFloat)):
+            return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
