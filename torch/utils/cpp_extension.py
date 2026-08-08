@@ -624,6 +624,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     return (False, TorchVersion('.'.join(numeric_version)))
 
 
+def _cuda13_nvcc_preprocessor_flags() -> list[str]:
+    if torch.version.cuda is not None and Version(torch.version.cuda) >= Version('13.0'):
+        return ['-Xcompiler', '/Zc:preprocessor']
+    return []
+
+
 def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> None:
     if not CUDA_HOME:
         raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
@@ -1124,6 +1130,7 @@ class BuildExtension(_LazyBuildExt):
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
+                        cflags = _cuda13_nvcc_preprocessor_flags() + cflags
                         cmd = _wrap_compiler([nvcc, '-c', src, '-o', obj] + include_list + cflags)
                     else:
                         if isinstance(self.cflags, dict):
@@ -1208,7 +1215,7 @@ class BuildExtension(_LazyBuildExt):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = ['-std=c++20']
+                cuda_cflags = ['-std=c++20'] + _cuda13_nvcc_preprocessor_flags()
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -3018,6 +3025,7 @@ def _write_ninja_file_to_build_library(path,
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
+            cuda_flags = _cuda13_nvcc_preprocessor_flags() + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
             cuda_flags = cuda_flags + ['-std=c++20']
