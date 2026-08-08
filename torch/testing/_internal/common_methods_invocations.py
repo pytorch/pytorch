@@ -6715,6 +6715,10 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
 
+    # test mixed bounds
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_arg(()).item()))
+    yield SampleInput(make_arg(shape), args=(make_arg(()).item(), make_arg(shape)))
+
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
 
