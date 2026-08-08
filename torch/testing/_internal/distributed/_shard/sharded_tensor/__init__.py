@@ -32,9 +32,15 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             init_method=f"file://{self.file_name}",
         )
 
-        # set device for nccl pg for collectives
-        if backend == "nccl" or backend == "xccl":
-            torch.accelerator.set_device_index(self.rank)
+        # Set the per-rank device for the current accelerator backend.
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None:
+            device_type = accelerator.type
+            # Keep the existing HPU/HCCL behavior unchanged.
+            if device_type != "hpu" and backend == dist.get_default_backend_for_device(
+                device_type
+            ):
+                torch.accelerator.set_device_index(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
