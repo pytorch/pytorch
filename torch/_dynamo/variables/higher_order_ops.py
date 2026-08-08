@@ -35,7 +35,7 @@ import torch._C
 import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import constants_identical, get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -1045,10 +1045,12 @@ def are_same_graph_modules(
                     (arg_b.start, arg_b.stop, arg_b.step),
                 ):
                     return False
-            elif arg_a != arg_b:
+            elif not constants_identical(arg_a, arg_b):
                 # This is a catch-all for everything else. `slice` was a
                 # surprise but can there be other data structures that can
-                # contain fx.Nodes in them?
+                # contain fx.Nodes in them? Float constants are compared
+                # bitwise: two graphs differing only by 0.0 vs -0.0 must not
+                # be deduplicated, and identical nan constants should be.
                 return False
         return True
 
