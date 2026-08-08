@@ -357,6 +357,17 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 compiled(x, float_indices)
 
     @dtypesIfCUDA(torch.float16, torch.float64)
+    @dtypes(torch.float32)
+    def test_embedding_dense_backward_zero_width(self, device, dtype):
+        # Dense embedding backward with zero embedding width must not launch a
+        # kernel over the empty gradient and read a null pointer (gh-189668);
+        # the gradient is simply an empty tensor of the weight's shape.
+        weight = torch.zeros(10, 0, device=device, dtype=dtype, requires_grad=True)
+        idx = torch.zeros(3, dtype=torch.long, device=device)
+        torch.nn.functional.embedding(idx, weight).sum().backward()
+        self.assertEqual(weight.grad.shape, weight.shape)
+        self.assertEqual(weight.grad, torch.zeros_like(weight))
+
     @dtypesIfXPU(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
