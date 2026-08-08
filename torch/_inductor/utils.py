@@ -4718,6 +4718,9 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            # `.item()` returns a Scalar, which cannot be serialized as a generic
+            # fallback kernel; route it to its dedicated DynamicScalar lowering.
+            torch.ops.aten._local_scalar_dense.default,
         ]
     )
 
