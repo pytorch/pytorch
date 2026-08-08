@@ -2802,6 +2802,23 @@ def compile_fx_backward(
             static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             static_input_idxs = list(range(fixed))
+
+        # Saved primals that are plain user inputs (not params/buffers/
+        # mark_static_address) get a fresh tensor every call, so they are not
+        # address-stable and may not match the example input's alignment.
+        # Demote them so get_input_idxs_to_check gives them the same runtime
+        # copy_if_misaligned treatment as tangents. Saved activations stay
+        # static: inductor allocates them aligned. The partitioner stamps
+        # is_static_input on saved primal placeholders (see
+        # _extract_fwd_bwd_modules); nodes without the stamp (activations,
+        # tangents, or graphs from partitioners that predate it) keep their
+        # existing classification.
+        placeholders = gm.graph.find_nodes(op="placeholder")
+        static_input_idxs = [
+            i
+            for i in static_input_idxs
+            if placeholders[i].meta.get("is_static_input", True)
+        ]
         with (
             (
                 config.patch(get_cpp_wrapper_config())
