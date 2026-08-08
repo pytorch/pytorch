@@ -49,7 +49,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         TestShardedTensorBinaryOps.seed += 1
         return st1, st2
 
-    def get_gpu_specs(self):
+    def get_device_specs(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -72,7 +72,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         return spec, alt_spec
 
     def _test_common_failures(self, cmp_op):
-        spec, alt_spec = self.get_gpu_specs()
+        spec, alt_spec = self.get_device_specs()
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         if self.rank == 0:
@@ -127,33 +127,33 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_torch_equal_tensor_specs(self):
         self._test_common_failures(torch.equal)
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_torch_equal(self):
         """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
-        spec, _ = self.get_gpu_specs()
+        spec, _ = self.get_device_specs()
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_torch_allclose_tensor_specs(self):
         self._test_common_failures(torch.allclose)
 
     @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_torch_allclose(self):
         """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 
-        spec, _ = self.get_gpu_specs()
+        spec, _ = self.get_device_specs()
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.allclose(st1, st2))
