@@ -988,6 +988,14 @@ void ConfigureAndLaunchGammaBetaBackwardKernel(
 
 }
 
+// We have a situation where M >> N and N is small: parallelizing gamma/beta
+// backward across the M dimension in a separate kernel (below) pays off vs.
+// the single fused-tile kernel. Shared by LaunchGammaBetaBackwardCUDAKernel's
+// internal check and its ROCm caller so the two conditions cannot diverge.
+inline bool ShouldUseHugeMGammaBetaBackwardKernel(int64_t M, int64_t N, int block_dim_x, int sm_count) {
+  return M > 64 * 1024 && N / block_dim_x < sm_count / 2;
+}
+
 // Accept block_dim_x as a template parameter so ROCm can dispatch launch
 // shapes based on runtime warp size while preserving compile-time specialization.
 template<typename T, typename T_ACC, int block_dim_x, bool rms_norm>
@@ -1002,7 +1010,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
   const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  if (M > 64 * 1024 && N / block_dim_x < sm_count / 2) {
+  if (ShouldUseHugeMGammaBetaBackwardKernel(M, N, block_dim_x, sm_count)) {
     // We have a situation where M >> N and N is small.
     // In this case we can speed up the computation by parallelizing in the M dimension.
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
@@ -1056,22 +1064,11 @@ void LaunchGammaBetaBackwardCUDAKernel(
     } else if (M < 256) {
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 128, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else {
-#ifdef USE_ROCM
-      if constexpr (block_dim_x == 64) {
-        // GCN/CDNA devices use warp size 64 in ROCm.
-        // Cap block_dim_y at 16 to keep total threads (64*16=1024) within GPU limits.
-        // rows_per_thread_y = 256/16 = 16, still within warp size constraint.
-        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-      } else {
-        static_assert(block_dim_x == 32);
-        // RDNA devices (gfx10, gfx11, gfx12) use warp size 32 in ROCm.
-        // Use block_dim_y = 32 to keep total threads at 32*32=1024 within GPU limits.
-        // rows_per_thread_y = 256/32 = 8, still within warp size constraint.
-        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-      }
-#else
+      // Note: under USE_ROCM, LayerNormBackwardKernelImplInternal only reaches
+      // this function when ShouldUseHugeMGammaBetaBackwardKernel(...) is true
+      // (the huge-M/small-N regime handled above), so this branch is CUDA-only
+      // in practice; there is no ROCm-specific (CDNA/RDNA) tile shape here.
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-#endif
     }
   }
 }
@@ -1459,6 +1456,52 @@ void cuComputeGradGammaBeta(
     }
 }
 
+// Two-pass gamma/beta backward: cuComputePartGradGammaBeta reduces
+// dgamma/dbeta partial sums across part_size row-blocks, then
+// cuComputeGradGammaBeta finishes the reduction across those partial sums.
+template <typename T, typename T_ACC, bool rms_norm>
+void LaunchTwoPassGammaBetaBackwardCUDAKernel(
+    const T* dY_data,
+    const T* X_data,
+    const Tensor& X,
+    const T_ACC* mean_data,
+    const T_ACC* rstd_data,
+    int64_t M,
+    int64_t N,
+    Tensor* dgamma,
+    Tensor* dbeta,
+    cudaStream_t cuda_stream) {
+  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
+  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  const int warp_size = at::cuda::warp_size();
+  const int part_size = warp_size;
+  const dim3 threads2(warp_size, 4, 1);
+  const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
+  const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+  const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+  const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+
+  const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+  Tensor part_grad_gamma = at::empty({part_size, N}, X.options().dtype(part_grad_dtype));
+  Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+
+  cuComputePartGradGammaBeta<T, T_ACC, rms_norm><<<blocks2, threads2, nshared2, cuda_stream>>>(
+      dY_data, X_data, M, N, mean_data, rstd_data,
+      part_grad_gamma.template data_ptr<T_ACC>(),
+      part_grad_beta.template data_ptr<T_ACC>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+  const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
+  const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
+
+  cuComputeGradGammaBeta<T, T_ACC, rms_norm><<<blocks3, threads3, nshared3, cuda_stream>>>(
+      part_grad_gamma.template data_ptr<T_ACC>(),
+      part_grad_beta.template data_ptr<T_ACC>(),
+      part_size, M, N, dgamma_data, dbeta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 template<typename T, typename T_ACC, bool rms_norm> __global__
 void cuComputeGradInput(
     const T* __restrict__ dout,
@@ -1694,21 +1737,32 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      // Use the optimized tiled kernel adapted for the current warp size.
-      // This replaces the legacy two-pass cuComputePartGradGammaBeta +
-      // cuComputeGradGammaBeta approach with a single-pass tiled reduction
-      // that has coalesced memory access and adaptive tile sizing.
-      if (warp_size == 64) {
-        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
-          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-      } else if (warp_size == 32) {
-        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
-          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+      // Hoisted above the dispatch below: an unexpected warp size must be
+      // caught regardless of which path (tiled or two-pass) M would route to.
+      TORCH_INTERNAL_ASSERT(
+          warp_size == 32 || warp_size == 64,
+          "Unexpected ROCm warp size: ",
+          warp_size);
+      // LaunchGammaBetaBackwardCUDAKernel already special-cases M >> N (huge M, small N),
+      // which benchmarks ~2-6x faster than the two-pass kernel below for that regime.
+      const bool use_tiled_huge_M_kernel =
+          ShouldUseHugeMGammaBetaBackwardKernel(M, N, warp_size, sm_count);
+      if (use_tiled_huge_M_kernel) {
+        // Use the optimized tiled kernel adapted for the current warp size.
+        // This replaces the legacy two-pass cuComputePartGradGammaBeta +
+        // cuComputeGradGammaBeta approach with a single-pass tiled reduction
+        // that has coalesced memory access and adaptive tile sizing.
+        if (warp_size == 64) {
+          LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
+            dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+        } else {
+          LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
+            dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+        }
       } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Unexpected ROCm warp size: ",
-            warp_size);
+        LaunchTwoPassGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
+            dY_data, X_data, X, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
       }
     }
 #else
