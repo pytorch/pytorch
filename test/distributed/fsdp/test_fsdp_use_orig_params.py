@@ -28,7 +28,11 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -37,14 +41,12 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 if not dist.is_available():
@@ -63,6 +65,8 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     """Tests multiple parameter groups."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self) -> int:
@@ -221,9 +225,16 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        torch.accelerator.current_accelerator() is None,
+        "Inductor+accelerator needs triton and a recent accelerator",
+    )
     @skip_if_lt_x_gpu(2)
-    def test_fsdp_compile(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_fsdp_compile(self, device):
         self.run_subtests(
             {
                 "sharding_strategy": [
@@ -275,11 +286,15 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def test_diff_hyperparams(self, sharding_strategy_str: str):
+    def test_diff_hyperparams(self, device, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings.
@@ -308,11 +323,15 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def test_diff_hyperparams_cpu_offload(self, device, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is
@@ -377,7 +396,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_diff_trainability(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_diff_trainability(self, device):
         """
         Tests FSDP parity with DDP when using multiple parameter groups and
         freezing the parameters in one parameter group.
@@ -421,7 +444,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim, False)
 
     @skip_if_lt_x_gpu(2)
-    def test_multiple_optimizers(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_multiple_optimizers(self, device):
         """
         Tests using two optimizers where only one sets gradients to ``None``.
         """
@@ -569,6 +596,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     """Tests the unshard/reshard flow."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -629,8 +658,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         }
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("offload_params", [False, True])
-    def test_multiple_forward(self, offload_params: bool):
+    def test_multiple_forward(self, device, offload_params: bool):
         """
         Tests that ``use_orig_params=True`` has parity with ``False`` when
         running multiple forward passes before a backward pass.
@@ -687,8 +720,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         self._check_fsdp_parameter_parity(fsdp_model, fsdp_model_orig_params)
 
     @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("offload_params", [False, True])
-    def test_summon_between_two_forwards(self, offload_params: bool):
+    def test_summon_between_two_forwards(self, device, offload_params: bool):
         """
         Tests that ``use_orig_params=True`` has parity with ``False`` when
         running a forward pass, :meth:`summon_full_params()`, and another
@@ -742,6 +779,8 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
 class TestFSDPUseOrigParamsParamAccess(FSDPTest):
     """Tests original parameter access."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         # Force a world size of 2 since the tests hard code to the FSDP
@@ -749,7 +788,11 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_access_params_after_forward(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_access_params_after_forward(self, device):
         """
         Tests that accessing the original parameters after the forward but
         before the backward. Notably, this is not supported when
@@ -870,27 +913,30 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         check_parameter_parity(ddp_model, fsdp_model, True)
 
 
+class WritebackModel(nn.Module):
+    def __init__(self, device: torch.device):
+        super().__init__()
+        torch.manual_seed(42)
+        self.lin1 = nn.Linear(5, 5, bias=True, device=device)
+        self.lin2 = nn.Linear(5, 7, bias=True, device=device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.lin1(x)
+        z = nn.functional.relu(z)
+        z = self.lin2(z)
+        return z
+
+    def get_input(self, device: torch.device) -> tuple[torch.Tensor, ...]:
+        return (torch.randn((2, 5)).to(device),)
+
+    def get_loss(self, inp, out):
+        return out.sum()
+
+
 class TestFSDPUseOrigParamsWriteback(FSDPTest):
     """Tests parameter and gradient writeback."""
 
-    class Model(nn.Module):
-        def __init__(self, device: torch.device):
-            super().__init__()
-            torch.manual_seed(42)
-            self.lin1 = nn.Linear(5, 5, bias=True, device=device)
-            self.lin2 = nn.Linear(5, 7, bias=True, device=device)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            z = self.lin1(x)
-            z = nn.functional.relu(z)
-            z = self.lin2(z)
-            return z
-
-        def get_input(self, device: torch.device) -> tuple[torch.Tensor, ...]:
-            return (torch.randn((2, 5)).to(device),)
-
-        def get_loss(self, inp, out):
-            return out.sum()
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
@@ -908,7 +954,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                 torch.testing.assert_close(p1, p2)
 
     @skip_if_lt_x_gpu(2)
-    def test_param_writeback(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_param_writeback(self, device):
         """Tests that changes to the original parameters are written back."""
         self.run_subtests(
             {
@@ -924,11 +974,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Check that the writeback propagates
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             use_orig_params=True,
         )
         ddp = ddp_model.module  # for brevity
@@ -950,7 +1000,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         self._check_param_parity(ddp_model, fsdp_model)  # triggers a writeback
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_writeback(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_grad_writeback(self, device):
         """
         Tests that changes to the original parameters' gradients are written
         back.
@@ -977,11 +1031,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             return None if set_to_none else torch.ones_like(param) * 2
 
         ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             device_ids=[self.rank],
         )
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             use_orig_params=True,
         )
         LR = 1e-2
@@ -1032,9 +1086,13 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         self._check_param_parity(ddp_model, fsdp_model)  # triggers a writeback
 
     @skip_if_lt_x_gpu(2)
-    def test_writeback_shape_mismatch(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_writeback_shape_mismatch(self, device):
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             use_orig_params=True,
         )
         # Check that writing back with mismatched shape errors
@@ -1074,7 +1132,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                 ...
 
     @skip_if_lt_x_gpu(2)
-    def test_writeback_between_fwd_and_bwd_for_no_reshard_raises(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_writeback_between_fwd_and_bwd_for_no_reshard_raises(self, device):
         fsdp_kwargs = {
             "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
             "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
@@ -1084,9 +1146,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Test changing the parameter storage to no longer be a view into the
         # flat parameter
-        fsdp_model = fsdp_wrapper(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type))
-        )
+        fsdp_model = fsdp_wrapper(WritebackModel(torch.device(device_type)))
         inp = fsdp_model.get_input(torch.device(device_type))
         loss = fsdp_model(*inp).sum()
         fsdp_model.lin1.weight.data = fsdp_model.lin1.weight.clone()
@@ -1097,9 +1157,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             loss.backward()
 
         # Test changing the parameter variable itself
-        fsdp_model = fsdp_wrapper(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type))
-        )
+        fsdp_model = fsdp_wrapper(WritebackModel(torch.device(device_type)))
         inp = fsdp_model.get_input(torch.device(device_type))
         loss = fsdp_model(*inp).sum()
         fsdp_model.lin1._fsdp_wrapped_module.weight = nn.Parameter(
@@ -1109,7 +1167,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             loss.backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_no_reshard_and_mixed_precision(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_no_reshard_and_mixed_precision(self, device):
         """
         Tests that writeback does not falsely get triggered for a few
         configurations (exercising the sharded view skipping logic):
@@ -1134,7 +1196,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Train forward -> full-precision unshard -> train forward
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            WritebackModel(torch.device(device_type)),
             **fsdp_kwargs,
         )
         inp = fsdp_model.get_input(torch.device(device_type))
@@ -1161,8 +1223,14 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
-    def test_named_parameters_in_forward(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_named_parameters_in_forward(self, device):
         """
         Tests that calling ``named_parameters()`` during forward returns FQNs
         and ``Tensor`` s corresponding to the original parameters.
@@ -1206,12 +1274,18 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
 
 
 class TestFSDPUseOrigParamsNoSync(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_no_sync_correctness(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_no_sync_correctness(self, device):
         """
         Tests a basic ``no_sync()`` setup by comparing ``use_orig_params=True``
         against ``use_orig_params=False``.
@@ -1328,7 +1402,11 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
             torch.testing.assert_close(grad, 2 * ref_grad)
 
     @skip_if_lt_x_gpu(2)
-    def test_no_sync_mixed_precision(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_no_sync_mixed_precision(self, device):
         """
         Tests that dtypes are as expected when using ``no_sync()`` with
         ``use_orig_params=True`` and parameter mixed precision.
@@ -1377,8 +1455,14 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
 
 
 class TestFSDPUseOrigParamsInit(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
-    def test_non_uniform_requires_grad(self):
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_non_uniform_requires_grad(self, device):
         model = nn.Sequential(
             nn.Linear(3, 3, device=device_type),
             nn.Linear(3, 3, device=device_type),
@@ -1399,12 +1483,16 @@ NUM_SIZE0_TENSORS = 1000
 
 
 class TestMultiTensorApply(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_multi_tensor_apply_size0_tensors_cpu(self):
         size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @unittest.skipIf(
+        torch.accelerator.current_accelerator() is None, "no accelerator available"
+    )
     def test_multi_tensor_apply_size0_tensors_cuda(self):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)
@@ -1413,11 +1501,30 @@ class TestMultiTensorApply(TestCase):
         torch._foreach_mul_(size0_tensors, 0.1)
 
 
-instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)
-instantiate_parametrized_tests(TestFSDPUseOrigParamsUnshardReshard)
-instantiate_parametrized_tests(TestFSDPUseOrigParamsParamAccess)
-instantiate_parametrized_tests(TestFSDPUseOrigParamsFQNs)
-instantiate_parametrized_tests(TestFSDPUseOrigParamsNoSync)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsMultipleParamGroups,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsUnshardReshard, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsParamAccess, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsWriteback, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsInit, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
