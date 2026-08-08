@@ -5604,6 +5604,7 @@ xfail_by_backend = {
         "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
         "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
+        "test_node_creation_hook_checkpoint_recompute",  # checkpoint unpack_hook is in dynamo MOD_SKIPLIST
         "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
@@ -5666,6 +5667,15 @@ skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
+# Compiled autograd does not support the higher-order gradients this test needs.
+skipped_tests.add("test_batch_norm_errors_on_third_order_grad")
+
+# Dynamo support for the curried checkpoint API is added in a later commit
+skipped_tests.add(
+    "test_checkpoint_curried_kwargs_do_not_collide_with_checkpoint_kwargs"
+)
+skipped_tests.add("test_checkpoint_zero_arg_function")
+skipped_tests.add("test_checkpoint_curried_method")
 
 # boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
 skipped_tests.add("test_custom_function_boxed_grads")
@@ -5688,6 +5698,14 @@ skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
+
+# grad_dtype is not supported in compile (every eager test here is already
+# skipIfTorchDynamo). Most of them also report the dtype they observed by
+# setattr-ing on the Function class, which dynamo cannot trace once compiled
+# autograd inlines the backward.
+for name in dir(test_autograd.TestAutograd):
+    if name.startswith("test_ctx_output_grad_dtype"):
+        skipped_tests.add(name)
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(

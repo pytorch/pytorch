@@ -159,7 +159,12 @@ def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
     if reduction_type in ("max", "min", "fmax"):
-        return f"{module}.{reduction_type}2"
+        strict = (
+            "_strict"
+            if config.strict_signed_zero and reduction_type in ("max", "min")
+            else ""
+        )
+        return f"{module}.{reduction_type}2{strict}"
     else:
         return f"{module}.{reduction_type}"
 
@@ -3331,6 +3336,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
 
+    @property
+    def uses_tma(self) -> bool:
+        return bool(self.host_tma_descriptor_args or self._emitted_device_tma)
+
+    @property
+    def uses_device_tma(self) -> bool:
+        return self._emitted_device_tma
+
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
 
@@ -4913,6 +4926,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        # Read-after-write companion to the #1615 guard in store(). If we read
+        # back a buffer we stored in a reduction loop, coalescing can put the
+        # store and load on different warps, so a warp may read before another
+        # warp's write is visible. Barrier first to make the writes visible.
+        if (
+            name in self.cse.invalidated_stores
+            and V.graph.get_current_device_or_throw().type != "cpu"
+        ):
+            load_buffer.writeline(DeferredLine(name, "tl.debug_barrier()"))
         self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
@@ -5640,7 +5662,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute.splice(
                         f"""
                         {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine_with_sum(
-                            {accumulator_max}, {accumulator_sum}, {value_max}, {value_sum}, {config.use_fast_math}
+                            {accumulator_max}, {accumulator_sum}, {value_max}, {value_sum},
+                            {config.use_fast_math}, {config.strict_signed_zero}
                         )
                         """
                     )
@@ -5648,7 +5671,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute.splice(
                         f"""
                         {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
-                            {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
+                            {accumulator_max}, {accumulator_sum}, {value},
+                            {config.use_fast_math}, {config.strict_signed_zero}
                         )
                         """
                     )
@@ -5851,7 +5875,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
-                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+                {accumulator_max}, {accumulator_sum}, {dim},
+                {config.use_fast_math}, {config.strict_signed_zero})
             {result_max} = {self.reduction_resize(f"{result_max}")}
             {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """
@@ -5990,7 +6015,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(
             f"""
             {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
-                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+                {accumulator_max}, {accumulator_sum}, {dim},
+                {config.use_fast_math}, {config.strict_signed_zero})
             {result_max} = {self.reduction_resize(f"{result_max}")}
             {result_sum} = {self.reduction_resize(f"{result_sum}")}
             """
@@ -6519,6 +6545,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
+                if self.uses_tma:
+                    self.body.writeline("xoffset += XBLOCK")
+
                 # no need to sum if XBLOCK == 1, or does that matter?
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
@@ -6877,13 +6906,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "incremental_autotune": config.incremental_autotune,
-            # Captured at codegen time so it reflects the per-graph cudagraph
-            # decision, including override_cudagraphs annotations that patch
-            # config.triton.cudagraphs on only for this region's compilation
-            # (see cudagraph_annotation_context). The live global flag is back
-            # to its default by the time the kernel runs, so runtime checks of
-            # config.triton.cudagraphs miss per-region cudagraphs.
-            "cudagraphs": config.triton.cudagraphs,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
@@ -6947,6 +6969,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.uses_tma:
+            out["uses_tma"] = True
+        if self.uses_device_tma:
+            out["uses_device_tma"] = True
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:
@@ -7234,12 +7260,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._prescan_host_tma_materializability()
         self.codegen_body()
 
-        # TMA probing sets tma_min_block_sizes even when the access falls back
-        # to tl.load; a stale constraint regresses non-TMA kernels.
-        if (
-            not self.inductor_meta.get("host_tma_descriptor_args")
-            and not self._emitted_device_tma
-        ):
+        tma_fields = (
+            "tma_min_block_sizes",
+            "uses_tma",
+            "uses_device_tma",
+            "host_tma_descriptor_args",
+        )
+        final_kernel_meta = self.inductor_meta_per_kernel()
+        for field in tma_fields:
+            self.inductor_meta.pop(field, None)
+            if field in final_kernel_meta:
+                self.inductor_meta[field] = final_kernel_meta[field]
+
+        if not self.uses_tma:
+            # TMA probing sets tma_min_block_sizes even when the access falls
+            # back to tl.load; a stale constraint regresses non-TMA kernels.
             self.inductor_meta.pop("tma_min_block_sizes", None)
 
         self._filter_pdl(self.body)

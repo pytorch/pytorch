@@ -14,6 +14,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
   export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
+
+  if command -v sccache >/dev/null; then
+    SCCACHE_PATH="$(command -v sccache)"
+    export CMAKE_C_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export HIP_CLANG_LAUNCHER="${SCCACHE_PATH}"
+  fi
 fi
 
 echo "Python version:"
@@ -115,6 +123,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -180,12 +191,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# FlashAttention CUDA kernels (built for CUDA 8.0+) need large amounts of memory
-# to compile and can OOM at full build parallelism. The previous mitigation set
-# BUILD_CUSTOM_STEP to pre-build the flash_attention target at a reduced job
-# count; it was consumed by the setuptools build path removed in this stack, so
-# it is dropped here. Re-homing the throttle as a CMake JOB_POOLS constraint is
-# tracked in https://github.com/pytorch/pytorch/issues/190663.
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  FLASH_ATTENTION_MAX_JOBS=2
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
+  export FLASH_ATTENTION_MAX_JOBS
+  echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
+fi
 
 # TODO: Removeme once all the wrappers are gone
 if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -246,6 +262,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
@@ -272,7 +289,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
@@ -332,26 +349,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-    sudo rm -f /opt/cache/bin/cc
-    sudo rm -f /opt/cache/bin/c++
-    sudo rm -f /opt/cache/bin/gcc
-    sudo rm -f /opt/cache/bin/g++
-    # Restore original clang compilers that were backed up during sccache wrapping.
-    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-    if [[ -d /opt/rocm/llvm/bin ]]; then
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
-
     # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
-    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
     build_rocm_ck_wheel dist/
   fi
 

@@ -34,6 +34,10 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
 
+def _decode_subprocess_output(output: bytes) -> str:
+    return output.decode("utf-8", errors="replace")
+
+
 @dataclasses.dataclass
 class MinifierTestResult:
     minifier_code: str
@@ -195,11 +199,10 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
             ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
         )
 
-        print("test stdout:", proc.stdout.decode("utf-8"))
-        print("test stderr:", proc.stderr.decode("utf-8"))
-        repro_dir_match = re.search(
-            r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
-        )
+        print("test stdout:", _decode_subprocess_output(proc.stdout))
+        stderr = _decode_subprocess_output(proc.stderr)
+        print("test stderr:", stderr)
+        repro_dir_match = re.search(r"(\S+)minifier_launcher.py", stderr)
         if repro_dir_match is not None:
             return proc, repro_dir_match.group(1)
         return proc, None
@@ -226,8 +229,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
             # Everything in AOTI minifier is in no-isolate mode.
             args.append("--no-isolate")
         launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
-        print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
-        stderr = launch_proc.stderr.decode("utf-8")
+        print("minifier stdout:", _decode_subprocess_output(launch_proc.stdout))
+        stderr = _decode_subprocess_output(launch_proc.stderr)
         print("minifier stderr:", stderr)
 
         self.assertNotIn("Input graph did not fail the tester", stderr)
@@ -248,8 +251,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         repro_proc = self._maybe_subprocess_run(
             ["python3", repro_file], isolate=isolate, cwd=repro_dir
         )
-        print("repro stdout:", repro_proc.stdout.decode("utf-8"))
-        print("repro stderr:", repro_proc.stderr.decode("utf-8"))
+        print("repro stdout:", _decode_subprocess_output(repro_proc.stdout))
+        print("repro stderr:", _decode_subprocess_output(repro_proc.stderr))
         return repro_proc, repro_code
 
     # Template for testing code.
@@ -315,7 +318,7 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
 
-        self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
+        self.assertIn(expected_error, _decode_subprocess_output(test_proc.stderr))
 
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
@@ -328,6 +331,6 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
 
-        self.assertIn(expected_error, repro_proc.stderr.decode("utf-8"))
+        self.assertIn(expected_error, _decode_subprocess_output(repro_proc.stderr))
         self.assertNotEqual(repro_proc.returncode, 0)
         return MinifierTestResult(minifier_code=minifier_code, repro_code=repro_code)
