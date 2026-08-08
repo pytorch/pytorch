@@ -15,6 +15,7 @@
 
     current_device
     current_stream
+    empty_cache
     get_capabilities
     is_available
     is_initialized
