@@ -196,14 +196,74 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
+    # Set at the compiled-region boundary after its boxed inputs are validated.
+    _allow_compiled_region_scalar: bool
+    # The exact FakeTensor temporarily handled by generated DynamicScalar code.
+    _compiled_region_scalar_fake: FakeTensor | None
     non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
+        self._allow_compiled_region_scalar = False
+        self._compiled_region_scalar_fake = None
         self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
+
+
+@contextlib.contextmanager
+def allow_non_fake_scalar_for_compiled_region() -> Generator[None, None, None]:
+    """Enable narrowly scoped DynamicScalar handling in generated code.
+
+    This marker grants no FakeTensor conversion by itself. The generated item
+    helper separately authorizes only the exact scalar tensor it is reading.
+    """
+    old_allow_compiled_region_scalar = fake_tensor_tls._allow_compiled_region_scalar
+    fake_tensor_tls._allow_compiled_region_scalar = True
+    try:
+        yield
+    finally:
+        fake_tensor_tls._allow_compiled_region_scalar = old_allow_compiled_region_scalar
+
+
+def _item_with_optional_fake_mode(tensor: Tensor) -> Any:
+    """Read a generated DynamicScalar while preserving FakeTensor semantics."""
+    if not fake_tensor_tls._allow_compiled_region_scalar:
+        return tensor.item()
+
+    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    if fake_mode is None:
+        return tensor.item()
+    if fake_mode.shape_env is not None:
+        raise RuntimeError(
+            "Inductor compiled regions cannot directly run data-dependent scalar "
+            "reads under FakeTensorMode with a ShapeEnv. Enable "
+            "wrap_inductor_compiled_regions to propagate FakeTensors through the "
+            "original FX graph."
+        )
+
+    fake_tensor = fake_mode.from_tensor(tensor)
+    old_fake_scalar = fake_tensor_tls._compiled_region_scalar_fake
+    fake_tensor_tls._compiled_region_scalar_fake = fake_tensor
+    try:
+        return fake_tensor.item()
+    finally:
+        fake_tensor_tls._compiled_region_scalar_fake = old_fake_scalar
+
+
+def _item_memo_for_data_dependent_output(
+    arg: FakeTensor,
+) -> torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool | None:
+    """Return the item memo visible to a data-dependent scalar operation."""
+    item_memo = arg.item_memo
+    if arg is fake_tensor_tls._compiled_region_scalar_fake and type(item_memo) in (
+        bool,
+        float,
+        int,
+    ):
+        return None
+    return item_memo
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:

@@ -32,7 +32,7 @@ from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 import torch
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo.utils import counters, get_runtime_metrics_context
-from torch._guards import compile_context, CompileContext
+from torch._guards import compile_context, CompileContext, detect_fake_mode
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -57,9 +57,15 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_scalar_for_compiled_region,
+    DataDependentOutputException,
+    get_plain_tensors,
+    is_fake_tensor,
+)
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -96,6 +102,88 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+def _is_in_torch_dispatch_mode_for_current_thread() -> bool:
+    # The Python compatibility flag used by is_in_torch_dispatch_mode() is
+    # process-global, while the dispatcher stack itself is thread-local.
+    return (
+        torch._C._len_torch_dispatch_stack() > 0
+        or torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.PreDispatch
+        )
+    )
+
+
+def _check_fake_mode_for_compiled_region(inputs: Sequence[Any]) -> bool:
+    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    if fake_mode is not None:
+        for input in inputs:
+            if not isinstance(input, torch.Tensor):
+                continue
+
+            tensor_input = input
+            if is_traceable_wrapper_subclass(input):
+                plain_tensors: list[
+                    torch.Tensor | int | torch.SymInt | CustomClassBase
+                ] = []
+                get_plain_tensors(input, out=plain_tensors)
+                tensor_input = next(
+                    (x for x in plain_tensors if isinstance(x, torch.Tensor)), input
+                )
+
+            if is_fake_tensor(tensor_input):
+                raise AssertionError(
+                    "Inductor compiled regions cannot run directly with "
+                    "FakeTensor inputs. Enable wrap_inductor_compiled_regions "
+                    "to propagate FakeTensors through the compiled-region HOP."
+                )
+
+            # AssertionError matches FakeTensorMode's existing error for real
+            # tensor inputs. allow_non_fake_inputs is intentionally ignored:
+            # generated kernels cannot safely execute on fakified inputs.
+            raise AssertionError(
+                "Inductor compiled regions cannot run directly with real tensor "
+                "inputs while FakeTensorMode is active. Run with real tensors "
+                "outside FakeTensorMode or enable wrap_inductor_compiled_regions."
+            )
+
+        return True
+
+    # FakeTensor inputs can carry a mode even when it is not active on the
+    # dispatch stack. is_fake_tensor covers both Python and C++ FakeTensors.
+    is_cpp_fake_tensor = torch._C._is_fake_tensor
+    for input in inputs:
+        if type(input) is torch.Tensor:
+            if not is_cpp_fake_tensor(input):
+                continue
+        elif not isinstance(input, torch.Tensor):
+            continue
+        elif not is_fake_tensor(input):
+            if is_traceable_wrapper_subclass(input):
+                plain_tensors: list[
+                    torch.Tensor | int | torch.SymInt | CustomClassBase
+                ] = []
+                get_plain_tensors(input, out=plain_tensors)
+                if any(is_fake_tensor(x) for x in plain_tensors):
+                    raise AssertionError(
+                        "Inductor compiled regions cannot run directly with "
+                        "FakeTensor inputs inside a traceable wrapper subclass. "
+                        "Enable wrap_inductor_compiled_regions to propagate "
+                        "FakeTensors through the compiled-region HOP."
+                    )
+            continue
+
+        # An exact torch.Tensor can be a C++ FakeTensor, while tensor
+        # subclasses can be Python or C++ fakes.
+        if is_fake_tensor(input):
+            raise AssertionError(
+                "Inductor compiled regions cannot run directly with FakeTensor "
+                "inputs. Enable wrap_inductor_compiled_regions to propagate "
+                "FakeTensors through the compiled-region HOP."
+            )
+
+    return False
 
 
 @dataclasses.dataclass
@@ -562,6 +650,7 @@ class CompiledFxGraph(OutputCode):
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
     _defers_input_alignment: bool = False
+    _cpp_wrapper_has_dynamic_scalar: bool = False
     _compile_context: CompileContext | None = dataclasses.field(
         default=None, init=False, repr=False, compare=False
     )
@@ -645,6 +734,27 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
+        # Keep the large IR module off output_code's import path. It is only
+        # needed while constructing a fresh cache entry from GraphLowering.
+        from .ir import DynamicScalar
+
+        self._cpp_wrapper_has_dynamic_scalar = False
+        if graph.cpp_wrapper:
+            pending_graphs = [graph]
+            while pending_graphs:
+                current_graph = pending_graphs.pop()
+                if any(
+                    isinstance(op, DynamicScalar)
+                    and op.get_operation_name() not in current_graph.removed_operations
+                    for op in current_graph.operations
+                ):
+                    self._cpp_wrapper_has_dynamic_scalar = True
+                    break
+                pending_graphs.extend(
+                    subgraph.graph
+                    for subgraph in current_graph.seen_subgraphs.values()
+                    if subgraph.graph is not None
+                )
         storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
@@ -815,8 +925,45 @@ class CompiledFxGraph(OutputCode):
         # while its saved compile context is restored, then clear the saved
         # context after leaving the compile_context manager.
         try:
+            # The HOP wrapper has its own FakeTensor propagation path. The
+            # direct path only enables generated DynamicScalar reads after
+            # validating that no tensor inputs can enter the compiled region.
+            use_fake_mode_context = False
+            if not (
+                self._wrap_compiled_regions
+                and _is_in_torch_dispatch_mode_for_current_thread()
+            ):
+                use_fake_mode_context = _check_fake_mode_for_compiled_region(inputs)
             with autotune_cache_context:
                 try:
+                    if use_fake_mode_context:
+                        # C++ wrapper scalar reads cannot re-enter Python's
+                        # FakeTensor dispatcher, so fail with the equivalent
+                        # data-dependent exception at the region boundary.
+                        if self._cpp_wrapper_has_dynamic_scalar:
+                            fake_mode = torch._C._get_dispatch_mode(
+                                torch._C._TorchDispatchModeKey.FAKE
+                            )
+                            if fake_mode.shape_env is not None:
+                                raise RuntimeError(
+                                    "Inductor compiled regions cannot directly run "
+                                    "data-dependent scalar reads under FakeTensorMode "
+                                    "with a ShapeEnv. Enable "
+                                    "wrap_inductor_compiled_regions to propagate "
+                                    "FakeTensors through the original FX graph."
+                                )
+                            raise DataDependentOutputException(
+                                torch.ops.aten._local_scalar_dense.default
+                            )
+                        with allow_non_fake_scalar_for_compiled_region():
+                            if torch.autograd.profiler._is_profiler_enabled:
+                                with torch._C._profiler._RecordFunctionFast(
+                                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                                    keyword_values={"scope": "user_scope"},
+                                ):
+                                    return self.current_callable(inputs)
+                            return self.current_callable(inputs)
+
                     # Checking the profiler directly is faster than nullcontext
                     if torch.autograd.profiler._is_profiler_enabled:
                         with torch._C._profiler._RecordFunctionFast(
@@ -981,7 +1128,7 @@ class CompiledFxGraph(OutputCode):
             )
 
             def wrapped_callable(inputs):
-                if is_in_torch_dispatch_mode():
+                if _is_in_torch_dispatch_mode_for_current_thread():
                     kwargs = (
                         {"name": self.compile_region_name}
                         if self.compile_region_name is not None
@@ -1300,9 +1447,6 @@ class RegionalOutputCode(OutputCode):
             return
         if self._serialized_graph_module is None:
             raise AssertionError("self._serialized_graph_module must not be None")
-        # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
-
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             raise RuntimeError(
