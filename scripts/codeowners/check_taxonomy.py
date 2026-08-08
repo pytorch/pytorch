@@ -3,16 +3,18 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
 LINTER_CODE = "CODEOWNERS_TAXONOMY"
 HIERARCHY_MARKER = "# Review-surface hierarchy:"
-SECTION_MARKER = "# Draft grouped review-surface definitions:"
+SECTION_MARKER = "# Grouped review-surface definitions:"
 GROUP_PREFIX = "# ["
 
 
@@ -23,6 +25,7 @@ class TaxonomyPattern:
     group: str
     path: str
     line_number: int
+    active: bool = False
 
 
 @dataclass
@@ -78,10 +81,17 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     """Parse grouped rules while preserving their actual CODEOWNERS order."""
     lines = codeowners.read_text().splitlines()
     try:
-        start = lines.index(SECTION_MARKER) + 1
+        marker = lines.index(SECTION_MARKER)
     except ValueError as error:
         raise ValueError(f"missing taxonomy marker: {SECTION_MARKER}") from error
+    for line_number, raw_line in enumerate(lines[:marker], start=1):
+        line = raw_line.strip()
+        if line and not line.startswith("#"):
+            raise ValueError(
+                f"{codeowners}:{line_number}: active rule outside grouped taxonomy"
+            )
 
+    start = marker + 1
     patterns = []
     section_groups = []
     group = None
@@ -114,9 +124,9 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     raise ValueError(
                         f"{location}: invalid active owners: {', '.join(invalid_owners)}"
                     )
-            if pattern == "/" or any(character in pattern for character in "*?[\\"):
+            if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number))
+            patterns.append(TaxonomyPattern(group, pattern[1:], line_number, active))
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
@@ -135,11 +145,41 @@ def tracked_paths(repo: Path) -> list[str]:
     return sorted(path for path in output.split("\0") if path)
 
 
+@lru_cache
+def compile_glob(pattern: str) -> re.Pattern[str]:
+    """Compile the CODEOWNERS glob subset used by this repository."""
+    expression = []
+    index = 0
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            expression.append("(?:.*/)?")
+            index += 3
+        elif pattern.startswith("**", index):
+            raise ValueError(f"unsupported CODEOWNERS glob: {pattern!r}")
+        elif pattern[index] == "*":
+            expression.append("[^/]*")
+            index += 1
+        else:
+            expression.append(re.escape(pattern[index]))
+            index += 1
+    return re.compile("^" + "".join(expression) + "(?:/.*)?$")
+
+
+def pattern_specificity(pattern: TaxonomyPattern) -> tuple[int, int, int]:
+    """Rank literal paths and globs by their non-wildcard prefix."""
+    prefix = pattern.path.split("*", 1)[0]
+    return prefix.count("/"), len(prefix), len(pattern.path)
+
+
 def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     """Measure coverage and verify that source order preserves specificity."""
     patterns_by_path: dict[str, list[TaxonomyPattern]] = defaultdict(list)
+    glob_patterns = []
     for pattern in patterns:
-        patterns_by_path[pattern.path].append(pattern)
+        if "*" in pattern.path:
+            glob_patterns.append(pattern)
+        else:
+            patterns_by_path[pattern.path].append(pattern)
 
     matched_patterns: set[TaxonomyPattern] = set()
     effective_patterns: set[TaxonomyPattern] = set()
@@ -156,14 +196,21 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
         matches = []
         for candidate in candidates:
             matches.extend(patterns_by_path.get(candidate, []))
+        matches.extend(
+            pattern
+            for pattern in glob_patterns
+            if compile_glob(pattern.path).fullmatch(path)
+        )
         if not matches:
             uncovered.append(path)
             continue
         if len(matches) > 1:
             overridden[path] = matches
         matched_patterns.update(matches)
-        effective_pattern = max(matches, key=lambda pattern: len(pattern.path))
-        effective_patterns.add(effective_pattern)
+        effective_pattern = max(matches, key=pattern_specificity)
+        effective_patterns.update(
+            pattern for pattern in matches if pattern.group == effective_pattern.group
+        )
         effective_groups.add(effective_pattern.group)
         source_pattern = max(matches, key=lambda pattern: pattern.line_number)
         if effective_pattern != source_pattern:
@@ -182,11 +229,17 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
         uncovered=uncovered,
         overridden=overridden,
         duplicates=duplicates,
-        stale=[pattern for pattern in patterns if pattern not in matched_patterns],
+        stale=[
+            pattern
+            for pattern in patterns
+            if pattern not in matched_patterns and not pattern.active
+        ],
         ineffective=[
             pattern
             for pattern in patterns
-            if pattern in matched_patterns and pattern not in effective_patterns
+            if pattern in matched_patterns
+            and pattern not in effective_patterns
+            and not pattern.active
         ],
         source_order_mismatches=source_order_mismatches,
     )
