@@ -4407,6 +4407,8 @@ class CppKernelProxy(CppKernel):
         )
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
+        """Legalize low-precision values to CPU compute types within a loop body."""
+
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def get_input_dtype(node: torch.fx.Node) -> torch.dtype | None:
                 """Get input dtype for nodes that may consumes lowp fp dt"""
@@ -4607,6 +4609,11 @@ class CppKernelProxy(CppKernel):
                     def _used_by_to(to_node: torch.fx.Node):
                         return all(usr.target == "to_dtype" for usr in to_node.users)
 
+                    def _uses_compute_types(to_node: torch.fx.Node) -> bool:
+                        if len(to_node.args) > 4:
+                            return to_node.args[4]  # type: ignore[return-value]
+                        return to_node.kwargs.get("use_compute_types", True)  # type: ignore[return-value]
+
                     all_to_nodes = [
                         node for node in sub_graph.nodes if node.target == "to_dtype"
                     ]
@@ -4616,7 +4623,18 @@ class CppKernelProxy(CppKernel):
                     for node_users in all_to_nodes_and_users:
                         for node, users in node_users.items():
                             if node in sub_graph.nodes and (
-                                all(usr.args[-1] == node.args[-1] for usr in users)
+                                (
+                                    (
+                                        _uses_compute_types(node)
+                                        or all(
+                                            not _uses_compute_types(usr)
+                                            for usr in users
+                                        )
+                                    )
+                                    and all(
+                                        usr.args[-1] == node.args[-1] for usr in users
+                                    )
+                                )
                                 or (
                                     node in to_lowp_fp_legalized_nodes
                                     and all(

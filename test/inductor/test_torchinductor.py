@@ -7738,6 +7738,311 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(foo, (inp, weight), check_lowp=False)
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_layer_norm_numerics_under_autocast(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        torch.manual_seed(42)
+        norm = torch.nn.LayerNorm(128, eps=1e-5, device=self.device)
+        linear = torch.nn.Linear(128, 128, bias=False, device=self.device)
+
+        def fn(x):
+            return linear(norm(x))
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            x = torch.randn(4, 32, 32, 128, device=self.device)
+            expected = fn(x)
+            actual = compiled_fn(x)
+
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_autocast_low_precision_pointwise_barrier(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only validated on CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p_in = torch.nn.Linear(128, 256, bias=False)
+                self.g_in = torch.nn.Linear(128, 256, bias=False)
+
+            def forward(self, x):
+                x = self.p_in(x) * self.g_in(x).sigmoid()
+                a, b = torch.chunk(x.float(), 2, dim=-1)
+                return a + b
+
+        torch.manual_seed(42)
+        eager = Repro().to(self.device).eval()
+        compiled = torch.compile(Repro().to(self.device).eval(), fullgraph=True)
+        with torch.no_grad():
+            for param, ref_param in zip(compiled.parameters(), eager.parameters()):
+                param.copy_(ref_param)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            x = torch.randn(1, 16, 16, 128, device=self.device)
+            expected = eager(x)
+            actual = compiled(x)
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_autocast_nonpointwise_decomposition_has_no_barriers(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Only needed for CPU layout coverage")
+
+        marked_targets = []
+
+        def inspecting_inner_compile(gm, example_inputs, **kwargs):
+            marked_targets.extend(
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("low_precision_pointwise_barrier", False)
+            )
+            return compile_fx_inner(gm, example_inputs, **kwargs)
+
+        def backend(gm, example_inputs):
+            return compile_fx(
+                gm,
+                example_inputs,
+                inner_compile=inspecting_inner_compile,
+            )
+
+        def fn(x):
+            return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True)
+
+        x = torch.randn(1, 4, 8, 8, dtype=torch.bfloat16)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            expected = fn(x)
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+
+        # The interpolation decomposition contains internal bf16/fp32 casts,
+        # but interpolation itself is not an eager pointwise boundary.
+        self.assertEqual(marked_targets, [])
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_internal_autocast_layer_norm_precision(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        torch.manual_seed(42)
+        norm = torch.nn.LayerNorm(128, eps=1e-5, device=self.device)
+        linear = torch.nn.Linear(128, 128, bias=False, device=self.device)
+
+        def fn(x):
+            with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+                return linear(norm(x))
+
+        x = torch.randn(4, 32, 32, 128, device=self.device)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_internal_autocast_low_precision_pointwise_barrier(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        torch.manual_seed(42)
+        lhs = torch.nn.Linear(128, 256, bias=False, device=self.device).eval()
+        rhs = torch.nn.Linear(128, 256, bias=False, device=self.device).eval()
+
+        def fn(x):
+            with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+                return lhs(x) * rhs(x).sigmoid()
+
+        x = torch.randn(1, 16, 16, 128, device=self.device)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_direct_fx_low_precision_cast_barrier(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        x = torch.tensor([257.0, 2.0039, 1.0039, 5001.0], device=self.device)
+        lowp = torch.empty((), dtype=torch.bfloat16, device=self.device)
+        for tracer in ("make_fx", "symbolic_trace"):
+            for source_cast in (
+                "aten",
+                "prims",
+                "type_as",
+                "pointwise_method",
+                "int_method",
+                "long_method",
+            ):
+                with self.subTest(tracer=tracer, source_cast=source_cast):
+
+                    def cast(x, dtype):
+                        if source_cast == "aten":
+                            return torch.ops.aten._to_copy.default(x, dtype=dtype)
+                        return torch.ops.prims.convert_element_type.default(x, dtype)
+
+                    if source_cast == "type_as":
+
+                        def fn(x, lowp):
+                            return x.type_as(lowp).float()
+
+                        inputs = [x, lowp]
+                        expected_conversions = 2
+                    elif source_cast == "pointwise_method":
+
+                        def fn(x):
+                            return x.sigmoid().float()
+
+                        inputs = [x.to(torch.bfloat16)]
+                        expected_conversions = 1
+                    elif source_cast in ("int_method", "long_method"):
+
+                        def fn(x):
+                            x = x * 1.00390625
+                            return x.int() if source_cast == "int_method" else x.long()
+
+                        inputs = [
+                            torch.tensor(
+                                [0.99609375, 1.9921875, -0.99609375, -1.9921875],
+                                dtype=torch.bfloat16,
+                                device=self.device,
+                            )
+                        ]
+                        expected_conversions = 1
+                    else:
+
+                        def fn(x):
+                            return cast(cast(x, torch.bfloat16), torch.float32)
+
+                        inputs = [x]
+                        expected_conversions = 2
+
+                    gm = (
+                        make_fx(fn)(*inputs)
+                        if tracer == "make_fx"
+                        else torch.fx.symbolic_trace(fn)
+                    )
+                    marked_targets = []
+
+                    def inspecting_inner_compile(gm, example_inputs, **kwargs):
+                        marked_targets.extend(
+                            node.target
+                            for node in gm.graph.nodes
+                            if node.meta.get("low_precision_pointwise_barrier", False)
+                        )
+                        return compile_fx_inner(gm, example_inputs, **kwargs)
+
+                    actual = compile_fx(
+                        gm, inputs, inner_compile=inspecting_inner_compile
+                    )(*inputs)
+
+                    self.assertEqual(
+                        marked_targets.count(
+                            torch.ops.prims.convert_element_type.default
+                        ),
+                        expected_conversions,
+                    )
+                    if source_cast == "pointwise_method":
+                        self.assertIn(torch.ops.aten.sigmoid.default, marked_targets)
+                    torch.testing.assert_close(actual, fn(*inputs), rtol=0, atol=0)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_predispatch_fx_low_precision_cast_barrier(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        def fn(x, lowp):
+            x = torch.ops.aten.to.other(x, lowp, False, False)
+            x = torch.ops.aten.sigmoid.default(x)
+            return torch.ops.aten.to.dtype(x, torch.float32, False, False)
+
+        x = torch.linspace(-8, 8, 4097, device=self.device)
+        lowp = torch.empty((), dtype=torch.bfloat16, device=self.device)
+        gm = make_fx(fn, pre_dispatch=True)(x, lowp)
+        marked_targets = []
+
+        def inspecting_inner_compile(gm, example_inputs, **kwargs):
+            marked_targets.extend(
+                node.target
+                for node in gm.graph.nodes
+                if node.meta.get("low_precision_pointwise_barrier", False)
+            )
+            return compile_fx_inner(gm, example_inputs, **kwargs)
+
+        actual = compile_fx(gm, [x, lowp], inner_compile=inspecting_inner_compile)(
+            x, lowp
+        )
+        self.assertEqual(
+            marked_targets.count(torch.ops.prims.convert_element_type.default), 2
+        )
+        self.assertIn(torch.ops.aten.sigmoid.default, marked_targets)
+        torch.testing.assert_close(actual, fn(x, lowp), rtol=0, atol=0)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_explicit_low_precision_cast_barrier(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        def cast_aliases(x):
+            return x.bfloat16().float()
+
+        def to_dtype(x):
+            return x.to(torch.bfloat16).to(torch.float32)
+
+        x = torch.tensor([257.0, 2.0039, 1.0039, 5001.0], device=self.device)
+        for fn in (cast_aliases, to_dtype):
+            with self.subTest(fn=fn.__name__):
+                expected = fn(x)
+                actual = torch.compile(fn, fullgraph=True)(x)
+                torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_direct_fx_low_precision_pointwise_barrier(self):
+        # Direct FX inputs are retraced by AOTAutograd before Inductor lowering.
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only validated on CUDA")
+
+        x = torch.randn(1024, device=self.device)
+        for source_cast in ("aten", "prims"):
+            with self.subTest(source_cast=source_cast):
+
+                def cast(x, dtype):
+                    if source_cast == "aten":
+                        return torch.ops.aten._to_copy.default(x, dtype=dtype)
+                    return torch.ops.prims.convert_element_type.default(x, dtype)
+
+                def fn(x):
+                    return cast(
+                        torch.ops.aten.silu.default(cast(x, torch.bfloat16)),
+                        torch.float32,
+                    )
+
+                gm = make_fx(fn)(x)
+                marked_targets = []
+
+                def inspecting_inner_compile(gm, example_inputs, **kwargs):
+                    marked_targets.extend(
+                        node.target
+                        for node in gm.graph.nodes
+                        if node.meta.get("low_precision_pointwise_barrier", False)
+                    )
+                    return compile_fx_inner(gm, example_inputs, **kwargs)
+
+                actual = compile_fx(gm, [x], inner_compile=inspecting_inner_compile)(x)
+
+                self.assertEqual(
+                    marked_targets.count(torch.ops.prims.convert_element_type.default),
+                    3,
+                )
+                self.assertNotIn(torch.ops.aten.neg.default, marked_targets)
+                self.assertNotIn(torch.ops.aten.exp.default, marked_targets)
+                self.assertNotIn(torch.ops.aten.add.Tensor, marked_targets)
+                self.assertNotIn(torch.ops.aten.div.Tensor, marked_targets)
+                torch.testing.assert_close(actual, fn(x), rtol=0, atol=0)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -21332,9 +21637,31 @@ if RUN_GPU:
             # The cpp_wrapper code is significantly more complex, so skip checking for exact
             # code lines.
             if not config.cpp_wrapper:
-                FileCheck().check_regex(
-                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
-                ).run(code[1])
+                self.assertTrue(
+                    re.search(
+                        r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse",
+                        code[1],
+                    )
+                    or re.search(
+                        r"empty_strided_cuda\(\(1024, 50264\), \(50304, 1\), "
+                        r"torch\.bfloat16\)\.as_strided\(\(1024, 50257\), "
+                        r"\(50304, 1\)\)",
+                        code[1],
+                    )
+                )
+                self.assertTrue(
+                    re.search(
+                        r"reinterpret_tensor\(.*, \(1, 1024, 3072\).*# reuse",
+                        code[1],
+                    )
+                    or re.search(
+                        r"(?P<buf>buf\d+) = empty_strided_cuda"
+                        r"\(\(1, 1024, 3072\), \(3145728, 3072, 1\), "
+                        r"torch\.bfloat16\)\n\s+buf\d+ = (?P=buf); "
+                        r"del (?P=buf)  # reuse",
+                        code[1],
+                    )
+                )
 
         @unittest.skipIf(
             not triton_version_uses_attrs_dict(),

@@ -1100,24 +1100,46 @@ def _maybe_record_pointwise_barrier(
 ) -> None:
     """
     Records operators whose tensor outputs or inputs are fp16/bf16 so downstream pointwise code can
-    emulate eager's rounding behavior when emulate_precision_casts is enabled.
+    emulate eager's rounding behavior when emulate_precision_casts or low-precision autocast is enabled.
     """
-    if proxy_mode.decomp_layers or not proxy_mode.emulate_precision_casts:
+    if proxy_mode.decomp_layers:
         return
 
-    if not isinstance(func, torch._ops.OpOverload):
-        return
+    if not proxy_mode.emulate_precision_casts:
+        from torch._inductor.autocast_utils import (
+            low_precision_pointwise_barriers_enabled,
+        )
+
+        if not low_precision_pointwise_barriers_enabled():
+            return
 
     last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
-    t = last_node.meta.get("val")
-    low_pr_fp = (torch.bfloat16, torch.float16)
+    from torch._inductor.autocast_utils import (
+        LOW_PRECISION_CAST_BOUNDARY,
+        LOW_PRECISION_CAST_OPS,
+        needs_low_precision_pointwise_barrier,
+    )
 
-    output_low_precision = isinstance(t, torch.Tensor) and t.dtype in low_pr_fp
+    if not needs_low_precision_pointwise_barrier(func):
+        return
+    if (
+        func in LOW_PRECISION_CAST_OPS
+        and not proxy_mode.emulate_precision_casts
+        and not last_node.meta.get("custom", {}).get(LOW_PRECISION_CAST_BOUNDARY, False)
+    ):
+        return
+
+    t = last_node.meta.get("val")
+    from torch._inductor.autocast_utils import LOW_PRECISION_FP_DTYPES
+
+    output_low_precision = (
+        isinstance(t, torch.Tensor) and t.dtype in LOW_PRECISION_FP_DTYPES
+    )
 
     if not output_low_precision:
         for input_node in last_node.all_input_nodes:
-            val = input_node.meta.get("val") if hasattr(input_node, "meta") else None
-            if isinstance(val, torch.Tensor) and val.dtype in low_pr_fp:
+            val = input_node.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.dtype in LOW_PRECISION_FP_DTYPES:
                 output_low_precision = True
                 break
 
