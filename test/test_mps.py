@@ -1346,6 +1346,21 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(res2, res2_cpu)
         [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
 
+    def test_max_unpool_complex_error(self):
+        pool = torch.nn.MaxPool3d(2, return_indices=True)
+        x = torch.randn(1, 1, 4, 4, 4, device="mps")
+        _, indices = pool(x)
+        z = torch.zeros(1, 1, 2, 2, 2, dtype=torch.complex64, device="mps")
+        with self.assertRaisesRegex(NotImplementedError, "not implemented for complex dtypes"):
+            torch.nn.functional.max_unpool3d(z, indices, kernel_size=2)
+
+        pool2 = torch.nn.MaxPool2d(2, return_indices=True)
+        x2 = torch.randn(1, 1, 4, 4, device="mps")
+        _, indices2 = pool2(x2)
+        z2 = torch.zeros(1, 1, 2, 2, dtype=torch.complex64, device="mps")
+        with self.assertRaisesRegex(NotImplementedError, "not implemented for complex dtypes"):
+            torch.nn.functional.max_unpool2d(z2, indices2, kernel_size=2)
+
     def test_cross(self):
         a = torch.randn(4, 3, device="mps")
         b = torch.randn(4, 3, device="mps")
