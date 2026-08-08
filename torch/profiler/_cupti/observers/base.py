@@ -235,7 +235,7 @@ class CuptiMonitorObserver:
         acceptable on the infrequent destroy path and what bounds cache growth over a
         long run). Hooks capture only the cache wrapper + purge fn (never self, so they
         cannot pin this observer -- the dependency purge closes over the map dict, not the
-        observer); run_graph_destroy_hooks also swallows any error they raise
+        observer); the destroy fan-out also swallows any error they raise
         (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
         resolver is externally backed (nothing to purge), so its hook only clears the
         cache."""
