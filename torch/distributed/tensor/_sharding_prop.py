@@ -11,6 +11,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._logging import LazyString
 from torch._ops import OpOverload
+from torch._prims_common import make_contiguous_strides_for
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
@@ -43,6 +44,39 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 log = logging.getLogger(__name__)
+
+
+def _get_schema_arg(
+    op_schema: OpSchema, index: int, kwarg: str, default: object = None
+) -> object:
+    if len(op_schema.args_schema) > index:
+        return op_schema.args_schema[index]
+    return op_schema.kwargs_schema.get(kwarg, default)
+
+
+def _get_tensor_meta(arg: object) -> TensorMeta:
+    if isinstance(arg, DTensorSpec):
+        if arg.tensor_meta is None:
+            raise AssertionError("Expected DTensorSpec with tensor_meta")
+        return arg.tensor_meta
+    if isinstance(arg, OpStrategy):
+        return arg.tensor_meta
+    if isinstance(arg, TensorMeta):
+        return arg
+    raise AssertionError(f"Expected tensor metadata argument, got {type(arg)}")
+
+
+def _propagate_scaled_mm_tensor_meta(op_schema: OpSchema) -> TensorMeta:
+    mat1_meta = _get_tensor_meta(_get_schema_arg(op_schema, 0, "self"))
+    mat2_meta = _get_tensor_meta(_get_schema_arg(op_schema, 1, "mat2"))
+    out_dtype = _get_schema_arg(op_schema, 6, "out_dtype", None)
+    if out_dtype is None:
+        out_dtype = mat1_meta.dtype
+    if not isinstance(out_dtype, torch.dtype):
+        raise AssertionError(f"Expected out_dtype to be a torch.dtype, got {out_dtype}")
+
+    shape = torch.Size((mat1_meta.shape[0], mat2_meta.shape[1]))
+    return TensorMeta(shape, make_contiguous_strides_for(shape), out_dtype)
 
 
 def _propagate_use_strided_shard_flag(
@@ -527,6 +561,8 @@ class ShardingPropagator:
         if op_schema.op == aten.equal.default:
             # data dependent ops can't be used for fake propagation
             return None
+        if op_schema.op == aten._scaled_mm.default:
+            return _propagate_scaled_mm_tensor_meta(op_schema)
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory.
