@@ -455,8 +455,7 @@ test_python_smoke_b200() {
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
-  # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
-  # time test_xpu_sycl_tla_backend
+  time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -516,7 +515,7 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.9.2 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 

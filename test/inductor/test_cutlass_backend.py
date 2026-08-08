@@ -1094,7 +1094,7 @@ class TestCutlassBackend(TestCase):
                 actual = [compiled_model(*input) for input in inputs]
             torch.testing.assert_close(actual, expected)
 
-    @skipXPUIf(True, "streamk kernels not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1138,7 +1138,7 @@ class TestCutlassBackend(TestCase):
                 # matmuls involved. Many small addition differences add up.
                 torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
 
-    @skipXPUIf(True, "streamk kernels not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     def test_streamk_with_dynamic(
@@ -1164,7 +1164,7 @@ class TestCutlassBackend(TestCase):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                 _ = torch.compile(torch.mm, dynamic=True)(a, b)
 
-    @skipXPUIf(True, "streamk kernels not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     def test_streamk_with_static(
@@ -1423,7 +1423,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual)
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @skipXPUIf(True, "streamk kernels not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     def test_aoti_workspace_ptr(self):
         class MyModel(torch.nn.Module):
@@ -1996,7 +1996,7 @@ class TestCutlassBackend(TestCase):
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
-    @skipXPUIf(not Xe2_Or_Later, "")
+    # @skipXPUIf(True, "Wrong accuracy")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
     def test_maybe_append_choice_caching(self):
@@ -3062,7 +3062,7 @@ class TestCutlassBackend(TestCase):
         # Check that all config counts are equal
         all_counts = list(config_counts.values())
         # XPU has more configs for bf16 than f16.
-        expected_count = 2 if GPU_TYPE == "xpu" else 1
+        expected_count = 1
         self.assertTrue(
             len(set(all_counts)) == expected_count,
             lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
