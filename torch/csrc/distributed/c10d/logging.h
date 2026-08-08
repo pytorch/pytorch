@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include <c10/macros/Macros.h>
@@ -45,3 +46,18 @@ std::string formatLogMessage(fmt::string_view fmt, T&&... args) {
 #define C10D_TRACE(...)                                               \
   if (c10d::detail::isLogLevelEnabled(c10d::detail::LogLevel::Trace)) \
   LOG(INFO) << "[c10d - trace] " << c10d::detail::formatLogMessage(__VA_ARGS__)
+
+// Logs at WARNING on calls N, 2N, 3N, ... and at DEBUG otherwise.
+// Useful for retry loops where each failure is worth recording but only
+// every Nth one needs to surface as a warning.
+#define C10D_WARNING_EVERY_NTH_ELSE_DEBUG(n, ...)                  \
+  do {                                                             \
+    static std::atomic<size_t> _c10d_counter{0};                   \
+    size_t _c10d_c =                                               \
+        _c10d_counter.fetch_add(1, std::memory_order_relaxed) + 1; \
+    if (_c10d_c % (n) == 0) {                                      \
+      C10D_WARNING(__VA_ARGS__);                                   \
+    } else {                                                       \
+      C10D_DEBUG(__VA_ARGS__);                                     \
+    }                                                              \
+  } while (false)
