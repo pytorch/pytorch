@@ -15,6 +15,7 @@ from typing import Any
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     run_tests,
     do_test_empty_full,
@@ -97,6 +98,7 @@ def _rand_shape(dim, min_size, max_size):
 # See https://pytorch.org/docs/main/torch.html#creation-ops
 
 class TestTensorCreation(TestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
     exact_dtype = True
 
     @onlyCPU
@@ -3351,6 +3353,7 @@ class TestTensorCreation(TestCase):
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
     exact_dtype = True
 
     # TODO: add torch.complex64, torch.complex128
@@ -3806,6 +3809,7 @@ class TestRandomTensorCreation(TestCase):
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
     exact_dtype = True
 
     # TODO: this test should be updated
@@ -4005,6 +4009,8 @@ def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
 class TestBufferProtocol(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
 
@@ -4160,6 +4166,8 @@ class TestBufferProtocol(TestCase):
         self.assertSequenceEqual(tensor, [255, 255])
 
 class TestFromBlob(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_data(self, dtype, numel):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
         arr = np.arange(1, numel + 1, dtype=numpy_dtype)
@@ -4243,6 +4251,8 @@ def to_memview(tensor):
     return memoryview(to_numpy(tensor))
 
 class TestAsArray(TestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
+
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
         """Check the output of 'asarray', given its input and assertion information.
 
