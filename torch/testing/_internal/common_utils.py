@@ -3916,11 +3916,23 @@ class TestCase(expecttest.TestCase):
                 def expect_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
+                        outcome = self._outcome
+                        expecting_failure = outcome.expecting_failure
+                        # Let unittest route failing subTests through expectedFailure
+                        # so the Dynamo expected-failure wrapper can skip them.
+                        outcome.expecting_failure = True
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
-                            self.skipTest(e)
+                        except Exception as exc:
+                            skip_reason = exc
+                            if outcome.expectedFailure is not None:
+                                skip_reason = outcome.expectedFailure[1]
+                            self.skipTest(skip_reason)
+                        finally:
+                            outcome.expecting_failure = expecting_failure
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                    if getattr(wrapper, "__unittest_expecting_failure__", False):
+                        delattr(wrapper, "__unittest_expecting_failure__")
                     return wrapper
 
                 if TEST_WITH_TORCHINDUCTOR:
@@ -3940,7 +3952,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
+                        except Exception as e:
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
                         if getattr(method, "__unittest_expecting_failure__", False):

@@ -14,6 +14,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.bytecode_debugger import debug
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
 class InteractiveDebugSession:
@@ -605,6 +606,7 @@ Stack (TOS at end):
 
         InteractiveDebugSession(fn, (torch.ones(3),), test_logic)
 
+    @skipIfTorchDynamo("the outer Dynamo wrapper conflicts with the debugger")
     def test_breakpoint_marker(self):
         """Test that create_breakpoint() auto-activates the debugger.
 
