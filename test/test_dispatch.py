@@ -10,8 +10,8 @@ import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    TestCase,
     run_tests,
+    TestCase,
 )
 
 
