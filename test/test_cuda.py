@@ -2249,6 +2249,22 @@ if __name__ == '__main__':
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
+    # gfx950 (MI350) SIGFPEs in histogram sizing at nbins > INT_MAX; the int32
+    # overflow fix is still exercised on CUDA and other ROCm archs.
+    @skipIfRocmArch(MI350_ARCH)
+    @largeTensorTest("18GB", "cuda")
+    @serialTest()
+    def test_bincount_int32_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/189666
+        # A value above INT_MAX must not overflow the bin index inside
+        # kernelHistogram1D, which produced a negative bin offset and an
+        # illegal memory access.
+        val = torch.iinfo(torch.int32).max + 1000  # INT_MAX + 1000
+        t = torch.tensor([val, val], dtype=torch.long, device="cuda")
+        counted = t.bincount()
+        self.assertEqual(counted.numel(), val + 1)
+        self.assertEqual(counted[val].item(), 2)
+
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
