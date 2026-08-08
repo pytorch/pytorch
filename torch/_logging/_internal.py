@@ -33,6 +33,27 @@ _P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
+# Callbacks invoked after every successful set_logs() call. Out-of-tree device
+# backends register a callback here to mirror the Python log
+# state into their own native logging systems, instead of monkey-patching
+# set_logs.
+_set_logs_callbacks: list[Callable[[], None]] = []
+
+
+def register_set_logs_callback(callback: Callable[[], None]) -> None:
+    """
+    Register a callback to be invoked after every successful call to set_logs().
+
+    Intended for out-of-tree backends that need to propagate the Python logging
+    state to their own logging systems. Callbacks take no arguments and their
+    return value is ignored; exceptions raised by a callback are logged and
+    swallowed so they cannot break set_logs() for other callers.
+    """
+    if not callable(callback):
+        raise TypeError(f"expected a callable, got {type(callback)}")
+    _set_logs_callbacks.append(callback)
+
+
 # This is a synthetic logger which doesn't correspond to an actual logger,
 # but handles all of our "tracing" logging, which is structured and doesn't go
 # to stderr but always goes to a dedicated log file.  We don't put these
@@ -604,6 +625,12 @@ def set_logs(
         caching=caching,
         partitioned_scatter=partitioned_scatter,
     )
+
+    for _callback in _set_logs_callbacks:
+        try:
+            _callback()
+        except Exception:
+            log.exception("set_logs callback %r failed", _callback)
 
 
 def get_loggers() -> list[logging.Logger]:

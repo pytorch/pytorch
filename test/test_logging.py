@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import contextlib
 import glob
 import gzip
 import logging
@@ -16,6 +17,19 @@ import torch
 import torch._logging._internal as log_internal
 from torch._logging._internal import _init_logs, trace_log, trace_structured
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+@contextlib.contextmanager
+def restored_log_state():
+    """Restore the global log state and the set_logs callback list on exit."""
+    old_callbacks = list(log_internal._set_logs_callbacks)
+    old_log_state = log_internal._get_log_state()
+    try:
+        yield
+    finally:
+        log_internal._set_logs_callbacks[:] = old_callbacks
+        log_internal._set_log_state(old_log_state)
+        _init_logs()
 
 
 class LoggingTest(TestCase):
@@ -90,6 +104,80 @@ class LoggingTest(TestCase):
             )
             self.assertIn("issue173759 component log", result.stderr)
             self.assertIn("issue173759 artifact log", result.stderr)
+
+    def test_set_logs_callback_is_invoked(self):
+        with restored_log_state():
+            calls = []
+            log_internal.register_set_logs_callback(lambda: calls.append(None))
+
+            torch._logging.set_logs(dynamo=logging.DEBUG)
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(logging.getLogger("torch._dynamo").level, logging.DEBUG)
+
+    def test_set_logs_callback_sees_the_new_log_state(self):
+        # Callbacks run after set_logs has applied its changes, so a backend can
+        # read the final state and mirror it into its own logging system.
+        with restored_log_state():
+            observed = []
+            log_internal.register_set_logs_callback(
+                lambda: observed.append(
+                    dict(log_internal._get_log_state().log_qname_to_level)
+                )
+            )
+
+            torch._logging.set_logs(dynamo=logging.DEBUG)
+
+            self.assertEqual(len(observed), 1)
+            self.assertEqual(observed[0].get("torch._dynamo"), logging.DEBUG)
+
+    def test_set_logs_callback_exception_is_contained(self):
+        with restored_log_state():
+
+            def failing_callback():
+                raise RuntimeError("callback failure")
+
+            calls = []
+            log_internal.register_set_logs_callback(failing_callback)
+            log_internal.register_set_logs_callback(lambda: calls.append(None))
+
+            with self.assertLogs(log_internal.log, level=logging.ERROR) as captured:
+                torch._logging.set_logs(dynamo=logging.DEBUG)
+
+            self.assertTrue(
+                any("callback failure" in message for message in captured.output)
+            )
+            # A failing callback must not stop the remaining ones, nor set_logs itself.
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(logging.getLogger("torch._dynamo").level, logging.DEBUG)
+
+    def test_set_logs_callbacks_skipped_when_env_var_takes_precedence(self):
+        # set_logs returns early when TORCH_LOGS is set, leaving the log state
+        # untouched, so there is nothing for a callback to synchronize.
+        with restored_log_state():
+            old_env = os.environ.get(log_internal.LOG_ENV_VAR)
+            try:
+                os.environ[log_internal.LOG_ENV_VAR] = "+dynamic"
+                calls = []
+                log_internal.register_set_logs_callback(lambda: calls.append(None))
+
+                torch._logging.set_logs(dynamo=logging.DEBUG)
+
+                self.assertEqual(calls, [])
+            finally:
+                if old_env is None:
+                    os.environ.pop(log_internal.LOG_ENV_VAR, None)
+                else:
+                    os.environ[log_internal.LOG_ENV_VAR] = old_env
+
+    def test_register_set_logs_callback_rejects_non_callable(self):
+        with restored_log_state():
+            registered = len(log_internal._set_logs_callbacks)
+
+            with self.assertRaises(TypeError):
+                log_internal.register_set_logs_callback("not a callable")
+
+            self.assertEqual(len(log_internal._set_logs_callbacks), registered)
 
     def testApiUsage(self):
         """
