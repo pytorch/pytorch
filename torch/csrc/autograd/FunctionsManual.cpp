@@ -4690,8 +4690,13 @@ Tensor linalg_det_jvp(
     const bool use_A_T) {
   // (d det)_A(E) = tr(A^{-1}E)*det
   // We use that the determinant is C^1 to approximate the gradient of singular
-  // inputs Since we never differentiate over forward AD, we don't need to deal
-  // with further gradients, as we do in grad_backward
+  // inputs.
+  // When higher-order forward AD is active (jvp of jvp / jacfwd of jacfwd),
+  // we route through a differentiable solve path to track d(A^{-1}) = -A^{-1} (dA) A^{-1}.
+  if (dA.fw_grad(/*level=*/0).defined()) {
+    auto AinvE = use_A_T ? at::linalg_solve(LU.matrix_power(-1), dA) : at::linalg_solve(LU, dA);
+    return AinvE.diagonal(0, -2, -1).sum(-1) * det;
+  }
   auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
   auto LU_ =
       LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
