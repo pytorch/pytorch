@@ -258,6 +258,37 @@ class PrecompileNoDispatchSlot(torch.nn.Module):
         return (y + 1).sum()
 
 
+class PrecompileSharedBlock(torch.nn.Module):
+    """A library block reused by two different models; its frame graph-breaks."""
+
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        return y * self.scale
+
+
+class PrecompileSharedUserA(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = PrecompileSharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+
+class PrecompileSharedUserB(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = PrecompileSharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+
+
 class PrecompileSelfAct(torch.nn.Module):
     """self.act = <callable> -- how configurable activations are usually written."""
 
@@ -2437,6 +2468,45 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             skewed = dataclasses.replace(current, **{field: bad})
             with self.assertRaisesRegex(RuntimeError, "different"):
                 skewed.check_compatibility(current, "cpu")
+
+    def test_two_artifacts_sharing_an_inner_frame_both_serve(self):
+        # Two DIFFERENT models containing the same library block share that
+        # block's frame and its resume function. Unlike two artifacts for one
+        # class, which collide on the entry frame and evict each other, these
+        # coexist: precompile entries accumulate on the shared code object and
+        # the guards pick the right one. Pin that, because the alternative --
+        # the second load evicting the first -- is silent here, the eviction
+        # warning covering entry frames only.
+        x = torch.ones(3, 4)
+        paths = []
+        for cls, scale in ((PrecompileSharedUserA, 3.0), (PrecompileSharedUserB, 7.0)):
+            torch._dynamo.reset()
+            session = precompile_capture(cls(scale), backend="eager", dynamic=False)
+            with session as compiled, torch.no_grad():
+                compiled(x)
+            # No opt-out: a float attribute is a serializable guard.
+            self.assertEqual(session.summary().risky_dropped_guards, ())
+            path = os.path.join(self.path(), f"shared_{cls.__name__}")
+            os.makedirs(path, exist_ok=True)
+            session.save(path, require_complete=False)
+            paths.append(path)
+
+        torch._dynamo.reset()
+        model_a, model_b = PrecompileSharedUserA(3.0), PrecompileSharedUserB(7.0)
+        with torch.no_grad():
+            want_a, want_b = model_a(x), model_b(x)
+        with (
+            precompile_load(model_a, paths[0], backend="eager", dynamic=False) as a,
+            precompile_load(model_b, paths[1], backend="eager", dynamic=False) as b,
+            torch.no_grad(),
+            serving(),
+        ):
+            # The surviving artifact still serves its own model correctly.
+            self.assertEqual(b(x), want_b)
+            # The evicted one must not be served the survivor's graph. Its
+            # entries are gone, so this is a miss, and fail_on_recompile makes
+            # the miss loud instead of letting it recompile.
+            self.assertEqual(a(x), want_a)
 
     def test_load_rejects_artifact_from_a_different_callable(self):
         x = torch.randn(4, 8)

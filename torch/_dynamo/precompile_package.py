@@ -53,13 +53,18 @@ Know these before relying on an artifact in production:
 * ``install()`` patches code objects process-globally, so an artifact is not
   scoped to the object it was loaded onto: other instances of the same class
   are served from it too, and ``torch._dynamo.reset()`` unloads it. Two
-  artifacts for one class cannot be loaded at once either: entries clear en
-  masse, so the second load evicts the first, with a warning. The evicted one
-  does not merely stop working: its calls fall through to the surviving
-  artifact's entries, and if those guards accept the call -- they do when the
-  guard that told the two instances apart was an identity guard precompile
-  dropped -- the first model is silently served the second's graph. Load one
-  artifact per class per process.
+  artifacts for ONE CLASS cannot be loaded at once: they collide on the entry
+  frame, whose entries clear en masse, so the second load evicts the first,
+  with a warning. Load one artifact per class per process.
+
+  Two artifacts for DIFFERENT models that merely share an inner frame -- two
+  models containing the same library block -- do coexist: entries accumulate
+  on the shared code object and guards pick the right one. That holds only as
+  long as the guards can still tell the two apart. Drop the discriminating
+  guard, which is what ``require_no_risky_drops=False`` lets you do, and
+  dispatch becomes ambiguous: the first matching entry wins and one model is
+  silently served the other's graph. Nothing warns, because the eviction
+  warning covers entry frames only.
 * While an artifact is loaded, a plain ``torch.compile`` of anything else in
   the same module can die with ``AssertionError: Name '__builtins_dict___1'
   already exists in scope``. Loading installs that name -- a counter value from
@@ -224,8 +229,25 @@ def _source_root(source: Source) -> Source:
     return source
 
 
+# Locals Dynamo synthesizes when a resume function is itself nested, passed
+# positionally into the continuation. They name generated code, not a slot any
+# config chooses, so an identity guard lost on one cannot diverge.
+_DYNAMO_SYNTHESIZED = ("__nested_resume_fns", "__nested_frame_values")
+
+
+def _is_dynamo_synthesized(source_name: str) -> bool:
+    return any(
+        source_name == n or source_name.startswith(n + "[") for n in _DYNAMO_SYNTHESIZED
+    )
+
+
 def _is_library_module(module_name: str | None) -> bool:
-    """Owned by torch or the stdlib: one implementation, no plug points."""
+    """
+    Owned by torch or the stdlib, so config on the serving machine does not
+    choose between implementations. NB this trusts the OWNER, not the binding:
+    a third party that monkeypatches ``F.gelu`` at import time still diverges,
+    and that is called out in ``_is_risky_drop``'s KNOWN GAP.
+    """
     if module_name is None:
         return False
     if module_name == "torch" or module_name.startswith("torch."):
@@ -389,6 +411,14 @@ def _is_risky_drop(
       also waived, because at capture time the module really does own whichever
       def the branch produced. The reading file binds nothing conditionally,
       so it looks covered and is not.
+    - library-namespace arm, and this one needs no conditional at all. The
+      waiver trusts the owner, not the binding, so a third party that rebinds a
+      torch or stdlib attribute -- ``F.gelu = _fast_gelu`` executed at import
+      by a package that happens to be installed on the serving host -- is
+      waived even though the model itself reads ``F.gelu`` unconditionally.
+      ``functools.wraps(F.gelu)(user_fn)`` reaches the same waiver by a
+      different route, since it copies ``__name__`` and ``__module__`` off the
+      torch function it wraps.
 
     An ``allow_in_graph`` function passes too, and Dynamo traces it opaquely so
     the inlined-source checksum never covers it either. Nothing at capture time
@@ -399,6 +429,10 @@ def _is_risky_drop(
     """
     source = entry.orig_guard.originating_source
     value = entry.value
+    # entry.name, not source.name: guard names arrive with local scope stripped
+    # ("L['x'].y" -> "x.y"), and these are always locals of a resume frame.
+    if _is_dynamo_synthesized(entry.name):
+        return False
     if source.name in namespaces:
         return False
     if _reads_a_builtin(source, value):
