@@ -202,6 +202,16 @@ def rocm_os_deps() -> list[Path]:
     ]
 
 
+def rocm_os_dep_aliases(os_lib: Path) -> list[str]:
+    """Additional filenames needed for OS deps bundled into ROCm wheels."""
+    if os_lib.name.startswith("libnuma.so."):
+        # rocSHMEM calls dlopen("libnuma.so") at import time. The wheel bundles
+        # libnuma.so.1, but wheel installers do not preserve symlinks portably,
+        # so ship a second real file with the unversioned loader name.
+        return ["libnuma.so"]
+    return []
+
+
 def find_rocm_lib(rocm_home: Path, basename: str) -> Path | None:
     """Locate a ROCm library, falling back from lib/ to lib64/ to a wider search."""
     for sub in ("lib", "lib64"):
@@ -262,6 +272,8 @@ def rocm_bundle(
     for os_lib in rocm_os_deps():
         if os_lib.is_file():
             libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
+            for alias in rocm_os_dep_aliases(os_lib):
+                libs.append(BundledLib(src=os_lib, dest_name=alias))
 
     archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
     aux: list[AuxFile] = []
