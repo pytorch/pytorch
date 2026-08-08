@@ -13,7 +13,6 @@ from itertools import chain, count
 from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
-
 import torch
 import torch._higher_order_ops.torchbind
 import torch._inductor.async_compile
@@ -1260,6 +1259,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
+            fold_input_only = V.graph.get_fold_input_only_constants()
             for idx, name in enumerate(V.graph.constants.keys()):
                 tensor = V.graph.get_original_value_of_constant(name)
                 if not isinstance(tensor, torch.Tensor):
@@ -1301,6 +1301,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
+
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].fold_input_only = "
+                    f"{'true' if name in fold_input_only else 'false'};"
                 )
 
                 if name in V.graph.folded_constants:
