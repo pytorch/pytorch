@@ -700,6 +700,17 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   ncclWindow_t win = nullptr;
   auto rc = nccl_api_->commWindowRegister(
       nccl_comm_, it->first, it->second.len, &win, NCCL_WIN_COLL_SYMMETRIC);
+  if (rc == ncclInProgress) {
+    // NCCL retains &win in its async registration task, so keep this stack
+    // frame alive until the task has populated the handle.
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm_,
+        rc,
+        options_c10d_->timeout,
+        "NCCL symmetric window registration failed");
+    rc = ncclSuccess;
+  }
   if (rc != ncclSuccess) {
     return rc;
   }

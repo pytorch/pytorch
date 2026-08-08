@@ -216,6 +216,10 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
+  TORCH_CHECK(
+      supportsWindow(),
+      "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
+      "supported on ROCm");
   // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
   // device, then the current CUDA device.
   if (init_state_ != InitializationState::INITIALIZED) {
@@ -235,6 +239,16 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     window->tensor_register(*tensor);
   }
   return window;
+}
+
+bool ProcessGroupNCCL::supportsWindow() const {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+  int runtime_version = 0;
+  return ncclGetVersion(&runtime_version) == ncclSuccess &&
+      runtime_version >= NCCL_VERSION(2, 29, 0);
+#else
+  return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
