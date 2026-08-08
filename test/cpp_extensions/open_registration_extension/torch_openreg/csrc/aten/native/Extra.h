@@ -21,6 +21,15 @@ void quantize_tensor_per_tensor_affine_stub(
     at::Tensor& qtensor,
     double scale,
     int64_t zero_point);
+void dequantize_tensor_per_tensor_affine_stub(
+    const at::Tensor& qtensor,
+    at::Tensor& rtensor,
+    double scale,
+    int64_t zero_point);
+at::Tensor make_per_tensor_quantized_tensor(
+    const at::Tensor& self,
+    double scale,
+    int64_t zero_point);
 std::tuple<
     at::Tensor,
     at::Tensor,
@@ -65,5 +74,12 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x);
 at::Tensor& abs_out(const at::Tensor& self, at::Tensor& out);
 void abs_kernel(at::TensorIteratorBase& iter);
 at::Tensor custom_abs(at::Tensor x);
+
+at::Tensor quantized_copy_from(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking);
+
+at::Tensor int_repr_quantized_openreg(const at::Tensor& self);
 
 } // namespace at::native::openreg
