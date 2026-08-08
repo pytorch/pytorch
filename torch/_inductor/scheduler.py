@@ -9328,8 +9328,17 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        output_device = node.get_device()
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.FallbackKernel)
+            and ir.is_node_sequence(ir_node.inputs)
+            and any(
+                (input_device := input_node.get_device()) is not None
+                and input_device != output_device
+                for input_node in ir_node.inputs
+            )
+        ):
+            return "cross-device copy ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
