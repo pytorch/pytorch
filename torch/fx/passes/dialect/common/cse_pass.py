@@ -1,3 +1,5 @@
+import dataclasses
+import struct
 from typing import Any
 
 import torch
@@ -8,6 +10,22 @@ from torch.utils._pytree import tree_flatten
 
 
 aten = torch.ops.aten
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
+    # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
+    if type(val) is float:
+        return _ScalarKey("float", struct.pack(">d", val))
+    if type(val) is complex:
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
+    return val
 
 
 # stateful ops are banned from CSE
@@ -121,6 +139,7 @@ class CSEPass(PassBase):
                         v = arg_list[i]
                         if isinstance(v, Node) and v in env:
                             arg_list[i] = env[v]
+                        arg_list[i] = _normalize_cse_arg(arg_list[i])
                     return tuple(arg_list), spec
 
                 args, args_spec = substitute(n.args)
@@ -137,7 +156,14 @@ class CSEPass(PassBase):
                 }
 
                 # hash substituted args to a number, do not hash specs because specs are not hashable
-                hash_arg = hash((args, kwargs))
+                # We need to add type into hash to avoid situations like:
+                # hash((primals_2, 1.0)) == hash((primals_2, 1))
+                hash_arg = hash(
+                    (
+                        tuple((a, type(a)) for a in args),
+                        tuple((a, type(a)) for a in kwargs),
+                    )
+                )
                 hash_val = (n.target, hash_arg)
 
                 # check if a node has a substitute and can be eliminated

@@ -243,6 +243,33 @@ class TestCSEPass(TestCase):
         check(self, f, t, 0, P=P_ban_add)  # check that add is banned
         check(self, f, t, 1)  # check that add is not banned by default
 
+    def test_nan_dedup(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(self, f, t, 1, check_val=False)
+
+    def test_neg_zero_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, 0.0)
+            b = torch.full_like(x, -0.0)
+            return torch.stack([a.reciprocal(), b.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(self, f, t, 0)
+
+    def test_int_float_not_merged(self):
+        def f(x):
+            a = x + 1
+            b = x + 1.0
+            return a + b
+
+        t = torch.randint(0, 10, (2, 2))
+        check(self, f, t, 0)
+
     def test_rand_like(self):
         def f(x):
             a = torch.rand_like(x)
