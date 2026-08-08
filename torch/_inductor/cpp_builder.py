@@ -19,7 +19,7 @@ import sysconfig
 import tempfile
 import textwrap
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
@@ -2082,6 +2082,37 @@ def _transform_rocm_paths(lpaths: list[str]) -> None:
             lpaths.append(sdk_lib)
 
 
+# Registry for out-of-tree device backends to provide C++ compile options.
+# Maps device_type (e.g. "npu") to a callback with the same signature as
+# get_cpp_torch_device_options.
+_cpp_device_options_registry: dict[str, Callable] = {}
+
+
+def register_cpp_device_options(
+    device_type: str,
+    callback: Callable,
+) -> None:
+    """Register C++ build options for a device type.
+
+    Allows out-of-tree device backends (e.g., PrivateUse1 devices like NPU)
+    to inject their own compile options into Inductor's C++ compilation
+    pipeline without monkey-patching.
+
+    Args:
+        device_type: The device type string (e.g. "npu").
+        callback: A callable with the same signature as
+            :func:`get_cpp_torch_device_options`:
+            ``(device_type, aot_mode, compile_only) ->
+            tuple[definitions, include_dirs, cflags, ldflags,
+                  libraries_dirs, libraries, passthrough_args]``
+    """
+    if device_type in _cpp_device_options_registry:
+        warnings.warn(
+            f"Device options for '{device_type}' is already registered, overwriting."
+        )
+    _cpp_device_options_registry[device_type] = callback
+
+
 def get_cpp_torch_device_options(
     device_type: str,
     aot_mode: bool = False,
@@ -2171,6 +2202,12 @@ def get_cpp_torch_device_options(
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
+
+    # Check registered device backends (e.g., PrivateUse1 devices like NPU)
+    if device_type in _cpp_device_options_registry:
+        return _cpp_device_options_registry[device_type](
+            device_type, aot_mode, compile_only
+        )
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
