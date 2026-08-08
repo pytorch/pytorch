@@ -28,6 +28,9 @@ from torch.testing._internal.common_utils import (
     skipIfNoCuteDSL,
     skipIfWindows,
 )
+from torch.testing._internal.common_cuda import (
+    xfailIfUnsupportedCuteDSLDeviceCapability,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     requires_gpu,
@@ -492,6 +495,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
             expected = x + y
             self.assertEqual(result, expected)
 
+    @xfailIfUnsupportedCuteDSLDeviceCapability
     def test_cutedsl_subprocess_e2e(self):
         shutdown_compile_workers()
         with config.patch(worker_start_method="subprocess", compile_threads=4):
@@ -547,6 +551,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     "test_kernel", "import torch\ndef other_func(): pass\n"
                 ).result()
 
+    @xfailIfUnsupportedCuteDSLDeviceCapability
     def test_cutedsl_subprocess_precompile_invoked(self):
         """Verify that subprocess actually calls _precompile for a template that defines it."""
         import uuid
@@ -1257,6 +1262,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 kernel_wrapper.run(x, y, out)
                 self.assertEqual(out, x + y)
 
+    @xfailIfUnsupportedCuteDSLDeviceCapability
     def test_cutedsl_subprocess_precompile_no_cuda_init(self):
         """Regression: precompile in subprocess workers must not call torch.cuda.*.
 
