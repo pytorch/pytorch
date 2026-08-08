@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -40,6 +39,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -165,6 +165,8 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 @unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
 class TestForeach(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def is_cuda(self):
         return self.device_type == "cuda"
@@ -1124,7 +1126,7 @@ class TestForeach(TestCase):
 
             self.assertEqual(expect, actual, equal_nan=True)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.complex128)
     def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
         # Prevent regressions for complex double MTA chunking, see #189827
@@ -1971,20 +1973,23 @@ _FOREACH_MM_SHAPES = [
 ]
 
 
+def _foreach_mm_check(test_case, shapes, dtype, device):
+    A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
+    B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
+    ref = [torch.mm(a, b) for a, b in zip(A, B)]
+    out = torch._foreach_mm(A, B)
+    test_case.assertEqual(len(out), len(ref))
+    # Grouped GEMM backends may use different accumulation order than
+    # torch.mm, so fp32 needs relaxed tolerances.
+    kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
+    for i, (r, o) in enumerate(zip(ref, out)):
+        test_case.assertEqual(
+            o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
+        )
+
+
 class TestForeachMM(TestCase):
-    def _check(self, shapes, dtype, device):
-        A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
-        B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
-        ref = [torch.mm(a, b) for a, b in zip(A, B)]
-        out = torch._foreach_mm(A, B)
-        self.assertEqual(len(out), len(ref))
-        # Grouped GEMM backends may use different accumulation order than
-        # torch.mm, so fp32 needs relaxed tolerances.
-        kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
-        for i, (r, o) in enumerate(zip(ref, out)):
-            self.assertEqual(
-                o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
-            )
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "label,shapes",
@@ -1992,17 +1997,7 @@ class TestForeachMM(TestCase):
         name_fn=lambda label, shapes: label,
     )
     def test_foreach_mm_cpu(self, label, shapes):
-        self._check(shapes, torch.float32, "cpu")
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    @parametrize(
-        "label,shapes",
-        _FOREACH_MM_SHAPES,
-        name_fn=lambda label, shapes: label,
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float32])
-    def test_foreach_mm_cuda(self, label, shapes, dtype):
-        self._check(shapes, dtype, "cuda")
+        _foreach_mm_check(self, shapes, torch.float32, "cpu")
 
     def test_foreach_mm_gradcheck(self):
         G = 4
@@ -2102,9 +2097,21 @@ class TestForeachMM(TestCase):
         ):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+
+@unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+class TestForeachMMOnCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
     )
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_mm_cuda(self, device, label, shapes, dtype):
+        _foreach_mm_check(self, shapes, dtype, device)
+
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
         [
@@ -2125,9 +2132,7 @@ class TestForeachMM(TestCase):
         B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
         self.assertFalse(_foreach_mm_cond(A, B))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2159,9 +2164,7 @@ class TestForeachMM(TestCase):
             self.assertEqual(o, r)
 
     @skipIfNoNvmath
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2196,6 +2199,7 @@ class TestForeachMM(TestCase):
 
 
 instantiate_parametrized_tests(TestForeachMM)
+instantiate_parametrized_tests(TestForeachMMOnCUDA)
 
 
 if __name__ == "__main__":
