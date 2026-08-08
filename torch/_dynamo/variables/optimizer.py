@@ -51,6 +51,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
@@ -220,7 +221,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
         )
         for param_group_vt in param_groups_vt.items:
             key = HashableTracker(ConstantVariable.create("capturable"))
-            param_group_vt.items[key] = ConstantVariable.create(True)
+            orig_vt = param_group_vt.items.get(key)
+            if orig_vt is None or isinstance(orig_vt, OptimizerCapturableVariable):
+                continue
+            param_group_vt.items[key] = OptimizerCapturableVariable(
+                value=True, orig_value=orig_vt.as_python_constant()
+            )
 
     def get_python_args(
         self, *args: Any, **kwargs: Any
@@ -433,3 +439,24 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
+
+
+class OptimizerCapturableVariable(VariableTracker):
+    """Reconstructs as the original capturable value, preventing side-effect leaks.
+    Dynamo never needs to statically evaluate 'if capturable:' itself,
+    so this VT intentionally does NOT expose as_python_constant/is_python_constant.
+    The codegen path therefore uses reconstruct() which emits the true original value.
+    """
+
+    _nonvar_fields = {"orig_value", *VariableTracker._nonvar_fields}
+
+    def __init__(self, value: bool, orig_value: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+        self.orig_value = orig_value
+
+    def python_type(self) -> type:
+        return bool
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(ConstantVariable.create(self.orig_value))
