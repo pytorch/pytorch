@@ -5,8 +5,9 @@ import sys
 import unittest
 from types import SimpleNamespace
 
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_gpu
 
 
 if IS_WINDOWS and IS_CI:
@@ -105,10 +106,7 @@ class TestMemoryPlanningOutputGroups(TestCase):
 
 
 @requires_gpu()
-@config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
-    device = GPU_TYPE
-
     def _generate(self, *, device):
         """
         Generate a simple test case that has multiple simultaneously-live intermediate tensors.
@@ -127,14 +125,15 @@ class TestMemoryPlanning(TestCase):
         z = torch.randn((2, 3), device=device)
         return (Foo(), (x, y, z))
 
-    def test_python_wrapper(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @config.patch(memory_planning=True)
+    def test_python_wrapper(self, device):
+        f, args = self._generate(device=device)
         compiled = torch.compile(f, dynamic=True)
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
             "pool1 = empty_strided_"
-            + GPU_TYPE
+            + device
             + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s77, s77), (s77, 1))"
@@ -142,8 +141,9 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
-    def test_cpp_wrapper(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @config.patch(memory_planning=True)
+    def test_cpp_wrapper(self, device):
+        f, args = self._generate(device=device)
         compiled = torch.compile(f, dynamic=True)
         with config.patch({"cpp_wrapper": True}):
             result, code = run_and_get_cpp_code(compiled, *args)
@@ -155,8 +155,9 @@ class TestMemoryPlanning(TestCase):
         ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    def test_aoti(self):
-        f, args = self._generate(device=GPU_TYPE)
+    @config.patch(memory_planning=True)
+    def test_aoti(self, device):
+        f, args = self._generate(device=device)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         result, code = run_and_get_cpp_code(
@@ -180,12 +181,10 @@ class TestMemoryPlanning(TestCase):
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/168171",
     )
-    @config.patch({"triton.autotune_at_compile_time": False})
-    def test_unbacked_symint(self):
+    @config.patch({"triton.autotune_at_compile_time": False, "memory_planning": True})
+    def test_unbacked_symint(self, device):
         # when allocation's size has unbacked symints
         # the unbacked symints are only available after computed
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
 
         class Repro(torch.nn.Module):
             def forward(self, x, y):
@@ -200,10 +199,10 @@ class TestMemoryPlanning(TestCase):
                 return sevens * 3
 
         example_inputs = (
-            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
-            torch.ones(8, device=self.device),
+            torch.scalar_tensor(2, dtype=torch.int, device=device),
+            torch.ones(8, device=device),
         )
-        model = Repro().to(self.device)
+        model = Repro().to(device)
         result, code = run_and_get_cpp_code(
             lambda: AOTIRunnerUtil.run(model, example_inputs)
         )
@@ -274,6 +273,10 @@ class TestMemoryPlanning(TestCase):
         )
 
 
+instantiate_device_type_tests(
+    TestMemoryPlanning, globals(), except_for="cpu", allow_xpu=True
+)
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON:
         run_tests()
