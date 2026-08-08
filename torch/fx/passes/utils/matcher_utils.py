@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import struct
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,17 @@ from torch.fx._compatibility import compatibility
 
 
 __all__ = ["SubgraphMatcher", "InternalMatch"]
+
+
+def _literal_eq(a: Any, b: Any) -> bool:
+    # Python float eq is not value-identity: nan != nan while -0.0 == 0.0.
+    # Match constants by bit pattern so a nan pattern literal can match and
+    # 0.0 does not spuriously match -0.0.
+    if type(a) is float and type(b) is float:
+        return struct.pack(">d", a) == struct.pack(">d", b)
+    if type(a) is complex and type(b) is complex:
+        return struct.pack(">dd", a.real, a.imag) == struct.pack(">dd", b.real, b.imag)
+    return a == b
 
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
@@ -210,7 +222,7 @@ class SubgraphMatcher:
                 # Check if we've already matched these nodes in the current
                 # traversal
                 if pn in match.nodes_map:
-                    return match.nodes_map[pn] == gn
+                    return _literal_eq(match.nodes_map[pn], gn)
 
                 match.nodes_map[pn] = gn
                 return True
@@ -219,7 +231,7 @@ class SubgraphMatcher:
         elif not isinstance(pn, Node) and isinstance(gn, Node):
             return False
         else:
-            return type(gn) is type(pn) and gn == pn
+            return type(gn) is type(pn) and _literal_eq(gn, pn)
 
     def _match_nodes(
         self, pn: Node, gn: Node, match: InternalMatch, node_name_match: str = ""

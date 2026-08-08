@@ -123,6 +123,40 @@ class TestMatcher(JitTestCase):
         match_result = subgraph_matcher.match(original_graph)
         self.assertEqual(len(match_result), 1)
 
+    def test_subgraph_matcher_nan_literal(self):
+        def original(x):
+            return x.clamp(min=float("nan")) + 1
+
+        original_graph = make_fx(original)(torch.ones(3, 3)).graph
+        original_graph.eliminate_dead_code()
+
+        def pattern(x):
+            return x.clamp(min=float("nan"))
+
+        pattern_graph = make_fx(pattern)(torch.ones(4, 4)).graph
+        pattern_graph.eliminate_dead_code()
+
+        subgraph_matcher = SubgraphMatcher(pattern_graph)
+        match_result = subgraph_matcher.match(original_graph)
+        self.assertEqual(len(match_result), 1)
+
+    def test_subgraph_matcher_neg_zero_literal(self):
+        def original(x):
+            return x.clamp(min=-0.0) + 1
+
+        original_graph = make_fx(original)(torch.ones(3, 3)).graph
+        original_graph.eliminate_dead_code()
+
+        def pattern(x):
+            return x.clamp(min=0.0)
+
+        pattern_graph = make_fx(pattern)(torch.ones(4, 4)).graph
+        pattern_graph.eliminate_dead_code()
+
+        subgraph_matcher = SubgraphMatcher(pattern_graph)
+        match_result = subgraph_matcher.match(original_graph)
+        self.assertEqual(len(match_result), 0)
+
     def test_variatic_arg_matching(self):
         inputs = (torch.randn(20, 16, 50, 32),)
 
