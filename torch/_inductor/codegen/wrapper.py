@@ -3250,7 +3250,7 @@ class PythonWrapperCodegen(CodeGen):
                 elif isinstance(value, ir.GeneratorState):
                     add_expr_input(
                         name,
-                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
+                        f"torch._C._accelerator_getDefaultGenerator({value.device.index}).graphsafe_get_state()",
                     )
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")

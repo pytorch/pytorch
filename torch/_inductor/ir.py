@@ -7282,11 +7282,16 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
+                    accelerator = torch.accelerator.current_accelerator()
                     if not (
-                        arg.device.type in ["cuda", "xpu"] and device_index is not None
+                        accelerator is not None
+                        and arg.device.type == accelerator.type
+                        and device_index is not None
                     ):
                         raise AssertionError(
-                            'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
+                            "Expected arg.device to be on the current accelerator "
+                            "and arg.device.index is not None, got "
+                            f"{arg.device} (current accelerator: {accelerator})"
                         )
                     real_non_tensor_args.append(
                         torch._C._accelerator_getDefaultGenerator(
@@ -7371,9 +7376,16 @@ class ExternKernel(InputsKernel):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
-                if not (x.device.type in ["cuda", "xpu"] and device_index is not None):
+                accelerator = torch.accelerator.current_accelerator()
+                if not (
+                    accelerator is not None
+                    and x.device.type == accelerator.type
+                    and device_index is not None
+                ):
                     raise AssertionError(
-                        'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
+                        "Expected x.device to be on the current accelerator "
+                        "and x.device.index is not None, got "
+                        f"{x.device} (current accelerator: {accelerator})"
                     )
                 example_args.append(
                     torch._C._accelerator_getDefaultGenerator(
