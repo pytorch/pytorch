@@ -11772,7 +11772,7 @@ def sample_inputs_expm1(op_info, device, dtype, requires_grad, op_kwargs=None, *
     if dtype == torch.float64:
         yield SampleInput(
             torch.tensor(
-                -40.0,
+                [[-40.0]],
                 device=device,
                 dtype=dtype,
                 requires_grad=requires_grad,
