@@ -14,7 +14,11 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
     post_training_sparse_quantize,
 )
 from torch.nn.utils.parametrize import is_parametrized
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class ImplementedSparsifier(BaseDataSparsifier):
@@ -36,6 +40,8 @@ class _BaseDataSparsiferTestCase(TestCase):
     TODO: Change the structure by creating a separate test case class for each
           member function
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def run_all_checks(self, data_list, data_with_config, defaults):
         self.check_constructor(data_list, data_with_config, defaults)
@@ -303,6 +309,8 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
           member function
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def run_all_checks(self, data_list, defaults, data_with_config, norm_type="L1"):
         if norm_type not in ["L1", "L2"]:
             raise AssertionError(f"norm_type must be 'L1' or 'L2', got '{norm_type}'")
@@ -504,6 +512,8 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
     Once the above is done, create an instance of TestBaseDataSparsifierType and call all the run_tests()
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensors(self):
         tensor1, tensor2, tensor3 = (
             torch.randn(3, 3),
@@ -576,6 +586,8 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
 
     Once the above is done, create an instance of _NormDataSparsifierTestRunner and call run_tests()
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_tensors(self):
         tensor1, tensor2, tensor3 = (
@@ -740,6 +752,8 @@ class Model(nn.Module):
 
 
 class TestQuantizationUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_ptq_sparsify_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model
