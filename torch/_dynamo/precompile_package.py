@@ -42,7 +42,24 @@ Know these before relying on an artifact in production:
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
   authoritative list and ``risky_dropped_guards`` is a lint over it, not a
-  proof -- see ``_is_risky_drop`` for what it does and does not catch.
+  proof -- see ``_is_risky_drop`` for what it does and does not catch. The lint
+  REPORTS by default rather than refusing, because real models trip it on
+  library internals: measured on stock models, torchvision resnet18 and
+  mobilenet_v3 report none, timm's ViT reports one (a re-exported
+  ``torch._assert``) and transformers' Qwen2 reports 33, of which only the
+  attention-implementation registry looks genuinely config-selected. Refusing
+  by default would refuse real models and train users to switch the check off,
+  so audit the list once for your model and pass
+  ``require_no_risky_drops=True`` to enforce it thereafter.
+* A transformers model does not round trip today. Capture and save work, but
+  ``precompile_load`` dies building guards with ``AttributeError: '_Missing'
+  object has no attribute '__defaults__'``: a SEQUENCE_LENGTH guard on a
+  function's ``__defaults__`` outlives the dropped identity guard on the
+  function itself, which is therefore absent from the reloaded scope. This is
+  not specific to this module -- plain
+  ``torch._dynamo.config.caching_precompile`` reproduces it on the same model
+  -- so it needs fixing in guard serialization, not here. Vision models
+  (torchvision, timm) do round trip.
 * SystemInfo checks Python, PyTorch, CUDA, Triton and GPU name at load, but NOT
   the CPU vector ISA. Inductor bakes the vector width into generated CPU code,
   so an artifact captured on an AVX-512 host and served on an AVX2 host can
@@ -270,6 +287,14 @@ def _defined_where_read(
     return bool(user_stack) and file is not None and file == user_stack[-1].filename
 
 
+def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
+    """The module behind an ``__import_a_dot_b`` alias, mirroring import_source."""
+    prefix = "__import_"
+    if not global_name.startswith(prefix):
+        return None
+    return sys.modules.get(global_name[len(prefix) :].replace("_dot_", "."))
+
+
 def _module_namespaces(
     entries: Sequence[GuardFilterEntry],
 ) -> dict[str, types.ModuleType]:
@@ -300,6 +325,17 @@ def _module_namespaces(
         if isinstance(e.value, types.ModuleType)
         and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
     }
+    # Dynamo guards the attributes it reads off an import alias but never the
+    # bare alias, so a real model produces G['__import_torch'].Tensor with no
+    # module-valued entry for G['__import_torch'] to anchor it. The alias name
+    # encodes its module, so recover it rather than treating torch.Tensor as a
+    # config-swappable slot.
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        if isinstance(root, GlobalSource) and root.name not in modules:
+            aliased = _dynamo_alias_module(root.global_name)
+            if aliased is not None:
+                modules[root.name] = (root, aliased)
     trusted: dict[str, bool] = {}
 
     def is_trusted(name: str) -> bool:
@@ -614,7 +650,7 @@ class PrecompileSession:
         path: str,
         *,
         require_complete: bool = True,
-        require_no_risky_drops: bool = True,
+        require_no_risky_drops: bool = False,
         require_no_dropped_guards: bool = False,
     ) -> PrecompileSummary:
         """
@@ -634,6 +670,20 @@ class PrecompileSession:
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
         summary = self.summary()
+        if summary.risky_dropped_guards and not require_no_risky_drops:
+            # Advisory, not a gate. Measured on stock models: torchvision
+            # resnet18 and mobilenet_v3 report none, timm's ViT reports one
+            # (a re-exported torch._assert), and transformers' Qwen2 reports
+            # 33, nearly all library internals no deployment swaps. Refusing by
+            # default would refuse real models and teach users to switch the
+            # check off, so it reports and lets you opt in to enforcement.
+            log.warning(
+                "precompile: %d dropped identity guard(s) sit at slots config can "
+                "choose, so nothing checks them at load: %s. Audit them against your "
+                "deployment and pass require_no_risky_drops=True to enforce.",
+                len(summary.risky_dropped_guards),
+                [n for _, n in summary.risky_dropped_guards][:8],
+            )
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped identity guard(s) on "

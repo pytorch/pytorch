@@ -2055,7 +2055,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # Guards on the torch module itself are dropped too but are not risky.
         self.assertNotIn("G['torch']", risky)
         with self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
         # The risk is acknowledgeable, not a hard block.
         session.save(self.path(), require_no_risky_drops=False)
 
@@ -2083,7 +2083,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         risky = [name for _, name in session.summary().risky_dropped_guards]
         self.assertIn("self.act", risky)
         with self.assertRaisesRegex(PackageError, "self.act"):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
 
     def test_library_and_def_site_drops_are_not_risky(self):
         # Ordinary code with no dispatch slot still drops identity guards: on
@@ -2251,7 +2251,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("G['impl']", risky)
         self.assertIn("G['impl'].op", risky)
         with self.assertRaisesRegex(PackageError, r"G\['impl'\]"):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
 
         # What the refusal buys, spelled out: opt out and the serving machine
         # runs the other backend eagerly and the captured one under the artifact.
@@ -2287,7 +2287,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         risky = [name for _, name in session.summary().risky_dropped_guards]
         self.assertIn("G['op']", risky)
         with self.assertRaisesRegex(PackageError, r"G\['op'\]"):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
 
     def test_a_self_named_module_import_is_not_a_risky_drop(self):
         # The other side of that line. `import own_helpers` binds the module
@@ -2329,7 +2329,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("self.ns", risky)
         self.assertIn("self.ns.gelu", risky)
         with self.assertRaisesRegex(PackageError, "self.ns"):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
 
     def _corpus_module(self, name):
         """Write _CORPUS_MODULES to disk and import one of them fresh."""
@@ -2366,8 +2366,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         session = self._capture_corpus_shape(*build(self))
         risky = [name for _, name in session.summary().risky_dropped_guards]
         self.assertIn(expected, risky)
+        # Reporting is the default; enforcement is opt-in, because real models
+        # trip the predicate on library internals. Assert both halves.
+        session.save(self.path())
         with self.assertRaisesRegex(PackageError, re.escape(expected)):
-            session.save(self.path())
+            session.save(self.path(), require_no_risky_drops=True)
 
     @parametrize("shape", sorted(_BENIGN_DROP_CORPUS))
     def test_benign_drop_corpus_is_not_flagged(self, shape):

@@ -210,14 +210,42 @@ def _get_module_content(module: types.ModuleType) -> str:
     return inspect.getsource(module)
 
 
+def _defining_module_name(code: types.CodeType) -> str | None:
+    """
+    The sys.modules key whose source actually contains ``code``.
+
+    Two things make this harder than ``inspect.getmodule``. It can hand back a
+    module that merely re-exports the code from a private implementation file --
+    ``collections.abc`` is three lines of ``from _collections_abc import *`` --
+    and hashing this code's line range against that module reads lines that are
+    not there. And ``__name__`` is not necessarily importable back to the same
+    object: ``_collections_abc`` sets its own ``__name__`` to "collections.abc",
+    which imports to the shim instead. Load-time revalidation re-imports this
+    name, so return the key, not ``__name__``.
+
+    Real models inline through such modules constantly, so give up and skip the
+    checksum rather than record one against the wrong file.
+    """
+    module = inspect.getmodule(code)
+    if module is not None and getattr(module, "__file__", None) == code.co_filename:
+        name = getattr(module, "__name__", None)
+        if name is not None and sys.modules.get(name) is module:
+            return name
+    for key, candidate in list(sys.modules.items()):
+        if getattr(candidate, "__file__", None) == code.co_filename:
+            return key
+    return None
+
+
 @dataclasses.dataclass
 class SourceInfo:
     inlined_sources: set[InlinedSource]
 
     def add_code(self, code: types.CodeType) -> None:
-        module = inspect.getmodule(code)
-        if module is None:
+        module_name = _defining_module_name(code)
+        if module_name is None:
             return
+        module = sys.modules[module_name]
         sourcelines, firstlineno = inspect.getsourcelines(code)
         lastlineno = firstlineno + len(sourcelines)
         source = "".join(sourcelines)
@@ -228,7 +256,7 @@ class SourceInfo:
             )
         self.inlined_sources.add(
             InlinedSource(
-                module=module.__name__,
+                module=module_name,
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
