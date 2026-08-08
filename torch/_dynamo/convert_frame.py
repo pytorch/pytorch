@@ -2025,6 +2025,9 @@ def _compile(
                 # building an artifact can detect the gap. Deliberately not a
                 # bypass: the variants captured so far are still valid and must
                 # stay installable, and for a cache a miss just recompiles.
+                # Only this frame is named even though the RUN_ONLY strategy set
+                # below is recursive: frames called beneath it go short too, and
+                # never re-enter here, so the record is a lower bound.
                 package.mark_current_entry_truncated()
                 torch._logging.trace_structured(
                     "artifact",

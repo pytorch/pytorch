@@ -382,6 +382,47 @@ def _set_pooling(mode):
         GLOBAL_POOLING_CONFIG["pooling"] = old
 
 
+AOT_POOL_MODE = "sum"
+
+
+class GlobalRebindModule(torch.nn.Module):
+    def forward(self, x):
+        if AOT_POOL_MODE == "sum":
+            return x.sum(1)
+        return x.mean(1) * 10.0
+
+
+@contextmanager
+def _set_pool_mode(mode):
+    global AOT_POOL_MODE
+    old = AOT_POOL_MODE
+    AOT_POOL_MODE = mode
+    try:
+        yield
+    finally:
+        AOT_POOL_MODE = old
+
+
+AOT_ABSENT_WEIGHT = torch.eye(3) * 3.0
+
+
+class AbsentGlobalModule(torch.nn.Module):
+    def forward(self, x):
+        return x @ AOT_ABSENT_WEIGHT
+
+
+def keep_global_guards(guard_entries):
+    # Same policy the guard serializer enforces: drop only what cannot be
+    # serialized, and in particular keep the global guards that the default
+    # aot_compile filter drops wholesale.
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return [
+        g.guard_type not in unsupported
+        and not any(d in unsupported for d in g.derived_guard_types)
+        for g in guard_entries
+    ]
+
+
 class RepeatInterleaveModule(torch.nn.Module):
     def forward(self, x):
         chunk = x.chunk(2, dim=-1)
@@ -984,14 +1025,6 @@ from user code:
         # The default guard_filter_fn drops all global guards, so a caller who
         # needs one honored has to opt in. Keeping it only works because
         # AOTCompiledModel.deserialize supplies the traced function's globals.
-        def keep_global_guards(guard_entries):
-            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            return [
-                g.guard_type not in unsupported
-                and not any(d in unsupported for d in g.derived_guard_types)
-                for g in guard_entries
-            ]
-
         mod = GlobalConfigModule()
         model = torch.compile(
             mod,
@@ -1060,18 +1093,55 @@ from user code:
         # One line per input, not a multi-line GuardDebugInfo repr per input.
         self.assertEqual(len(message.splitlines()), 4)
 
+    def test_aot_compile_module_disable_guard_check(self):
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine; module dispatch has to honour it too, or
+        # a module artifact has no opt-out while a function artifact does.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        # requires_grad is guarded but does not change what the graph computes.
+        x = torch.randn(3, 3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+            model(x)
+        model.forward.compiled_results[0].disable_guard_check()
+        self.assertEqual(model(x), x * 2)
+
+    def test_disable_guard_check_does_not_shadow_a_matching_result(self):
+        # An opted-out result accepts anything, so it has to be the last resort
+        # rather than a candidate in the ordinary scan: consulting it before
+        # every real guard check has been tried serves the first artifact for a
+        # call the second one was compiled for. Same shapes, same dtypes, no
+        # error, different numbers.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        model.forward.compiled_results[0].disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
         # Module._wrapped_call_impl, whose globals are torch/nn/modules/module.py.
         # The guard scope has to come from what was actually traced, model.forward.
-        def keep_global_guards(guard_entries):
-            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            return [
-                g.guard_type not in unsupported
-                and not any(d in unsupported for d in g.derived_guard_types)
-                for g in guard_entries
-            ]
-
         mod = GlobalConfigModule()
         mod.register_forward_hook(lambda m, i, o: o)
         model = torch.compile(
@@ -1110,7 +1180,10 @@ from user code:
     def test_aot_compile_module_reload_is_hermetic(self):
         # The graph's own globals must stay as serialized. Supplying a scope for
         # guards must not rewire what the compiled bytecode reads, or a reloaded
-        # artifact silently recomputes against the loading process's state.
+        # artifact silently recomputes against the loading process's state. The
+        # rebind has to happen before the load: deserialization copies the scope
+        # into the reconstructed function's globals, so rebinding afterwards is
+        # invisible whether or not the two scopes are wired together.
         global AOT_HERMETIC_WEIGHT
         model = torch.compile(HermeticModule(), fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
@@ -1119,14 +1192,94 @@ from user code:
         data = model._save_aot_compiled_module()
 
         torch._dynamo.reset()
-        reloaded = torch.compile(HermeticModule(), fullgraph=True, backend="inductor")
-        reloaded._load_aot_compiled_module(data)
         saved = AOT_HERMETIC_WEIGHT
         try:
             AOT_HERMETIC_WEIGHT = AOT_HERMETIC_WEIGHT * 2
+            reloaded = torch.compile(
+                HermeticModule(), fullgraph=True, backend="inductor"
+            )
+            reloaded._load_aot_compiled_module(data)
             self.assertEqual(reloaded(x), expected)
         finally:
             AOT_HERMETIC_WEIGHT = saved
+
+    def test_aot_compile_module_guards_track_rebound_global(self):
+        # The other half of hermeticity. Guards resolve against the loading
+        # process's scope dict itself, so a global rebound after the artifact is
+        # loaded redirects dispatch. A copy taken at load time would go on
+        # serving whichever graph matched then, with no error and a wrong answer.
+        global AOT_POOL_MODE
+        mod = GlobalRebindModule()
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pool_mode(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pool_mode(m)])
+                for m in ("sum", "mean")
+            ]
+        )
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = AOT_POOL_MODE
+        try:
+            AOT_POOL_MODE = "sum"
+            reloaded = torch.compile(
+                GlobalRebindModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            self.assertEqual(reloaded(x), expected["sum"])
+            AOT_POOL_MODE = "mean"
+            self.assertEqual(reloaded(x), expected["mean"])
+        finally:
+            AOT_POOL_MODE = saved
+
+    def test_aot_compile_module_absent_global_fails_guard(self):
+        # A guarded global the loading process does not have has to fail the
+        # guard. Falling back to the serialized scope would make the guard a
+        # no-op checked against capture-time state, which is the silent failure
+        # mode -- the loud one is recoverable on the serving machine.
+        mod = AbsentGlobalModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_ABSENT_WEIGHT")
+        try:
+            reloaded = torch.compile(
+                AbsentGlobalModule(),
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            )
+            reloaded._load_aot_compiled_module(data)
+            with self.assertRaises(RuntimeError) as ctx:
+                reloaded(x)
+            self.assertIn("No AOT compiled graph matched", str(ctx.exception))
+            self.assertIn("AOT_ABSENT_WEIGHT", str(ctx.exception))
+        finally:
+            globals()["AOT_ABSENT_WEIGHT"] = saved
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()

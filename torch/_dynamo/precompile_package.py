@@ -33,10 +33,11 @@ Know these before relying on an artifact in production:
   compiles, so a forward-only capture with grad enabled -- the default, and what
   ``model.eval()`` still leaves you in -- records no backends and cannot be
   saved. Capturing a training step that calls ``.backward()`` works too.
-* A value that crosses a graph break is guarded by equality, so a model whose
-  breaks come from ``.item()`` or other data-dependent control flow yields an
-  artifact that only serves inputs reproducing those exact values.
-  ``summary().wont_generalize`` lists them; expect poor coverage on new data.
+* A non-tensor argument, and any value that crosses a graph break, is guarded
+  by equality, so an int/bool/str argument or a break coming from ``.item()``
+  yields an artifact that only serves calls reproducing those exact values.
+  ``summary().wont_generalize`` lists them; exercise every value you need to
+  serve inside the capture block, or expect poor coverage on new data.
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
@@ -51,10 +52,32 @@ Know these before relying on an artifact in production:
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 * ``install()`` patches code objects process-globally, so an artifact is not
   scoped to the object it was loaded onto: other instances of the same class
-  are served from it too, and ``torch._dynamo.reset()`` unloads it.
+  are served from it too, and ``torch._dynamo.reset()`` unloads it. Two
+  artifacts for one class cannot be loaded at once either: entries clear en
+  masse, so the second load evicts the first, with a warning. The evicted one
+  does not merely stop working: its calls fall through to the surviving
+  artifact's entries, and if those guards accept the call -- they do when the
+  guard that told the two instances apart was an identity guard precompile
+  dropped -- the first model is silently served the second's graph. Load one
+  artifact per class per process.
+* While an artifact is loaded, a plain ``torch.compile`` of anything else in
+  the same module can die with ``AssertionError: Name '__builtins_dict___1'
+  already exists in scope``. Loading installs that name -- a counter value from
+  the capture process -- into the module, and a local compile mints from a
+  counter that starts over here, so the two eventually collide. ``unload()``
+  removes it; until then keep loaded and freshly compiled callables in
+  separate modules.
 
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
+
+Everything here is private and deliberately unexported: reach it as
+``torch._dynamo.precompile_package`` and expect the names to move. It is also
+neither of the other two things torch calls "precompile" --
+``torch.compiler.precompile`` is make_fx AOT capture to Python source, and
+``torch._dynamo.config.caching_precompile`` is transparent caching of
+``torch.compile`` artifacts, which drives the same CompilePackage machinery this
+module wraps but automatically, without an explicit capture block.
 """
 
 from __future__ import annotations
@@ -64,6 +87,7 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import sys
 import types
 from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
@@ -71,13 +95,17 @@ from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
+from torch._guards import ChainedSource, Source
 
 from .exc import PackageError
 from .guards import CheckFunctionManager
 from .package import _DynamoCacheEntry, CompilePackage, DiskDynamoStore
+from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
 if TYPE_CHECKING:
+    import traceback
+
     from .types import GuardFilterEntry
 
 
@@ -130,12 +158,16 @@ class PrecompileSummary:
     guarded_codes: int
     backend_graphs: int
     bypassed: tuple[str, ...]
+    # Frames that hit recompile_limit. A LOWER BOUND: the limit also puts every
+    # frame called beneath the offender into run-only mode, and those never
+    # re-enter Dynamo, so they go short without being named here.
     truncated: tuple[str, ...] = ()
     # Frames Dynamo produced but compiled nothing for. The entry frame landing
     # here means the model runs eager despite the artifact existing.
     uncovered_frames: tuple[str, ...] = ()
-    # Guards pinning a value that crossed a graph break. These make the artifact
-    # serve only the inputs it was captured with.
+    # Sources pinned to an exact value by an equality guard -- see
+    # ``_pins_a_value``. These make the artifact serve only the calls it was
+    # captured with.
     wont_generalize: tuple[str, ...] = ()
     # (guard_type, source_name) for every guard the filter discarded / retained.
     dropped_guards: tuple[tuple[str, str], ...] = ()
@@ -173,7 +205,7 @@ class PrecompileSummary:
         if self.wont_generalize:
             base += f", {len(self.wont_generalize)} value-pinned guards"
         if self.truncated:
-            base += f", {len(self.truncated)} TRUNCATED: {list(self.truncated)}"
+            base += f", >={len(self.truncated)} TRUNCATED: {list(self.truncated)}"
         if self.bypassed:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         return base
@@ -186,34 +218,239 @@ def _owning_module(value: object) -> str | None:
     return owner if isinstance(owner, str) else None
 
 
-def _is_risky_drop(source: str, value: object) -> bool:
+def _source_root(source: Source) -> Source:
+    while isinstance(source, ChainedSource):
+        source = source.base
+    return source
+
+
+def _is_library_module(module_name: str | None) -> bool:
+    """Owned by torch or the stdlib: one implementation, no plug points."""
+    if module_name is None:
+        return False
+    if module_name == "torch" or module_name.startswith("torch."):
+        return True
+    return module_name.partition(".")[0] in sys.stdlib_module_names
+
+
+def _defined_where_read(
+    value: object, user_stack: traceback.StackSummary | None
+) -> bool:
+    """
+    Whether the def lives in the file of the frame that read it.
+
+    A def bound to its own name in its OWN module takes an edit there to
+    repoint. ``from impl_a import op`` takes only a conditional import in the
+    reader, which is not an edit at all and which no checksum covers.
+    """
+    home = sys.modules.get(getattr(value, "__module__", None) or "")
+    file = getattr(home, "__file__", None)
+    return bool(user_stack) and file is not None and file == user_stack[-1].filename
+
+
+def _module_namespaces(
+    entries: Sequence[GuardFilterEntry],
+) -> dict[str, types.ModuleType]:
+    """
+    Sources holding a module whose binding config cannot repoint, mapped to the
+    module itself. Dynamo guards every module it walks through, so the path
+    down to ``F.gelu`` is guarded module by module, which is what lets an
+    attribute read be recognised as coming off a namespace rather than off an
+    object a config could have swapped. The module comes back with the name
+    because whether a read off a namespace is safe depends on which module it
+    is -- see ``_is_risky_drop``.
+
+    TRUSTED is the load-bearing half and is deliberately narrow. A module is
+    that if torch or the stdlib owns it, if it is bound under its own name --
+    ``import mypkg.layers``, and the ``__import_x`` alias Dynamo installs to
+    reach an inlined function's own globals -- or if it is an attribute of a
+    trusted module under a name that module already owns: its own ``__name__``
+    (a plain ``import own_sub`` inside the parent) or the parent's plus the
+    attribute (``from . import sub``). An ALIASED user module is none of those:
+    ``if flag: import impl_b as impl`` picks what ``impl.op`` resolves to per
+    machine, and so does the same alias spelled ``from . import impl_b as
+    impl`` in a package __init__. Inheriting the parent's trust without
+    checking the name is what let ``mypkg.impl.op`` through before.
+    """
+    modules = {
+        e.orig_guard.originating_source.name: (e.orig_guard.originating_source, e.value)
+        for e in entries
+        if isinstance(e.value, types.ModuleType)
+        and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
+    }
+    trusted: dict[str, bool] = {}
+
+    def is_trusted(name: str) -> bool:
+        if name not in trusted:
+            trusted[name] = False  # also breaks cycles while recursing
+            found = modules.get(name)
+            if found is not None:
+                source, module = found
+                # Mirrors InstructionTranslator.import_source's alias.
+                dynamo_alias = "__import_" + module.__name__.replace(".", "_dot_")
+                if _is_library_module(module.__name__):
+                    trusted[name] = True
+                elif isinstance(source, GlobalSource):
+                    trusted[name] = source.global_name in (
+                        module.__name__,
+                        dynamo_alias,
+                    )
+                elif isinstance(source, AttrSource):
+                    outer = modules.get(source.base.name)
+                    trusted[name] = (
+                        outer is not None
+                        and is_trusted(source.base.name)
+                        and module.__name__
+                        in (source.member, f"{outer[1].__name__}.{source.member}")
+                    )
+        return trusted[name]
+
+    return {name: module for name, (_, module) in modules.items() if is_trusted(name)}
+
+
+# Dynamo's own handle on the builtins dict, minted by
+# OutputGraph.install_builtins_dict_in_fglobals.
+_BUILTINS_DICT_PREFIX = "__builtins_dict__"
+
+
+def _reads_a_builtin(source: Source, value: object) -> bool:
+    """
+    ``len`` or ``sorted`` reached the ordinary way, through the builtins dict
+    Dynamo installs to resolve them. No binding sits in front of those, so
+    nothing can repoint them.
+
+    A builtin parked in a slot -- ``self.act = abs``, straight out of an
+    ACT2FN-style table -- is a slot like any other, so this deliberately keys
+    on where the read comes FROM rather than on who owns the value.
+    """
+    return (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, GlobalSource)
+        and source.base.global_name.startswith(_BUILTINS_DICT_PREFIX)
+        and _owning_module(value) == "builtins"
+    )
+
+
+def _is_risky_drop(
+    entry: GuardFilterEntry, namespaces: dict[str, types.ModuleType]
+) -> bool:
     """
     Whether losing this identity guard can plausibly change results.
 
-    Classify by what the guarded object IS, not by how the source is spelled.
-    Source spelling cannot work: guard names have their local scope stripped, so
-    a guard on ``self.act`` arrives as ``'self.act'`` and is indistinguishable
-    from a global by pattern. Provenance survives that -- an object owned by
-    torch or by builtins is library machinery whose binding no serving setup
-    rebinds, while anything owned by user code is a candidate for the
-    ``self.act = ACT2FN[cfg.act]`` dispatch shape, where a rebind silently serves
-    the graph traced against the old callable.
+    Intersect the binding SITE with who owns the value; either test alone is
+    wrong. Site alone: ``self.act = getattr(F, cfg.activation)`` and
+    ``self.act = cfg.act_fn`` are the same swappable slot, so calling the first
+    benign because ``F.gelu`` is torch-owned waves through the exact divergence
+    this check exists for -- capture gelu, serve silu, get the gelu graph and no
+    error. Ownership alone: ``if flag: import impl_b as impl`` then ``impl.op``
+    is a read off a module namespace exactly like ``F.gelu``, and the module is
+    user code an env var chose; so is ``self.act = abs``, where the value is a
+    builtin nothing can repoint but the attribute holding it is a slot. The site
+    survives the name stripping that makes source spelling useless -- a guard on
+    ``self.act`` arrives as ``'self.act'`` -- because the structured source is
+    still on the guard.
 
     For a capture-here / serve-there deployment the concern is not in-process
     rebinding but DIVERGENCE: the serving machine runs the same source but picks
-    a different object because config, a flag, or an env var differs.
+    a different object because config, a flag, or an env var differs. Three
+    bindings are waived -- a builtin read the ordinary way (see
+    ``_reads_a_builtin``), a read off a TRUSTED namespace (see
+    ``_module_namespaces``) that torch or the stdlib owns or that owns the
+    value itself, and a global bound to a def of that same name when torch or
+    the stdlib owns the def or it lives in the file doing the reading. The rest
+    are slots whose occupant config chooses: instance attributes, closure
+    cells, aliased imports, cross-module ``from x import op``, registry
+    lookups.
 
-    KNOWN GAP: only the capture-time value is visible. Capturing with a
-    torch-owned callable and diverging to a different torch-owned one (``relu``
-    -> ``sigmoid``) is classified benign and is NOT caught. ``dropped_guards`` is
-    the authoritative list; this predicate is a lint over it, not a proof of
-    safety.
+    Trusting a namespace is not trusting everything read off it. ``F.gelu`` is
+    waived because torch owns torch.nn.functional and there is only one of it;
+    ``own_helpers.call`` is waived because own_helpers owns the def, subject to
+    the gap below. ``mypkg.op`` re-exported from ``mypkg.impl_b``,
+    ``dispatch.op`` and ``mypkg.impl.op`` are not waived: the import that chose
+    the implementation lives in a file the inlined-source checksum never sees,
+    so capture and serve can disagree with every other rail passing. Waiving
+    those is how this predicate failed open in an earlier round;
+    ``_RISKY_DROP_CORPUS`` in test_package.py is the regression net that keeps
+    them, and every other shape found so far, flagged.
+
+    KNOWN GAP, and it is a wrong-answer one. EVERY waiver above judges the
+    object capture happened to bind, not the statement that bound it, so any
+    name bound CONDITIONALLY is waived whenever the branch taken on the capture
+    machine is one of the waived shapes. This is not specific to the def-name
+    arm and it is not limited to the file being read:
+
+    - def-name arm. ``if HAVE_FAST: from fastops import gelu`` / ``else: from
+      torch.nn.functional import gelu``, captured without the flag, drops
+      ``G['gelu']`` and reports nothing; a serving machine that has fastops
+      runs torch's gelu instead, with no error. A def the reading file itself
+      redefines under an ``if`` is the same shape.
+    - namespace-owns-the-value arm. A module that binds a name under an ``if``
+      and is read as a namespace by an ordinary ``import mod`` elsewhere is
+      also waived, because at capture time the module really does own whichever
+      def the branch produced. The reading file binds nothing conditionally,
+      so it looks covered and is not.
+
+    An ``allow_in_graph`` function passes too, and Dynamo traces it opaquely so
+    the inlined-source checksum never covers it either. Nothing at capture time
+    distinguishes a conditional bind from an unconditional one -- only the
+    resulting object is visible -- so this is a limit of the approach rather
+    than a missing check. ``dropped_guards`` is the authoritative list; this
+    predicate is a lint over it, not a proof of safety.
     """
-    owner = _owning_module(value)
-    if owner is None:
-        # Unknown provenance: assume it matters rather than quietly allowing it.
-        return True
-    return not (owner == "builtins" or owner == "torch" or owner.startswith("torch."))
+    source = entry.orig_guard.originating_source
+    value = entry.value
+    if source.name in namespaces:
+        return False
+    if _reads_a_builtin(source, value):
+        return False
+    if isinstance(source, ChainedSource):
+        namespace = namespaces.get(source.base.name)
+        if namespace is not None:
+            return not (
+                _is_library_module(namespace.__name__)
+                or _owning_module(value) == namespace.__name__
+            )
+    if (
+        isinstance(source, GlobalSource)
+        and getattr(value, "__name__", None) == source.global_name
+    ):
+        return not (
+            _is_library_module(_owning_module(value))
+            or _defined_where_read(value, entry.orig_guard.user_stack)
+        )
+    return True
+
+
+# CONSTANT_MATCH covers bool/None/int, EQUALS_MATCH everything else comparable.
+_VALUE_EQUALITY_GUARD_TYPES = frozenset({"CONSTANT_MATCH", "EQUALS_MATCH"})
+
+
+def _pins_a_value(guard_type: str, name: str) -> bool:
+    """
+    Whether this kept guard makes the artifact serve only the value it saw.
+
+    Two things have to line up, and keying on either one alone is wrong.
+
+    The guard has to be a value-equality one. TENSOR_MATCH, SHAPE_ENV and the
+    global-state guards are what every capture has and they generalize fine --
+    a TENSOR that crosses a graph break gets TENSOR_MATCH on a ``___stackN``
+    source and is emphatically not a pin.
+
+    And the source has to be a BARE name -- a plain local of some traced frame,
+    or the ``___stackN`` Dynamo gives a value crossing a graph break. Anything
+    dotted or subscripted (``self.eps``, ``model._modules['ln'].eps``,
+    ``G['CFG'].width``) is reached THROUGH an argument rather than being one,
+    which is where model config lives: every LayerNorm and Dropout contributes
+    a CONSTANT_MATCH there, so counting those would flag every model and make
+    the field noise.
+
+    KNOWN GAP: a constant inside a container argument is guarded on a
+    subscripted source (``dims[0]`` for ``x.sum(dim=[0])``) and is not counted.
+    ``kept_guards`` is the authoritative list; this is a lint over it.
+    """
+    return guard_type in _VALUE_EQUALITY_GUARD_TYPES and not any(
+        c in name for c in ".["
+    )
 
 
 def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
@@ -238,11 +475,7 @@ def _summarize(
         for c in entry.codes[:1]
         if not c.guarded_codes and not c.bypassed
     )
-    # Dynamo names the value that crossed a graph break ___stackN. Any guard
-    # retained on one pins the artifact to the exact value seen at capture, and
-    # the guard type varies (CONSTANT_MATCH, EQUALS_MATCH, ...), so key on the
-    # source rather than the type.
-    wont_generalize = tuple(sorted({n for _, n in kept if "___stack" in n}))
+    wont_generalize = tuple(sorted({n for t, n in kept if _pins_a_value(t, n)}))
     return PrecompileSummary(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
@@ -323,10 +556,11 @@ class PrecompileSession:
 
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
+            namespaces = _module_namespaces(entries)
             for keep, entry in zip(decisions, entries):
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add((entry.guard_type, entry.name))
-                if not keep and _is_risky_drop(entry.name, entry.value):
+                if not keep and _is_risky_drop(entry, namespaces):
                     self._risky_dropped_guards.add((entry.guard_type, entry.name))
             return decisions
 
@@ -352,6 +586,16 @@ class PrecompileSession:
         """
         Write the artifact, refusing by default to write one that cannot serve
         what it claims. See ``PrecompileSummary.complete``.
+
+        ``path`` names a DIRECTORY, created if absent, holding a single file
+        called ``entry``: a file-looking ``model.pt`` becomes ``model.pt/entry``.
+        ``precompile_load`` takes that same directory path.
+
+        Saving also records the package into the process-global
+        PrecompileContext and nothing here clears it, so capturing several
+        callables in one process leaves all of them there and whatever drains
+        the context next -- ``PrecompileContext.save_to_dynamo_cache()``, say --
+        sees every capture rather than this one.
         """
         if self._stack is not None:
             raise RuntimeError("save() must be called after the capture block exits")
@@ -359,9 +603,11 @@ class PrecompileSession:
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped identity guard(s) on "
-                f"{[n for _, n in summary.risky_dropped_guards]}. These guard objects "
-                f"owned by your code rather than by torch, and identity guards cannot "
-                f"be serialized, so nothing checks them at load time. Identical source "
+                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
+                f"a slot whose occupant config chooses -- an instance attribute, a "
+                f"closure cell, an aliased or cross-module import -- and identity "
+                f"guards cannot be serialized, so nothing checks them at load time. "
+                f"Identical source "
                 f"is not enough: if config, a feature flag, or an environment variable "
                 f"selects a different object on the serving machine, the artifact "
                 f"serves the graph traced against the capture-time object and returns "
@@ -386,12 +632,16 @@ class PrecompileSession:
                 )
             if summary.truncated:
                 raise PackageError(
-                    f"Precompilation is incomplete: {len(summary.truncated)} frame(s) "
-                    f"exceeded recompile_limit (currently {self._recompile_limit}) and "
-                    f"are missing variants: {list(summary.truncated)}. A frame needs "
-                    f"one slot per variant, and frames shared across module instances "
-                    f"accumulate them. Raise recompile_limit, or pass "
-                    f"require_complete=False to accept a partial artifact."
+                    f"Precompilation is incomplete: at least "
+                    f"{len(summary.truncated)} frame(s) exceeded recompile_limit "
+                    f"(currently {self._recompile_limit}) and are missing variants: "
+                    f"{list(summary.truncated)}. That list is a lower bound -- hitting "
+                    f"the limit also puts every frame called beneath the named one "
+                    f"into run-only mode, so those stop capturing too and never "
+                    f"re-enter Dynamo to report it. A frame needs one slot per "
+                    f"variant, and frames shared across module instances accumulate "
+                    f"them. Raise recompile_limit, or pass require_complete=False to "
+                    f"accept an artifact that is more incomplete than this list shows."
                 )
             if summary.uncovered_frames:
                 raise PackageError(
@@ -413,11 +663,11 @@ class PrecompileSession:
                 )
         if summary.wont_generalize:
             log.warning(
-                "precompile: %d guard(s) pin a value that crossed a graph break "
-                "(%s...). The artifact will only serve inputs producing those exact "
-                "values; anything else misses every graph.",
+                "precompile: %d value(s) are pinned to what capture saw (%s). A call "
+                "supplying anything else misses every graph, so exercise each value "
+                "you need to serve inside the capture block.",
                 len(summary.wont_generalize),
-                summary.wont_generalize[0],
+                list(summary.wont_generalize),
             )
         store = DiskDynamoStore()
         if self._backend == "eager":
@@ -553,10 +803,29 @@ def _check_artifact_matches(
     and the source checksum only covers the ORIGINAL function's source, so a
     mismatch is not otherwise detected: the wrong callable simply returns the
     captured one's results.
+
+    Identity is (defining module, qualname, co_name, first line). The first
+    line is what separates two definitions of one name in one module -- the
+    class under an ``if`` that a config flag picks -- which every other field
+    agrees on and which the source checksum passes, since both branches are in
+    the file it hashes. co_filename is deliberately NOT compared: the capture
+    and serving machines check out to different absolute paths, and the module
+    name already carries what the path would say.
     """
     code = getattr(entry_fn, "__code__", None)
     if code is None:
-        return
+        raise PackageError(f"{entry_fn!r} has no __code__ to load {path} onto.")
+    if not dynamo.codes:
+        raise PackageError(f"Artifact at {path} contains no code entries.")
+    entry = dynamo.codes[0]
+    actual_module = getattr(entry_fn, "__module__", None)
+    if actual_module is not None and entry.python_module != actual_module:
+        raise PackageError(
+            f"Artifact at {path} was captured from a callable defined in "
+            f"{entry.python_module!r} but is being loaded onto one defined in "
+            f"{actual_module!r}. Loading it would serve the captured "
+            f"function's graphs for this one."
+        )
     expected = dynamo.fn_name
     actual = getattr(entry_fn, "__qualname__", None)
     if expected is not None and actual is not None and expected != actual:
@@ -565,11 +834,22 @@ def _check_artifact_matches(
             f"loaded onto {actual!r}. Loading it would serve the captured "
             f"function's graphs for this one."
         )
-    stored = dynamo.codes[0].python_code if dynamo.codes else None
-    if stored is not None and stored.co_name != code.co_name:
+    stored = entry.python_code
+    if stored.co_name != code.co_name:
         raise PackageError(
             f"Artifact at {path} was captured from code object "
             f"{stored.co_name!r} but is being loaded onto {code.co_name!r}."
+        )
+    if stored.co_firstlineno != code.co_firstlineno:
+        raise PackageError(
+            f"Artifact at {path} was captured from a definition at "
+            f"{entry.python_module}:{stored.co_firstlineno} but the callable of "
+            f"that name here is defined at line {code.co_firstlineno}. Same "
+            f"name, different definition -- a class defined under an `if` that "
+            f"a config flag or environment variable resolves the other way on "
+            f"this machine looks exactly like this, and nothing else catches "
+            f"it, because both branches are in the source the checksum covers. "
+            f"A module whose lines merely shifted also lands here."
         )
 
 
@@ -577,9 +857,24 @@ def _check_artifact_matches(
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if not callable(fn):
         raise TypeError(f"expected a callable or nn.Module, got {type(fn).__name__}")
+    if not hasattr(fn, "__code__"):
+        raise TypeError(
+            f"expected a function or nn.Module, got {type(fn).__name__}, which "
+            f"has no __code__ for Dynamo to capture or to load an artifact "
+            f"onto. Pass partial.func for a functools.partial, or obj.__call__ "
+            f"for an object that only defines __call__."
+        )
     return fn  # type: ignore[return-value]
 
 
 @_entry_fn_of.register
 def _(fn: torch.nn.Module) -> Callable[..., object]:
-    return fn.forward
+    forward = fn.forward
+    if not hasattr(forward, "__code__"):
+        raise TypeError(
+            f"{type(fn).__name__}.forward is a {type(forward).__name__}, which "
+            f"has no __code__ for Dynamo to capture or to load an artifact onto. "
+            f"Binding it in __init__ -- self.forward = functools.partial(...) -- "
+            f"shadows the class method and lands here; keep forward a method."
+        )
+    return forward

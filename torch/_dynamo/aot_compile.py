@@ -194,7 +194,9 @@ class AOTCompiledFunction:
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
     # Scope used ONLY to resolve guards, kept separate from _extra_globals so
-    # that supplying it cannot rewire what the compiled bytecode reads.
+    # that supplying it cannot rewire what the compiled bytecode reads. It is
+    # held by reference, not copied, so guards track the loading process's
+    # globals as they change.
     _guard_globals: dict[str, object] | None = None
 
     def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
@@ -231,13 +233,16 @@ class AOTCompiledFunction:
 
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
-            # Guards must see live values -- that is the point of checking them
-            # -- while the graph's own globals stay as serialized. Merging with
-            # the live scope on top gives guards what they need without letting
-            # it override the graph inputs baked into the artifact.
-            guard_scope = dict(self.fn.__globals__)
-            if self._guard_globals is not None:
-                guard_scope.update(self._guard_globals)
+            # The guard manager keeps this dict by reference, so handing it the
+            # loading process's scope rather than a copy is what makes a global
+            # rebound after load redirect dispatch instead of silently serving
+            # whichever graph matched at load time. There is deliberately no
+            # fallback to the serialized scope: a name the loading process does
+            # not have must fail the guard, not resolve against the value baked
+            # into the artifact. The graph's own globals stay as serialized.
+            guard_scope = self._guard_globals
+            if guard_scope is None:
+                guard_scope = self.fn.__globals__
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -508,6 +513,13 @@ class AOTCompiledModel:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         for result in self.compiled_results:
             if result.guard_check(self.model, *args, **kwargs):
+                return result(self.model, *args, **kwargs)
+        # disable_guard_check() is the escape hatch for an artifact whose guards
+        # fail on the serving machine for a reason the caller judges benign. A
+        # result that opted out accepts anything, but only after a real match has
+        # been looked for, so dispatch is unchanged when nobody opted out.
+        for result in self.compiled_results:
+            if not result._guard_check_enabled:
                 return result(self.model, *args, **kwargs)
         raise RuntimeError(self._no_match_message(*args, **kwargs))
 
