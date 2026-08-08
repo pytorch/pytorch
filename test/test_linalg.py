@@ -9166,6 +9166,57 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(result_triu_min, expected_triu_min)
         self.assertEqual(result_tril_min, expected_tril_min)
 
+    @dtypes(torch.float)
+    def test_triu_tril_matrix_overlap(self, device, dtype):
+        msg = "unsupported operation: more than one element of the written-to tensor"
+
+        for shape, expanded in (((), (3, 3)), ((1, 3), (3, 3)), ((3, 1), (3, 3)),
+                                ((5, 3, 1), (5, 3, 3)), ((5, 1, 3), (5, 3, 3))):
+            overlapping = make_tensor(shape, dtype=dtype, device=device).expand(expanded)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                overlapping.triu_(1)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                overlapping.tril_(-1)
+        src = make_tensor((3, 3), dtype=dtype, device=device)
+        overlapping_out = make_tensor((), dtype=dtype, device=device).expand(3, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.triu(src, out=overlapping_out)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.tril(src, out=overlapping_out)
+
+        for shape in ((3, 1), (1, 3), (0, 0), (0, 3), (3, 0), (5, 3, 1)):
+            t = make_tensor(shape, dtype=dtype, device=device)
+            t.triu_(1)
+            t.tril_(-1)
+
+        empty_expanded = make_tensor((0, 1), dtype=dtype, device=device).expand(0, 3)
+        empty_expanded.triu_(1)
+        empty_expanded.tril_(-1)
+
+        for t in (
+            make_tensor((3, 3), dtype=dtype, device=device).mT,
+            make_tensor((3, 6), dtype=dtype, device=device)[:, ::2],
+            make_tensor((5, 3, 3), dtype=dtype, device=device).mT,
+        ):
+            t.triu_(1)
+            t.tril_(-1)
+
+        strided_out = make_tensor((3, 3), dtype=dtype, device=device).mT
+        torch.triu(src, 1, out=strided_out)
+        self.assertEqual(strided_out, torch.triu(src, 1))
+
+        batched = make_tensor((5, 3, 3), dtype=dtype, device=device)
+        expected = torch.stack([torch.triu(batched[i], 1) for i in range(5)])
+        batched.triu_(1)
+        self.assertEqual(batched, expected)
+
+        base = make_tensor((3, 3), dtype=dtype, device=device)
+        expected_slice = torch.triu(base.clone(), 1)
+        broadcast = base.expand(5, 3, 3)
+        broadcast.triu_(1)
+        for i in range(5):
+            self.assertEqual(broadcast[i], expected_slice)
+
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
     def test_1_sized_with_0_strided(self, device, dtype):
