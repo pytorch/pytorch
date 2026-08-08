@@ -2559,6 +2559,33 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
+    def test_rnn_cell_input_hidden_dim_mismatch(self):
+        input_1d = torch.randn(5)
+        hx_2d = torch.randn(3, 3)
+        cx_2d = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.LSTMCell(5, 3)(input_1d, (hx_2d, cx_2d))
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.GRUCell(5, 3)(input_1d, hx_2d)
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.RNNCell(5, 3)(input_1d, hx_2d)
+
+        input_2d = torch.randn(3, 5)
+        hx_1d = torch.randn(3)
+        cx_1d = torch.randn(3)
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.LSTMCell(5, 3)(input_2d, (hx_1d, cx_1d))
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.GRUCell(5, 3)(input_2d, hx_1d)
+
+        with self.assertRaisesRegex(ValueError, "same number of dimensions"):
+            nn.RNNCell(5, 3)(input_2d, hx_1d)
+
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
