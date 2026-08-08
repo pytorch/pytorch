@@ -2617,8 +2617,31 @@ class Module:
                         "it should be done inplace."
                     )
 
+        # Assign mode reassigns each name its own object, breaking aliasing
+        # between names that shared one tied parameter or buffer. Record the
+        # tied groups here and restore them after the load below.
+        tied_names: list[list[str]] = []
+        if assign:
+            grouped: dict[int, list[str]] = {}
+            for tensor_name, tensor in itertools.chain(
+                self.named_parameters(remove_duplicate=False),
+                self.named_buffers(remove_duplicate=False),
+            ):
+                if tensor_name in state_dict:
+                    grouped.setdefault(id(tensor), []).append(tensor_name)
+            tied_names = [names for names in grouped.values() if len(names) > 1]
+
         load(self, state_dict)
         del load
+
+        for names in tied_names:
+            module_path, _, attr = names[0].rpartition(".")
+            submodule = self.get_submodule(module_path) if module_path else self
+            canonical = getattr(submodule, attr)
+            for name in names[1:]:
+                module_path, _, attr = name.rpartition(".")
+                submodule = self.get_submodule(module_path) if module_path else self
+                setattr(submodule, attr, canonical)
 
         if strict:
             if len(unexpected_keys) > 0:
