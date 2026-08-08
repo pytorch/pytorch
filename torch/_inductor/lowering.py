@@ -9366,11 +9366,18 @@ def with_effects(token, op, *args, **kwargs):
     old_bindings = None
     bindings = V.graph.current_node.meta.get("unbacked_bindings")
     if wrapped_while_loop and bindings is not None:
+        # Same purpose as symbolic_shapes._remove_effect_token_unbacked_bindings,
+        # but a wrapped while_loop flattens its results next to the token, so
+        # the leading SequenceKey is decremented rather than stripped.
         if not all(
             path and isinstance(path[0], pytree.SequenceKey) and path[0].idx > 0
             for path in bindings.values()
         ):
-            raise AssertionError("Expected bindings after the effect token")
+            raise AssertionError(
+                "Expected unbacked bindings of a with_effects(while_loop) node "
+                f"to start after the effect token, got {bindings} on node "
+                f"{V.graph.current_node.format_node()}"
+            )
         old_bindings = bindings
         V.graph.current_node.meta["unbacked_bindings"] = {
             symbol: (pytree.SequenceKey(path[0].idx - 1), *path[1:])

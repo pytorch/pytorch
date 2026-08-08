@@ -518,6 +518,10 @@ def unlift_tokens(
                     raise AssertionError(
                         "Expected tokenized while_loop subgraphs to be GraphModules"
                     )
+                # The cond token placeholder must be erased here: no with_effects
+                # node consumes it, so the named_modules sweep cannot see it. The
+                # body is swept again by that loop, but the second pass is a
+                # no-op since its token input is a _make_token call by then.
                 if cond_module not in unlifted_while_loop_conds:
                     cond_nodes = cond_module.graph.find_nodes(op="placeholder")
                     cond_token = cond_nodes[0] if cond_nodes else None
@@ -529,6 +533,23 @@ def unlift_tokens(
                     cond_module.recompile()
                     unlifted_while_loop_conds.add(cond_module)
                 if body_module not in unlifted_while_loop_bodies:
+                    if not any(
+                        n.op == "call_function"
+                        and (
+                            n.target is torch.ops.higher_order.with_effects
+                            or (
+                                n.target is torch.ops.higher_order.while_loop
+                                and "num_effect_tokens" in n.kwargs
+                            )
+                        )
+                        for n in body_module.graph.nodes
+                    ):
+                        raise AssertionError(
+                            f"while_loop body {body_node.target} is marked with "
+                            "num_effect_tokens=1 but contains no with_effects "
+                            "nodes and no tokenized inner while_loop; effect "
+                            "detection and emission disagree"
+                        )
                     _unlift_tokens_from_module_helper(
                         body_module,
                         f"{subgraph_str}_{body_node.target}",

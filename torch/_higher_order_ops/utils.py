@@ -521,8 +521,6 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         raise RuntimeError(f"{name} might be aliasing the input or the output!")
     if inp_mutation:
         raise RuntimeError(f"{name} might be modifying the input!")
-    if checked_graph is None:
-        raise AssertionError("alias and mutation check did not produce a graph")
     return checked_graph
 
 

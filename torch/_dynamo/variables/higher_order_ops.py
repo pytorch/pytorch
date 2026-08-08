@@ -765,7 +765,7 @@ def _call_while_loop(
         unimplemented(
             gb_type="torch.while_loop: effect token marker",
             context="num_effect_tokens is an internal capture marker",
-            explanation="Effectful while_loop export recompilation is unsupported.",
+            explanation="Recompiling an AOT-produced graph that contains an effectful while_loop is unsupported.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
     cond_fn, body_fn, operands, additional_inputs = args
