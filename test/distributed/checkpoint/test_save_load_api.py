@@ -34,7 +34,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         return 2
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_auto_detect(self):
         model = FSDP(MyTestModule().to(self.device_type))
