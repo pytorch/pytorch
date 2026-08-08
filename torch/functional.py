@@ -1840,11 +1840,12 @@ def norm(
     # NB. All the repeated code and weird python is to please TorchScript.
     #     For a more compact implementation see the relevant function in `_refs/__init__.py`
 
-    # We don't do this for MPS or sparse tensors
+    # Only for strided tensors on backends that have a linalg.vector_norm kernel
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
         "xpu",
+        "mps",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):

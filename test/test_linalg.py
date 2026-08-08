@@ -1359,6 +1359,15 @@ class TestLinalg(TestCase):
                             norm_dtype)
 
 
+    def test_norm_fast_path_requires_vector_norm_kernel(self):
+        # torch.norm only reroutes to linalg.vector_norm on the backends listed
+        # in torch/functional.py. That list cannot be replaced by a plain layout
+        # check: 'fro' reaches every backend today through composite
+        # frobenius_norm, while linalg.vector_norm needs a real kernel.
+        has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+        self.assertTrue(has_kernel("aten::frobenius_norm.dim", "CompositeImplicitAutograd"))
+        self.assertFalse(has_kernel("aten::linalg_vector_norm", "CompositeImplicitAutograd"))
+
     def test_vector_norm_decom_unbacked_checks(self):
         from torch._refs.linalg import _check_vector_norm_args
 
