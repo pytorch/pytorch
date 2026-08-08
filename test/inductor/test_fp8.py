@@ -648,6 +648,38 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("use_v2", (False, True))
+    @onlyOn(["cpu"])
+    def test_scaled_mm_row_major_mat_b(self, use_v2: bool, device):
+        # The col-major mat_b requirement is cuBLAS-specific; the CPU kernel
+        # accepts any layout, so compile must not reject what eager allows.
+        M, K, N = 16, 32, 24
+        x = torch.randn(M, K, device=device)
+        w = torch.randn(K, N, device=device)
+        x_fp8, x_scale = _quantize_tensorwise(x, torch.float8_e4m3fn)
+        w_fp8, w_scale = _quantize_tensorwise(w, torch.float8_e4m3fn)
+        self.assertEqual(w_fp8.stride(), (N, 1))
+
+        def fn(x_fp8, w_fp8, x_scale, w_scale):
+            if use_v2:
+                return scaled_mm(
+                    x_fp8,
+                    w_fp8,
+                    x_scale,
+                    ScalingType.TensorWise,
+                    w_scale,
+                    ScalingType.TensorWise,
+                    output_dtype=torch.float32,
+                )
+            return torch._scaled_mm(
+                x_fp8, w_fp8, x_scale, w_scale, out_dtype=torch.float32
+            )
+
+        expected = fn(x_fp8, w_fp8, x_scale, w_scale)
+        actual = torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, x_scale, w_scale)
+        self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
     @onlyCUDA
     @parametrize(
