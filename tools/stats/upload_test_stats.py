@@ -34,6 +34,57 @@ def should_upload_full_test_run(head_branch: str | None, head_repository: str) -
     )
 
 
+# pytest's xunit2 schema (_pytest/junitxml.py) drops the file/line attributes
+# from each <testcase> and emits a dotted, package-path classname such as
+# "test.test_ops.TestForeachCPU". torch/testing/_internal/common_utils.py::
+# sanitize_pytest_xml normally rewrites these in-process right after pytest runs,
+# re-deriving `file` from the classname. But pytest.main() and that sanitize pass
+# are sequential statements in the same subprocess, so if the subprocess is
+# killed in between (shard timeout, OOM, teardown crash) the XML is uploaded
+# unsanitized: empty `file` + dotted classname. Those rows break every downstream
+# consumer that keys on `file`. Re-apply the same transformation here, at the
+# single upload chokepoint that feeds both the streaming (upload_artifacts.py)
+# and post-job backfill paths.
+#
+# Regex matches sanitize_pytest_xml's: an optional "test." package prefix, the
+# module path (dots -> slashes) captured as `file`, and the trailing dotless
+# segment as the bare classname. Unlike that in-process pass (which only ever
+# sees freshly-generated pytest XML), this runs at the upload boundary over
+# archived artifacts, so it additionally declines degenerate matches (empty
+# module or class, e.g. ".Foo" or "test.bar.") rather than writing a nonsensical
+# file.
+_PYTEST_DOTTED_CLASSNAME_RE = re.compile(
+    r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$"
+)
+
+
+def sanitize_case_inplace(case: dict[str, Any]) -> None:
+    """Backfill an empty ``file`` from a dotted pytest ``classname``, in place.
+
+    Idempotent and conservative: a case that already carries a non-empty
+    ``file`` (unittest reports, or pytest XML sanitized in-process) is left
+    untouched, as is a classname with no ``.`` (already sanitized, or not a
+    pytest classname). Only the known-broken shape -- empty ``file`` + dotted
+    classname -- is rewritten, so healthy rows are never modified.
+    """
+    if case.get("file"):
+        return
+    classname = case.get("classname")
+    if not isinstance(classname, str):
+        return
+    match = _PYTEST_DOTTED_CLASSNAME_RE.search(classname)
+    if match is None:
+        return
+    file = match.group("file")
+    bare_classname = match.group("classname")
+    if not file or not bare_classname:
+        # Degenerate classname (leading/trailing dot) -- leave it alone rather
+        # than emit a ".py" file or an empty classname.
+        return
+    case["classname"] = bare_classname
+    case["file"] = f"{file.replace('.', '/')}.py"
+
+
 def parse_xml_report(
     tag: str,
     report: Path,
@@ -53,6 +104,7 @@ def parse_xml_report(
     root = ET.parse(report)
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
+        sanitize_case_inplace(case)
         case["workflow_id"] = workflow_id
         case["workflow_run_attempt"] = workflow_run_attempt
         case["job_id"] = job_id
