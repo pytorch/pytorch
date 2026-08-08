@@ -159,10 +159,11 @@ def _stub_macos_probes() -> None:
 
 def _patch_has_triton() -> None:
     # triton_utils.py defines add_kernel et al. only `if has_triton():`, which is
-    # False when the GPU is hidden. Declare triton present so those helpers exist
-    # (triton itself is installed; only device detection is what fails).
+    # False when the GPU is hidden, so declare triton present to keep those helpers.
+    # Only safe when triton really is installed: claiming otherwise turns a skip
+    # into an ImportError at `import triton` further down the same file.
     t = _safe_import("torch.utils._triton")
-    if t is not None:
+    if t is not None and _safe_import("triton") is not None:
         t.has_triton = lambda: True
 
 
