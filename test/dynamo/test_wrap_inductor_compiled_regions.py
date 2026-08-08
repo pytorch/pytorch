@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+import threading
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -1153,7 +1155,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
     def test_fake_tensor_mode_works(self):
         """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
         with FakeTensorMode():
             model = torch.nn.Linear(4, 4)
@@ -1164,9 +1166,60 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
                 # This should now work - the inductor_compiled_code HOP will
                 # use the stored FX graph to propagate fake tensors
-                result = torch.compile(model)(inp)  # noqa: UNSPECIFIED_BACKEND
+                # even if another thread leaves the process-global compatibility
+                # flag stale.
+                with patch(
+                    "torch.utils._python_dispatch._is_in_torch_dispatch_mode", False
+                ):
+                    result = torch.compile(model)(inp)  # noqa: UNSPECIFIED_BACKEND
                 # Verify the result has the expected shape
                 self.assertEqual(result.shape, (4, 4))
+                self.assertIsInstance(result, FakeTensor)
+
+    def test_pre_dispatch_mode_works_with_stale_global_flag(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn(x):
+            return x + 1
+
+        x = torch.ones(2)
+        self.assertEqual(fn(x), x + 1)
+
+        ready = threading.Event()
+        release = threading.Event()
+
+        def hold_pre_dispatch_mode_on_another_thread():
+            with FunctionalTensorMode(pre_dispatch=True):
+                ready.set()
+                release.wait()
+
+        worker = threading.Thread(target=hold_pre_dispatch_mode_on_another_thread)
+        worker.start()
+        self.assertTrue(ready.wait(timeout=5))
+        try:
+            from torch._inductor.output_code import (
+                _is_in_torch_dispatch_mode_for_current_thread,
+            )
+
+            self.assertFalse(_is_in_torch_dispatch_mode_for_current_thread())
+        finally:
+            release.set()
+            worker.join()
+
+        with FunctionalTensorMode(pre_dispatch=True):
+            with patch(
+                "torch.utils._python_dispatch._is_in_torch_dispatch_mode", False
+            ):
+                result = fn(x)
+                self.assertIsInstance(result, FunctionalTensor)
 
     def test_proxy_tensor_mode_works(self):
         """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""

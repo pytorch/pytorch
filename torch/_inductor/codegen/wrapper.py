@@ -3113,13 +3113,17 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(DynamicScalarLine(self, node))
 
     def _codegen_dynamic_scalar(self, node):
+        self.add_import_once(
+            "from torch._subclasses.fake_tensor import _item_with_optional_fake_mode"
+        )
         (data,) = (t.codegen_reference() for t in node.inputs)
+        item_expr = f"_item_with_optional_fake_mode({data})"
         if len(node.keypath) == 0:
-            self.writeline(f"{node.sym} = {data}.item()")
+            self.writeline(f"{node.sym} = {item_expr}")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
-            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+            self.writeline(f"{node.sym} = 1 if {item_expr} else 0")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
-            self.writeline(f"{node.sym}_undivided = {data}.item()")
+            self.writeline(f"{node.sym}_undivided = {item_expr}")
             self.writeline(
                 f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
                 f"f'{{{node.sym}_undivided}} not divisible by {node.keypath[0].divisor}'"

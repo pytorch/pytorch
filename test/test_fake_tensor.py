@@ -34,6 +34,8 @@ from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
+    _item_with_optional_fake_mode,
+    allow_non_fake_scalar_for_compiled_region,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -2532,6 +2534,194 @@ class FakeTensorConstHandling(TestCase):
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
                 ref = fn(inputs)
+
+    def _check_compile_fake_tensor_in_intlist_repro(self):
+        def fn():
+            max_size = torch.tensor([800, 1216], dtype=torch.int64)
+            batch_shape = list(max_size)
+            return torch.ones(batch_shape)
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.DataDependentOutputException,
+                "aten._local_scalar_dense.default",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    compiled_fn()
+
+    def test_compile_fake_tensor_in_intlist_repro(self):
+        self._check_compile_fake_tensor_in_intlist_repro()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_compile_fake_tensor_in_intlist_repro_cpp_wrapper(self):
+        self._check_compile_fake_tensor_in_intlist_repro()
+
+    def _check_compile_fake_tensor_in_intlist_with_shape_env(self):
+        def fn():
+            max_size = torch.tensor([2, 3], dtype=torch.int64)
+            return torch.ones(list(max_size))
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(compiled_fn().shape, (2, 3))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "data-dependent scalar reads under FakeTensorMode with a ShapeEnv",
+            ):
+                with FakeTensorMode(shape_env=ShapeEnv()):
+                    compiled_fn()
+
+    def test_compile_fake_tensor_in_intlist_with_shape_env(self):
+        self._check_compile_fake_tensor_in_intlist_with_shape_env()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_compile_fake_tensor_in_intlist_with_shape_env_cpp_wrapper(self):
+        self._check_compile_fake_tensor_in_intlist_with_shape_env()
+
+    def test_compile_fake_tensor_in_intlist_with_shape_env_wrapped(self):
+        def fn():
+            max_size = torch.tensor([2, 3], dtype=torch.int64)
+            return torch.ones(list(max_size))
+
+        with (
+            torch._dynamo.config.patch(capture_scalar_outputs=True),
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+        ):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(compiled_fn().shape, (2, 3))
+            with FakeTensorMode(shape_env=ShapeEnv()):
+                result = compiled_fn()
+                self.assertIsInstance(result, FakeTensor)
+                self.assertEqual(len(result.shape), 2)
+
+    def test_compiled_region_scalar_item_is_narrow_and_scoped(self):
+        dynamic_scalar = torch.tensor(3, dtype=torch.int64)
+        captured_user_scalar = torch.tensor(4, dtype=torch.int64)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
+            retained_fake = mode.from_tensor(dynamic_scalar)
+            self.assertEqual(retained_fake.item(), 3)
+
+            with allow_non_fake_scalar_for_compiled_region():
+                with self.assertRaisesRegex(
+                    torch._subclasses.fake_tensor.DataDependentOutputException,
+                    "aten._local_scalar_dense.default",
+                ):
+                    _item_with_optional_fake_mode(dynamic_scalar)
+
+                # The compiled-region marker must not authorize real tensors
+                # reached through callbacks or globals.
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    "Please convert all Tensors to FakeTensors first",
+                ):
+                    captured_user_scalar.item()
+
+            # Suppressing the memo for the generated scalar read must not
+            # mutate the converter's retained FakeTensor.
+            self.assertEqual(retained_fake.item(), 3)
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_user_input_is_rejected(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Please convert all Tensors to FakeTensors first",
+        ):
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                fn(x)
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_fn(torch.tensor([1, 2, 3], dtype=torch.int64))
+        for allow_non_fake_inputs in (False, True):
+            with self.subTest(allow_non_fake_inputs=allow_non_fake_inputs):
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    "Inductor compiled regions cannot run directly with real tensor inputs",
+                ):
+                    with torch._subclasses.fake_tensor.FakeTensorMode(
+                        allow_non_fake_inputs=allow_non_fake_inputs
+                    ):
+                        compiled_fn(x)
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_input_without_active_mode_is_rejected(self):
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_fn(torch.tensor([1, 2, 3], dtype=torch.int64))
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(torch.tensor([1, 2, 3], dtype=torch.int64))
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Inductor compiled regions cannot run directly with FakeTensor inputs",
+        ):
+            compiled_fn(fake_x)
+
+    def test_compiled_region_fake_wrapper_input_is_rejected(self):
+        from torch._inductor.output_code import _check_fake_mode_for_compiled_region
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            wrapped = TwoTensor(torch.ones(2), torch.ones(2))
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "FakeTensor inputs inside a traceable wrapper subclass",
+        ):
+            _check_fake_mode_for_compiled_region([wrapped])
+
+    def test_compiled_region_cpp_fake_input_is_rejected(self):
+        from torch._inductor.output_code import _check_fake_mode_for_compiled_region
+
+        tensor = torch.ones(2)
+        with patch("torch._C._is_fake_tensor", return_value=True):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Inductor compiled regions cannot run directly with FakeTensor inputs",
+            ):
+                _check_fake_mode_for_compiled_region([tensor])
+
+    def test_compiled_region_fake_mode_detection_ignores_global_flag(self):
+        from torch._inductor.output_code import _check_fake_mode_for_compiled_region
+
+        # Concurrent mode contexts can leave this process-global compatibility
+        # flag stale while the current thread still has an active mode.
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            with patch(
+                "torch.utils._python_dispatch._is_in_torch_dispatch_mode", False
+            ):
+                self.assertTrue(_check_fake_mode_for_compiled_region([]))
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_user_input_item_is_rejected(self):
+        def fn(x):
+            return torch.ones((x.item(),))
+
+        x = torch.tensor(3, dtype=torch.int64)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Please convert all Tensors to FakeTensors first",
+        ):
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                fn(x)
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            compiled_fn(torch.tensor(3, dtype=torch.int64))
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Inductor compiled regions cannot run directly with real tensor inputs",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    compiled_fn(x)
 
     def test_fake_tensor_batch_norm_cpu(self):
         with torch._subclasses.CrossRefFakeMode():
