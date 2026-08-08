@@ -3,7 +3,10 @@
 #include <test/cpp/jit/test_utils.h>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
+#include <unordered_set>
 
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -12,6 +15,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -152,6 +156,107 @@ TEST(SerializationTest, TypeTags) {
     ASSERT_TRUE(loaded.type()->isSubtypeOf(*item.expected_type));
     ASSERT_TRUE(item.expected_type->isSubtypeOf(*loaded.type()));
   }
+}
+
+TEST(SerializationTest, LoadStandardArchiveWithPrepopulatedStorageContext) {
+  Module module("m");
+  auto archivedWeight = torch::tensor({2.0f, 3.0f});
+  auto archivedBias = torch::tensor({5.0f, 7.0f});
+  module.register_parameter("weight", archivedWeight, false);
+  module.register_parameter("bias", archivedBias, false);
+  module.define(R"JIT(
+    def forward(self, input: Tensor) -> Tensor:
+      return input * self.weight + self.bias
+  )JIT");
+
+  std::ostringstream oss;
+  {
+    caffe2::serialize::PyTorchStreamWriter writer(
+        [&](const void* buf, size_t nbytes) -> size_t {
+          oss.write(
+              static_cast<const char*>(buf),
+              static_cast<std::streamsize>(nbytes));
+          return oss ? nbytes : 0;
+        });
+    ScriptModuleSerializer serializer(writer);
+    ExtraFilesMap extraFiles;
+    const std::unordered_set<std::string> skipTensorDataKeys = {"0"};
+    serializer.serialize(
+        module,
+        extraFiles,
+        /*bytecode_format=*/false,
+        /*save_mobile_debug_info=*/false,
+        &skipTensorDataKeys);
+  }
+
+  auto replacementWeight = torch::tensor({11.0f, 13.0f});
+  auto storageContext = std::make_shared<DeserializationStorageContext>();
+  storageContext->addStorage("0", replacementWeight.storage());
+
+  std::istringstream iss(oss.str());
+  auto reader = std::make_shared<caffe2::serialize::PyTorchStreamReader>(&iss);
+  ExtraFilesMap loadedExtraFiles;
+  auto loaded = import_ir_module(
+      std::make_shared<CompilationUnit>(),
+      std::move(reader),
+      std::move(storageContext),
+      std::optional<c10::Device>(c10::Device(c10::kCPU)),
+      loadedExtraFiles);
+
+  auto loadedWeight = loaded.attr("weight").toTensor();
+  EXPECT_EQ(loadedWeight.data_ptr(), replacementWeight.data_ptr());
+  EXPECT_TRUE(torch::equal(loaded.attr("bias").toTensor(), archivedBias));
+
+  auto input = torch::tensor({2.0f, 3.0f});
+  auto expected = input * replacementWeight + archivedBias;
+  EXPECT_TRUE(torch::equal(loaded.forward({input}).toTensor(), expected));
+}
+
+TEST(SerializationTest, LoadStandardArchiveWithNullStorageContext) {
+  Module module("m");
+  auto archivedWeight = torch::tensor({2.0f, 3.0f});
+  auto archivedBias = torch::tensor({5.0f, 7.0f});
+  module.register_parameter("weight", archivedWeight, false);
+  module.register_parameter("bias", archivedBias, false);
+  module.define(R"JIT(
+    def forward(self, input: Tensor) -> Tensor:
+      return input * self.weight + self.bias
+  )JIT");
+
+  std::ostringstream oss;
+  {
+    caffe2::serialize::PyTorchStreamWriter writer(
+        [&](const void* buf, size_t nbytes) -> size_t {
+          oss.write(
+              static_cast<const char*>(buf),
+              static_cast<std::streamsize>(nbytes));
+          return oss ? nbytes : 0;
+        });
+    ScriptModuleSerializer serializer(writer);
+    ExtraFilesMap extraFiles;
+    serializer.serialize(
+        module,
+        extraFiles,
+        /*bytecode_format=*/false,
+        /*save_mobile_debug_info=*/false);
+  }
+
+  std::istringstream iss(oss.str());
+  auto reader = std::make_shared<caffe2::serialize::PyTorchStreamReader>(&iss);
+  ExtraFilesMap loadedExtraFiles;
+  auto loaded = import_ir_module(
+      std::make_shared<CompilationUnit>(),
+      std::move(reader),
+      nullptr,
+      std::optional<c10::Device>(c10::Device(c10::kCPU)),
+      loadedExtraFiles);
+
+  EXPECT_TRUE(torch::equal(loaded.attr("weight").toTensor(), archivedWeight));
+  EXPECT_TRUE(torch::equal(loaded.attr("bias").toTensor(), archivedBias));
+
+  auto input = torch::tensor({2.0f, 3.0f});
+  auto expected = input * archivedWeight + archivedBias;
+  EXPECT_TRUE(torch::equal(loaded.forward({input}).toTensor(), expected));
 }
 
 TEST(SerializationTest, TestJitStream_CUDA) {
