@@ -320,7 +320,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     return torch._dynamo.list_backends(exclude_tags)
 
 
-def assume_constant_result(fn):
+def assume_constant_result(fn=None, *, specialize_args=False):
     """
     This function is used to mark a function `fn` as having a constant result.
     This allows the compiler to optimize away your function.
@@ -328,6 +328,21 @@ def assume_constant_result(fn):
 
     Args:
         fn: The function to be marked as having a constant result.
+        specialize_args: If ``specialize_args=False`` (the default), the result
+            is assumed not to depend on the argument values: it is computed
+            once and baked into the graph, and the arguments can be anything.
+            If ``specialize_args=True``, the result is assumed to depend on
+            the arguments, but to be the same whenever they are equal: the
+            baked result is reused for equal arguments and recomputed when
+            they change. Arguments are limited to what ``torch.compile`` can
+            compare by value - basic types and their containers, dataclasses
+            of those, and classes registered as constants via
+            ``torch.utils._pytree.register_constant`` or
+            ``torch._library.opaque_object.register_custom_class`` with
+            ``typ="constant"`` (both compare via the class's ``__eq__``);
+            anything else, including tensors, triggers a graph break (tensor
+            arguments are allowed only with ``specialize_args=False``, where
+            they are passed by real value without any guard).
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
@@ -336,7 +351,7 @@ def assume_constant_result(fn):
     """
     import torch._dynamo
 
-    return torch._dynamo.assume_constant_result(fn)
+    return torch._dynamo.assume_constant_result(fn, specialize_args=specialize_args)
 
 
 def disable(fn=None, recursive=True, *, reason=None):

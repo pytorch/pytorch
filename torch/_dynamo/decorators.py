@@ -188,8 +188,41 @@ class set_stance(_DecoratorContextManager):
         return self.__class__(self.stance.stance, force_backend=self.stance.backend)
 
 
-def assume_constant_result(fn):  # type: ignore[no-untyped-def]
+def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[no-untyped-def]
+    """
+    Run ``fn`` once at compile time and bake its result into the graph as a
+    constant.
+
+    By default, user-defined object arguments are guarded only by ``ID_MATCH``
+    (object identity) and no guard is added for other argument types. That means
+    a freshly-allocated argument (e.g. a new dataclass every call) forces a
+    recompile every step, while a mutated-in-place object is not detected at all.
+
+    With ``specialize_args=True``, arguments are guarded by value instead, so a
+    fresh but equal argument (e.g. a new dataclass every call) only triggers a
+    recompile when a value actually changes. Supported argument values are
+    constants (``int``/``float``/``bool``/``str``/``bytes``/``None``/
+    ``torch.dtype``/``torch.device``/...), enums, classes registered as
+    constants via :func:`torch.utils._pytree.register_constant` or
+    ``torch._library.opaque_object.register_custom_class`` with
+    ``typ="constant"`` (guarded via their ``__eq__``), tuples and lists of
+    supported values, dicts with literal keys, and dataclasses whose fields
+    are recursively supported. Symbolic scalars (an ``int``/``float``/``bool``
+    made dynamic by automatic dynamic shapes) are specialized to their traced
+    value with a shape-env guard. Anything else - arbitrary objects, sets,
+    tensors, or arguments mutated inside the compiled region before the call -
+    triggers a graph break rather than silently falling back to identity
+    guarding. In particular, tensor arguments are only permitted in the
+    default mode (where they are passed to ``fn`` as real values with no
+    guard); with ``specialize_args=True`` they are rejected, since tensor data
+    cannot be value-guarded and the baked result could silently go stale.
+    """
+    if fn is None:
+        return functools.partial(
+            assume_constant_result, specialize_args=specialize_args
+        )
     fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
+    fn._dynamo_specialize_args = specialize_args  # type: ignore[attr-defined]
     return fn
 
 
