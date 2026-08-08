@@ -743,8 +743,7 @@ class TestMatmulCuda(InductorTestCase):
                 start = offs_cpu[i]
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
-    # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm with compile supported on SM80 or greater")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
