@@ -34,6 +34,8 @@ class FakeTensorProp(torch.fx.Interpreter):
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
+        # Bump the memo epoch so memoization doesn't carry across props (mode is
+        # non-None here); both the Python and C++ fake modes participate.
         mode.epoch += 1
         mode.reset_nt_tensor_id_counter()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()

@@ -2888,7 +2888,7 @@ class VariableBuilder:
         return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
-        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+        if maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
@@ -3596,7 +3596,10 @@ class VariableBuilder:
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+        if (
+            is_fake_tensor(fake_tensor_value)
+            and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
+        ):
             raise AssertionError(
                 f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
                 "({self.tx.fake_mode}) from InstructionTranslator"
@@ -3690,7 +3693,10 @@ class VariableBuilder:
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            if (
+                is_fake_tensor(fake_tensor_value)
+                and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
+            ):
                 raise AssertionError(
                     f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
                     "({self.tx.fake_mode}) from InstructionTranslator"
@@ -3745,8 +3751,12 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             )
             or value.is_nested
         ):
-            # NB: ensure strides are preserved
-            value = clone_input(value)
+            # NB: ensure strides are preserved.
+            # we need to manually disable C++ faketensormode here
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 

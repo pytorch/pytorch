@@ -222,7 +222,7 @@ from .variables.user_defined import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
     from .package import CompilePackage
 
@@ -5199,7 +5199,7 @@ class InstructionTranslatorBase(
         return global_name
 
     @property
-    def fake_mode(self) -> FakeTensorMode | None:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode | None:
         return self.output.tracing_context.fake_mode
 
     @contextlib.contextmanager

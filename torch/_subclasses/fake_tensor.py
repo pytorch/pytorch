@@ -213,9 +213,15 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 @contextlib.contextmanager
 def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    # Suspend the C++ fake mode too: save the current TLS state and clear it
+    # (mode + Fake key), restoring on exit. Mirrors the Python mode save/restore
+    # above; robust to the mode being popped within the block (unlike toggling
+    # the Fake key, which asserts a live mode is installed).
+    torch._C._push_cpp_fake_tensor_mode(None)
     try:
         yield old
     finally:
+        torch._C._pop_cpp_fake_tensor_mode()
         if old is not None:
             torch._C._set_dispatch_mode(old)
 
@@ -291,7 +297,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
-def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
+def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -323,25 +329,294 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, Tensor):
+        return torch._C._maybe_get_fake_mode(t)
     return None
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
+    elif isinstance(x, FunctionalTensor):
+        return maybe_get_real_tensor(x.elem)
+    elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return maybe_get_real_tensor(unwrapped)
+    elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
+        return maybe_get_real_tensor(torch._C._functorch.get_unwrapped(x))
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_real_tensor(x)
     return None
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.fake_device
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        try:
+            return torch._C._fake_tensor_device(x)
+        except RuntimeError:
+            return None
     return None
+
+
+def maybe_set_fake_device(x: object, device: torch.device) -> None:
+    # Set the fake device on a Python FakeTensor or a C++ fake tensor.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.fake_device = device
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._set_fake_device(x, device)
 
 
 def maybe_get_fake_constant(x: object) -> Tensor | None:
+    # The constant a fake tensor was created from, for Python or C++ fakes.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.constant
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_constant(x)
     return None
+
+
+def maybe_set_real_tensor(x: object, real: Tensor) -> None:
+    # Store the shadow real tensor on a Python FakeTensor or a C++ fake.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.real_tensor = real
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._set_fake_real_tensor(x, real)
+
+
+def maybe_to_real_tensor(t: T, shape_env: Any) -> T | Tensor | None:
+    # Recover the real value shadowing a fake tensor / symbolic value under
+    # propagate_real_tensors. Shared by FakeTensorMode._dispatch_impl and the
+    # C++ fallback (via propagate_real_tensors).
+    if is_fake_tensor(t):
+        return maybe_get_real_tensor(t)
+    elif isinstance(t, py_sym_types):
+        if shape_env is None:
+            raise AssertionError("shape_env must not be None for symbolic types")
+        return t.node.pytype(
+            t.node.expr.xreplace(shape_env.backed_var_to_val).xreplace(
+                shape_env.real_tensor_prop_unbacked_vals
+            )
+        )
+    elif isinstance(t, FakeScriptObject):
+        return t.real_obj
+    else:
+        return t
+
+
+def propagate_real_tensor(t: object, real_t: object, shape_env: Any) -> None:
+    # Stamp `real_t` onto fake tensor `t` (recursing through sizes/strides/
+    # storage_offset) and record unbacked-symbol -> real-value hints in the
+    # ShapeEnv. Shared by FakeTensorMode._dispatch_impl and the C++ fallback.
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    if is_fake_tensor(t):
+        maybe_set_real_tensor(t, real_t)  # type: ignore[arg-type]
+        for s, real_s in zip(t.size(), real_t.size()):  # type: ignore[attr-defined]
+            propagate_real_tensor(s, real_s, shape_env)
+        for s, real_s in zip(t.stride(), real_t.stride()):  # type: ignore[attr-defined]
+            propagate_real_tensor(s, real_s, shape_env)
+        propagate_real_tensor(
+            t.storage_offset(),  # type: ignore[attr-defined]
+            real_t.storage_offset(),  # type: ignore[attr-defined]
+            shape_env,
+        )
+    elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
+        if isinstance(t.node.expr, sympy.Symbol):
+            if shape_env is None:
+                raise AssertionError("shape_env must not be None for symbolic Symbol")
+            shape_env.set_real_tensor_prop_unbacked_vals(t.node.expr, real_t)
+        elif (
+            isinstance(s := t.node.expr, sympy.Eq)
+            and isinstance(s.lhs, sympy.Symbol)
+            and s.rhs == 1
+        ):
+            if shape_env is None:
+                raise AssertionError("shape_env must not be None for symbolic Eq")
+            shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
+
+
+def propagate_real_tensors(
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fake_out: list[Any],
+) -> None:
+    """Run `func` on the real tensors shadowing the fake args, then stamp the
+    reals / hint unbacked symbols onto the fake outputs, using the shared
+    maybe_to_real_tensor / propagate_real_tensor helpers. Runs only when
+    propagate_real_tensors is on. Best-effort: no-ops if a fake arg has no
+    shadow real yet or the real op raises.
+    """
+    shape_env = fake_mode.shape_env
+    missing = object()
+
+    def to_real(a: Any) -> Any:
+        real = maybe_to_real_tensor(a, shape_env)
+        return missing if (is_fake_tensor(a) and real is None) else real
+
+    flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+    real_flat_args = [to_real(a) for a in flat_args]
+    if any(a is missing for a in real_flat_args):
+        return  # a fake arg has no real yet: cannot propagate this op
+    real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+
+    with unset_fake_temporarily():
+        try:
+            real_out = func(*real_args, **real_kwargs)
+        except Exception:
+            log.debug("cpp propagate_real_tensors: real run failed for %s", func)
+            return
+
+    # Flatten both sides: a single collection return (e.g. _foreach_*, split)
+    # arrives as one nested entry in fake_out but N leaves in real_out.
+    real_leaves = pytree.tree_leaves(real_out)
+    fake_leaves = pytree.tree_leaves(fake_out)
+    if len(real_leaves) != len(fake_leaves):
+        return
+    for fake_t, real_t in zip(fake_leaves, real_leaves):
+        propagate_real_tensor(fake_t, real_t, shape_env)
+
+
+class CppFakeTensorMode:
+    def __init__(
+        self,
+        *,
+        shape_env: Any = None,
+        fake_tensor_converter: Any = None,
+        allow_fallback_kernels: bool = True,
+        static_shapes: bool | None = None,
+    ) -> None:
+        self.shape_env = shape_env
+        # Sizes are static when there is no ShapeEnv, matching FakeTensorMode.
+        # A ShapeEnv can still be present for static tracing (so data-dependent
+        # ops can allocate unbacked symbols); from_tensor then forces a static
+        # symbolic context so input sizes stay concrete.
+        if static_shapes is None:
+            static_shapes = shape_env is None
+        self.static_shapes = static_shapes
+        self.fake_tensor_converter = fake_tensor_converter
+        self.allow_fallback_kernels = allow_fallback_kernels
+        self.allow_scalar_outputs = False
+        self.in_kernel_invocation = False
+        # Retracing epoch, bumped to invalidate memoized unbacked SymInts across
+        # subgraphs/retraces (see SymNumberMemoDescriptor). Mirrors
+        # FakeTensorMode.epoch so the same epoch-bump sites apply to both modes.
+        self.epoch = 0
+        # When on, fake tensors carry a real tensor and the fallback runs the
+        # real op to hint unbacked symbols. Read once here, mirroring both
+        # FakeTensorMode and the C++ mode's propagate_real_tensors_ field.
+        self.propagate_real_tensors = (
+            torch._functorch.config.fake_tensor_propagate_real_tensors
+        )
+        # The C++ fallback always converts non-fake inputs to fake, so it
+        # effectively always allows them. The attribute exists so callers that
+        # toggle it on the Python mode (e.g. fake_tensor_prop's
+        # force_allow_non_fake_inputs path, via mock.patch.object) work uniformly.
+        self.allow_non_fake_inputs = False
+        # Opaque capsule owning the C++ FakeTensorMode; set by
+        # create_cpp_fake_tensor_mode. The mode is installed into TLS only for
+        # the duration of a `with self:` scope (never persistently).
+        self._cpp_mode: Any = None
+
+    def reset_nt_tensor_id_counter(self) -> None:
+        # No-op: the C++ mode does not allocate nested-int tensor ids. Exists so
+        # the epoch-bump sites can treat both modes uniformly.
+        pass
+
+    @classmethod
+    def create_cpp_fake_tensor_mode(
+        cls, fake_tensor_converter: Any, shape_env: Any = None
+    ) -> CppFakeTensorMode:
+        """Create the C++ FakeTensorMode from a converter and ShapeEnv."""
+        self = cls(shape_env=shape_env, fake_tensor_converter=fake_tensor_converter)
+        # self is stored on the C++ mode so op_impl handlers (PyInterpreter.cpp)
+        # observe the same single identity. The returned capsule owns the C++
+        # mode; it is installed into TLS only within a `with self:` scope.
+        self._cpp_mode = torch._C._create_cpp_fake_tensor_mode(
+            fake_tensor_converter, shape_env, self
+        )
+        return self
+
+    def __enter__(self) -> CppFakeTensorMode:
+        # Install this mode into TLS with the Fake dispatch key on; __exit__
+        # restores the state _push saved (C++ keeps the save-stack).
+        torch._C._push_cpp_fake_tensor_mode(self._cpp_mode)
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        torch._C._pop_cpp_fake_tensor_mode()
+        return None
+
+    def set_allow_fallback_kernels(self, allow: bool) -> None:
+        # Read by op_impl handlers (e.g. workaround_stride_incorrect_op).
+        self.allow_fallback_kernels = allow
+
+    def is_our_fake(self, t: object) -> bool:
+        return isinstance(t, Tensor) and torch._C._is_fake_tensor(t)
+
+    def from_tensor(
+        self,
+        tensor: Tensor,
+        *,
+        static_shapes: bool | None = None,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
+        if static_shapes is None:
+            static_shapes = self.static_shapes
+        # The C++ converter keys sizing off the mode's ShapeEnv, so to keep sizes
+        # static while the ShapeEnv stays live for data-dependent ops, force an
+        # all-static symbolic context (rather than dropping the ShapeEnv).
+        if static_shapes and symbolic_context is None and source is not None:
+            from torch.fx.experimental.symbolic_shapes import (
+                DimDynamic,
+                StatelessSymbolicContext,
+            )
+
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.STATIC] * tensor.dim()
+            )
+        # Route through from_real_tensor (not the to_meta_tensor shortcut) so cpp
+        # fakes get the full conversion: .item()/nonzero memoization, grad_dtype,
+        # and storage/constant memo. mk_fake_tensor already stamps cpp fakes via
+        # _from_meta_and_device instead of wrapping a Python FakeTensor.
+        return self.fake_tensor_converter.from_real_tensor(
+            self,
+            tensor,
+            shape_env=self.shape_env,
+            source=source,
+            symbolic_context=symbolic_context,
+            trace=trace,
+        )
+
+    def from_meta_and_device(self, t: Tensor, device: torch.device) -> Tensor:
+        # i could branch in the existing converter but i think keeping it separate
+        # for now is better...if we going to eventually delete Python converter?
+        return torch._C._from_meta_and_device(t, device, self._cpp_mode)
+
+    # need for op_impl
+    @contextlib.contextmanager
+    def in_kernel_invocation_manager(self) -> Generator[None, None, None]:
+        prev = self.in_kernel_invocation
+        self.in_kernel_invocation = True
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            torch._C._dispatch_tls_set_dispatch_key_excluded(
+                torch._C.DispatchKey.Fake, True
+            )
+            try:
+                yield
+            finally:
+                self.in_kernel_invocation = prev
 
 
 @functools.cache
@@ -538,6 +813,22 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
+                if isinstance(fake_mode, CppFakeTensorMode):
+                    # make_meta_t() calls factory ops (e.g. empty_strided) to
+                    # build the meta backing. no_dispatch() suspends the Python
+                    # fake layer but not the cpp per-tensor/TLS Fake key, so those
+                    # factories would re-enter this mode's fallback -- and under
+                    # propagate_real_tensors that seeds symbolic sizes as their
+                    # own bogus real value. Exclude the Fake key so the meta
+                    # tensor is built plainly before _from_meta_and_device stamps
+                    # it as a cpp fake.
+                    with torch._C._ExcludeDispatchKeyGuard(
+                        torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+                    ):
+                        meta_t = make_meta_t()
+                    return torch._C._from_meta_and_device(
+                        meta_t, torch.device(device), fake_mode._cpp_mode
+                    )
                 return FakeTensor(
                     fake_mode,
                     # pyrefly: ignore [bad-argument-type]
@@ -560,7 +851,11 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if t.is_mkldnn:
-            out.dispatch_keys = torch._C._dispatch_keys(t)
+            if isinstance(out, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                out.dispatch_keys = torch._C._dispatch_keys(t)
+            else:
+                # C++ fake: carry the mkldnn key so is_mkldnn/layout report it.
+                torch._C._set_fake_mkldnn(out, True)
 
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
@@ -587,6 +882,9 @@ class FakeTensorConverter:
         if (
             not self.export
             and _is_plain_tensor(t)  # mostly, we want to know if item() works
+            # A cpp fake is also a plain Tensor; calling t.item() on it yields an
+            # unbacked symint (not a real value), so exclude already-fake inputs.
+            and not is_fake(t)
             and t.dim() == 0
             and t.device.type == "cpu"
             # All integer types are fair game, because signed overflow is UB
@@ -673,7 +971,11 @@ class FakeTensorConverter:
                             source=item_source,
                         )
         if make_constant:
-            self.add_constant_storage_mapping(out)
+            if isinstance(fake_mode, CppFakeTensorMode):
+                # C++ mode stores constants (and their storage aliases) itself.
+                torch._C._set_fake_constant(out, constant, fake_mode._cpp_mode)
+            else:
+                self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
         return out
 
@@ -695,9 +997,14 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        out = FakeTensor(
-            fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
-        )
+        if isinstance(fake_mode, CppFakeTensorMode):
+            out = torch._C._from_meta_and_device(
+                t, torch.device(device), fake_mode._cpp_mode
+            )
+        else:
+            out = FakeTensor(
+                fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
+            )
         self.set_tensor_memo(t, out)
         return out
 
@@ -1546,6 +1853,33 @@ class FakeTensorMode(TorchDispatchMode):
     # mode, you should reset the counter to the initial count.
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
+
+    def __new__(
+        cls,
+        *,
+        allow_fallback_kernels: bool = True,
+        allow_non_fake_inputs: bool = False,
+        shape_env: ShapeEnv | None = None,
+        static_shapes: bool | None = None,
+        export: bool = False,
+    ) -> FakeTensorMode | CppFakeTensorMode:
+        # Create a CppFakeTensorMode when the cpp fake tensor flag is on.
+        import torch._dynamo.config
+
+        if cls is FakeTensorMode and torch._dynamo.config.use_cpp_fake_tensor:
+            mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+                FakeTensorConverter(
+                    copy_data=torch._functorch.config.fake_tensor_propagate_real_tensors,
+                    export=export,
+                ),
+                shape_env,
+            )
+            mode.set_allow_fallback_kernels(allow_fallback_kernels)
+            mode.allow_non_fake_inputs = allow_non_fake_inputs
+            if static_shapes is not None:
+                mode.static_shapes = static_shapes
+            return mode
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -2871,26 +3205,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        def maybe_to_real_tensor(
-            t: T,
-        ) -> T | Tensor | torch._C.ScriptObject | None:
-            if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                return t.real_tensor
-            elif isinstance(t, py_sym_types):
-                if self.shape_env is None:
-                    raise AssertionError(
-                        "self.shape_env must not be None for symbolic types"
-                    )
-                return t.node.pytype(
-                    t.node.expr.xreplace(self.shape_env.backed_var_to_val).xreplace(
-                        self.shape_env.real_tensor_prop_unbacked_vals
-                    )
-                )
-            elif isinstance(t, FakeScriptObject):
-                return t.real_obj
-            else:
-                return t
-
         from torch.fx.experimental.symbolic_shapes import (
             compute_unbacked_bindings,
             free_unbacked_symbols,
@@ -2916,7 +3230,9 @@ class FakeTensorMode(TorchDispatchMode):
             )
         ):
             log.debug("propagate_real_tensors %s", func)
-            real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
+            real_flat_args = [
+                maybe_to_real_tensor(a, self.shape_env) for a in flat_args
+            ]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
 
             is_builtin = library_utils.is_builtin(func)
@@ -2959,42 +3275,10 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
-            import sympy
-
             log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
-                if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                    # NB: unconditionally overwrite
-                    log.debug(
-                        "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
-                    )
-                    t.real_tensor = real_t
-                    for s, real_s in zip(t.size(), real_t.size()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    for s, real_s in zip(t.stride(), real_t.stride()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
-                elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
-                    if isinstance(t.node.expr, sympy.Symbol):
-                        if self.shape_env is None:
-                            raise AssertionError(
-                                "self.shape_env must not be None for symbolic Symbol"
-                            )
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            t.node.expr, real_t
-                        )
-                    elif (
-                        isinstance(s := t.node.expr, sympy.Eq)
-                        and isinstance(s.lhs, sympy.Symbol)
-                        and s.rhs == 1
-                    ):
-                        if self.shape_env is None:
-                            raise AssertionError(
-                                "self.shape_env must not be None for symbolic Eq"
-                            )
-
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
+                propagate_real_tensor(t, real_t, self.shape_env)
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches

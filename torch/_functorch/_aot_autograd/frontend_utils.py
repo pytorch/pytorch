@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import CppFakeTensorMode, FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -115,6 +115,8 @@ def process_inputs(
                 # inner fake mode.
                 if maybe_get_fake_mode(x) is not fake_mode:
                     return fake_mode.from_tensor(x)
+                return x
+            if torch._C._is_fake_tensor(x):
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
@@ -225,7 +227,7 @@ def _resolve_input_async_collectives(
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, ShapeEnv | None]:
+) -> tuple[FakeTensorMode | CppFakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None

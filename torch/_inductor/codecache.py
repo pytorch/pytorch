@@ -113,6 +113,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
+    is_fake,
     TensorMetadata,
 )
 from torch._utils_internal import log_cache_bypass
@@ -799,6 +800,9 @@ class FxGraphCachePickler(pickle.Pickler):
         stored as attributes on the GraphModule.
         """
         from .graph import GraphLowering
+
+        if is_fake(t):
+            return self._reduce_fake_tensor(t)
 
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled

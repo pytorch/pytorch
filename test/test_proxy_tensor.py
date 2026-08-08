@@ -35,6 +35,30 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     PythonKeyTracer,
 )
+
+
+# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
+# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
+
+# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
+# construction build a CppFakeTensorMode so the suite exercises it end to end.
+if torch._dynamo.config.use_cpp_fake_tensor:
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
+
+    def FakeTensorMode(
+        *,
+        shape_env=None,
+        allow_fallback_kernels=True,
+        allow_non_fake_inputs=False,
+        **kwargs,
+    ):
+        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+            FakeTensorConverter(), shape_env
+        )
+        mode.set_allow_fallback_kernels(allow_fallback_kernels)
+        mode.allow_non_fake_inputs = allow_non_fake_inputs
+        return mode
+
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -153,7 +177,21 @@ class UnwrapTensor(torch.Tensor):
         kwargs = tree_map(unwrap, kwargs)
         return func(*args, **kwargs)
 
-class TestGenericProxyTensor(TestCase):
+
+class ProxyTensorTestCase(TestCase):
+    # A C++ FakeTensorMode installs persistent TLS state on creation and is torn
+    # down explicitly (not on scope exit), so a mode built in one test can
+    # linger into the next. Clear it per-test to keep tests isolated under
+    # CPP_FAKETENSOR=1; a no-op otherwise.
+    def setUp(self):
+        super().setUp()
+        if torch._dynamo.config.use_cpp_fake_tensor and hasattr(
+            torch._C, "_exit_fake_tensor_mode"
+        ):
+            torch._C._exit_fake_tensor_mode()
+
+
+class TestGenericProxyTensor(ProxyTensorTestCase):
     # WARNING: if any of your inputs are index tensors, DO NOT use this
     # function
     def _test(self, f, inps):
@@ -864,7 +902,7 @@ class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
 del TestGenericProxyTensor
 
 
-class TestRealProxyTensor(TestCase):
+class TestRealProxyTensor(ProxyTensorTestCase):
     def test_error_on_data_dependent_ops(self):
         def f():
             x = torch.randn([])
@@ -903,7 +941,7 @@ class TestRealProxyTensor(TestCase):
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
-class TestFakeProxyTensor(TestCase):
+class TestFakeProxyTensor(ProxyTensorTestCase):
     def test_issue82547(self):
         x = nn.Parameter(torch.randn(3, 3))
 
@@ -1031,7 +1069,7 @@ def _trace(f, *args):
     return make_fx(f, tracing_mode="symbolic")(*inps)
 
 # TODO: Need to test the guards themselves specifically as well
-class TestSymbolicTracing(TestCase):
+class TestSymbolicTracing(ProxyTensorTestCase):
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
@@ -2319,7 +2357,7 @@ def skipIfNameMatches(pattern):
 filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
-class TestProxyTensorOpInfo(TestCase):
+class TestProxyTensorOpInfo(ProxyTensorTestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):

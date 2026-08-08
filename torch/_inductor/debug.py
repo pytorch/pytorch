@@ -25,6 +25,7 @@ from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._functorch import config as functorch_config
 from torch._inductor import utils
+from torch._inductor.utils import create_fake_mode
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
 from torch._utils_internal import signpost_event
@@ -1519,9 +1520,7 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True, shape_env=shape_env
-    )
+    fake_mode = create_fake_mode(allow_non_fake_inputs=True)
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

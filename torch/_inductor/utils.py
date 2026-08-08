@@ -4936,3 +4936,16 @@ def infer_scale_swizzle_ir(
         scale_dtype=scale.dtype,
         eq_fn=symbolic_eq,
     )
+
+
+def create_fake_mode(
+    *,
+    allow_non_fake_inputs: bool = False,
+    shape_env: Any = None,
+) -> Any:
+    """Return python FakeTensorMode or c++ FakeTensorMode if CPP_FAKETENSOR=1"""
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    return FakeTensorMode(
+        allow_non_fake_inputs=allow_non_fake_inputs, shape_env=shape_env
+    )
