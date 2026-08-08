@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -77,6 +78,8 @@ device_module = torch.get_device_module(device_type)
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -385,6 +388,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class NVSHMEMAll2AllTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -786,6 +791,8 @@ def dispatch_then_combine(device, align: int, group) -> None:
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class DispatchCombineTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -811,6 +818,8 @@ class DispatchCombineTest(MultiProcContinuousTest):
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class DispatchCombineInSubgroups(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -843,6 +852,8 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class NVSHMEMTileCommTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
