@@ -1557,13 +1557,17 @@ test_libtorch_profiler() {
     local kineto_test
     for kineto_test in "${kineto_bin_dir}"/*; do
       [[ -x "${kineto_test}" ]] || continue
-      kineto_tests+=(-i "cpp/$(basename "${kineto_test}")")
+      kineto_tests+=("cpp/$(basename "${kineto_test}")")
     done
     if [[ ${#kineto_tests[@]} -eq 0 ]]; then
       echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
       return 1
     fi
-    CPP_TESTS_DIR="${kineto_bin_dir}" python test/run_test.py --cpp --verbose "${kineto_tests[@]}"
+    echo "Running ${#kineto_tests[@]} Kineto tests: ${kineto_tests[*]}"
+    # A single -i takes the whole list. Repeating the flag keeps only the last
+    # name, because run_test.py declares -i with nargs="+" and no append.
+    CPP_TESTS_DIR="${kineto_bin_dir}" python test/run_test.py --cpp --verbose \
+      -i "${kineto_tests[@]}"
   fi
 }
 
