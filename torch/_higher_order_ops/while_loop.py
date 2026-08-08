@@ -2,7 +2,7 @@
 import contextlib
 import functools
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -48,15 +48,14 @@ def _graph_has_effects(gm):
         if not isinstance(submodule, torch.fx.GraphModule):
             continue
         for node in submodule.graph.nodes:
-            if node.op == "call_function":
+            if node.op != "call_function":
+                continue
+            nested_tokens = 0
+            if node.target in (while_loop_op, while_loop_stack_output_op):
                 nested_tokens = node.kwargs.get("num_effect_tokens", 0)
                 _validate_num_effect_tokens(nested_tokens)
-                if (
-                    nested_tokens
-                    or node.target is with_effects
-                    or has_effects(node.target)
-                ):
-                    return True
+            if nested_tokens or node.target is with_effects or has_effects(node.target):
+                return True
     return False
 
 
@@ -87,15 +86,18 @@ class WhileLoopOp(HigherOrderOperator):
         _validate_num_effect_tokens(num_effect_tokens, len(carried_inputs))
         if num_effect_tokens and carried_inputs[0] is None:
             raise NotImplementedError(
-                "effectful torch.while_loop requires an effect-token-unlifting backend"
+                "the leading effect-token carry of this while_loop is None, "
+                "which means the compiling backend keeps effect tokens lifted "
+                "(unlift_effect_tokens=False); effectful torch.while_loop "
+                "requires an effect-token-unlifting backend such as inductor"
             )
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
         if num_effect_tokens:
-            kwargs["num_effect_tokens"] = cast(Any, num_effect_tokens)
+            kwargs["num_effect_tokens"] = num_effect_tokens
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
             cond_fn,
@@ -376,6 +378,10 @@ def while_loop_autograd(
     mutated_arg_indices="",
     num_effect_tokens=0,
 ):
+    if num_effect_tokens:
+        raise NotImplementedError(
+            "effects in torch.while_loop are not supported with autograd"
+        )
     return WhileLoopAutogradOp.apply(
         cond_fn,
         body_fn,
@@ -531,11 +537,11 @@ def while_loop_tracing(
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
 
         args = (cond_graph, body_graph, carried_inputs, additional_inputs)
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if not stack_output and mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
         if not stack_output and num_effect_tokens:
-            kwargs["num_effect_tokens"] = cast(Any, num_effect_tokens)
+            kwargs["num_effect_tokens"] = num_effect_tokens
 
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
@@ -782,15 +788,22 @@ def while_loop_func(
                 finally:
                     _restore_tokens(saved_tokens)
 
-        op_kwargs = {}
+        op_kwargs: dict[str, Any] = {}
         if not stack_output and mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         if not stack_output and (num_effect_tokens or body_has_effect):
-            op_kwargs["num_effect_tokens"] = cast(Any, 1)
+            op_kwargs["num_effect_tokens"] = 1
 
         loop_carried_inputs = unwrapped_carried_inputs
         if active_mode is not None:
-            token = ctx.unwrap_tensors((active_mode._tokens[EffectType.ORDERED],))[0]
+            ordered_token = active_mode._tokens.get(EffectType.ORDERED)
+            if ordered_token is None:
+                raise NotImplementedError(
+                    "while_loop body effect detection and token discovery "
+                    "disagree: the materialized body graph contains an effect "
+                    "but no ORDERED token was discovered for this trace"
+                )
+            token = ctx.unwrap_tensors((ordered_token,))[0]
             loop_carried_inputs = (token, *loop_carried_inputs)
         ret = op(
             functional_cond_fn,
