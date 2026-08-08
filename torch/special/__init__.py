@@ -922,8 +922,7 @@ Example::
 
     >>> a1 = torch.tensor([4.0])
     >>> a2 = torch.tensor([3.0, 4.0, 5.0])
-    >>> a = torch.special.gammaincc(a1, a2)
-    tensor([0.3528, 0.5665, 0.7350])
+    >>> a = torch.special.gammainc(a1, a2)
     tensor([0.3528, 0.5665, 0.7350])
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
