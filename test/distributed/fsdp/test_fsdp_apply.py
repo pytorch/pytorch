@@ -16,7 +16,11 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if not dist.is_available():
@@ -34,6 +38,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestApply(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # FSDP v1 has reference cycles that prevent GC from freeing model tensors,
     # causing false positives in the CUDA memory leak checker.
     _do_cuda_memory_leak_check = False
@@ -117,7 +123,6 @@ class TestApply(FSDPTestContinuous):
                 transformer.apply(self._init_linear_weights)
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestApply, globals(), except_for=("cpu",), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
