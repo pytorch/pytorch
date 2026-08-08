@@ -8495,6 +8495,61 @@ SavedForBackwardsAOTOutput(idx=5)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_issue_185888_as_strided_inplace(self):
+        """as_strided_ must propagate mutated metadata to graph-input tensors.
+
+        See https://github.com/pytorch/pytorch/issues/185888
+        """
+
+        # Basic metadata propagation on graph input (rank-invariant)
+        def fn(x):
+            x.as_strided_((2,), (2,))
+            return x.clone()
+
+        x_eager = torch.arange(4.0, dtype=torch.float32)
+        fn(x_eager)
+
+        x_compiled = torch.arange(4.0, dtype=torch.float32)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_fn(x_compiled)
+
+        self.assertEqual(x_compiled.size(), x_eager.size())
+        self.assertEqual(x_compiled.stride(), x_eager.stride())
+
+        # with storage_offset (same rank, no guard mismatch)
+        def fn_offset(x):
+            x.as_strided_((2,), (1,), 1)
+            return x.clone()
+
+        x_eager2 = torch.arange(4.0)
+        fn_offset(x_eager2)
+
+        x_compiled2 = torch.arange(4.0)
+        compiled_fn2 = torch.compile(fn_offset, backend="aot_eager", fullgraph=True)
+        compiled_fn2(x_compiled2)
+
+        self.assertEqual(x_compiled2.size(), x_eager2.size())
+        self.assertEqual(x_compiled2.stride(), x_eager2.stride())
+
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_issue_185888_as_strided_inplace_rank_change(self):
+        # Rank-changing as_strided_ (1D -> 2D)
+        # Forced to static shapes because dynamic shape guard generation
+        # expects invariant rank and throws IndexError on rank change.
+        def fn(x):
+            x.as_strided_((2, 2), (2, 1))
+            return x.clone()
+
+        x_eager = torch.arange(4.0, dtype=torch.float32)
+        fn(x_eager)
+
+        x_compiled = torch.arange(4.0, dtype=torch.float32)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_fn(x_compiled)
+
+        self.assertEqual(x_compiled.size(), x_eager.size())
+        self.assertEqual(x_compiled.stride(), x_eager.stride())
+
     def test_dual_tensor_input_graph_breaks(self):
         import torch.autograd.forward_ad as fwAD
 
