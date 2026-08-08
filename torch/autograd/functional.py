@@ -684,6 +684,11 @@ def jacobian(
             'Otherwise, prefer to use "reverse-mode".'
         )
     if strategy == "forward-mode":
+        if not vectorize:
+            raise ValueError(
+                'torch.autograd.functional.jacobian: `strategy="forward-mode"` '
+                "requires `vectorize=True`."
+            )
         if create_graph:
             raise NotImplementedError(
                 "torch.autograd.functional.jacobian: `create_graph=True` "
@@ -953,6 +958,11 @@ def hessian(
     ):
         raise AssertionError(
             'Expected strategy to be either "forward-mode" or "reverse-mode".'
+        )
+    if outer_jacobian_strategy == "forward-mode" and not vectorize:
+        raise ValueError(
+            'torch.autograd.functional.hessian: `outer_jacobian_strategy="forward-mode"` '
+            "requires `vectorize=True`."
         )
 
     def ensure_single_output_function(*inp):
