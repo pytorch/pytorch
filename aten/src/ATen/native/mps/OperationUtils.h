@@ -181,6 +181,15 @@ std::string get_mem_format_string(c10::MemoryFormat memory_format);
 
 using MPSCacheKey = uint64_t;
 
+inline uint64_t mpsCacheSecondHash(const std::string& key) {
+  uint64_t h = 14695981039346656037ULL;
+  for (char c : key) {
+    h ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
 struct MPSCachedKernel {
   MPSCachedKernel(NSObject* object) : _object([object retain]) {}
   virtual ~MPSCachedKernel() {
@@ -259,9 +268,11 @@ struct MPSKernelCache {
   typedef MPSCachedKernel* (^CreateCachedKernelBlock)();
 
   struct CacheEntry {
-    CacheEntry(const std::string& key, MPSCachedKernel* cachedKernel) : cachedKernel_(cachedKernel), key_(key) {}
+    CacheEntry(const std::string& key, MPSCachedKernel* cachedKernel)
+        : cachedKernel_(cachedKernel), key_(key), verifyHash_(mpsCacheSecondHash(key)) {}
     MPSCachedKernel* cachedKernel_ = nullptr;
     std::string key_;
+    uint64_t verifyHash_;
   };
 
  public:
@@ -290,7 +301,7 @@ struct MPSKernelCache {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_, "Hash collision in MPS kernel cache for key: ", key);
         cachedKernel = entry.cachedKernel_;
       } else {
         cachedKernel = createCacheBlock();
@@ -312,7 +323,9 @@ struct MPSKernelCache {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        if (C10_UNLIKELY(mpsCacheSecondHash(key) != entry.verifyHash_)) {
+          return;
+        }
         cachedKernel = entry.cachedKernel_;
       }
     });
@@ -354,9 +367,11 @@ struct MPSGraphCache {
   typedef MPSCachedGraph* (^CreateCachedGraphBlock)();
 
   struct CacheEntry {
-    CacheEntry(const std::string& key, MPSCachedGraph* cachedGraph) : cachedGraph_(cachedGraph), key_(key) {}
+    CacheEntry(const std::string& key, MPSCachedGraph* cachedGraph)
+        : cachedGraph_(cachedGraph), key_(key), verifyHash_(mpsCacheSecondHash(key)) {}
     MPSCachedGraph* cachedGraph_ = nullptr;
     std::string key_;
+    uint64_t verifyHash_;
   };
 
  public:
@@ -385,11 +400,10 @@ struct MPSGraphCache {
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      // verify the cached entry doesn't already exist
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_, "Hash collision in MPS graph cache for key: ", key);
         cachedGraph = entry.cachedGraph_;
       } else {
         cachedGraph = createCacheBlock();
@@ -414,7 +428,9 @@ struct MPSGraphCache {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        if (C10_UNLIKELY(mpsCacheSecondHash(key) != entry.verifyHash_)) {
+          return;
+        }
         cachedGraph = entry.cachedGraph_;
         profileCachedGraph(entry);
       }

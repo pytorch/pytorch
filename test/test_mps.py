@@ -17270,6 +17270,55 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(dst, src.permute(0, 2, 1))
 
 
+class TestCacheIntegrity(TestCaseMPS):
+    """Verify dual-hash cache collision detection doesn't produce false positives
+    and that distinct ops get distinct cached graphs/kernels."""
+
+    def test_repeated_op_returns_consistent_result(self):
+        x = torch.randn(32, 32, device="mps")
+        r1 = torch.relu(x)
+        r2 = torch.relu(x)
+        self.assertEqual(r1, r2)
+
+    def test_distinct_unary_ops_no_cross_contamination(self):
+        x = torch.randn(16, 16, device="mps")
+        self.assertFalse(torch.equal(torch.relu(x), torch.sigmoid(x)))
+        self.assertFalse(torch.equal(torch.neg(x), torch.abs(x)))
+        self.assertFalse(torch.equal(torch.tanh(x), torch.sin(x)))
+
+    def test_distinct_binary_ops_no_cross_contamination(self):
+        a = torch.randn(16, 16, device="mps")
+        b = torch.randn(16, 16, device="mps")
+        add_result = a + b
+        mul_result = a * b
+        sub_result = a - b
+        self.assertFalse(torch.equal(add_result, mul_result))
+        self.assertFalse(torch.equal(add_result, sub_result))
+
+    def test_same_op_different_dtypes_independent(self):
+        x_f32 = torch.randn(8, 8, device="mps", dtype=torch.float32)
+        x_f16 = x_f32.half()
+        r_f32 = torch.relu(x_f32)
+        r_f16 = torch.relu(x_f16)
+        self.assertEqual(r_f32.half(), r_f16, atol=1e-3, rtol=1e-3)
+
+    def test_cache_hit_after_many_ops(self):
+        x = torch.randn(8, 8, device="mps")
+        ops = [torch.relu, torch.sigmoid, torch.tanh, torch.neg, torch.abs,
+               torch.sin, torch.cos, torch.exp, torch.log1p, torch.sqrt]
+        for op in ops:
+            op(x)
+        expected = torch.relu(x.cpu()).to("mps")
+        self.assertEqual(torch.relu(x), expected)
+
+    def test_matmul_cache_correctness(self):
+        a = torch.randn(16, 32, device="mps")
+        b = torch.randn(32, 16, device="mps")
+        result = a @ b
+        expected = a.cpu() @ b.cpu()
+        self.assertEqual(result.cpu(), expected, atol=1e-5, rtol=1e-5)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
