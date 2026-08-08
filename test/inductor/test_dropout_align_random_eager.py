@@ -9,12 +9,13 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
-    requires_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import requires_gpu
 
 
 # ───────────────────────────────────────────────────────────────
@@ -108,13 +109,12 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
 
 
-def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
+def dropout_parity(shape, device, p=0.3, dtype=torch.float32, seed=1234):
     """Returns (masks_equal, eager_out, compiled_out)."""
-    DEVICE = torch.device("cuda")
     torch._dynamo.reset()
-    x = torch.ones(shape, device=DEVICE, dtype=dtype)
-    drop_e = torch.nn.Dropout(p).to(DEVICE).train()
-    drop_c = torch.compile(torch.nn.Dropout(p).to(DEVICE).train())
+    x = torch.ones(shape, device=device, dtype=dtype)
+    drop_e = torch.nn.Dropout(p).to(device).train()
+    drop_c = torch.compile(torch.nn.Dropout(p).to(device).train())
 
     set_seed(seed)
     out_e = drop_e(x)
@@ -128,12 +128,11 @@ def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
 # ───────────────────────────────────────────────────────────────
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
-@unittest.skipIf(
-    not (IS_LINUX and HAS_CUDA_AND_TRITON),
-    "Inductor CUDA dropout alignment tests require Linux and CUDA",
-)
+@unittest.skipIf(not IS_LINUX, "Inductor CUDA dropout alignment tests require Linux")
 @config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def assertSmallMismatchFraction(self, a, b, atol=1e-5, max_fraction=1e-3):
         """Assert that only a small fraction of elements differ significantly.
 
@@ -154,13 +153,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         )
 
     @requires_gpu()
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skip(
         "Disabled due to CI failures; see "
         "https://github.com/pytorch/pytorch/issues/190237"
     )
-    def test_linear_block_compile_parity_forward(self):
-        device = torch.device(GPU_TYPE)
-
+    def test_linear_block_compile_parity_forward(self, device):
         for training in (False, True):
             eager, compiled = build_models(DROPOUT_P)
             eager.to(device)
@@ -187,13 +185,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(y_eager, y_comp)
 
     @requires_gpu()
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skip(
         "Disabled due to CI failures; see "
         "https://github.com/pytorch/pytorch/issues/190237"
     )
-    def test_linear_block_compile_parity_backward(self):
-        device = torch.device(GPU_TYPE)
-
+    def test_linear_block_compile_parity_backward(self, device):
         eager, compiled = build_models(DROPOUT_P)
         eager.to(device)
         compiled.to(device)
@@ -223,8 +220,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
     @requires_gpu()
-    def test_dropout_mask_parity_and_rng_offset_cuda(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_dropout_mask_parity_and_rng_offset_cuda(self, device):
         H, W = BATCH * SEQ_LEN, FFN_DIM
 
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
@@ -256,23 +253,26 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertLessEqual(
                 mismatch_ratio,
                 1e-4,
-                msg=lambda msg: f"{msg}\nDropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
+                msg=lambda msg: (
+                    f"{msg}\nDropout mask mismatch ratio too high: {mismatch_ratio:.8f}"
+                ),
             )
             self.assertEqual(seed0_e, BASE_SEED)
             self.assertEqual(seed0_c, BASE_SEED)
             self.assertEqual(
                 delta_e,
                 delta_c,
-                msg=lambda msg: f"{msg}\nRNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
+                msg=lambda msg: (
+                    f"{msg}\nRNG offset delta mismatch: eager={delta_e}, compiled={delta_c}"
+                ),
             )
 
     # ───────────────────────────────────────────────────────────
     # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    def test_multi_dropout_multi_iterations_parity(self):
-        device = torch.device(GPU_TYPE)
-
+    @requires_capabilities(Capability.lib.triton)
+    def test_multi_dropout_multi_iterations_parity(self, device):
         eager = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -299,13 +299,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skip(
         "Disabled due to CI failures; see "
         "https://github.com/pytorch/pytorch/issues/190237"
     )
-    def test_dropout_parity_dynamic_shapes(self):
-        device = torch.device(GPU_TYPE)
-
+    def test_dropout_parity_dynamic_shapes(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -334,13 +333,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
+    @requires_capabilities(Capability.lib.triton)
     @unittest.skip(
         "Disabled due to CI failures; see "
         "https://github.com/pytorch/pytorch/issues/190237"
     )
-    def test_dropout_parity_cudagraphs_reduce_overhead(self):
-        device = torch.device(GPU_TYPE)
-
+    def test_dropout_parity_cudagraphs_reduce_overhead(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -363,8 +361,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Codegen sanity: run_and_get_code + FileCheck
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    def test_inductor_generated_code_contains_dropout(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_inductor_generated_code_contains_dropout(self, device):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         model = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
@@ -384,8 +382,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Optional: perf smoke (GPU only)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    def test_perf_smoke_cuda(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_perf_smoke_cuda(self, device):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         eager, compiled = build_models(DROPOUT_P)
@@ -445,22 +443,22 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     @unittest.expectedFailure
     @requires_gpu()
-    def test_primitive_rand_parity(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_primitive_rand_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("rand", device, shape)
 
     @unittest.expectedFailure
     @requires_gpu()
-    def test_primitive_randn_parity(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_primitive_randn_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randn", device, shape)
 
     @unittest.expectedFailure
     @requires_gpu()
-    def test_primitive_randint_parity(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_primitive_randint_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randint", device, shape)
 
@@ -468,8 +466,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # nn.Dropout as primitive RNG consumer (should PASS)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    def test_primitive_nn_dropout_parity(self):
-        device = torch.device(GPU_TYPE)
+    @requires_capabilities(Capability.lib.triton)
+    def test_primitive_nn_dropout_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
 
         x = torch.ones(shape, device=device)
@@ -493,15 +491,19 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Seeds > 2^32 overflow.
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    def test_large_seed(self):
+    @requires_capabilities(Capability.lib.triton)
+    def test_large_seed(self, device):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
-                masks_eq, _, _ = dropout_parity((1024,), seed=seed)
+                masks_eq, _, _ = dropout_parity((1024,), device, seed=seed)
                 self.assertTrue(
                     masks_eq, lambda msg: f"{msg}\nseed={seed}: mask mismatch"
                 )
 
 
+instantiate_device_type_tests(TestDropoutAlignRandomEager, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX:
         run_tests(needs="filelock")
