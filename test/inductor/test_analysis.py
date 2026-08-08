@@ -16,6 +16,7 @@ from torch._inductor.analysis.profile_analysis import (
     main,
 )
 from torch._inductor.utils import fresh_inductor_cache, tabulate_2d, zip_dicts
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -23,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_XPU,
@@ -243,6 +245,8 @@ prefix = ["profile.py"]
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tabulate2d(self):
         headers = ["Kernel", "Self H100 TIME (ms)", "Count", "Percent"]
         rows = [
@@ -285,10 +289,17 @@ class TestUtils(TestCase):
 
 def has_supported_gpu():
     """Check if any GPU platform with Triton support is available."""
-    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
+    return (
+        torch.xpu.is_available()
+        or SM80OrLater
+        or torch.version.hip
+        or _is_privateuse1_backend_available()
+    )
 
 
 class TestAnalysis(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     def test_noop(self):
         with (
@@ -644,10 +655,7 @@ class TestAnalysis(TestCase):
 
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
-        # XPU currently does not have the deviceProperties like CUDA.
-        # See https://github.com/intel/torch-xpu-ops/issues/2247
-        if torch.cuda.is_available():
-            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+        self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
         # Verify some trace events from each original profile are present
         combined_event_names = {
