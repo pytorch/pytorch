@@ -562,7 +562,7 @@ Tensor& multinomial_out(const Tensor& self,
       "multinomial arguments must have the same device");
   TORCH_CHECK(
       self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
-  TORCH_CHECK(
+  TORCH_CHECK_TYPE(
       at::isFloatingType(self.scalar_type()),
       "multinomial only supports floating-point dtypes for input, got: ",
       self.scalar_type());
