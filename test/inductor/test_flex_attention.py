@@ -58,6 +58,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfPRIVATEUSE1,
     dtypesIfXPU,
     E4M3_MAX_POS,
     e4m3_type,
@@ -66,6 +67,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
+    IS_FLEX_ATTENTION_PRIVATEUSE1_SUPPORTED as TEST_ON_PRIVATEUSE1,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
@@ -281,18 +283,24 @@ class DeviceConfig:
 device_configs = {}
 # Tests are skipped when no device is supported, so CPU as default is safe
 test_device = ("cpu",)
-if HAS_GPU:
-    if TEST_ON_CUDA:
-        if TEST_ON_CPU:
-            test_device = (
-                "cuda",
-                "cpu",
-            )
-        else:
-            test_device = ("cuda",)
-    elif TEST_ON_XPU:
-        torch._C._set_onednn_allow_tf32(True)
-        test_device = ("xpu",)
+
+# Build the list of supported GPU devices in priority order.
+# Each entry is (platform_supported_flag, device_name, optional_setup_fn).
+_gpu_candidates = [
+    (TEST_ON_CUDA, "cuda", None),
+    (TEST_ON_XPU, "xpu", lambda: torch._C._set_onednn_allow_tf32(True)),
+    (TEST_ON_PRIVATEUSE1, torch._C._get_privateuse1_backend_name(), None),
+]
+
+supported_gpus = [
+    (name, setup) for supported, name, setup in _gpu_candidates if supported
+]
+
+if supported_gpus and (HAS_GPU or HAS_MPS):
+    gpu_name, setup_fn = supported_gpus[0]
+    if setup_fn is not None:
+        setup_fn()
+    test_device = (gpu_name, "cpu") if TEST_ON_CPU else (gpu_name,)
 elif HAS_MPS:
     test_device = ("mps",)
 
@@ -308,10 +316,15 @@ class SubstringSet:
             item = "xpu"
         if "mps" in item:
             item = "mps"
+        if "privateuse1" in item or (
+            torch._C._get_privateuse1_backend_name() != "privateuseone"
+            and item == torch._C._get_privateuse1_backend_name()
+        ):
+            item = "privateuse1"
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu", "privateuse1"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -337,6 +350,10 @@ device_configs["cpu"] = DeviceConfig(
 device_configs["mps"] = DeviceConfig(
     dtypes=[torch.float32, torch.float16, torch.bfloat16],
     dtypes_fast=[torch.float32],
+)
+device_configs["privateuse1"] = DeviceConfig(
+    dtypes=[torch.float32, torch.bfloat16, torch.float16],
+    dtypes_fast=[torch.float16],
 )
 
 torch_config_string = torch.__config__.show()
@@ -1476,6 +1493,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, device, dtype, score_mod: Callable):
@@ -1486,6 +1504,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
         self, device, dtype, score_mod: Callable
@@ -1501,6 +1520,7 @@ class TestFlexAttention(InductorTestCase):
     @running_on_a100_only
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -1535,6 +1555,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
     def test_builtin_score_mods_dynamic(
@@ -1545,6 +1566,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_automatic_dynamic(
@@ -1555,6 +1577,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_different_seqlen(
@@ -1579,6 +1602,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
@@ -1600,6 +1624,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
@@ -1812,6 +1837,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
@@ -1849,6 +1875,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
@@ -1871,6 +1898,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "q_s", test_strides[:2]
@@ -2024,6 +2052,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_skip_odd_keys(self, device, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
@@ -2035,6 +2064,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_function_composition(self, device, dtype: torch.dtype):
         def score_mod_1(score, b, h, m, n):
@@ -2052,6 +2082,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_captured_buffers_all_dims(self, device, dtype: torch.dtype):
         head_scale = torch.randn(H, device=device)
@@ -2136,6 +2167,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_seq_masking(self, device, dtype):
         seq_idx = torch.zeros(S, device=device, dtype=torch.bool)
@@ -2150,6 +2182,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_seq_only(self, device, dtype):
         bias = torch.randn(S, S, device=device, dtype=dtype)
@@ -2163,6 +2196,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_seq_batch(self, device, dtype):
         bias = torch.randn(B, S, S, device=device, dtype=dtype)
@@ -2224,6 +2258,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, device, dtype):
         bias = torch.randn(B, H, S, S, device=device, dtype=dtype)
@@ -2237,6 +2272,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_rel_bias(self, device, dtype):
         rel_bias = torch.randn(2 * S, device=device, dtype=dtype)
@@ -2250,6 +2286,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_dependent_causal_bidirectional(self, device, dtype):
         num_bidirectional = torch.randint(0, S, (B,), device=device, dtype=torch.int32)
@@ -2272,6 +2309,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_natten_2d(self, device, dtype):
         H = 32
@@ -2345,6 +2383,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_silu_on_score(self, device, dtype):
         def silu_score(score, b, h, q, kv):
@@ -2356,6 +2395,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
@@ -2375,6 +2415,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_captured_scale(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
@@ -2389,6 +2430,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @dtypes(*device_configs["cuda"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_captured_scalar_grad(self, device, dtype):
         """Test learnable scalar parameter with shape (1,) using literal index."""
@@ -2421,6 +2463,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_mps
     @dtypes(*device_configs["cuda"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("compiled", [False, True])
     def test_unused_captured_score_mod_grad(self, device, dtype, compiled):
@@ -2456,6 +2499,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_xpu
     @dtypes(torch.float16)
     @dtypesIfCUDA(torch.float16)
+    @dtypesIfPRIVATEUSE1(torch.float16)
     @common_utils.parametrize("detach_temp", [False, True])
     @expected_not_implemented_on_mps
     def test_captured_0d_scalar_grad(self, device, dtype, detach_temp):
@@ -2493,8 +2537,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out1.backward(grad)
         out2 = torch.compile(m2)(q2, k2, v2)
         out2.backward(grad)
-        if device == "cuda":
-            torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         pairs = [
             (out1, out2),
@@ -2515,6 +2558,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_recompile_changed_score_mod(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
@@ -2537,6 +2581,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_captured_reduction(self, device, dtype):
         scale = torch.randn((B, 8), device=device)
@@ -2550,6 +2595,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @dtypes(torch.float16)
     @dtypesIfCUDA(torch.float16)
+    @dtypesIfPRIVATEUSE1(torch.float16)
     @expected_not_implemented_on_mps
     def test_dynamic_captured_buffer(self, device, dtype):
         def run_with_head_count(compiled_fa, head_count):
@@ -2583,6 +2629,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @dtypes(torch.bfloat16)
     @dtypesIfCUDA(torch.bfloat16)
+    @dtypesIfPRIVATEUSE1(torch.bfloat16)
     @expected_not_implemented_on_mps  # uses requires_grad+autograd.grad; backward NIE on MPS
     def test_compacted_block_mask_matches_reference_after_recompile(
         self, device, dtype
@@ -2686,6 +2733,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
@@ -2784,6 +2832,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
@@ -2872,6 +2921,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     @skip_on_mps  # tests deprecation-warning emission; flaky under test-suite ordering
@@ -2929,6 +2979,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @expected_not_implemented_on_mps
     def test_autocast(self, device, dtype):
@@ -2954,6 +3005,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
     @skip_on_mps  # asserts Triton "IS_DIVISIBLE : tl.constexpr" in generated code
@@ -3489,6 +3541,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_njt_causal(self, device, dtype):
         offsets = torch.tensor(
@@ -3723,6 +3776,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
@@ -3818,6 +3872,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
@@ -3883,6 +3938,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     @expected_not_implemented_on_mps  # backward path (return_lse / requires_grad); NIE on MPS
@@ -9039,6 +9095,7 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfPRIVATEUSE1(*device_configs["privateuse1"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_paged_builtin_score_mods(
@@ -9217,9 +9274,9 @@ ROCM_FLAKY_LEARNABLE_BIAS_CASES = {
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.xpu.is_available() and has_triton())
-        or (torch.cuda.is_available() and has_triton())
-        and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
+        TEST_ON_XPU
+        or (TEST_ON_CUDA or torch.version.hip)
+        or TEST_ON_PRIVATEUSE1
     ),
     "Requires Triton + A100 or Triton + ROCm",
 )
