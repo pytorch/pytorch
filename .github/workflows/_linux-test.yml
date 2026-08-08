@@ -39,6 +39,11 @@ on:
         type: string
         default: ""
         description: Space-separated tests to exclude (empty string implies none)
+      enable-periodic-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Run tests marked as periodic.
       use-gha:
         required: false
         type: string
@@ -215,7 +220,7 @@ jobs:
           for dll in win-torch-wheel/cudart64_*.dll; do
             if [ -f "$dll" ]; then
               mv "$dll" win-torch-wheel-extracted/bin/x64/
-              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+              echo "Moved $(basename "$dll") to win-torch-wheel-extracted/bin/x64/"
             fi
           done
 
@@ -295,6 +300,7 @@ jobs:
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          PYTORCH_TEST_WITH_PERIODIC: ${{ inputs.enable-periodic-tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
