@@ -221,8 +221,8 @@ static void check_argmax_argmin(
     const char* name,
     const Tensor& self,
     const std::optional<int64_t>& dim) {
-  TORCH_CHECK(!self.is_complex(), name, ": does not support complex input");
-  TORCH_CHECK(!(self.scalar_type() == kBool), name, ": does not support bool input");
+  TORCH_CHECK_TYPE(!self.is_complex(), name, ": does not support complex input");
+  TORCH_CHECK_NOT_IMPLEMENTED(!(self.scalar_type() == kBool), name, ": does not support bool input");
   if (dim.has_value()) {
     auto dim_ = maybe_wrap_dim(dim.value(), self.dim());
     native::zero_numel_check_dims(self, dim_, name);
@@ -355,6 +355,7 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
 
 TORCH_META_FUNC(aminmax)
 (const Tensor& self, std::optional<int64_t> dim_opt, bool keepdim) {
+  TORCH_CHECK_TYPE(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
   const auto& min = maybe_get_output(0);
   const auto& max = maybe_get_output(1);
   TORCH_CHECK(
@@ -1308,7 +1309,7 @@ Tensor sum(const Tensor &self, std::optional<ScalarType> dtype) {
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
+    TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
   }
 
   // For integral types, use existing sum as
