@@ -114,6 +114,14 @@ void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
 }
 
+void MPSHooks::setMemoryBudget(size_t budget_bytes) const {
+  at::mps::getIMPSAllocator()->setMemoryBudget(budget_bytes);
+}
+
+size_t MPSHooks::getMemoryBudget() const {
+  return at::mps::getIMPSAllocator()->getMemoryBudget();
+}
+
 void MPSHooks::profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
   at::mps::getMPSProfiler().StartTrace(mode, waitUntilCompleted);
 }

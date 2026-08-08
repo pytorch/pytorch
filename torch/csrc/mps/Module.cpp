@@ -130,6 +130,24 @@ static PyObject* MPSModule_maxBufferLength(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_setMemoryBudget(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(args), "invalid argument to setMemoryBudget()");
+  const uint64_t budget = THPUtils_unpackUInt64(args);
+  at::detail::getMPSHooks().setMemoryBudget(static_cast<size_t>(budget));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getMemoryBudget(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::detail::getMPSHooks().getMemoryBudget());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* MPSModule_profilerStartTrace(
     PyObject* _unused,
     PyObject* args) {
@@ -275,6 +293,8 @@ static struct PyMethodDef _MPSModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_mps_maxBufferLength", MPSModule_maxBufferLength, METH_NOARGS, nullptr},
+    {"_mps_setMemoryBudget", MPSModule_setMemoryBudget, METH_O, nullptr},
+    {"_mps_getMemoryBudget", MPSModule_getMemoryBudget, METH_NOARGS, nullptr},
     {"_mps_profilerStartTrace",
      MPSModule_profilerStartTrace,
      METH_VARARGS,
