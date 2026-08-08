@@ -70,9 +70,7 @@ def ufunctor_ctor_type(t: Type, *, binds: ArgName, scalar_t: BaseCppType) -> Nam
     if r is not None:
         return r
 
-    if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, BaseCType(opmath_type(scalar_t)))
-    elif t == BaseType(BaseTy.Tensor):
+    if t in (BaseType(BaseTy.Scalar), BaseType(BaseTy.Tensor)):
         return NamedCType(binds, BaseCType(opmath_type(scalar_t)))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
@@ -99,9 +97,7 @@ def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
     if r is not None:
         return r
 
-    if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, compute_t)
-    elif t == BaseType(BaseTy.Tensor):
+    if t in (BaseType(BaseTy.Scalar), BaseType(BaseTy.Tensor)):
         return NamedCType(binds, compute_t)
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
