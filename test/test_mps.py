@@ -5609,6 +5609,80 @@ class TestMPS(TestCaseMPS):
         output = loss(pred, target)
         output.backward()
 
+    def test_softmax_metal_kernel_paths(self):
+        # Exercise the specialized large-shape Metal softmax kernels (looped,
+        # two-pass, and the cooperative dim=0 blocked/coalesced paths) that the
+        # small OpInfo softmax samples never reach, plus the leading-(-inf)
+        # masked-row edge case that triggers the online-softmax NaN guard.
+        configs = [
+            ((4, 8192), -1),    # looped: axis_size > 1024 * N_READS
+            ((2, 65536), -1),   # two-pass: few very long rows
+            ((8192, 128), 0),   # cooperative dim=0 (blocked/blocked2)
+            ((128, 8192), 0),   # dim=0 with large inner size
+            ((16, 4097), -1),   # just past the looped threshold
+        ]
+        for shape, dim in configs:
+            cpu_x = torch.randn(shape, dtype=torch.float32, requires_grad=True)
+            mps_x = cpu_x.detach().to("mps").requires_grad_(True)
+            cpu_y = F.softmax(cpu_x, dim=dim)
+            mps_y = F.softmax(mps_x, dim=dim)
+            self.assertEqual(cpu_y, mps_y.to("cpu"))
+            go = torch.randn_like(cpu_y)
+            cpu_y.backward(go)
+            mps_y.backward(go.to("mps"))
+            self.assertEqual(cpu_x.grad, mps_x.grad.to("cpu"))
+            cpu_h = cpu_x.detach().half()
+            self.assertEqual(F.softmax(cpu_h, dim=dim),
+                             F.softmax(cpu_h.to("mps"), dim=dim).to("cpu"))
+        # Leading-(-inf) masked long row must match CPU, never produce a NaN row.
+        for dtype in (torch.float32, torch.float16):
+            cpu_x = torch.randn(4, 8192, dtype=dtype)
+            cpu_x[0, :128] = float("-inf")
+            mps_y = F.softmax(cpu_x.to("mps"), dim=-1).to("cpu")
+            self.assertFalse(torch.isnan(mps_y).any())
+            self.assertEqual(F.softmax(cpu_x, dim=-1), mps_y)
+        # Left-padded (-inf) rows wide enough that entire simdgroups (and, on
+        # the 65536 row, the whole first two-pass axis chunk) see only -inf:
+        # the simd- and chunk-level combines must not turn the masked partial
+        # sums into NaN via exp(-inf - -inf).
+        for fn in (F.softmax, F.log_softmax):
+            for rows, cols in ((4, 8192), (2, 65536)):
+                cpu_x = torch.randn(rows, cols, dtype=torch.float32)
+                cpu_x[0, :4224] = float("-inf")
+                mps_y = fn(cpu_x.to("mps"), dim=-1).to("cpu")
+                self.assertFalse(torch.isnan(mps_y).any())
+                self.assertEqual(fn(cpu_x, dim=-1), mps_y)
+        # A NaN input must poison its whole softmax row/column (CPU
+        # semantics) on every kernel path. The NaN block sits at the start of
+        # the reduction axis so the online update sees it while its running
+        # max is still -inf (fmax() drops NaNs); the second loop hides the
+        # NaN inside a masked (-inf) prefix, which additionally stresses the
+        # fully-masked simdgroup/chunk combines.
+        nan_configs = configs + [((4, 1024), -1)]  # last: single_row path
+        for fn in (F.softmax, F.log_softmax):
+            for shape, dim in nan_configs:
+                cpu_x = torch.randn(shape, dtype=torch.float32)
+                if dim == -1:
+                    cpu_x[0, :8] = float("nan")
+                else:
+                    cpu_x[:8, 0] = float("nan")
+                cpu_y = fn(cpu_x, dim=dim)
+                mps_y = fn(cpu_x.to("mps"), dim=dim).to("cpu")
+                poisoned = mps_y[0] if dim == -1 else mps_y[:, 0]
+                clean = mps_y[1:] if dim == -1 else mps_y[:, 1:]
+                self.assertTrue(torch.isnan(poisoned).all())
+                self.assertFalse(torch.isnan(clean).any())
+                self.assertEqual(cpu_y, mps_y)
+            for rows, cols in ((4, 8192), (2, 65536)):
+                cpu_x = torch.randn(rows, cols, dtype=torch.float32)
+                cpu_x[0, :4224] = float("-inf")
+                cpu_x[0, 100] = float("nan")
+                cpu_y = fn(cpu_x, dim=-1)
+                mps_y = fn(cpu_x.to("mps"), dim=-1).to("cpu")
+                self.assertTrue(torch.isnan(mps_y[0]).all())
+                self.assertFalse(torch.isnan(mps_y[1:]).any())
+                self.assertEqual(cpu_y, mps_y)
+
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
