@@ -211,3 +211,46 @@ To enable CK in either scenario, simply pass 'ck' to those functions.
 In order to set the backend to CK, the user MUST have built with the correct environment variable. If not,
 PyTorch will print a warning and use the "default" backend. For GEMMs, this will route to hipblas and
 for SDPA it routes to aotriton.
+
+.. _sdpa-igpu-gfx1151-layout:
+
+SDPA Layout Performance on AMD gfx1151 device
+----------------------------------------------
+
+On AMD gfx1151 device, `torch.nn.functional.scaled_dot_product_attention` with a non-contiguous BSHD input tensor
+can be significantly slower than with a contiguous BHSD layout, depending on shape. This is
+shape-dependent; no universal threshold exists.
+
+Benchmark results on gfx1151 (representative shapes from diffusion models):
+
+.. code-block:: text
+
+    Shape [B, S, H, D]       default   +contiguous   speedup
+    ----------------------------------------------------------
+    [2, 1357, 24,  64]        1724 us      2195 us    -27%   (head_dim=64, no benefit)
+    [1, 1536, 24, 128]        1833 us      2745 us    -50%   (small seqlen, slower)
+    [1, 4608, 24, 128]       17181 us     17675 us     -3%   (near crossover)
+    [1, 7424, 24, 128]       64133 us     44006 us    +31%   (large seqlen, faster)
+    [1, 9807, 24, 128]      124387 us     72812 us    +42%   (large seqlen, faster)
+    [1, 4096, 30, 128]       15509 us     17135 us    -11%   (nheads=30, no benefit)
+
+The benefit is shape-dependent; no universal threshold applies. In particular, ``head_dim=64`` and
+``nheads=30`` with ``head_dim=128`` show no benefit across all shapes tested.
+
+A common pattern in diffusion model frameworks permutes BSHD inputs to BHSD before calling SDPA. On
+gfx1151 at large sequence lengths, replacing ``permute`` with ``transpose(...).contiguous()`` may
+improve performance for shapes where contiguous layout is beneficial::
+
+    # Common pattern (non-contiguous after permute)
+    def sdpa_permute(q, k, v):
+        q2, k2, v2 = (x.permute(0, 2, 1, 3) for x in (q, k, v))
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.permute(0, 2, 1, 3)
+
+    # Alternative: contiguous BHSD (profile to verify benefit for your shape)
+    def sdpa_contiguous(q, k, v):
+        q2 = q.transpose(1, 2).contiguous()
+        k2 = k.transpose(1, 2).contiguous()
+        v2 = v.transpose(1, 2).contiguous()
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.transpose(1, 2).contiguous()
