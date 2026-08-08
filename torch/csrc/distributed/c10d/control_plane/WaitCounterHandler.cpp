@@ -6,7 +6,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/Synchronized.h>
 #include <c10/util/WaitCounter.h>
 
@@ -105,11 +104,11 @@ class TrackingBackendFactory
 // Ensures the wait counter backend is registered
 // NOTE: This function is in the c10d::control_plane namespace, NOT anonymous
 void ensureWaitCounterBackendRegistered() {
-  static c10::once_flag once;
-  c10::call_once(once, []() {
+  static bool backend_registered [[maybe_unused]] = [] {
     c10::monitor::detail::registerWaitCounterBackend(
         std::make_unique<TrackingBackendFactory>());
-  });
+    return true;
+  }();
 }
 
 // Returns all wait counter values as a JSON string

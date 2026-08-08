@@ -52,10 +52,6 @@ cusparseLtHandle_t& get_cusparselt_handle_for_current_device() {
 }
 
 #ifdef USE_ROCM
-// Single global flag for platform-wide hipSparseLt support
-c10::once_flag g_hipSparseLtSupportInitFlag;
-static bool g_hipSparseLtSupported = false;
-
 static const std::vector<std::string>& hipSparseLtSupportedArchs() {
 #if ROCM_VERSION >= 71400
   static const std::vector<std::string> archs = {"gfx950", "gfx942", "gfx1250"};
@@ -67,39 +63,25 @@ static const std::vector<std::string>& hipSparseLtSupportedArchs() {
   return archs;
 }
 
-// Initialize the hipSparseLt support status once for the platform
-static void initHipSparseLtSupport() {
-  // Default to not supported
-  g_hipSparseLtSupported = false;
-
-  // Check only the first available device
-  try {
-    if (at::cuda::device_count() > 0) {
-      g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
-          hipSparseLtSupportedArchs(), 0);
-    }
-  } catch (const std::exception&) {
-    // If an exception occurs during device property check, we assume
-    // hipSparseLt is not supported This could happen due to driver issues,
-    // device access problems, or other runtime errors
-    g_hipSparseLtSupported = false;
-    TORCH_WARN(
-        "Exception occurred while checking hipSparseLt support. Assuming not supported.");
-  }
-}
-
 static bool isHipSparseLtSupported() {
-  // Initialize support check only once
-  c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
+  static bool g_hipSparseLtSupported = [] {
+    try {
+      if (at::cuda::device_count() > 0) {
+        return at::detail::getCUDAHooks().isGPUArch(
+            hipSparseLtSupportedArchs(), 0);
+      }
+    } catch (const std::exception&) {
+      TORCH_WARN(
+          "Exception occurred while checking hipSparseLt support. Assuming not supported.");
+    }
+    return false;
+  }();
 
-  // Return cached result (platform-wide)
-  if (!g_hipSparseLtSupported) {
-    TORCH_CHECK(
-        false,
-        "hipSparseLt not supported on this device. Supported architectures: ",
-        c10::Join(", ", hipSparseLtSupportedArchs()),
-        ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
-  }
+  TORCH_CHECK(
+      g_hipSparseLtSupported,
+      "hipSparseLt not supported on this device. Supported architectures: ",
+      c10::Join(", ", hipSparseLtSupportedArchs()),
+      ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
   return g_hipSparseLtSupported;
 }
 #endif
