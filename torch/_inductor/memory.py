@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import bisect
 import collections
 import dataclasses
 import heapq
 import logging
-from typing import TYPE_CHECKING, TypedDict
+import math
+from typing import TYPE_CHECKING, TypedDict, TypeVar
 
 import torch
 from torch._environment import is_fbcode
@@ -27,6 +29,8 @@ from .dependencies import WeakDep
 
 
 torch_log = logging.getLogger(__name__)
+
+_TupleT = TypeVar("_TupleT", tuple[float, float], tuple[float, float, float])
 
 
 @dataclasses.dataclass
@@ -627,6 +631,88 @@ def estimate_peak_memory_allocfree(
     )
 
 
+class _LpmfReadyQueue:
+    """Selection structure for topological_sort_lpmf's default (size-based) strategy.
+
+    The greedy key is (size if size > gap else 0, size - memory_to_free, index).
+    Because `gap` shifts every iteration, a plain heap cannot order the ready set.
+    Instead we keep ready nodes in a segment tree indexed by their rank in a static
+    sort by (size, index). The `gap` test then partitions the ready set into a
+    prefix (size <= gap, key component 0) and a suffix; a node in the prefix always
+    beats one in the suffix, so a prefix range-min over (size - memory_to_free, index)
+    picks the winner, falling back to a full-range min over (size, size - memory_to_free,
+    index) when the prefix is empty. Each op is O(log n), matching the original min()
+    scan's selection exactly.
+    """
+
+    _INF2: tuple[float, float] = (math.inf, math.inf)
+    _INF3: tuple[float, float, float] = (math.inf, math.inf, math.inf)
+
+    def __init__(self, nodes: list[BaseSchedulerNode]) -> None:
+        order = sorted(nodes, key=lambda n: (n.mpi_node.size, n.mpi_node.index))
+        self._slot: dict[BaseSchedulerNode, int] = {n: i for i, n in enumerate(order)}
+        self._by_index: dict[int, BaseSchedulerNode] = {
+            n.mpi_node.index: n for n in nodes
+        }
+        self._sizes: list[int] = [n.mpi_node.size for n in order]
+        self._n: int = len(nodes)
+        self._partial: list[tuple[float, float]] = [self._INF2] * (2 * self._n)
+        self._full: list[tuple[float, float, float]] = [self._INF3] * (2 * self._n)
+
+    def _write(
+        self,
+        pos: int,
+        partial: tuple[float, float],
+        full: tuple[float, float, float],
+    ) -> None:
+        i = pos + self._n
+        self._partial[i] = partial
+        self._full[i] = full
+        i >>= 1
+        while i:
+            self._partial[i] = min(self._partial[2 * i], self._partial[2 * i + 1])
+            self._full[i] = min(self._full[2 * i], self._full[2 * i + 1])
+            i >>= 1
+
+    def add(self, node: BaseSchedulerNode, memory_to_free: int) -> None:
+        size = node.mpi_node.size
+        index = node.mpi_node.index
+        self._write(
+            self._slot[node],
+            (size - memory_to_free, index),
+            (size, size - memory_to_free, index),
+        )
+
+    def remove(self, node: BaseSchedulerNode) -> None:
+        self._write(self._slot[node], self._INF2, self._INF3)
+
+    def _range_min(
+        self, tree: list[_TupleT], lo: int, hi: int, inf: _TupleT
+    ) -> _TupleT:
+        res = inf
+        lo += self._n
+        hi += self._n
+        while lo < hi:
+            if lo & 1:
+                res = min(res, tree[lo])
+                lo += 1
+            if hi & 1:
+                hi -= 1
+                res = min(res, tree[hi])
+            lo >>= 1
+            hi >>= 1
+        return res
+
+    def select(self, memory_gap: int) -> BaseSchedulerNode:
+        prefix = bisect.bisect_right(self._sizes, memory_gap)
+        if prefix > 0:
+            best = self._range_min(self._partial, 0, prefix, self._INF2)
+            if best[0] != math.inf:
+                return self._by_index[best[1]]
+        best_full = self._range_min(self._full, 0, self._n, self._INF3)
+        return self._by_index[best_full[2]]
+
+
 def topological_sort_lpmf(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
@@ -713,10 +799,20 @@ def topological_sort_lpmf(
     # schedule nodes one at a time
     schedule: list[BaseSchedulerNode] = []
     size_threshold = config.size_threshold_for_succ_based_strategy
+    # The default size-based strategy selects each node via a segment tree that
+    # reproduces the exact argmin of the greedy key in O(log n); the opt-in
+    # succ-based strategy (size_threshold > 0) keeps the original linear scan.
+    ready_queue = None
+    if size_threshold <= 0:
+        ready_queue = _LpmfReadyQueue(nodes)
+        for node in nodes_to_schedule:
+            ready_queue.add(node, node_info[node]["memory_to_free"])
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
-        if (
+        if ready_queue is not None:
+            selected_node = ready_queue.select(memory_gap)
+        elif (
             size_threshold > 0
             and min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold
         ):
@@ -740,6 +836,8 @@ def topological_sort_lpmf(
                 ),
             )
         nodes_to_schedule.remove(selected_node)
+        if ready_queue is not None:
+            ready_queue.remove(selected_node)
         schedule.append(selected_node)
         num_iters += 1
 
@@ -758,6 +856,8 @@ def topological_sort_lpmf(
             node_info[succ_node]["indegree"] -= 1
             if node_info[succ_node]["indegree"] == 0:
                 nodes_to_schedule.add(succ_node)
+                if ready_queue is not None:
+                    ready_queue.add(succ_node, node_info[succ_node]["memory_to_free"])
 
         # update predecessor nodes
         for buf in selected_node.mpi_node.pred_buffers:
@@ -769,6 +869,10 @@ def topological_sort_lpmf(
             if buf_info[buf]["outdegree"] == 1:
                 for succ_node in buf.mpi_buffer.succ_nodes:
                     node_info[succ_node]["memory_to_free"] += buf.mpi_buffer.size_free
+                    if ready_queue is not None and succ_node in nodes_to_schedule:
+                        ready_queue.add(
+                            succ_node, node_info[succ_node]["memory_to_free"]
+                        )
 
     if num_iters > len(nodes):
         raise RuntimeError("Failed to schedule, while loop ran too long for lpmf")
