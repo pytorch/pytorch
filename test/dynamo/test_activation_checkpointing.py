@@ -3405,7 +3405,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
 
 
