@@ -118,6 +118,7 @@ struct Block : public c10::intrusive_ptr_target {
   size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
+  int64_t alloc_id{-1};
 
   Block(
       c10::intrusive_ptr<AllocationRef> alloc_ref,
@@ -125,7 +126,8 @@ struct Block : public c10::intrusive_ptr_target {
       size_t block_size,
       size_t buffer_size,
       size_t buffer_offset,
-      const std::optional<std::string>& group_name);
+      const std::optional<std::string>& group_name,
+      int64_t alloc_id);
 };
 
 class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
@@ -137,6 +139,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
+  int64_t get_alloc_id(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) override;
@@ -154,6 +157,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type
       handle_type_ = c10::cuda::CUDACachingAllocator::
           Expandable_Segments_Handle_Type::UNSPECIFIED;
+  int64_t alloc_counter_{0};
 };
 
 } // namespace c10d::symmetric_memory

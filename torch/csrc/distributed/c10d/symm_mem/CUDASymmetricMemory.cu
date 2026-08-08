@@ -340,13 +340,15 @@ Block::Block(
     size_t block_size,
     size_t buffer_size,
     size_t buffer_offset,
-    const std::optional<std::string>& group_name)
+    const std::optional<std::string>& group_name,
+    int64_t alloc_id)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
       buffer_size(buffer_size),
       buffer_offset(buffer_offset),
-      default_group_name(std::move(group_name)) {}
+      default_group_name(std::move(group_name)),
+      alloc_id(alloc_id) {}
 
 namespace {
 using Expandable_Segments_Handle_Type =
@@ -447,6 +449,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // (and thus alloc_base) is released internally by ~AllocationRef.
   void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
 
+  int64_t alloc_id = 0;
+  {
+    std::unique_lock lock(mutex_);
+    alloc_id = alloc_counter_++;
+  }
+
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
       alloc_base, handle, block_size, device_idx);
   auto block = c10::make_intrusive<Block>(
@@ -455,7 +463,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
       block_size,
       size,
       buffer_offset,
-      group_name);
+      group_name,
+      alloc_id);
   {
     std::unique_lock lock(mutex_);
     // Key by the data pointer we return (that's what free()/rendezvous see).
@@ -476,6 +485,15 @@ size_t CUDASymmetricMemoryAllocator::get_alloc_size(void* ptr) {
       "CUDASymmetricMemoryAllocator::get_alloc_size: input must be allocated ",
       "via CUDASymmetricMemoryAllocator::alloc");
   return block->buffer_size;
+}
+
+int64_t CUDASymmetricMemoryAllocator::get_alloc_id(void* ptr) {
+  size_t offset = 0;
+  auto block = find_block_covering(ptr, offset);
+  if (block != nullptr) {
+    return block->alloc_id;
+  }
+  return -1;
 }
 
 struct RendezvousRequest {
