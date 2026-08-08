@@ -48,27 +48,6 @@ dnnl::memory::dims deconv_dst_size(
   return dst_size;
 }
 
-static inline dnnl::memory::format_tag deconv_src_fmt(
-    const int64_t ndim,
-    const bool is_channels_last = false) {
-  // 3D: n/c/w (n/w/c)         [a/b/c (a/c/b)]
-  // 4D: n/c/h/w (n/h/w/c)     [a/b/c/d (a/c/d/b)]
-  // 5D: n/c/d/h/w (n/d/h/w/c) [a/b/c/d/e (a/c/d/e/b)]
-  if (!is_channels_last) {
-    return (ndim == 3)
-        ? dnnl::memory::format_tag::ncw
-        : ((ndim == 4) ? dnnl::memory::format_tag::nchw
-                       : ((ndim == 5) ? dnnl::memory::format_tag::ncdhw
-                                      : dnnl::memory::format_tag::undef));
-  } else {
-    return (ndim == 3)
-        ? dnnl::memory::format_tag::nwc
-        : ((ndim == 4) ? dnnl::memory::format_tag::nhwc
-                       : ((ndim == 5) ? dnnl::memory::format_tag::ndhwc
-                                      : dnnl::memory::format_tag::undef));
-  }
-}
-
 static inline std::vector<int64_t> deconv_weight_fmt(
     const at::Tensor& weight,
     const int64_t ndim,
@@ -125,23 +104,25 @@ deconv_get_plain_md(
     const at::Tensor& dst,
     int64_t groups,
     bool is_channels_last_suggested) {
+  (void)is_channels_last_suggested;
   auto ndim = src.ndimension();
   auto src_data_t = get_onednn_dtype_include_double(src);
-  auto fmt_src = deconv_src_fmt(ndim, is_channels_last_suggested);
-  auto src_usr_md = dnnl::memory::desc(src.sizes().vec(), src_data_t, fmt_src);
+  auto src_usr_md =
+      dnnl::memory::desc(src.sizes().vec(), src_data_t, src.strides().vec());
 
   auto dst_data_t = get_onednn_dtype_include_double(dst);
-  auto dst_usr_md = dnnl::memory::desc(dst.sizes().vec(), dst_data_t, fmt_src);
+  auto dst_usr_md =
+      dnnl::memory::desc(dst.sizes().vec(), dst_data_t, dst.strides().vec());
 
   auto ic = src.size(1);
   auto oc = dst.size(1);
   dnnl::memory::dims weight_size =
       deconv_compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
   auto weight_dt = get_onednn_dtype_include_double(weight);
-  auto fmt_weight = deconv_weight_fmt(
+  auto weight_strides = deconv_weight_fmt(
       weight, ndim, weight_size, groups != 1, is_channels_last_suggested);
   dnnl::memory::desc weight_usr_md =
-      dnnl::memory::desc(weight_size, weight_dt, fmt_weight);
+      dnnl::memory::desc(weight_size, weight_dt, weight_strides);
 
   return {src_usr_md, weight_usr_md, dst_usr_md};
 }

@@ -48,6 +48,7 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2);
 void undo_broadcast(at::Tensor& tensor);
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor);
+bool is_onednn_conv_strides(const at::Tensor& tensor);
 
 bool is_64_bytes_aligned(const at::Tensor& tensor);
 

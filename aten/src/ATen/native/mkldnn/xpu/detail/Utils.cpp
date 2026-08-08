@@ -394,6 +394,55 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   return true;
 }
 
+bool is_onednn_conv_strides(const at::Tensor& tensor) {
+  // oneDNN convolution uses:
+  // - src/dst: 3D/4D/5D
+  // - weight: 3D/4D/5D
+  // - bias: 1D
+  auto sizes = tensor.sizes();
+  auto tensor_dim = sizes.size();
+  if (tensor_dim != 1 && (tensor_dim < 3 || tensor_dim > 5))
+    return false;
+
+  // Keep the same safety contract as make_contiguous_and_aligned().
+  // If current data pointer is not 64-byte aligned, force fallback copy.
+  if (!is_64_bytes_aligned(tensor)) {
+    return false;
+  }
+
+  if (tensor.is_contiguous() ||
+      tensor.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+      tensor.is_contiguous(at::MemoryFormat::ChannelsLast3d))
+    return true;
+
+  if (tensor.storage_offset() > 0 && !is_64_bytes_aligned(tensor)) {
+    return false;
+  }
+
+  // the overlapped cases are not supported
+  dnnl::memory::dims strides = get_onednn_strides(tensor);
+  int64_t storage_size = 1;
+  for (size_t dim = 0; dim < tensor_dim; ++dim) {
+    if (strides[dim] < 0)
+      return false;
+    storage_size += (sizes[dim] - 1) * strides[dim];
+  }
+  if (storage_size < tensor.numel())
+    return false;
+
+  // Expanded broadcasted dimensions are not supported for conv descriptors.
+  // Keep size-1 dimensions with stride 0, as they are semantically safe.
+  for (const auto d : c10::irange(tensor_dim)) {
+    if (strides[d] == 0 && sizes[d] > 1) {
+      return false;
+    }
+  }
+
+  if (!onednn_strides_check(tensor))
+    return false;
+  return true;
+}
+
 bool is_broadcast_from_other_to_self(
     const at::Tensor& self,
     const at::Tensor& other) {

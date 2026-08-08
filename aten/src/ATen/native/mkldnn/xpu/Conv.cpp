@@ -269,6 +269,7 @@ Tensor _convolution_out(
     int64_t groups_,
     Attr attr,
     IntArrayRef pad_nd = IntArrayRef({})) {
+  std::cout << "debug: _convolution_out" << std::endl;
   CheckedFrom c = "xpu_convolution";
   TensorArg input_t{input_r, "input", 1}, weight_t{weight_r, "weight", 2};
   checkAllSameType(c, {input_t, weight_t});
@@ -281,6 +282,7 @@ Tensor _convolution_out(
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
   // thus we need the transformation here
+  std::cout << "debug: _convolution_out: ndim: " << ndim << std::endl;
   if (ndim == 3) {
     input = view4d(input_r);
     weight = view4d(weight_r);
@@ -326,9 +328,16 @@ Tensor _convolution_out(
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
 
-  auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
-  input = make_contiguous_and_aligned(input, mfmt);
-  weight = make_contiguous_and_aligned(weight, mfmt);
+  auto bias =
+      bias_r.defined() && (transposed_ || !is_onednn_conv_strides(bias_r))
+      ? make_contiguous_and_aligned(bias_r)
+      : bias_r;
+  input = (transposed_ || !is_onednn_conv_strides(input))
+      ? make_contiguous_and_aligned(input, mfmt)
+      : input;
+  weight = (transposed_ || !is_onednn_conv_strides(weight))
+      ? make_contiguous_and_aligned(weight, mfmt)
+      : weight;
   check_shape_forward(input, weight, bias, params);
 
   Tensor output;
@@ -533,9 +542,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ = make_contiguous_and_aligned(grad_output_, mfmt);
-  weight_ = make_contiguous_and_aligned(weight_, mfmt);
-  input_ = make_contiguous_and_aligned(input_, mfmt);
+  grad_output_ = (transposed_ || !is_onednn_conv_strides(grad_output_))
+      ? make_contiguous_and_aligned(grad_output_, mfmt)
+      : grad_output_;
+  weight_ = (transposed_ || !is_onednn_conv_strides(weight_))
+      ? make_contiguous_and_aligned(weight_, mfmt)
+      : weight_;
+  input_ = (transposed_ || !is_onednn_conv_strides(input_))
+      ? make_contiguous_and_aligned(input_, mfmt)
+      : input_;
 
   auto opt = grad_output_.options();
   Tensor grad_input;
