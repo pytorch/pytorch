@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import (
     _get_default_group,
     _TORCHCOMM_AVAILABLE,
     _world,
+    Backend,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -32,7 +33,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -88,7 +89,16 @@ def _with_torchcomm_env(func):
     return wrapper
 
 
-@unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
+# Query gloo's supported device types from the framework's backend capability
+# registry. gloo supports ["cpu", "cuda"] by default; accelerator device types
+# not in this list (e.g. xpu, hpu, npu) will be skipped.
+_GLOO_SUPPORTED_DEVICES = Backend.backend_capability.get(Backend.GLOO, ["cpu"])
+
+
+@unittest.skipIf(
+    device_type not in _GLOO_SUPPORTED_DEVICES,
+    f"{device_type} does not support gloo backend.",
+)
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -99,7 +109,7 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         mesh_group = mesh.get_group()
         default_group = _get_default_group()
-        if torch.cuda.is_available():
+        if torch.accelerator.is_available():
             self.assertNotEqual(mesh_group, default_group)
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
@@ -203,7 +213,7 @@ class DeviceMeshTest(DTensorTestBase):
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
         if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
+            curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
