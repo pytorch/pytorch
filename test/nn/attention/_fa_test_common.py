@@ -259,7 +259,13 @@ class FlashAttentionTestMixin:
                 handles["dummy_impl_1"].removed, "dummy_impl_1 should be removed"
             )
         finally:
-            activate_flash_attention_impl(self.impl_name)  # reset for next test
+            # On XPU-only systems, activating "FA4" requires flash_attn (CUDA-only).
+            # Fall back to restoring the default impl instead.
+            xpu_only = torch.xpu.is_available() and not torch.cuda.is_available()
+            if xpu_only:
+                restore_flash_attention_impl()
+            else:
+                activate_flash_attention_impl(self.impl_name)  # reset for next test
 
     def _test_compiled_sdpa_metadata(self, device, dtype, is_causal):
         """Test that torch.compile preserves tensor metadata (shape, stride, dtype)."""
