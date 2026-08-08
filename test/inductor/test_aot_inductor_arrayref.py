@@ -7,7 +7,12 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+)
 
 
 if IS_WINDOWS and IS_CI:
@@ -317,6 +322,7 @@ CPU_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -337,6 +343,7 @@ copy_tests(
 class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
     TestCase
 ):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -366,6 +373,8 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
         # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
         # CppWrapperCpuArrayRef) must track the current allow_stack_allocation
