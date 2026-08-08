@@ -217,6 +217,52 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return f"launchKernel({kernel_name}" in code
         return f"{kernel_name}.run(" in code
 
+    def test_serialize_triton_constexpr_namedtuple(self):
+        # NamedTuple constexpr values must round-trip through ``repr`` without
+        # referencing the user type name (Inductor embeds triton_meta via !r).
+        # See https://github.com/pytorch/pytorch/issues/192288
+        from typing import NamedTuple
+
+        from torch._inductor.runtime.hints import (
+            serialize_triton_constexpr,
+            TritonConstexprStruct,
+        )
+
+        class MatrixStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: MatrixStrides
+
+        strides = MatrixStrides(batch=8, token=1)
+        serialized = serialize_triton_constexpr(strides)
+        self.assertIsInstance(serialized, TritonConstexprStruct)
+        self.assertEqual(serialized.batch, 8)
+        self.assertEqual(serialized.token, 1)
+        self.assertEqual(serialized[0], 8)
+        self.assertEqual(serialized[1], 1)
+        # ``repr`` must not mention the user NamedTuple class name.
+        text = repr(serialized)
+        self.assertNotIn("MatrixStrides", text)
+        self.assertIn("TritonConstexprStruct", text)
+        reconstructed = eval(text, {"TritonConstexprStruct": TritonConstexprStruct})
+        self.assertEqual(reconstructed.batch, 8)
+        self.assertEqual(reconstructed.token, 1)
+
+        nested = serialize_triton_constexpr(Nested(outer=2, strides=strides))
+        self.assertIsInstance(nested.strides, TritonConstexprStruct)
+        self.assertEqual(nested.strides.token, 1)
+        self.assertNotIn("MatrixStrides", repr(nested))
+        self.assertNotIn("Nested", repr(nested))
+
+        # Plain tuples stay plain tuples (already self-contained under ``repr``).
+        plain = serialize_triton_constexpr((8, 1))
+        self.assertEqual(plain, (8, 1))
+        self.assertIsInstance(plain, tuple)
+        self.assertNotIsInstance(plain, TritonConstexprStruct)
+
     def _run_and_get_triton_compile_options(self, fn, *args):
         # TestCase already gives each test a fresh compile cache. This patch
         # only keeps compilation in-process while the triton.compile mock is
@@ -284,6 +330,57 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+    @requires_gpu
+    def test_triton_kernel_namedtuple_constexpr(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192288
+        # NamedTuple tl.constexpr args must compile under torch.compile(fullgraph=True).
+        from typing import NamedTuple
+
+        class MatrixStrides(NamedTuple):
+            batch: int
+            token: int
+
+        @triton.jit
+        def copy_first_row_kernel(
+            x_ptr,
+            out_ptr,
+            N: tl.constexpr,
+            X_STRIDES: tl.constexpr,
+            BLOCK: tl.constexpr,
+        ):
+            offsets = tl.arange(0, BLOCK)
+            values = tl.load(
+                x_ptr + 0 * X_STRIDES.batch + offsets * X_STRIDES.token,
+                mask=offsets < N,
+            )
+            tl.store(out_ptr + offsets, values, mask=offsets < N)
+
+        def copy_first_row(x):
+            out = torch.empty_like(x[0])
+            copy_first_row_kernel[(1,)](
+                x,
+                out,
+                N=x.shape[1],
+                X_STRIDES=MatrixStrides(
+                    batch=x.stride(0),
+                    token=x.stride(1),
+                ),
+                BLOCK=16,
+            )
+            return out
+
+        x = torch.arange(16, device=GPU_TYPE).reshape(2, 8)
+        expected = x[0].clone()
+        eager = copy_first_row(x)
+        self.assertEqual(eager, expected)
+
+        compiled = torch.compile(copy_first_row, fullgraph=True)
+        compiled_result, (code,) = run_and_get_code(compiled, x)
+        self.assertEqual(compiled_result, expected)
+        # Generated module must not reference the user NamedTuple type by name.
+        self.assertNotIn("MatrixStrides", code)
+        self.assertIn("TritonConstexprStruct", code)
 
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton

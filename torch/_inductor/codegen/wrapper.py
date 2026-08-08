@@ -49,7 +49,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, TritonMeta
+from ..runtime.hints import DeviceProperties, serialize_triton_constexpr, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import get_raw_stream_name, get_stream_name
 from ..utils import (
@@ -3438,7 +3438,9 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    constants[arg.name] = kwargs[arg.name]
+                    # NamedTuple constexprs must be rewritten so ``triton_meta={...!r}``
+                    # emits importable Python (see serialize_triton_constexpr / #192288).
+                    constants[arg.name] = serialize_triton_constexpr(kwargs[arg.name])
 
             else:
                 # the only case where arg name isn't in kwargs, should be
