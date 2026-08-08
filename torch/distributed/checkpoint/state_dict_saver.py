@@ -4,6 +4,7 @@ import contextlib
 import inspect
 import os
 import warnings
+import weakref
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
@@ -357,9 +358,37 @@ def async_save(
         )
 
         if owned_async_stager is not None:
-            upload_future.add_done_callback(lambda _: maybe_close_owned_async_stager())
-            # in the success path transfer cleanup ownership to the upload future
+            # Success path: do not close the stager here (ExitStack unwind) nor
+            # on the upload worker. close() frees the staged CPU buffers, which
+            # were allocated on THIS (caller) thread. With mimalloc (default on
+            # aarch64) a free performed on a different thread than the allocator
+            # is parked on the owner-heap's delayed-free list and effectively
+            # never reclaimed (https://github.com/microsoft/mimalloc/issues/1187),
+            # so the free must run on the caller thread. We bind close() to the
+            # lifetime of the handle returned to the caller via weakref.finalize
+            # (see _free_staged_on_caller_thread); it runs on the caller thread
+            # when the handle is dropped.
             stack.pop_all()
+
+    def _free_staged_on_caller_thread(handle):
+        # Free the staged CPU buffers on the caller (allocating) thread, not on
+        # the upload worker: a cross-thread free is parked on mimalloc's
+        # owner-heap delayed-free list and effectively never reclaimed
+        # (https://github.com/microsoft/mimalloc/issues/1187). finalize() runs
+        # when the caller drops `handle`, on the caller's own thread. We pin the
+        # staged state_dict in the finalizer so its final decref happens there
+        # rather than racing the upload worker's work-item release, and close()
+        # the owned stager (which clears its staging cache) on that thread too.
+        if owned_async_stager is None:
+            return handle
+
+        staged = staging_future_or_state_dict
+
+        def _cleanup(_staged=staged):
+            maybe_close_owned_async_stager()
+
+        weakref.finalize(handle, _cleanup)
+        return handle
 
     if isinstance(staging_future_or_state_dict, Future):
         staging_future = staging_future_or_state_dict
@@ -381,8 +410,11 @@ def async_save(
             return_staging_future.set_result(None)
 
         # return new AsyncSaveResponse for users using new ZOC implementation
-        return AsyncSaveResponse(
-            staging_completion=return_staging_future, upload_completion=upload_future
+        return _free_staged_on_caller_thread(
+            AsyncSaveResponse(
+                staging_completion=return_staging_future,
+                upload_completion=upload_future,
+            )
         )
     else:
 
@@ -392,7 +424,7 @@ def async_save(
                 async_stager.synchronize_staging()
 
         maybe_synchronize_staging()
-        return upload_future
+        return _free_staged_on_caller_thread(upload_future)
 
 
 @_dcp_method_logger(log_exceptions=True)
