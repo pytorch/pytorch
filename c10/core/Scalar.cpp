@@ -38,6 +38,9 @@ Scalar Scalar::log() const {
   } else if (isIntegral(false)) {
     TORCH_CHECK(!isSymbolic(), "NYI log symbolic int");
     return std::log(v.i);
+  } else if (isBoolean()) {
+    TORCH_CHECK(!isSymbolic(), "NYI log symbolic bool");
+    return std::log(static_cast<bool>(v.i));
   }
   TORCH_INTERNAL_ASSERT(false, "unknown ivalue tag ", static_cast<int>(tag));
 }
