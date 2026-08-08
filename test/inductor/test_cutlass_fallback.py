@@ -227,6 +227,7 @@ class TestCutlassFallback(TestCase):
             torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
 
+@instantiate_parametrized_tests
 class TestCutlassSubprocessRouting(TestCase):
     """Tests for CUTLASS subprocess benchmarking routing and error recovery."""
 
@@ -424,7 +425,6 @@ class TestCutlassSubprocessRouting(TestCase):
 
 
 instantiate_device_type_tests(TestCutlassFallback, globals(), only_for="cuda")
-instantiate_parametrized_tests(TestCutlassSubprocessRouting)
 
 
 if __name__ == "__main__":
