@@ -1,0 +1,3 @@
+ERROR
+TypeError: add got incompatible shapes for broadcasting
+cannot reshape array of shape (4, 64) (size 256) into shape (8, 1, 64) (size 512)
