@@ -21,6 +21,8 @@ from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     get_triton_reduction_function,
+    IndexingOptions,
+    TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
@@ -194,6 +196,268 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    def test_reduction_invariant_load_indexing(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree, r_tree = kernel.range_trees
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+            x_index = x_tree.full_range().symbol()
+            r_index = r_tree.full_range().symbol()
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+
+            def indexing(index):
+                options = kernel.indexing(
+                    index,
+                    reduction_invariant_indexing=True,
+                )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            with patch.object(kernel, "_load_mask", scalar_mask):
+                invariant_options = indexing(invariant_index)
+                x_options = indexing(x_index)
+                reduction_options = indexing(r_index)
+
+            self.assertEqual(
+                tuple(map(str, invariant_options.expand_shape or ())), ("1", "1")
+            )
+            self.assertEqual(
+                tuple(map(str, x_options.expand_shape or ())), ("XBLOCK", "1")
+            )
+            self.assertTrue(invariant_options.reduction_invariant_indexing)
+            self.assertTrue(x_options.reduction_invariant_indexing)
+            self.assertFalse(reduction_options.reduction_invariant_indexing)
+
+            x_mask = TritonCSEVariable(
+                "tmp1", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            with patch.object(kernel, "_load_mask", x_mask):
+                predicate_options = indexing(invariant_index)
+            self.assertEqual(
+                tuple(map(str, predicate_options.expand_shape or ())),
+                ("XBLOCK", "1"),
+            )
+            self.assertTrue(predicate_options.reduction_invariant_indexing)
+
+    def test_reduction_invariant_load_indexing_extents(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree, r_tree = kernel.range_trees
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+
+            def indexing(mask):
+                with patch.object(kernel, "_load_mask", mask):
+                    options = kernel.indexing(
+                        invariant_index,
+                        reduction_invariant_indexing=True,
+                    )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            for reduction_numel in (
+                sympy.Symbol("u1", integer=True, nonnegative=True),
+                sympy.S.Zero,
+            ):
+                with (
+                    self.subTest(reduction_numel=reduction_numel),
+                    patch.object(r_tree, "numel", reduction_numel),
+                ):
+                    self.assertFalse(indexing(scalar_mask).reduction_invariant_indexing)
+
+            with patch.object(kernel, "is_combo_kernel", True):
+                self.assertTrue(indexing(scalar_mask).reduction_invariant_indexing)
+                scalar_1d_mask = TritonCSEVariable(
+                    "tmp1", ValueRanges.unknown(), torch.bool, shape=("1",)
+                )
+                with (
+                    patch.object(x_tree, "tensor_dim", None),
+                    patch.object(r_tree, "tensor_dim", 0),
+                ):
+                    self.assertEqual(
+                        tuple(map(str, indexing(scalar_1d_mask).expand_shape or ())),
+                        ("1",),
+                    )
+                    for pointwise_numel in (
+                        sympy.Symbol("u0", integer=True, nonnegative=True),
+                        sympy.S.Zero,
+                    ):
+                        with (
+                            self.subTest(pointwise_numel=pointwise_numel),
+                            patch.object(x_tree, "numel", pointwise_numel),
+                        ):
+                            self.assertFalse(
+                                indexing(scalar_1d_mask).reduction_invariant_indexing
+                            )
+
+    def test_reduction_invariant_load_indexing_unknown_mask(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            indirect = kernel.cse.namedvar("tmp1", dtype=torch.int64, shape=("1", "1"))
+            self.assertIsInstance(indirect, TritonCSEVariable)
+            indirect_index = sympy.Symbol(indirect.name, integer=True)
+
+            with patch.object(kernel, "_load_mask", scalar_mask):
+                resolved_options = kernel.indexing(
+                    indirect_index,
+                    reduction_invariant_indexing=True,
+                )
+                indirect.mask_vars.add("unknown_mask")
+                options = kernel.indexing(
+                    indirect_index,
+                    reduction_invariant_indexing=True,
+                )
+
+            self.assertIsInstance(resolved_options, IndexingOptions)
+            self.assertTrue(resolved_options.reduction_invariant_indexing)
+            self.assertIsInstance(options, IndexingOptions)
+            self.assertFalse(options.reduction_invariant_indexing)
+            self.assertEqual(
+                tuple(map(str, options.expand_shape or ())),
+                ("XBLOCK", "R0_BLOCK"),
+            )
+
+    def test_reduction_invariant_load_indexing_schedule_guards(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree = kernel.range_trees[0]
+            x_index = x_tree.full_range().symbol()
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            x_mask = TritonCSEVariable(
+                "tmp1", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+            for guarded_mode in (
+                "cooperative_reduction",
+                "mix_order_reduction",
+            ):
+                with (
+                    self.subTest(guarded_mode=guarded_mode),
+                    patch.object(kernel, guarded_mode, True),
+                ):
+                    with patch.object(kernel, "_load_mask", scalar_mask):
+                        options = kernel.indexing(
+                            invariant_index,
+                            reduction_invariant_indexing=True,
+                        )
+                        self.assertIsInstance(options, IndexingOptions)
+                        self.assertFalse(options.reduction_invariant_indexing)
+                    with patch.object(kernel, "_load_mask", x_mask):
+                        options = kernel.indexing(
+                            x_index,
+                            reduction_invariant_indexing=True,
+                        )
+                        self.assertIsInstance(options, IndexingOptions)
+                        self.assertFalse(options.reduction_invariant_indexing)
+
+    def test_template_indexing_disables_reduction_invariant_narrowing(self):
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        kernel = object.__new__(TritonTemplateKernel)
+        kernel.template_out_shape = ("XBLOCK", "R0_BLOCK")
+        kernel.template_mask = "template_mask"
+        index = sympy.Symbol("xindex", integer=True)
+        expected = object()
+
+        with patch.object(
+            TritonKernel,
+            "indexing",
+            autospec=True,
+            return_value=expected,
+        ) as indexing:
+            actual = kernel.indexing(
+                index,
+                reduction_invariant_indexing=True,
+            )
+
+        self.assertIs(expected, actual)
+        self.assertFalse(indexing.call_args.kwargs["reduction_invariant_indexing"])
+
+    def test_reduction_invariant_indexing_consumers(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+
+        for device_type, expected_shape in (
+            ("cuda", ("XBLOCK", "1")),
+            ("cpu", ("XBLOCK", "R0_BLOCK")),
+        ):
+            with self.subTest(device_type=device_type):
+                kernel = TritonKernel(
+                    {"x": xnumel, "r0_": rnumel},
+                    features=SIMDKernelFeatures([], xnumel, rnumel),
+                    override_persistent_reduction=False,
+                    override_cooperative_reduction=False,
+                )
+                scalar_mask = TritonCSEVariable(
+                    "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+                )
+
+                with (
+                    V.set_kernel_handler(kernel),
+                    patch.object(kernel, "_load_mask", scalar_mask),
+                    patch.object(
+                        self._graph,
+                        "get_current_device_or_throw",
+                        return_value=torch.device(device_type),
+                    ),
+                ):
+                    x_index = kernel.range_trees[0].full_range().symbol()
+                    value = TritonKernelOverrides.index_expr(x_index, torch.int64)
+                    with patch.object(
+                        kernel,
+                        "indirect_assert",
+                        wraps=kernel.indirect_assert,
+                    ) as indirect_assert:
+                        kernel.check_bounds(x_index, xnumel, lower=True, upper=True)
+
+                self.assertEqual(expected_shape, tuple(map(str, value.shape or ())))
+                checked_index = indirect_assert.call_args.args[0]
+                self.assertIn(
+                    "[" + ", ".join(expected_shape) + "]",
+                    checked_index,
+                )
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):

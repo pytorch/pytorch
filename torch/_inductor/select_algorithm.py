@@ -1809,6 +1809,7 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        reduction_invariant_indexing=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1824,6 +1825,8 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            # Templates own their output broadcast shape and mask.
+            reduction_invariant_indexing=False,
         )
 
     def codegen_range_tree(self):
