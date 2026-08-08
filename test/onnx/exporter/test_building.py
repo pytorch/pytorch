@@ -50,6 +50,25 @@ class TestOpRecorder(common_utils.TestCase):
         )
         self.assertEqual(tracer.nodes[1].op_type, "Reshape")
 
+    def test_constant_farm_keys_floats_bitwise(self):
+        input_x = _tensors.SymbolicTensor(
+            opset=self.opset, name="input_x", shape=ir.Shape([2, 3])
+        )
+
+        with onnxscript.evaluator.default_as(tracer := self.recorder):
+            # Distinct nan objects must share one Constant; -0.0 and 0.0
+            # must get distinct Constants (Python: nan != nan, -0.0 == 0.0).
+            _ = self.opset.Add(input_x, float("nan"))
+            _ = self.opset.Add(input_x, float("nan"))
+            _ = self.opset.Add(input_x, 0.0)
+            _ = self.opset.Add(input_x, -0.0)
+
+        constants = [n for n in tracer.nodes if n.op_type == "Constant"]
+        values = [c.attributes["value"].value.numpy().item() for c in constants]
+        self.assertEqual(len(constants), 3)
+        self.assertTrue(np.isnan(values[0]))
+        self.assertEqual(np.signbit(values[1:]).tolist(), [False, True])
+
     def test_process_python_sequence_with_allowed_sequence_type(self):
         input_x = _tensors.SymbolicTensor(
             opset=self.opset, name="input_x", shape=ir.Shape([2, 3])

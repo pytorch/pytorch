@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import inspect
 import logging
+import struct
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TYPE_CHECKING
 
@@ -283,11 +284,23 @@ def _get_or_create_constant(
         # pyrefly: ignore [bad-argument-type]
         arg = tuple(arg)
 
-    constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
+    # Python float eq/hash is not value-identity (nan != nan, -0.0 == 0.0),
+    # so key floats by bit pattern to dedup nan constants deterministically
+    # and keep -0.0 distinct from 0.0.
+    if isinstance(arg, float):
+        key_arg = struct.pack("<d", arg)
+    elif isinstance(arg, tuple):
+        key_arg = tuple(
+            struct.pack("<d", v) if isinstance(v, float) else v for v in arg
+        )
+    else:
+        key_arg = arg
+
+    constant_value = constant_farm.get((key_arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
         constant_tensor = ir.tensor(value=arg, dtype=dtype)
         constant_value = opset.Constant(value=constant_tensor)
-        constant_farm[(arg, dtype)] = constant_value  # type: ignore[arg-type,index]
+        constant_farm[(key_arg, dtype)] = constant_value  # type: ignore[arg-type,index]
     return constant_value  # type: ignore[return-value]
 
 
