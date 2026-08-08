@@ -357,6 +357,16 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
+def _is_float_symbolic(x: object) -> bool:
+    """True for a symbolic float value, whether a SymFloat or a Proxy wrapping
+    one (the latter occurs while inductor traces sympy expressions)."""
+    if isinstance(x, torch.SymFloat):
+        return True
+    if isinstance(x, torch.fx.Proxy):
+        return isinstance(x.node.meta.get("val"), (float, torch.SymFloat))
+    return False
+
+
 class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
     @staticmethod
     def sym_sum(args):
@@ -366,18 +376,26 @@ class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
     def floor_to_int(x, dtype):
         if isinstance(x, (int, float)):
             return math.floor(x)
+        # A symbolic float must be lowered to an int; the no-op default would
+        # leave a SymFloat where an int is required (e.g. a tensor size).
+        if _is_float_symbolic(x):
+            return x.__floor__()
         return x
 
     @staticmethod
     def ceil_to_int(x, dtype):
         if isinstance(x, (int, float)):
             return math.ceil(x)
+        if _is_float_symbolic(x):
+            return x.__ceil__()
         return x
 
     @staticmethod
     def trunc_to_int(x, dtype):
         if isinstance(x, (int, float)):
             return math.trunc(x)
+        if _is_float_symbolic(x):
+            return x.__trunc__()
         return x
 
 

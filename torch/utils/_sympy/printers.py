@@ -510,8 +510,9 @@ class CppPrinter(ExprPrinter):
                     + ")"
                 )
             elif exp == -1:
-                # pyrefly: ignore [missing-attribute]
-                r = "1.0/" + self._print(base)
+                # Parenthesize the base so a compound denominator (e.g. an Add
+                # like ``k + 20``) is not mis-parsed as ``1.0/k + 20``.
+                r = "1.0/" + self.parenthesize(base, PRECEDENCE["Mul"], strict=True)
             else:  # exp == 0
                 r = "1.0"
 
