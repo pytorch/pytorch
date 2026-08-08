@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 
 import copyreg
-import os.path as _osp
 import weakref
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils import (
     backcompat as backcompat,
     collect_env as collect_env,
@@ -29,7 +29,11 @@ def set_module(obj, mod):
     obj.__module__ = mod
 
 
-cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+# Editable installs using scikit-build-core redirect mode install share/cmake
+# into the package directory rather than the source tree this file loads from,
+# so resolve it the same way torch.utils.cpp_extension resolves lib/ and
+# include/ instead of from this file's location.
+cmake_prefix_path = get_file_path("torch", "share", "cmake")
 
 
 def swap_tensors(t1, t2):
