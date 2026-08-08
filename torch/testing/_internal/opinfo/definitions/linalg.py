@@ -1137,13 +1137,23 @@ def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kw
     # No zero-size dims here: they trip generic coverage suites (e.g. vmap can't
     # batch over a size-0 dim). Empty/degenerate shapes are covered separately by
     # the dedicated test_polar_empty test in test_linalg.py.
-    make_arg = partial(
-        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
-    )
+    # Gradient tests need full-rank, well-conditioned samples because the
+    # decomposition is differentiable only for full column rank A, and
+    # near-singular samples amplify float32 round-off past test tolerances.
+    if requires_grad:
+        make_arg = partial(
+            make_fullrank_matrices_with_distinct_singular_values,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+    else:
+        make_arg = partial(make_tensor, dtype=dtype, device=device, low=-2, high=2)
     batches = [(), (2,), (1, 1)]
     sizes = [(5, 5), (5, 3), (2, 2)]
     for batch, (m, n) in product(batches, sizes):
-        yield SampleInput(make_arg(*(batch + (m, n)), low=-2, high=2))
+        shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape) if requires_grad else make_arg(shape))
 
 
 def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
@@ -1265,6 +1275,8 @@ op_db: list[OpInfo] = [
         "linalg.cholesky",
         aten_name="linalg_cholesky",
         dtypes=floating_and_complex_types(),
+        # cholesky backward calls solve_triangular, which is float-only on MPS
+        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1272,24 +1284,13 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # Exception: linalg.cholesky: The factorization could not be completed because the input is not positive-definite
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.cholesky_ex",
         aten_name="linalg_cholesky_ex",
         dtypes=floating_and_complex_types(),
+        # cholesky backward calls solve_triangular, which is float-only on MPS
+        backward_dtypesIfMPS=(torch.float32,),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1297,23 +1298,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
-        skips=(
-            # The following dtypes worked in forward but are not listed by the
-            # OpInfo: {torch.bfloat16, torch.float16}. The following dtypes did
-            # not work in backward but are listed by the OpInfo:
-            # {torch.complex64}.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            # RuntimeError: linalg.solve.triangular(); Only float is supported!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
-        ),
     ),
     OpInfo(
         "linalg.vecdot",
@@ -1955,8 +1939,8 @@ op_db: list[OpInfo] = [
         aten_name="linalg_polar",
         op=torch.linalg.polar,
         dtypes=floating_and_complex_types(),
-        # Forward op only; autograd is a follow-up.
-        supports_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
             # torch-xpu-ops/issues/4162
@@ -1968,6 +1952,14 @@ op_db: list[OpInfo] = [
             # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
+            # The gradient goes through SVD/eigh, whose MPS results differ
+            # slightly between contiguous and non-contiguous inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=3e-4, rtol=2e-3)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
         ],
     ),
     OpInfo(
