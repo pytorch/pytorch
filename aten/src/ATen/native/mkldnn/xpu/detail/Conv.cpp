@@ -186,7 +186,7 @@ sycl::event convolution_backward_weights(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(src, diff_dst);
+  bool is_channels_last = use_channels_last_for_conv(src, diff_weight);
 
   // create dnnl::memory desc
   auto [src_md, weight_md, dst_md] =
@@ -293,7 +293,7 @@ sycl::event convolution_backward_data(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(diff_dst, weight);
+  bool is_channels_last = use_channels_last_for_conv(diff_src, weight);
 
   // create memory desc
   auto [src_md, weight_md, dst_md] =
