@@ -475,6 +475,76 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(ValueError):
             LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
 
+    def test_scheduler_rejects_nonpositive_divisor_params(self):
+        # https://github.com/pytorch/pytorch/issues/177833
+        # These parameters are used as divisors or modulo bases in get_lr, so
+        # non-positive values must be rejected at construction time instead of
+        # crashing with ZeroDivisionError at step time.
+        cases = [
+            (lambda v: StepLR(self.opt, step_size=v), "step_size"),
+            (lambda v: CosineAnnealingLR(self.opt, T_max=v), "T_max"),
+            (lambda v: PolynomialLR(self.opt, total_iters=v), "total_iters"),
+            (lambda v: LinearLR(self.opt, total_iters=v), "total_iters"),
+            (
+                lambda v: CyclicLR(
+                    self.opt,
+                    base_lr=0.01,
+                    max_lr=0.1,
+                    step_size_up=v,
+                    cycle_momentum=False,
+                ),
+                "step_size_up",
+            ),
+            (
+                lambda v: CyclicLR(
+                    self.opt,
+                    base_lr=0.01,
+                    max_lr=0.1,
+                    step_size_up=10,
+                    step_size_down=v,
+                    cycle_momentum=False,
+                ),
+                "step_size_down",
+            ),
+            (
+                lambda v: OneCycleLR(
+                    self.opt, max_lr=0.1, total_steps=10, div_factor=v
+                ),
+                "div_factor",
+            ),
+            (
+                lambda v: OneCycleLR(
+                    self.opt, max_lr=0.1, total_steps=10, final_div_factor=v
+                ),
+                "final_div_factor",
+            ),
+        ]
+        for ctor, param_name in cases:
+            for value in (0, -1):
+                with self.assertRaisesRegex(ValueError, param_name):
+                    ctor(value)
+        for factor in (0.0, -0.5):
+            with self.assertRaisesRegex(ValueError, "factor"):
+                ConstantLR(self.opt, factor=factor)
+
+    def test_scheduler_accepts_minimal_positive_divisor_params(self):
+        StepLR(self.opt, step_size=1)
+        CosineAnnealingLR(self.opt, T_max=1)
+        PolynomialLR(self.opt, total_iters=1)
+        LinearLR(self.opt, total_iters=1)
+        CyclicLR(
+            self.opt,
+            base_lr=0.01,
+            max_lr=0.1,
+            step_size_up=1,
+            step_size_down=1,
+            cycle_momentum=False,
+        )
+        OneCycleLR(
+            self.opt, max_lr=0.1, total_steps=10, div_factor=1.0, final_div_factor=1.0
+        )
+        ConstantLR(self.opt, factor=1.0)
+
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
