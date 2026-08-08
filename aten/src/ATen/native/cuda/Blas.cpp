@@ -691,7 +691,7 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
           (other.stride(0) <= INT_MAX),
-      "dot only supports n, incx, incy with the bound [val] <= %d",
+      "dot only supports n, incx, incy with the bound [val] <= ",
       INT_MAX);
 }
 

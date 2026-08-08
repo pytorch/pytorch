@@ -347,8 +347,9 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     size_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
         _storage_nbytes == nbytes,
-        "storage has wrong byte size: expected %ld got %ld",
+        "storage has wrong byte size: expected ",
         nbytes,
+        " got ",
         _storage_nbytes);
   }
 
