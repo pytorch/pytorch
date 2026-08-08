@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    dtypesIfXPU,
     expectedFailureMeta,
     expectedFailureMPS,
     expectedFailureXLA,
@@ -28,9 +29,9 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
+    onlyOn,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -185,51 +186,6 @@ class TestPoolingNN(NNTestCase):
                 torch.empty([2, 2, 2])
             ),
         )
-
-    def test_adaptive_pooling_lower_precision(self):
-        def _test_adaptive_pooling_lower_precision(
-            self, device, dtype, mod, memory_format
-        ):
-            input = torch.randint(1, 10, (3, 19, 8, 8), dtype=torch.float32)
-            input = input.to(device).to(memory_format=memory_format).requires_grad_()
-            pool = mod((7, 7)).to(device)
-
-            input2 = input.detach().clone().to(dtype=dtype).requires_grad_(True)
-
-            out = pool(input)
-            out.sum().backward()
-            out2 = pool(input2)
-            out2.sum().backward()
-
-            self.assertTrue(out2.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out2.dtype, dtype)
-            self.assertEqual(input2.grad.dtype, dtype)
-            self.assertEqual(out, out2.float(), atol=0.1, rtol=0)
-            self.assertEqual(input.grad, input2.grad.float(), atol=0.1, rtol=0)
-
-        device_list = ["cpu"]
-        for device in device_list:
-            for dtype in [torch.bfloat16, torch.float16]:
-                _test_adaptive_pooling_lower_precision(
-                    self,
-                    device,
-                    dtype,
-                    torch.nn.AdaptiveAvgPool2d,
-                    torch.contiguous_format,
-                )
-                _test_adaptive_pooling_lower_precision(
-                    self, device, dtype, torch.nn.AdaptiveAvgPool2d, torch.channels_last
-                )
-                _test_adaptive_pooling_lower_precision(
-                    self,
-                    device,
-                    dtype,
-                    torch.nn.AdaptiveMaxPool2d,
-                    torch.contiguous_format,
-                )
-                _test_adaptive_pooling_lower_precision(
-                    self, device, dtype, torch.nn.AdaptiveMaxPool2d, torch.channels_last
-                )
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
@@ -409,6 +365,40 @@ class TestPoolingNN(NNTestCase):
 
 
 class TestPoolingNNDeviceType(NNTestCase):
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize_test(
+        "mod",
+        [
+            subtest(torch.nn.AdaptiveAvgPool2d, name="AdaptiveAvgPool2d"),
+            subtest(torch.nn.AdaptiveMaxPool2d, name="AdaptiveMaxPool2d"),
+        ],
+    )
+    @parametrize_test(
+        "memory_format",
+        [
+            subtest(torch.contiguous_format, name="contiguous"),
+            subtest(torch.channels_last, name="channels_last"),
+        ],
+    )
+    def test_adaptive_pooling_lower_precision(self, device, dtype, mod, memory_format):
+        input = torch.randint(1, 10, (3, 19, 8, 8), dtype=torch.float32)
+        input = input.to(device).to(memory_format=memory_format).requires_grad_()
+        pool = mod((7, 7)).to(device)
+
+        input2 = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+
+        out = pool(input)
+        out.sum().backward()
+        out2 = pool(input2)
+        out2.sum().backward()
+
+        self.assertTrue(out2.is_contiguous(memory_format=memory_format))
+        self.assertEqual(out2.dtype, dtype)
+        self.assertEqual(input2.grad.dtype, dtype)
+        self.assertEqual(out, out2.float(), atol=0.1, rtol=0)
+        self.assertEqual(input.grad, input2.grad.float(), atol=0.1, rtol=0)
+
     @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
@@ -520,8 +510,9 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest("10GB", device="cuda")
+    @largeTensorTest("10GB", device="xpu")
     def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
         height = 32769
         width = 65536
@@ -569,6 +560,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @dtypesIfXPU(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_adaptive_pooling_empty_output_size(self, dtype, device):
         error_msg = (
             "Expected grad_output to have non-zero size for non-batch dimensions"
@@ -838,8 +830,9 @@ class TestPoolingNNDeviceType(NNTestCase):
     def test_MaxUnpool_index_errors(
         self, device, module_name, module_size, output_size, test_index, should_error
     ):
-        # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
-        if torch.device(device).type == "cuda":
+        # NOTE: CUDA/XPU tests need to be run in a subprocess because they cause device asserts
+        device_type = torch.device(device).type
+        if device_type in ("cuda", "xpu"):
             error_msgs = {
                 "MaxUnpool2d": r"Assertion `maxind >= 0 && maxind < outputImageSize` failed",
                 "MaxUnpool3d": r"Assertion `index >= 0 && index < outputImageSize` failed",
@@ -852,7 +845,7 @@ output = torch.rand({output_size}, dtype=torch.float32, device='{device}')
 indices = torch.zeros({output_size}, dtype=torch.int64, device='{device}')
 indices.flatten()[0] = {test_index}
 unpool(output, indices)
-torch.cuda.synchronize()
+torch.{device_type}.synchronize()
 """
             p = subprocess.run(
                 [sys.executable, "-c", script],
@@ -866,14 +859,14 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                # CUDA shows assertion message
+                # CUDA/XPU shows assertion message
                 # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
-                has_cuda_assert = error_msg in output
+                has_device_assert = error_msg in output
                 has_hip_error = (
                     "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
                 )
                 self.assertTrue(
-                    has_cuda_assert or has_hip_error,
+                    has_device_assert or has_hip_error,
                     lambda msg: f"{msg}\nExpected device assert error, got: {output[-500:]}",
                 )
             else:
@@ -890,7 +883,7 @@ torch.cuda.synchronize()
                     RuntimeError, r"Found an invalid max index:"
                 ):
                     unpool(output, indices)
-                    if torch.device(device).type == "mps":
+                    if device_type == "mps":
                         torch.mps.synchronize()
             else:
                 unpool(output, indices)
@@ -1106,6 +1099,7 @@ torch.cuda.synchronize()
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(
             n,
@@ -1176,6 +1170,7 @@ torch.cuda.synchronize()
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypesIfMPS(torch.float)
     def test_avg_pool3d_nhwc(self, device, dtype):
         def helper(
@@ -1374,6 +1369,7 @@ torch.cuda.synchronize()
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
@@ -1449,6 +1445,7 @@ torch.cuda.synchronize()
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, h, w, d, kernel_size, stride=None):
@@ -1900,37 +1897,44 @@ torch.cuda.synchronize()
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @expectedFailureMPS
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @expectedFailureMPS
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
@@ -1968,6 +1972,7 @@ torch.cuda.synchronize()
             self.assertEqual(indices_no_batch, indicies_single_batch.squeeze(0))
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @expectedFailureMPS  # Exception not raise
     @expectedFailureXLA
@@ -2130,6 +2135,7 @@ torch.cuda.synchronize()
 
     @expectedFailureMPS  # Not implemented
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @expectedFailureXLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
@@ -2180,6 +2186,7 @@ torch.cuda.synchronize()
                 )
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ("max", "avg"):
@@ -2213,6 +2220,7 @@ torch.cuda.synchronize()
         helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ("max", "avg"):
@@ -2299,8 +2307,10 @@ torch.cuda.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestAvgPoolDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":
