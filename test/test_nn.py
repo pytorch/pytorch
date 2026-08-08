@@ -6487,6 +6487,50 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
+    def test_convert_sync_batchnorm_warns_on_lossy_conversion(self):
+        # convert_sync_batchnorm rebuilds anything that is not a stock eager BN
+        # as a bare SyncBatchNorm. Attributes, parameters, buffers and children
+        # survive the rebuild but the type does not, so an overridden forward or
+        # the lazy initialization hooks are lost silently (gh-187298).
+        class BatchNormAct2d(nn.BatchNorm2d):
+            def __init__(self, num_features):
+                super().__init__(num_features)
+                self.act = nn.ReLU()
+
+            def forward(self, x):
+                return self.act(super().forward(x))
+
+        with self.assertWarnsRegex(UserWarning, "BatchNormAct2d"):
+            torch.nn.SyncBatchNorm.convert_sync_batchnorm(BatchNormAct2d(4))
+
+        # An uninitialized lazy BN keeps _BatchNorm.forward and has no children,
+        # yet converting it yields a SyncBatchNorm with num_features=0 and
+        # uninitialized parameters, so it must warn too.
+        for lazy in (nn.LazyBatchNorm1d(), nn.LazyBatchNorm2d(), nn.LazyBatchNorm3d()):
+            with self.assertWarnsRegex(UserWarning, type(lazy).__name__):
+                torch.nn.SyncBatchNorm.convert_sync_batchnorm(lazy)
+
+        # Once a lazy BN has initialized it is exactly a stock BatchNorm*d and
+        # converts faithfully, like the stock classes themselves.
+        initialized_lazy = nn.LazyBatchNorm2d()
+        initialized_lazy(torch.randn(2, 4, 3, 3))
+        for stock in (nn.BatchNorm1d(4), nn.BatchNorm2d(4), nn.BatchNorm3d(4),
+                      nn.SyncBatchNorm(4), initialized_lazy):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                torch.nn.SyncBatchNorm.convert_sync_batchnorm(stock)
+
+        # Nested lossy layers warn once from the top-level call, naming every
+        # offending type, and the warning is attributed to the caller rather
+        # than to the recursive conversion inside batchnorm.py.
+        model = nn.Sequential(BatchNormAct2d(4), nn.BatchNorm2d(4), nn.LazyBatchNorm2d())
+        with warnings.catch_warnings(record=True) as warns:
+            warnings.simplefilter("always")
+            torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        self.assertEqual(len(warns), 1)
+        self.assertIn("BatchNormAct2d, LazyBatchNorm2d", str(warns[0].message))
+        self.assertEqual(warns[0].filename, __file__)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sync_batchnorm_backward_elemt(self):
         device = 'cuda'
