@@ -115,6 +115,52 @@ REGISTER_UNARY_OP(hardswish, float, float);
 REGISTER_UNARY_OP(hardswish, half, half);
 REGISTER_UNARY_OP(hardswish, bfloat, bfloat);
 
+// prelu: self and (channel-reshaped, broadcast) weight -> self > 0 ? self :
+// weight * self. weight arrives already reshaped to [1, C, 1, ...] by the
+// composite prelu, so its stride is {0, elem, 0, ...} -- the layout
+// binary_inner_strided serves.
+struct prelu_functor {
+  template <typename T>
+  inline T operator()(const T self, const T weight) {
+    return self > T(0) ? self : static_cast<T>(float(weight) * float(self));
+  }
+};
+
+// prelu backward, grad_input: self > 0 ? grad_output : weight * grad_output.
+struct prelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self, const T weight) {
+    return self > T(0) ? grad_output
+                       : static_cast<T>(float(weight) * float(grad_output));
+  }
+};
+
+// prelu backward, per-element weight grad: self > 0 ? 0 : self * grad_output.
+// The framework reduces this to the weight shape.
+struct prelu_weight_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    return self > T(0) ? T(0)
+                       : static_cast<T>(float(self) * float(grad_output));
+  }
+};
+
+REGISTER_BINARY_OP(prelu, float, float);
+REGISTER_BINARY_OP(prelu, half, half);
+REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+// Opt-in binary_inner_strided for the {0, C, 0, ...} weight-broadcast layout.
+REGISTER_BINARY_INNER_STRIDED_OP(prelu, float, float);
+REGISTER_BINARY_INNER_STRIDED_OP(prelu, half, half);
+REGISTER_BINARY_INNER_STRIDED_OP(prelu, bfloat, bfloat);
+
+REGISTER_TERNARY_OP(prelu_backward, float, float);
+REGISTER_TERNARY_OP(prelu_backward, half, half);
+REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
+
+REGISTER_BINARY_OP(prelu_weight_backward, float, float);
+REGISTER_BINARY_OP(prelu_weight_backward, half, half);
+REGISTER_BINARY_OP(prelu_weight_backward, bfloat, bfloat);
+
 REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
