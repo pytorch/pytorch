@@ -492,7 +492,11 @@ ROCM_UNARY_NUMERICAL_XFAILS = {
         "tanh": {fp32},
     },
     "inductor_numerics": {
-        "log10": {fp16, fp32},
+        **(
+            {}
+            if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
+            else {"log10": {fp16, fp32}}
+        ),
         "sigmoid": {fp32},
     },
 }
@@ -565,6 +569,11 @@ ROCM_RELAXED_PROPERTY_CASES = {
             "cos": {fp32},
             "exp": {fp32},
             "log1p": {fp16, fp32},
+            **(
+                {"log10": {fp16, fp32}}
+                if TEST_WITH_ROCM and getRocmVersion() >= (7, 14)
+                else {}
+            ),
         },
         "inductor_numerics": {
             "rsqrt": {bf16},
