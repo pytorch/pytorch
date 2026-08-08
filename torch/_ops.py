@@ -1248,6 +1248,9 @@ class OpOverloadPacket(Generic[_P, _T]):
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
         self.__name__ = op_name
+        # Without this, __getattr__ would forward __qualname__ to the pybind11
+        # function self._op, which has an unreadable internal qualname.
+        self.__qualname__ = op_name
         self._op = op
         self._overload_names = overload_names
         self._dir: list[str] = []
