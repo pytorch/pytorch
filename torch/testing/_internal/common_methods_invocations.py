@@ -17500,10 +17500,14 @@ op_db: list[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9},
-                                                    {'threshold': float.fromhex('0x1.3ap-3'),
-                                                    'value': -9}),
+        # Use a non-negative fill for unsigned dtypes: NumPy >= 2.5 deliberately
+        # stopped truncating out-of-range Python ints in np.where (the reference
+        # path), so value=-9 against uint8 raises OverflowError. Keep -9 for the
+        # signed/float dtypes to retain negative-value coverage.
+        sample_kwargs=lambda device, dtype, input: (lambda value: (
+            {'threshold': float.fromhex('0x1.3ap-3'), 'value': value},
+            {'threshold': float.fromhex('0x1.3ap-3'), 'value': value},
+        ))(9 if dtype == torch.uint8 else -9),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
