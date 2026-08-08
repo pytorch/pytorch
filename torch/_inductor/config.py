@@ -3139,16 +3139,18 @@ class eager_numerics:
 
     disable_ftz: bool = False
 
-    # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    # Triton bundles its own libdevice.10.bc which may use different polynomial
-    # approximations than the installed CUDA toolkit, causing ~1 ULP differences
-    # in transcendental functions such as pow and erf.  The erf difference is
-    # particularly visible in explicit GELU kernels
-    # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
-    # can flip the result of a subsequent ceil(log2(...)) and produce a
-    # different uint8 encoded value (see gh-178045).
-    # This can be enabled directly; Inductor also enables it while
-    # emulate_precision_casts is active.
+    # Require CUDA toolkit libdevice behavior for eager-like numerics.
+    # Inductor prefers the CUDA toolkit's libdevice over Triton's bundled
+    # libdevice by default when the toolkit file is discoverable.  This flag
+    # still controls numerics-sensitive libdevice routing and requests a warning
+    # if the toolkit libdevice cannot be found.  Triton's bundled libdevice.10.bc
+    # may use different polynomial approximations than the installed CUDA
+    # toolkit, causing ~1 ULP differences in transcendental functions such as
+    # pow and erf.  The erf difference is particularly visible in explicit GELU
+    # kernels (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf
+    # output can flip the result of a subsequent ceil(log2(...)) and produce a
+    # different uint8 encoded value (see gh-178045).  Inductor also enables this
+    # while emulate_precision_casts is active.
     use_pytorch_libdevice: bool = False
 
 
