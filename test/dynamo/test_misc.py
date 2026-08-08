@@ -15159,7 +15159,7 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_getattro_impl = InspectVariable.getattro_impl
+        original_getattro_impl = InspectVariable.tp_getattro_impl
 
         def tracking_getattro_impl(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
@@ -15177,7 +15177,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
+        with patch.object(InspectVariable, "tp_getattro_impl", tracking_getattro_impl):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 
