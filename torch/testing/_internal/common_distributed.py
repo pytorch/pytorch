@@ -558,12 +558,11 @@ def requires_accelerator_dist_backend(backends=None):
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
 
+    # Use the is_<backend>_available() naming convention via reflection so
+    # that any registered accelerator backend is discovered automatically,
+    # without hardcoding a device-to-backend mapping here.
     backend_available = any(
-        {
-            "nccl": c10d.is_nccl_available,
-            "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
-        }.get(backend, lambda: False)()
+        getattr(c10d, f"is_{backend}_available", lambda: False)()
         for backend in backends
     )
 
@@ -1303,14 +1302,7 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        return c10d.get_default_backend_for_device(device)
 
     def create_pg(self, device, world_size=None):
         if world_size is None:
@@ -1323,7 +1315,7 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if self.backend(device) != "gloo":
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type

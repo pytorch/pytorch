@@ -34,6 +34,8 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
@@ -71,6 +73,9 @@ elif TEST_XPU:
     DEVICE = "xpu"
 elif TEST_CUDA:
     devices.append("cuda")
+elif TEST_PRIVATEUSE1:
+    devices.append(TEST_PRIVATEUSE1_DEVICE_TYPE)
+    DEVICE = TEST_PRIVATEUSE1_DEVICE_TYPE
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -520,6 +525,10 @@ if TEST_HPU:
     BACKEND = dist.Backend.HCCL
 elif TEST_XPU:
     BACKEND = dist.Backend.XCCL
+elif TEST_PRIVATEUSE1:
+    BACKEND = dist.Backend.default_device_backend_map.get(
+        TEST_PRIVATEUSE1_DEVICE_TYPE, dist.Backend.GLOO
+    )
 
 
 # allows you to check for multiple accelerator irrespective of device type
@@ -538,7 +547,7 @@ def with_comms(func=None):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         if (
-            BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
+            BACKEND != dist.Backend.GLOO
         ) and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
@@ -617,7 +626,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         self.assertEqual(y, expected)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -643,7 +652,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
