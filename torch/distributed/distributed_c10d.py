@@ -2664,7 +2664,7 @@ def _new_process_group_helper(
 
     if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
