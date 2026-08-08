@@ -23,7 +23,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu
+    TEST_WITH_ROCM, decorateIf, skipIfXpu, TEST_NUMPY
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -1004,7 +1004,46 @@ class TestAssertClose(TestCase):
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
 
+    def test_tensor_vs_scalar(self):
+        # CPU tensor vs Python scalar
+        torch.testing.assert_close(torch.ones(()), 1, check_dtype=False)
+        torch.testing.assert_close(torch.tensor(1, dtype=torch.int64), 1)
+        torch.testing.assert_close(torch.ones(()), 1.0, check_dtype=False)
 
+        # NumPy scalar vs Tensor
+        if TEST_NUMPY:
+            import numpy as np
+            torch.testing.assert_close(torch.ones(()), np.float64(1.0), check_dtype=False)
+            torch.testing.assert_close(torch.tensor(1.0, dtype=torch.float64), np.float64(1.0))
+
+            # 0-d numpy.ndarray vs Tensor (eager and compiled)
+            torch.testing.assert_close(torch.ones(()), np.array(1.0), check_dtype=False)
+            torch.testing.assert_close(torch.tensor(1.0, dtype=torch.float64), np.array(1.0))
+
+            @torch.compile(backend="aot_eager")
+            def compiled_assert_close(x, y):
+                torch.testing.assert_close(x, y, check_dtype=False)
+
+            compiled_assert_close(torch.ones(()), np.array(1.0))
+
+            # Non-scalar numpy.ndarray (1-d or 2-d) still raises TypeError
+            with self.assertRaises(TypeError):
+                torch.testing.assert_close(torch.ones(2), np.array([1.0, 1.0]))
+            with self.assertRaises(TypeError):
+                torch.testing.assert_close(torch.ones((2, 2)), np.array([[1.0, 1.0], [1.0, 1.0]]))
+
+        # CUDA tensor vs Python scalar (if CUDA is available)
+        if torch.cuda.is_available():
+            torch.testing.assert_close(torch.ones((), device="cuda"), 1, check_dtype=False)
+            torch.testing.assert_close(torch.ones((), device="cuda"), 1.0, check_dtype=False)
+
+        # Ensure unsupported types (e.g., list, numpy.ndarray) still raise the expected TypeError.
+        with self.assertRaises(TypeError):
+            torch.testing.assert_close(torch.arange(3), [0, 1, 2])
+        if TEST_NUMPY:
+            import numpy as np
+            with self.assertRaises(TypeError):
+                torch.testing.assert_close(torch.ones(2), np.ones(2))
 
 
 class TestAssertCloseMultiDevice(TestCase):
