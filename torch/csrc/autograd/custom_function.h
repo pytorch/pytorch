@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/ops/alias.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -532,7 +531,7 @@ auto Function<T>::apply(Args&&... args)
   };
 
   auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
-    return at::alias(x);
+    return x.alias();
   };
 
   c10::intrusive_ptr<Node> attached_node;

@@ -285,8 +285,8 @@ static at::Tensor _view_as_self_with_no_grad(
   // ignored.
   at::AutoFwGradMode fw_grad_mode(false);
   AutoGradMode grad_mode(false);
-  // We thread through this view_as_self_fn lambda so Python custom functions can
-  // retain the Python view_as path when torch function logic must trigger.
+  // We thread through this view_as_self_fn lambda so Python custom functions
+  // can retain the Python view_as path when torch function logic must trigger.
   return view_as_self_fn(self);
 }
 

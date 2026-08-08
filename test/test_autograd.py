@@ -342,7 +342,7 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.0))
 
-        v = torch.zeros((3, 1)).permute(1, 0)
+        v = torch.empty_strided((1, 3), (1, 1)).zero_()
         result = MyFunction.apply(v)
         self.assertEqual(result.stride(), v.stride())
 

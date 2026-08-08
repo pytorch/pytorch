@@ -529,12 +529,13 @@ TEST(CustomAutogradTest, FunctionReturnsInputPreservesStrides) {
     }
 
     static variable_list backward(
-        AutogradContext*, variable_list grad_outputs) {
+        AutogradContext*,
+        variable_list grad_outputs) {
       return {grad_outputs[0] * 2};
     }
   };
 
-  auto input = torch::zeros({3, 1}).permute({1, 0});
+  auto input = torch::empty_strided({1, 3}, {1, 1}).zero_();
   auto output = MyFunction::apply(input);
   EXPECT_EQ(output.strides(), input.strides());
 

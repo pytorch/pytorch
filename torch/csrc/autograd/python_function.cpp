@@ -4,7 +4,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
-#include <ATen/ops/alias.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
@@ -798,7 +797,7 @@ static void _wrap_outputs(
     if (!py_x)
       throw_python_error();
     if (!torch::has_torch_function(py_x.get())) {
-      return at::alias(x);
+      return x.alias();
     }
     THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
     if (!py_view_as_method)
