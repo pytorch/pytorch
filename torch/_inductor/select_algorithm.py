@@ -56,6 +56,8 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
+    ArgName,
+    ConstexprArg,
     CSEVariable,
     IndentedBuffer,
     KernelTemplate,
@@ -894,12 +896,27 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def extra_signature_constexprs(self) -> list[str]:
+        """Meta keys to promote to signature ``tl.constexpr`` params.
+
+        Empty by default, so templates render exactly as before. A backend that
+        autotunes template parameters (e.g. tile sizes) can override this to move
+        those names out of the body defines and into the kernel signature, which
+        makes each value a distinct compiled specialization that a launcher-level
+        autotuner can select between. Overriders are expected to strip the same
+        names from :meth:`gen_defines` so they are not declared twice.
+        """
+        return []
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
+        for _name in self.extra_signature_constexprs():
+            argdefs.append(ArgName(_name, is_constexpr=True))
+            signature.append(ConstexprArg(_name))
         triton_meta: TritonMeta = {
             "signature": signature_to_meta(
                 signature,
@@ -1054,6 +1071,8 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
+            for _name in self.extra_signature_constexprs():
+                arg_defs.append(ArgName(_name, is_constexpr=True))
             code = IndentedBuffer()
             code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
@@ -1061,7 +1080,10 @@ class TritonTemplateKernel(TritonKernel):
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
             )
             with code.indent():
-                code.splice(self.defines)
+                # via gen_defines() so a subclass can filter the body defines --
+                # e.g. drop names promoted to signature constexprs by
+                # extra_signature_constexprs(). Base impl returns self.defines.
+                code.splice(self.gen_defines())
                 code.splice(renames.getvalue())
                 self.codegen_prologue(code)
             return code.getvalue()
