@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstring>
 
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
@@ -128,10 +129,27 @@ static const std::initializer_list<PyGetSetDef> THPDtype_properties = {
      nullptr},
     {nullptr}};
 
+static PyObject* THPDtype_enter(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  py::module::import("torch.utils._dtype").attr("_enter_dtype")(py::handle(self));
+  Py_INCREF(self);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPDtype_exit(PyObject* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  py::module::import("torch.utils._dtype").attr("_exit_dtype")();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static const std::initializer_list<PyMethodDef> THPDtype_methods = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
     {"to_real", THPDtype_to_real, METH_NOARGS, nullptr},
     {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
+    {"__enter__", THPDtype_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPDtype_exit, METH_VARARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 

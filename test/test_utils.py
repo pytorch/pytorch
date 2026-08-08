@@ -850,6 +850,39 @@ class TestRenderUtils(TestCase):
         )
 
 
+class TestDtypeContextManager(TestCase):
+    def test_basic(self):
+        orig = torch.get_default_dtype()
+        with torch.float64 as dt:
+            self.assertIs(torch.get_default_dtype(), torch.float64)
+            x = torch.empty(3, 3)
+            self.assertEqual(x.dtype, torch.float64)
+            self.assertIs(dt, torch.float64)
+        self.assertIs(torch.get_default_dtype(), orig)
+
+    def test_nested(self):
+        orig = torch.get_default_dtype()
+        with torch.float64:
+            with torch.float16:
+                self.assertIs(torch.get_default_dtype(), torch.float16)
+            self.assertIs(torch.get_default_dtype(), torch.float64)
+        self.assertIs(torch.get_default_dtype(), orig)
+
+    def test_exception_restores(self):
+        orig = torch.get_default_dtype()
+        try:
+            with torch.float64:
+                raise ValueError("test")
+        except ValueError:
+            pass
+        self.assertIs(torch.get_default_dtype(), orig)
+
+    def test_nn_module(self):
+        with torch.float64:
+            m = torch.nn.Linear(10, 20)
+        self.assertEqual(m.weight.dtype, torch.float64)
+
+
 class TestDeviceUtils(TestCase):
     def test_basic(self):
         with torch.device("meta") as dev:
