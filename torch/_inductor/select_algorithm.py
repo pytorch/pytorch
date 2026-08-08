@@ -5386,14 +5386,42 @@ class AlgorithmSelectorCache(PersistentCache):
         hint_override: int | None = None,
         is_collective=False,
     ) -> dict[ChoiceCaller, float]:
-        inputs = cls.get_inputs(
-            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
-        )
+        try:
+            inputs = cls.get_inputs(
+                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            )
+        except torch.OutOfMemoryError:
+            # The example tensors are shared across all choices, so OOMing here
+            # dooms autotuning entirely. Fall back to the extern/ATen choice
+            # (always correct, no benchmarking needed) instead of failing compile.
+            return cls._autotune_oom_fallback(choices)
         return cls.benchmark_choices(
             choices,
             inputs,
             is_collective=is_collective,
         )
+
+    @classmethod
+    def _autotune_oom_fallback(
+        cls, choices: Sequence[ChoiceCaller]
+    ) -> dict[ChoiceCaller, float]:
+        fallback = next(
+            (choice for choice in choices if cls._is_extern(choice)),
+            None,
+        )
+        if fallback is None:
+            raise torch.OutOfMemoryError(
+                "Autotuning ran out of memory allocating benchmark inputs and no "
+                "ATen fallback choice was available to skip benchmarking."
+            )
+        log.warning(
+            "CUDA OOM while allocating autotuning inputs; skipping benchmarking "
+            "and falling back to %s.",
+            getattr(fallback, "name", fallback),
+        )
+        timings = {choice: float("inf") for choice in choices}
+        timings[fallback] = 0.0
+        return timings
 
     @classmethod
     def benchmark_in_sub_process(
