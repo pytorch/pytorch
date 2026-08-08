@@ -116,8 +116,13 @@ class Stream(torch._C._CudaStreamBase):
             return super().__eq__(o)
         return False
 
-    def __hash__(self):
-        return hash((self.cuda_stream, self.device))
+    # Since ``__eq__`` is defined above, ``__hash__`` must be set explicitly.
+    # Reuse the base ``torch.Stream`` hash -- a C-level
+    # ``hash_combine`` over ``stream_id``/``device_index``/``device_type`` --
+    # instead of ``hash((self.cuda_stream, self.device))``, which would allocate
+    # a ``torch.device`` (and read the ``cuda_stream`` handle) on every call.
+    # It stays consistent with ``__eq__``, which compares those same fields.
+    __hash__ = torch.Stream.__hash__
 
     def __repr__(self):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
