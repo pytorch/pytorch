@@ -15,11 +15,11 @@ from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
 
 
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1, device=None):
@@ -321,6 +321,8 @@ class CondModels:
 
 
 class CondTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_test(
         self,
         model,
@@ -363,7 +365,6 @@ class CondTests(TestCase):
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_simple_control_flow(self, device, dynamic):
@@ -378,7 +379,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     def test_cond_subgraph_output_stride_padding(self):
         self._run_test(
             model=CondModels.StridePadding(),
@@ -387,7 +387,6 @@ class CondTests(TestCase):
             device=GPU_TYPE,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_simple_with_int_closure(self, device):
         self._run_test(
@@ -399,7 +398,6 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -415,7 +413,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
             def __init__(
@@ -451,7 +448,6 @@ class CondTests(TestCase):
         opt_out2 = opt_model(x2, 30)
         self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_nested_control_flow(self, device, dynamic):
@@ -468,7 +464,6 @@ class CondTests(TestCase):
             num_predicates=3,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_outer_code_before_after(self, device, dynamic):
@@ -483,7 +478,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_multiple_outputs(self, device, dynamic):
@@ -499,7 +493,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_advanced_dynamic_shapes(self, device):
         # subgraphs input shapes include symbolic expressions
@@ -527,7 +520,6 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_unbacked_symint_outer_to_inner(self, device):
         class Model(torch.nn.Module):
@@ -555,7 +547,6 @@ class CondTests(TestCase):
                 dynamic=True,
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @torch._inductor.config.patch(size_asserts=False)
     # TODO: graph partition does not support creating tensor
@@ -590,7 +581,6 @@ class CondTests(TestCase):
                 dynamic=True,
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_unbacked_symint_inner_to_outer(self, device):
         class Model(torch.nn.Module):
@@ -622,7 +612,6 @@ class CondTests(TestCase):
                 dynamic=True,
             )
 
-    @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
@@ -636,7 +625,6 @@ class CondTests(TestCase):
             dynamic=False,
         )
 
-    @requires_gpu
     def test_cond_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
         self._run_test(
@@ -649,7 +637,6 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_subgraphs_with_parameters(self, device, dynamic):
@@ -661,7 +648,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_branch_tensor_constant(self, device):
         # branch references a tensor constant only used inside the subgraph
@@ -671,7 +657,6 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, device, dynamic):
@@ -689,7 +674,6 @@ class CondTests(TestCase):
                 num_predicates=0,
             )
 
-    @requires_gpu
     def test_cond_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
@@ -712,7 +696,6 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph(self, device):
         class Model(torch.nn.Module):
@@ -733,7 +716,6 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph_recursive(self, device):
         def inner_fn1(x):
@@ -760,7 +742,6 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_gpu
     def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
@@ -805,7 +786,6 @@ class CondTests(TestCase):
         self.assertEqual(counters["pre_grad"], 11)
         self.assertEqual(counters["post_grad"], 11)
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_cond_mismatched_branch_output_size(self, device, dynamic):
@@ -820,7 +800,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_cond_mismatched_branch_output_size_inner_dim(self, device, dynamic):
@@ -836,7 +815,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_cond_functional_call(self, device, dynamic):
@@ -847,7 +825,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -859,7 +836,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     def test_output_on_different_device(self):
         class FactoryBranches(torch.nn.Module):
             def forward(self, pred):
@@ -879,7 +855,6 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_buffer_reuse_with_large_subgraph(self, device):
         # Regression test: torch.cond subgraph with more buffers than main
@@ -1266,273 +1241,123 @@ class WhileLoopModels:
             return result.sum()
 
 
-class WhileLoopTests(TestCase):
-    def _run_test(
-        self, model, inputs, device, dynamic=False, num_counters=1, autograd=False
-    ):
-        import torch.utils._pytree as pytree
+def whileloop_run_test(
+    model, inputs, device, dynamic=False, num_counters=1, autograd=False
+):
+    import torch.utils._pytree as pytree
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        import copy
+    cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+    import copy
 
-        if not autograd:
-            for p in model.parameters():
-                p.requires_grad_(False)
+    if not autograd:
+        for p in model.parameters():
+            p.requires_grad_(False)
 
-        compiled_model = copy.deepcopy(model)
-        compiled_fn = torch.compile(backend=cnt, fullgraph=True)(compiled_model)
+    compiled_model = copy.deepcopy(model)
+    compiled_fn = torch.compile(backend=cnt, fullgraph=True)(compiled_model)
 
-        inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
-        input_sets = [inputs]
+    inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
+    input_sets = [inputs]
 
-        def mark_first_dim_dyn(inp):
-            torch._dynamo.mark_dynamic(inp, 0)
+    def mark_first_dim_dyn(inp):
+        torch._dynamo.mark_dynamic(inp, 0)
 
-        if dynamic:
+    if dynamic:
 
-            def tile_fn(inp):
-                # tile every first dim 5x
-                tiling = [5] + [1] * (inp.ndim - 1)
-                t = torch.tile(inp, tiling)
-                return t
+        def tile_fn(inp):
+            # tile every first dim 5x
+            tiling = [5] + [1] * (inp.ndim - 1)
+            t = torch.tile(inp, tiling)
+            return t
 
-            larger_inputs = pytree.tree_map(tile_fn, inputs)
-            input_sets.append(larger_inputs)
+        larger_inputs = pytree.tree_map(tile_fn, inputs)
+        input_sets.append(larger_inputs)
 
-        for inputs in input_sets:
-            flat_inputs, inp_spec = pytree.tree_flatten(inputs)
-            for flat_inputs_with_counters in prepend_counters(
-                flat_inputs, num_counters
+    for inputs in input_sets:
+        flat_inputs, inp_spec = pytree.tree_flatten(inputs)
+        for flat_inputs_with_counters in prepend_counters(
+            flat_inputs, num_counters
+        ):
+            counters, flat = (
+                flat_inputs_with_counters[:num_counters],
+                flat_inputs_with_counters[num_counters:],
+            )
+            unflat_inputs = pytree.tree_unflatten(flat, inp_spec)
+            inputs_with_counters = counters + unflat_inputs
+
+            def process_inputs(inp):
+                inp = inp.clone()
+                if dynamic:
+                    mark_first_dim_dyn(inp)
+
+                if autograd and inp.dtype.is_floating_point:
+                    inp.requires_grad_(True)
+                return inp
+
+            cloned_inputs = pytree.tree_map(process_inputs, inputs_with_counters)
+            cloned_inputs2 = pytree.tree_map(process_inputs, inputs_with_counters)
+
+            result = model(*cloned_inputs)
+            result_compiled = compiled_fn(*cloned_inputs2)
+            # inputs must not be mutated
+            torch.testing.assert_close(cloned_inputs, inputs_with_counters)
+            torch.testing.assert_close(
+                result, result_compiled, atol=1e-4, rtol=1e-4
+            )
+
+            if autograd and any(
+                pytree.tree_map_only(
+                    torch.Tensor, lambda t: t.requires_grad, cloned_inputs
+                )
             ):
-                counters, flat = (
-                    flat_inputs_with_counters[:num_counters],
-                    flat_inputs_with_counters[num_counters:],
+                result_loss = loss_fn(pytree.tree_flatten(result)[0])
+                compiled_loss = loss_fn(pytree.tree_flatten(result_compiled)[0])
+                self.assertTrue(
+                    not torch.isnan(result_loss) and not torch.isinf(compiled_loss)
                 )
-                unflat_inputs = pytree.tree_unflatten(flat, inp_spec)
-                inputs_with_counters = counters + unflat_inputs
-
-                def process_inputs(inp):
-                    inp = inp.clone()
-                    if dynamic:
-                        mark_first_dim_dyn(inp)
-
-                    if autograd and inp.dtype.is_floating_point:
-                        inp.requires_grad_(True)
-                    return inp
-
-                cloned_inputs = pytree.tree_map(process_inputs, inputs_with_counters)
-                cloned_inputs2 = pytree.tree_map(process_inputs, inputs_with_counters)
-
-                result = model(*cloned_inputs)
-                result_compiled = compiled_fn(*cloned_inputs2)
-                # inputs must not be mutated
-                torch.testing.assert_close(cloned_inputs, inputs_with_counters)
-                torch.testing.assert_close(
-                    result, result_compiled, atol=1e-4, rtol=1e-4
+                self.assertTrue(
+                    not torch.isnan(compiled_loss)
+                    and not torch.isinf(compiled_loss)
                 )
 
-                if autograd and any(
-                    pytree.tree_map_only(
-                        torch.Tensor, lambda t: t.requires_grad, cloned_inputs
+                self.assertEqual(result_loss, compiled_loss)
+
+                result_loss.backward()
+                compiled_loss.backward()
+
+                model_parameters = dict(model.named_parameters())
+                compiled_parameters = dict(compiled_model.named_parameters())
+                for name, param in model_parameters.items():
+                    self.assertEqual(param, compiled_parameters[name])
+                    self.assertEqual(
+                        param.grad,
+                        compiled_parameters[name].grad,
+                        atol=1e-4,
+                        rtol=1e-4,
                     )
+
+                for inp1, inp2 in zip(
+                    pytree.tree_flatten(cloned_inputs)[0],
+                    pytree.tree_flatten(cloned_inputs2)[0],
                 ):
-                    result_loss = loss_fn(pytree.tree_flatten(result)[0])
-                    compiled_loss = loss_fn(pytree.tree_flatten(result_compiled)[0])
-                    self.assertTrue(
-                        not torch.isnan(result_loss) and not torch.isinf(compiled_loss)
-                    )
-                    self.assertTrue(
-                        not torch.isnan(compiled_loss)
-                        and not torch.isinf(compiled_loss)
-                    )
-
-                    self.assertEqual(result_loss, compiled_loss)
-
-                    result_loss.backward()
-                    compiled_loss.backward()
-
-                    model_parameters = dict(model.named_parameters())
-                    compiled_parameters = dict(compiled_model.named_parameters())
-                    for name, param in model_parameters.items():
-                        self.assertEqual(param, compiled_parameters[name])
+                    if inp1.requires_grad:
                         self.assertEqual(
-                            param.grad,
-                            compiled_parameters[name].grad,
+                            inp1.grad,
+                            inp2.grad,
                             atol=1e-4,
                             rtol=1e-4,
                         )
 
-                    for inp1, inp2 in zip(
-                        pytree.tree_flatten(cloned_inputs)[0],
-                        pytree.tree_flatten(cloned_inputs2)[0],
-                    ):
-                        if inp1.requires_grad:
-                            self.assertEqual(
-                                inp1.grad,
-                                inp2.grad,
-                                atol=1e-4,
-                                rtol=1e-4,
-                            )
+    self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [False, True])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_simple_control_flow(self, device, dynamic, autograd):
-        # while_loop control flow without nesting
-        self._run_test(
-            model=WhileLoopModels.Simple(),
-            inputs=(
-                torch.randn(10, 20),
-                torch.randn(10, 20),
-            ),
-            device=device,
-            dynamic=dynamic,
-            autograd=autograd,
-        )
+class WhileLoopCpuTests(TestCase):
+    hw_classification = HardwareClassification.CPU
 
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [False, True])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_nested_control_flow(self, device, dynamic, autograd):
-        # while_loop control flow with nesting
-        self._run_test(
-            model=WhileLoopModels.Nested(),
-            inputs=(
-                torch.randn(10, 20),
-                torch.randn(10, 20),
-            ),
-            device=device,
-            dynamic=dynamic,
-            num_counters=2,
-            autograd=autograd,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [False, True])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_outer_code(self, device, dynamic, autograd):
-        # while_loop control flow with outer code
-        self._run_test(
-            model=WhileLoopModels.OuterCode(),
-            inputs=(
-                torch.randn(10, 20),
-                torch.randn(10, 20),
-            ),
-            device=device,
-            dynamic=dynamic,
-            autograd=autograd,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [False, True])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_parameters(self, device, dynamic, autograd):
-        # while_loop control flow with parameters
-        self._run_test(
-            model=WhileLoopModels.Parameters(device),
-            inputs=(torch.randn(10, 20, dtype=torch.float64),),
-            device=device,
-            dynamic=dynamic,
-            autograd=autograd,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    # dynamic=True doesn't work now due to
-    # https://github.com/pytorch/pytorch/issues/123596
-    @parametrize("dynamic", [False])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_outer_buffers(self, device, dynamic, autograd):
-        # while_loop control flow with outer code
-        self._run_test(
-            model=WhileLoopModels.OuterBuffers(),
-            inputs=(
-                torch.randn(10, 20),
-                torch.randn(10, 20),
-            ),
-            device=device,
-            dynamic=dynamic,
-            autograd=autograd,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [True, False])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_pytree_inputs(self, device, dynamic, autograd):
-        self._run_test(
-            model=WhileLoopModels.PytreeCarry(),
-            inputs=(
-                (
-                    [torch.randn(10, 20)],
-                    {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
-                ),
-            ),
-            device=device,
-            dynamic=dynamic,
-            autograd=autograd,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [True, False])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_data_dependent_ops(self, device, dynamic, autograd):
-        with torch._dynamo.config.patch(
-            {
-                "capture_dynamic_output_shape_ops": True,
-            }
-        ):
-            self._run_test(
-                model=WhileLoopModels.DataDependentOpInSubgraph(),
-                inputs=(
-                    torch.tensor([1, 2, 3, 4, 5]),
-                    torch.tensor(
-                        [True, True, True, True, True],
-                    ),
-                ),
-                device=device,
-                dynamic=dynamic,
-                autograd=autograd,
-            )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [True, False])
-    @parametrize("autograd", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_while_loop_with_data_dependent_in_out(self, device, dynamic, autograd):
-        with torch._dynamo.config.patch(
-            {
-                "capture_dynamic_output_shape_ops": True,
-                "capture_scalar_outputs": True,
-            }
-        ):
-            self._run_test(
-                model=WhileLoopModels.DataDependentInOut(),
-                inputs=(
-                    torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
-                    torch.tensor(
-                        [True, True, True, True, True],
-                    ),
-                ),
-                device=device,
-                dynamic=dynamic,
-                autograd=autograd,
-            )
+    def _run_test(
+        self, model, inputs, device, dynamic=False, num_counters=1, autograd=False
+    ):
+        whileloop_run_test(model, inputs, device, dynamic, num_counters, autograd)
 
     @parametrize("dynamic", [True, False])
     def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
@@ -1569,7 +1394,165 @@ class WhileLoopTests(TestCase):
                 dynamic=False,
             )
 
-    @requires_gpu
+
+class WhileLoopTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _run_test(
+        self, model, inputs, device, dynamic=False, num_counters=1, autograd=False
+    ):
+        whileloop_run_test(model, inputs, device, dynamic, num_counters, autograd)
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_simple_control_flow(self, device, dynamic, autograd):
+        # while_loop control flow without nesting
+        self._run_test(
+            model=WhileLoopModels.Simple(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_nested_control_flow(self, device, dynamic, autograd):
+        # while_loop control flow with nesting
+        self._run_test(
+            model=WhileLoopModels.Nested(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+            num_counters=2,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_outer_code(self, device, dynamic, autograd):
+        # while_loop control flow with outer code
+        self._run_test(
+            model=WhileLoopModels.OuterCode(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_parameters(self, device, dynamic, autograd):
+        # while_loop control flow with parameters
+        self._run_test(
+            model=WhileLoopModels.Parameters(device),
+            inputs=(torch.randn(10, 20, dtype=torch.float64),),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work now due to
+    # https://github.com/pytorch/pytorch/issues/123596
+    @parametrize("dynamic", [False])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_outer_buffers(self, device, dynamic, autograd):
+        # while_loop control flow with outer code
+        self._run_test(
+            model=WhileLoopModels.OuterBuffers(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_pytree_inputs(self, device, dynamic, autograd):
+        self._run_test(
+            model=WhileLoopModels.PytreeCarry(),
+            inputs=(
+                (
+                    [torch.randn(10, 20)],
+                    {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
+                ),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_data_dependent_ops(self, device, dynamic, autograd):
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentOpInSubgraph(),
+                inputs=(
+                    torch.tensor([1, 2, 3, 4, 5]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+                autograd=autograd,
+            )
+
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("autograd", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_with_data_dependent_in_out(self, device, dynamic, autograd):
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+                "capture_scalar_outputs": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentInOut(),
+                inputs=(
+                    torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+                autograd=autograd,
+            )
+
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_while_loop_zero_loop(self, device, dynamic):
@@ -1586,7 +1569,6 @@ class WhileLoopTests(TestCase):
                 dynamic=dynamic,
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch(
@@ -1605,7 +1587,6 @@ class WhileLoopTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", [GPU_TYPE])
     def test_while_loop_models_with_mixed_device(self, device):
         self._run_test(
@@ -1634,7 +1615,6 @@ class WhileLoopTests(TestCase):
                 dynamic=True,
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [False, True])
@@ -1653,7 +1633,6 @@ class WhileLoopTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [False, True])
@@ -1667,7 +1646,6 @@ class WhileLoopTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -1679,7 +1657,6 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -1695,7 +1672,8 @@ class WhileLoopTests(TestCase):
 
 
 class AssociativeScanTests(TestCase):
-    @requires_gpu
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("backend", ["inductor"])
     @parametrize("device", [torch.device("cpu"), GPU_TYPE])
@@ -2053,6 +2031,8 @@ class ScanModels:
 
 
 class ScanTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_test(
         self,
         model,
@@ -2125,7 +2105,6 @@ class ScanTests(TestCase):
         model2_out = model2(scan, *cloned_inputs)
         self.assertEqual(model1_out, model2_out)
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
@@ -2146,7 +2125,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
@@ -2171,7 +2149,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
@@ -2194,7 +2171,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
@@ -2227,7 +2203,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
@@ -2250,7 +2225,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2269,7 +2243,6 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -2287,7 +2260,6 @@ class ScanTests(TestCase):
                 device=device,
             )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2372,6 +2344,8 @@ class MapModels:
 
 
 class MapTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_test(
         self,
         model,
@@ -2416,7 +2390,6 @@ class MapTests(TestCase):
                 self.assertEqual(param.grad, model_params[name].grad)
                 self.assertEqual(param.grad, model_compiled_params[name].grad)
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2430,7 +2403,6 @@ class MapTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2444,7 +2416,6 @@ class MapTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2462,7 +2433,6 @@ class MapTests(TestCase):
             autograd=autograd,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("autograd", [True, False])
@@ -2555,6 +2525,8 @@ class SwitchModels:
 
 
 class SwitchTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_test(
         self,
         model,
@@ -2596,7 +2568,6 @@ class SwitchTests(TestCase):
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_switch_simple(self, device, dynamic):
@@ -2607,7 +2578,6 @@ class SwitchTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_switch_multiple_outputs(self, device, dynamic):
@@ -2619,7 +2589,6 @@ class SwitchTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_switch_outer_code_before_after(self, device, dynamic):
@@ -2631,7 +2600,6 @@ class SwitchTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_switch_outer_buffers_captured(self, device, dynamic):
@@ -2643,7 +2611,6 @@ class SwitchTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_switch_nn_module_params(self, device):
         self._run_test(
@@ -2654,6 +2621,7 @@ class SwitchTests(TestCase):
 
 
 instantiate_parametrized_tests(CondTests)
+instantiate_parametrized_tests(WhileLoopCpuTests)
 instantiate_parametrized_tests(WhileLoopTests)
 instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
