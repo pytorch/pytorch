@@ -4,6 +4,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Embedding.h>
+#include <c10/util/safe_conv.h>
 
 #include <fmt/format.h>
 
@@ -66,11 +67,11 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   EmbeddingDenseBackwardParams<uint32_t> params{};
   params.outer_ndim = static_cast<uint32_t>(outer_ndim);
   for (auto d = 0; d < outer_ndim; ++d) {
-    params.outer_sizes[d] = safe_downcast<uint32_t, int64_t>(indices.size(d));
-    params.indices_strides[d] = safe_downcast<uint32_t, int64_t>(indices.stride(d));
-    params.grad_outer_strides[d] = safe_downcast<uint32_t, int64_t>(grad_.stride(d));
+    params.outer_sizes[d] = c10::safe_conv<uint32_t, int64_t>(indices.size(d));
+    params.indices_strides[d] = c10::safe_conv<uint32_t, int64_t>(indices.stride(d));
+    params.grad_outer_strides[d] = c10::safe_conv<uint32_t, int64_t>(grad_.stride(d));
   }
-  params.grad_feature_stride = safe_downcast<uint32_t, int64_t>(grad_.stride(-1));
+  params.grad_feature_stride = c10::safe_conv<uint32_t, int64_t>(grad_.stride(-1));
   params.feature_size = static_cast<uint32_t>(D);
   params.padding_idx = padding_idx;
   params.scale_grad_by_freq = scale_grad_by_freq;

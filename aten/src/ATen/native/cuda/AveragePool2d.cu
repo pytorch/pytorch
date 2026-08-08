@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/safe_conv.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -257,14 +258,14 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
 
-  const int kH = c10::checked_convert<int>(kH_, "int");
-  const int kW = c10::checked_convert<int>(kW_, "int");
+  const int kH = c10::safe_conv<int>(kH_);
+  const int kW = c10::safe_conv<int>(kW_);
 
-  const int dH = c10::checked_convert<int>(dH_, "int");
-  const int dW = c10::checked_convert<int>(dW_, "int");
+  const int dH = c10::safe_conv<int>(dH_);
+  const int dW = c10::safe_conv<int>(dW_);
 
-  const int padH = c10::checked_convert<int>(padH_, "int");
-  const int padW = c10::checked_convert<int>(padW_, "int");
+  const int padH = c10::safe_conv<int>(padH_);
+  const int padW = c10::safe_conv<int>(padW_);
 
   /* sizes */
   const int64_t nInputPlane = input_.size(-3);
@@ -277,7 +278,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   Tensor input = input_.contiguous(memory_format);
 
-  const auto count = c10::checked_convert<int32_t>(output.numel(), "int32_t");
+  const auto count = c10::safe_conv<int32_t>(output.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
@@ -372,15 +373,15 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   checkAllSameGPU("avg_pool2d_backward_out_cuda",
                   {gradInput_arg, gradOutput_arg, input_arg});
 
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1]);
 
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0]);
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1]);
 
-  const int padH = c10::checked_convert<int>(padding[0], "int");
-  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+  const int padH = c10::safe_conv<int>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1]);
 
   const auto memory_format = input_.suggest_memory_format();
   const Tensor input = input_.contiguous(memory_format);

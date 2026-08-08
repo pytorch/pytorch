@@ -708,7 +708,9 @@ class TestPoolingNNDeviceType(NNTestCase):
 
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError, "value cannot be safely converted without overflow"
+        ):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
@@ -941,7 +943,9 @@ torch.cuda.synchronize()
         ).to(device)
         inp = torch.randn(3, 15, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError, "value cannot be safely converted without overflow"
+        ):
             avgpool(inp)
 
     def test_lp_pool_norm_type_zero(self, device):
