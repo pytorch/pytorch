@@ -6482,6 +6482,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue.clear()
         self.prologue_cache.clear()
 
+    def _splice_body_sections(self):
+        self.body.splice(self.indexing_code)
+        self.body.splice(self.loads)
+        self.body.splice(self.compute)
+        self.body.splice(self.stores)
+
+    def _find_range_tree_by_prefix(self, prefix: str):
+        """Find the first range tree with the given prefix."""
+        for tree in self.range_trees:
+            if tree.prefix.startswith(prefix):
+                return tree
+        return None
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -6499,6 +6512,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.compute
             or self.post_loop_combine
             or self.post_loop_store
+            or self.pointwise_indexing_code
+            or self.pointwise_loads
+            or self.pointwise_compute
+            or self.pointwise_stores
         ):
             return
 
@@ -6651,10 +6668,50 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.invalidate(self.outside_loop_vars)
                 tree.cache_clear()
         else:
-            self.body.splice(self.indexing_code)
-            self.body.splice(self.loads)
-            self.body.splice(self.compute)
-            self.body.splice(self.stores)
+            need_pointwise_loop = self.pointwise_loop_numel is not None
+
+            if need_pointwise_loop:
+                r_tree = self._find_range_tree_by_prefix("r")
+
+                if r_tree is not None:
+                    prefix = r_tree.prefix
+                    loop_start = "0"
+                    loop_end = self.index_to_str(self.pointwise_loop_numel)
+                    block_size = f"{prefix.upper()}BLOCK"
+
+                    # Splice reduction operations first (outside loop)
+                    self.body.splice(self.indexing_code)
+                    self.body.splice(self.loads)
+                    self.body.splice(self.compute)
+
+                    # Generate pointwise loop
+                    self.body.writeline(
+                        f"{prefix}base = {self.iteration_ranges_ranges_code(r_tree)}"
+                    )
+                    self.body.writeline(
+                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {block_size}):"
+                    )
+                    with self.body.indent():
+                        self.body.writeline(
+                            f"{r_tree.name} = {prefix}offset + {prefix}base"
+                        )
+                        self.body.writeline(
+                            f"{r_tree.mask_name()} = {r_tree.name} < {loop_end}"
+                        )
+                        # Splice pointwise operations inside loop
+                        self.body.splice(self.pointwise_indexing_code)
+                        self.body.splice(self.pointwise_loads)
+                        self.body.splice(self.pointwise_compute)
+                        self.body.splice(self.pointwise_stores)
+
+                    # Reduction stores go after loop
+                    self.body.splice(self.stores)
+                else:
+                    need_pointwise_loop = False
+
+            if not need_pointwise_loop:
+                self._splice_body_sections()
+
         self.body.splice(self.post_loop_combine)
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store
@@ -6676,6 +6733,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
+        self.pointwise_indexing_code.clear()
+        self.pointwise_loads.clear()
+        self.pointwise_compute.clear()
+        self.pointwise_stores.clear()
+        self.pointwise_loop_numel = None
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         args = []
@@ -7540,7 +7602,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # mix order reduction introduces an extra loop across the x
         # dimension
-        if entry.root.is_loop or (self.mix_order_reduction and entry.prefix == "x"):
+        in_pointwise_context = self.indexing_code is self.pointwise_indexing_code
+
+        if (
+            entry.root.is_loop
+            or (self.mix_order_reduction and entry.prefix == "x")
+            or in_pointwise_context
+        ):
+            # Write to indexing_code for loop entries, mix order reduction x, or when in pointwise context
             self.indexing_code.writeline(line)
         else:
             # lift non-reduction stores outside loop
@@ -7978,6 +8047,7 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     kernel_type: type[Any] = TritonKernel
+    supports_polyhedral: bool = True
     backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
