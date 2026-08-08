@@ -400,6 +400,8 @@ Tensor& soft_margin_loss_out(const Tensor& input,
     const Tensor& target,
     int64_t reduction,
     Tensor& output) {
+  TORCH_CHECK_TYPE(at::isFloatingType(input.scalar_type()),
+      "soft_margin_loss only supports floating point dtypes, but got ", input.scalar_type());
   // compute inplace variant of: output = at::log1p(at::exp(-input * target));
   at::neg_out(output, input).mul_(target).exp_().log1p_();
   if (reduction != Reduction::None) {

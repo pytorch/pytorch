@@ -639,7 +639,7 @@ Tensor cross_entropy_loss_symint(
   Tensor ret;
   if (self.sym_sizes() == target.sym_sizes()) {
     // Assume soft targets when input and target shapes are the same
-    TORCH_CHECK(at::isFloatingType(target.scalar_type()),
+    TORCH_CHECK_TYPE(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
     TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
 

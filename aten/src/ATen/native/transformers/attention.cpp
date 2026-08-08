@@ -946,7 +946,7 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
 
-  TORCH_CHECK(c10::isFloatingType(dtype),
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(dtype),
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
   TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
     "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
