@@ -66,9 +66,19 @@ void sign_kernel_cuda(TensorIteratorBase& iter){
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sign_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return c10::signum(a);
-        });
+        // Compile-time selection: integral types skip NaN checks
+        if constexpr (std::is_integral_v<scalar_t>) {
+            gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+                return c10::signum(a);
+            });
+        } else {
+            gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+                if (c10::isnan(a)) { // Fixed namespace for device code
+                    return a;
+                }
+                return c10::signum(a);
+            });
+        }
     });
   }
 }
