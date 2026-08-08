@@ -1688,6 +1688,10 @@ class TestPatternMatcher(TestCase):
             "keep_addmm_fused_for_half_dtypes": True,
         }
     )
+    @unittest.skipIf(
+        GPU_TYPE == "xpu",
+        "XPU prefers unfuse for half-dtype addmm; CUDA/ROCm keep fused",
+    )
     def test_unfuse_bias_addmm_half_dtypes(self, dtype):
         args = [
             torch.randn(20, device=GPU_TYPE, dtype=dtype),
@@ -1734,12 +1738,9 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(
         GPU_TYPE != "xpu",
-        "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused",
+        "XPU prefers unfuse for half-dtype addmm; CUDA/ROCm keep fused",
     )
-    def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
-        # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
-        # lets the Triton pointwise kernel load the fp32 bias directly,
-        # preserving precision instead of truncating before fused addmm.
+    def test_unfuse_bias_addmm_half_dtypes_xpu(self, dtype):
         bias_fp32 = torch.randn(20, device=GPU_TYPE, dtype=torch.float32)
         args = [
             torch.randn(10, 15, device=GPU_TYPE, dtype=dtype),
@@ -1752,20 +1753,8 @@ class TestPatternMatcher(TestCase):
             return torch.nn.functional.gelu(torch.ops.aten.addmm(bias_half, a, b))
 
         _, (code) = run_and_get_code(fn, bias_fp32, args[0], args[1])
-        # Should be unfused (mm, not addmm) because bias is a narrowing cast
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @inductor_config.patch(
-        {
-            "fx_graph_remote_cache": False,
-            "keep_addmm_fused_for_half_dtypes": True,
-        }
-    )
-    def test_unfuse_bias_addmm_half_dtypes_narrowing_cast_numerics(self, dtype):
-        # Verify that unfusing a narrowing-cast bias produces results whose
-        # RMSE vs fp64 stays within 3x of eager's RMSE (the torchbench
-        # accuracy check threshold for half dtypes).
         torch.manual_seed(42)
 
         class Model(torch.nn.Module):
