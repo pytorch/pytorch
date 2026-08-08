@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
+from torch.testing._internal.common_xpu import TEST_MULTIXPU
 from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -5707,12 +5708,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipUnless(TEST_MULTIGPU or TEST_MULTIXPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self, device):
+        second_device = device.split(":")[0] + ":1"
         make_tensor = functools.partial(
             torch.ones,
             (2, 2, 256, 32),
-            device="cuda:0",
+            device=device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -5721,7 +5723,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device=second_device)
         with self.assertRaisesRegex(
             RuntimeError, "Expect q/k/v and block_mask to be on the same device"
         ):
@@ -6544,26 +6546,28 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             compiled_flex(q, k, v)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipUnless(TEST_MULTIGPU or TEST_MULTIXPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
+        second_device = device.split(":")[0] + ":1"
+
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
                 return flex_attention(q, k, v, block_mask=block_mask)
 
-        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
-        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        q = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
         mask = create_block_mask(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             B=None,
             H=None,
             Q_LEN=256,
             KV_LEN=256,
-            device="cuda:1",
+            device=second_device,
         )
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
-        self.assertEqual(attn_output.device, torch.device("cuda:1"))
+        self.assertEqual(attn_output.device, torch.device(second_device))
 
     @supported_platform
     @skip_on_cpu

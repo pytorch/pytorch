@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import IS_WINDOWS, LazyVal, TEST_XPU
 
 
 XPU_ALREADY_INITIALIZED_ON_IMPORT = torch.xpu.is_initialized()
+TEST_MULTIXPU = TEST_XPU and torch.xpu.device_count() >= 2
 
 
 class XPUCodename(enum.Enum):
