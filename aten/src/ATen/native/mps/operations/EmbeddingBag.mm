@@ -17,7 +17,10 @@
 #include <ATen/ops/_embedding_bag_forward_only_native.h>
 #include <ATen/ops/_embedding_bag_native.h>
 #include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#include <ATen/ops/bincount.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -74,7 +77,11 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   int64_t feature_size = weight.size(1);
 
   auto bag_size = at::empty({num_bags}, indices.options());
-  auto offset2bag = at::empty({indices.size(0)}, indices.options());
+  // With include_last_offset, indices past the terminal offset belong to no
+  // bag; -1 marks them so backward can skip them (the kernel never visits
+  // them, so an uninitialized buffer would leak garbage bag ids).
+  auto offset2bag = include_last_offset ? at::full({indices.size(0)}, -1, indices.options())
+                                        : at::empty({indices.size(0)}, indices.options());
   auto output = at::empty({num_bags, feature_size}, weight.options());
 
   Tensor max_indices;
@@ -106,6 +113,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
   params.num_weights = weight.size(0);
+  params.include_last_offset = include_last_offset;
 
   auto num_threads = output.numel();
   MPSStream* stream = getCurrentMPSStream();
@@ -247,17 +255,29 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
     }
   });
 
+  if (scale_grad_by_freq) {
+    // Match CPU/CUDA: divide each row's gradient by its index's frequency,
+    // counted in integer math so half/bfloat gradients get an exact divisor.
+    auto counts = at::bincount(indices, {}, num_weights).clamp_min_(1).to(output_grad.scalar_type());
+    weight_grad.div_(counts.unsqueeze(1));
+  }
+
   return std::move(weight_grad);
 }
 
 Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                       const Tensor& weight,
-                                                      const Tensor& indices,
-                                                      const Tensor& offsets,
+                                                      const Tensor& indices_,
+                                                      const Tensor& offsets_,
                                                       const Tensor& offset2bag,
                                                       int64_t mode,
                                                       int64_t padding_idx) {
   TORCH_INTERNAL_ASSERT(static_cast<EmbeddingBagMode>(mode) == EmbeddingBagMode::SUM);
+  // The kernel reads indices and offset2bag with one index type, but autograd
+  // saves the original unpromoted indices while offset2bag comes from the
+  // forward pass already promoted, so mixed int32/int64 inputs would misread
+  // offset2bag. Promote the same way the forward (and the CPU impl) does.
+  const Tensor indices = promoteIndicesAndOffsets(indices_, offsets_).first;
   int64_t num_indices = indices.size(0);
   int64_t feature_size = output_grad.size(1);
   auto per_sample_weights_grad = at::zeros({num_indices}, output_grad.options());

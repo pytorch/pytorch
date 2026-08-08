@@ -15,6 +15,7 @@ struct EmbeddingBagParams {
   ::c10::metal::array<idx_type_t, 2> max_indices_strides;
 
   bool use_per_sample_weights;
+  bool include_last_offset;
   idx_type_t per_sample_weights_stride;
 
   idx_type_t num_indices;
