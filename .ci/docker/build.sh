@@ -91,13 +91,6 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
@@ -133,6 +126,14 @@ case "$tag" in
   pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.2.1
     ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.4.0
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -247,12 +248,6 @@ case "$tag" in
     KATEX=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
-    ANACONDA_PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
-    TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10

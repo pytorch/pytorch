@@ -952,6 +952,26 @@ class TestProfiler(TestCase):
                 if not is_int:
                     raise AssertionError("Invalid stacks record")
 
+    def test_export_chrome_trace_escapes_names(self):
+        from torch.autograd.profiler_util import EventList, FunctionEvent
+
+        tricky_name = 'aten::mm C:\\src\\"foo".cpp'
+        evt = FunctionEvent(
+            id=0,
+            name=tricky_name,
+            trace_name=tricky_name,
+            thread=0,
+            start_us=0,
+            end_us=10,
+        )
+        event_list = EventList([evt])
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+        self.assertEqual(trace[0]["name"], tricky_name)
+
     def test_experimental_config_pickle(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", BytesWarning)
@@ -3246,6 +3266,24 @@ class TestExperimentalUtils(TestCase):
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+    def test_function_event_metadata(self):
+        from torch.autograd.profiler_util import FunctionEvent
+
+        extra_meta = {"grid": "[1, 2, 3]"}
+        typed_metadata = {"grid": [1, 2, 3], "new metadata": {"nested": True}}
+        event = FunctionEvent(
+            1,
+            "test",
+            1,
+            0,
+            1,
+            extra_meta=extra_meta,
+            typed_metadata=typed_metadata,
+        )
+
+        self.assertEqual(event.metadata, typed_metadata)
+        self.assertEqual(event.event_metadata.grid, [1, 2, 3])
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/158727",
@@ -4350,6 +4388,65 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 expected_meta,
                 lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
+
+    def test_typed_metadata_matches_chrome_trace(self):
+        # Match events to Chrome trace records by identity (via name, cat, external/correlation id),
+        # then verify every metadata field has the same value in the matching trace record.
+        target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                expose_kineto_event_metadata=True
+            ),
+        ) as prof:
+            x = torch.randn(10, 10, device="cuda")
+            y = torch.mm(x, x)
+            z = x + y
+            z.cpu()
+
+        event_records = {}
+        for event in prof.events():
+            if (
+                event.external_id == 0
+                or event.id == 0
+                or event.activity_type not in target_cats
+            ):
+                continue
+            key = (event.name, event.activity_type, event.external_id, event.id)
+            self.assertNotIn(key, event_records)
+            event_records[key] = dict(event.metadata or {})
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        json_records = {}
+        for trace_event in trace["traceEvents"]:
+            category = trace_event.get("cat", "")
+            args = trace_event.get("args", {})
+            external_id = args.get("External id")
+            correlation = args.get("correlation")
+            if (
+                external_id is None
+                or correlation is None
+                or category not in target_cats
+            ):
+                continue
+            key = (trace_event["name"], category, external_id, correlation)
+            self.assertNotIn(key, json_records)
+            json_records[key] = args
+
+        self.assertGreater(len(json_records), 0)
+        self.assertEqual(set(event_records), set(json_records))
+
+        for key, trace_metadata in json_records.items():
+            typed_metadata = event_records[key]
+            self.assertGreater(len(typed_metadata), 0)
+            self.assertEqual(set(typed_metadata) - set(trace_metadata), set())
+            for field, value in typed_metadata.items():
+                self.assertEqual(value, trace_metadata[field])
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
