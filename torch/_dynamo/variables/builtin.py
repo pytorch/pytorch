@@ -3577,7 +3577,17 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 from .builder import wrap_fx_proxy
 
                 if name == "requires_grad":
-                    # TODO(azahed98): Make it work properly
+                    dtype = obj.dtype  # type: ignore[attr-defined]
+                    if (
+                        obj.source is None
+                        and val.is_python_constant()
+                        and val.as_python_constant() is True
+                        and not obj.requires_grad  # type: ignore[attr-defined]
+                        and dtype is not None
+                        and (dtype.is_floating_point or dtype.is_complex)
+                    ):
+                        obj.method_requires_grad_(tx, val)  # type: ignore[attr-defined]
+                        return val
                     unimplemented(
                         gb_type="setattr() on Tensor.requires_grad",
                         context=f"setattr({obj}, {name}, {val})",
