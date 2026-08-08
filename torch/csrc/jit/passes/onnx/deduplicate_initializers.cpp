@@ -139,11 +139,19 @@ static bool DeduplicateInitializersByValue(at::Tensor& t1, at::Tensor& t2) {
     return false;
   }
 
+  // Compare bitwise (uint8 view): IEEE eq would never dedup initializers
+  // containing NaN and would wrongly merge ones differing only in the sign
+  // of zero.
+  auto bitwise = [](const at::Tensor& a, const at::Tensor& b) {
+    return a.contiguous().flatten().view(at::kByte).equal(
+        b.contiguous().flatten().view(at::kByte));
+  };
+
   if (t1.device() != t2.device()) {
-    return t1.to("cpu").equal(t2.to("cpu"));
+    return bitwise(t1.to("cpu"), t2.to("cpu"));
   }
 
-  return t1.equal(t2);
+  return bitwise(t1, t2);
 }
 
 void DeduplicateInitializers(
