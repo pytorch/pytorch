@@ -1260,6 +1260,112 @@ def _softmax_backward_data(
     return grad_input.contiguous()
 
 
+# The fused MPS cross-entropy fast path (cross_entropy_loss_symint routes the
+# common 2D-logits / 1D-target case to these private ops, backed by a single
+# Metal kernel). The fused op has no inductor lowering, so under torch.compile
+# it would leak into the FX graph and break lowering. Decompose it back to the
+# reference primitives (logsumexp + gather, plus the label-smoothing term) so
+# inductor sees the standard log_softmax + nll graph: fused in eager, primitives
+# in compile. The math mirrors aten cross_entropy_loss exactly:
+#   lse[b]            = logsumexp(x[b])
+#   nll[b]            = -w[t] * (x[b, t] - lse[b])
+#   smooth[b]         = sum_w * lse[b] - sum_c w[c] * x[b, c]
+#   loss[b]           = (1 - eps) * nll[b] + (eps / V) * smooth[b]
+#   weight_per_row[b] = w[t]    (1 when unweighted; 0 when row is ignored)
+# Ignored rows (target == ignore_index) contribute 0 to all three outputs,
+# matching the kernel. All outputs are fp32 (the kernel accumulates in float;
+# the host casts the reduced loss back to the input dtype).
+@register_decomposition(aten._fused_cross_entropy_loss_2d_forward)
+def _fused_cross_entropy_loss_2d_forward(
+    self: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None = None,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    x = self.float()
+    n_classes = x.shape[-1]
+    lse = torch.logsumexp(x, dim=-1)
+
+    not_ignored = target != ignore_index
+    safe_target = torch.where(not_ignored, target, target.new_zeros(()))
+    safe_target_ = safe_target.long().unsqueeze(1)
+    x_t = torch.gather(x, 1, safe_target_).squeeze(1)
+
+    if weight is not None:
+        w = weight.float()
+        w_t = torch.gather(w.expand(x.shape), 1, safe_target_).squeeze(1)
+        sum_w = w.sum()
+    else:
+        w_t = torch.ones_like(lse)
+        sum_w = x.new_full((), float(n_classes))
+
+    nll = -w_t * (x_t - lse)
+    if label_smoothing > 0.0:
+        if weight is not None:
+            wlogit_sum = (x * weight.float()).sum(dim=-1)
+        else:
+            wlogit_sum = x.sum(dim=-1)
+        smooth = sum_w * lse - wlogit_sum
+        loss = (1.0 - label_smoothing) * nll + (label_smoothing / n_classes) * smooth
+    else:
+        loss = nll
+
+    zero = lse.new_zeros(())
+    loss = torch.where(not_ignored, loss, zero)
+    lse = torch.where(not_ignored, lse, zero)
+    weight_per_row = torch.where(not_ignored, w_t, zero)
+    return loss, lse, weight_per_row
+
+
+# Backward of the fused cross-entropy op. grad_loss already carries the host
+# reduction / mean-normalizer factor. Recompute softmax from the saved lse:
+#   grad_input[b, c] = grad_loss[b] * (
+#       (1 - eps) * w_t * (sm[b, c] - one_hot(c == t))
+#       + (eps / V) * (sum_w * sm[b, c] - w[c]) )
+# Rows with ignore_index get a zero gradient. Outputs match the eager kernel
+# and feed inductor the standard elementwise graph.
+@register_decomposition(aten._fused_cross_entropy_loss_2d_backward)
+def _fused_cross_entropy_loss_2d_backward(
+    grad_loss: torch.Tensor,
+    self: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    lse: torch.Tensor,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+) -> torch.Tensor:
+    x = self.float()
+    n_classes = x.shape[-1]
+    sm = torch.exp(x - lse.unsqueeze(1))
+
+    not_ignored = target != ignore_index
+    safe_target = torch.where(not_ignored, target, target.new_zeros(()))
+    safe_target_ = safe_target.long().unsqueeze(1)
+    # Functional one-hot (no in-place scatter_, which AOTAutograd's functional
+    # graph check rejects): one_hot[b, c] == 1 where c == target[b].
+    class_idx = torch.arange(n_classes, device=x.device).view(1, n_classes)
+    one_hot = (class_idx == safe_target_).to(x.dtype)
+
+    if weight is not None:
+        w = weight.float()
+        w_row = w.view(1, n_classes)
+        w_t = torch.gather(w.expand(x.shape), 1, safe_target_)
+        sum_w = w.sum()
+    else:
+        w_row = x.new_ones(())
+        w_t = x.new_ones(())
+        sum_w = x.new_full((), float(n_classes))
+
+    grad = (1.0 - label_smoothing) * w_t * (sm - one_hot)
+    if label_smoothing > 0.0:
+        grad = grad + (label_smoothing / n_classes) * (sum_w * sm - w_row)
+
+    grad = grad * grad_loss.unsqueeze(1)
+    grad = torch.where(not_ignored.unsqueeze(1), grad, torch.zeros_like(grad))
+    return grad.to(self.dtype)
+
+
 @register_decomposition(aten.index_reduce)
 def index_reduce(
     self: torch.Tensor,

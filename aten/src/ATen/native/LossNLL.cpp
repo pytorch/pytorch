@@ -16,7 +16,14 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/cross_entropy_loss_native.h>
+#include <ATen/ops/_fused_cross_entropy_loss_2d_forward.h>
+#include <ATen/ops/_fused_cross_entropy_loss_2d_forward_native.h>
+#include <ATen/ops/_fused_cross_entropy_loss_2d_backward_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/empty.h>
+#include <c10/util/env.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/log_softmax.h>
 #include <ATen/ops/nll_loss.h>
 #include <ATen/ops/nll_loss2d.h>
@@ -629,6 +636,138 @@ static Tensor cross_entropy_loss_label_smoothing(
     return (1 - label_smoothing) * nllloss + ret * (label_smoothing / n_classes);
 }
 
+
+// Fused 2D cross-entropy fast path for MPS. Routes the common
+// (2D logits, 1D class-index target) case to a single Metal kernel that
+// fuses log_softmax with the NLL gather, avoiding the [B, V] log_softmax
+// intermediate and the per-shape MPSGraph cache. The {mean,sum,none}
+// reduction is applied here with plain differentiable aten ops so that
+// autograd, torch.compile/export and functorch all see a standard
+// composite (the fused forward op carries its own derivative formula).
+static Tensor cross_entropy_loss_2d_fused_mps(
+    const Tensor& self,
+    const Tensor& target,
+    const std::optional<Tensor>& weight,
+    int64_t reduction,
+    int64_t ignore_index,
+    double label_smoothing) {
+  auto out = at::_fused_cross_entropy_loss_2d_forward(
+      self, target, weight, ignore_index, label_smoothing);
+  const Tensor& loss = std::get<0>(out);             // per-row loss (fp32)
+  const Tensor& weight_per_row = std::get<2>(out);   // w[t] (0 if ignored)
+
+  Tensor ret;
+  switch (reduction) {
+    case Reduction::None:
+      ret = loss;
+      break;
+    case Reduction::Sum:
+      ret = loss.sum();
+      break;
+    case Reduction::Mean: {
+      // mean normalizer: sum of target weights over non-ignored rows
+      // (count of non-ignored when unweighted) -- matches nll_loss / the
+      // reference cross_entropy_loss. Divide by the RAW denominator: this
+      // reproduces the reference for a negative weight-sum and yields nan for
+      // the all-ignored 0/0 case, exactly like nll_loss. No clamp.
+      ret = loss.sum() / weight_per_row.sum();
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+  }
+  // P1 fix: the reference returns the loss in the input dtype
+  // (at::log_softmax(self, dim, self.scalar_type()) preserves it); the fused
+  // kernel accumulates in fp32, so cast back to the logits dtype here.
+  return ret.to(self.scalar_type());
+}
+
+// True when the fused MPS cross-entropy path can serve this call exactly.
+// Everything else falls through to the reference composite below, which
+// raises the canonical errors. The gate must therefore reject every input
+// the reference would reject -- in particular it must NOT launch the Metal
+// kernel for a mis-shaped/typed weight (the kernel indexes weight[0..V) in
+// fp32, so a shorter weight buffer would read out of bounds) or for inputs
+// the reference path validates (target dtype, label_smoothing range).
+static bool can_use_fused_mps_cross_entropy(
+    const Tensor& self,
+    const Tensor& target,
+    const std::optional<Tensor>& weight,
+    double label_smoothing,
+    const c10::SymInt& ignore_index) {
+  // Escape hatch + same-build A/B (benchmarks/mps/bench_crossentropy.py): force
+  // the reference decomposed log_softmax + nll_loss path instead of the fused
+  // Metal kernel, without a rebuild.
+  static const bool force_decomposed =
+      c10::utils::has_env("PYTORCH_MPS_FORCE_DECOMPOSED_CROSS_ENTROPY");
+  if (force_decomposed) {
+    return false;
+  }
+  if (!(self.is_mps() && self.dim() == 2 && target.dim() == 1 &&
+        self.is_contiguous() &&
+        (self.scalar_type() == kFloat || self.scalar_type() == kHalf ||
+         self.scalar_type() == kBFloat16) &&
+        self.sym_size(0) == target.sym_size(0))) {
+    return false;
+  }
+  // The fused kernel packs batch_size / vocab_size as uint32; fall back to the
+  // reference decomposed path for extents that would overflow it. The typed
+  // constant keeps the SymInt comparison unambiguous across platforms (a bare
+  // LL literal is ambiguous where int64_t is long, e.g. Linux clang/gcc).
+  constexpr int64_t kMaxU32 = 0xFFFFFFFF;
+  if (self.sym_size(0) > kMaxU32 || self.sym_size(1) > kMaxU32) {
+    return false;
+  }
+  // ignore_index is packed into the int32 CrossEntropyParams field; a value
+  // outside int32 range would truncate, so fall back to the decomposed path.
+  // Concretize (guard_int) only here, after the is_mps / shape checks above
+  // have passed, so non-MPS and export/tracing paths never specialize on it.
+  const int64_t ignore_index_int = ignore_index.guard_int(__FILE__, __LINE__);
+  if (ignore_index_int < INT32_MIN || ignore_index_int > INT32_MAX) {
+    return false;
+  }
+  // Reference nll_loss only accepts Long/Byte class-index targets; reject
+  // other integral (and any floating) dtypes so they take the reference path
+  // and get the canonical error / soft-target handling.
+  if (target.scalar_type() != kLong && target.scalar_type() != kByte) {
+    return false;
+  }
+  // Forward-mode AD: the fused op has only a reverse-mode derivative (no JVP
+  // formula in derivatives.yaml), so a dual logits/weight tensor would raise
+  // "does not support forward AD". The reference log_softmax + nll_loss
+  // composite is forward-AD differentiable, so fall through when a forward
+  // tangent is present (mirrors the _fw_grad checks in Loss.cpp).
+  c10::MaybeOwned<Tensor> weight_fwad =
+      at::borrow_from_optional_tensor(weight);
+  if (self._fw_grad(/*level=*/0).defined() ||
+      (weight_fwad->defined() &&
+       weight_fwad->_fw_grad(/*level=*/0).defined())) {
+    return false;
+  }
+  // label_smoothing must be in [0, 1] (reference checks <= 1.0; negative
+  // values are also unsupported). Fall through so the reference raises.
+  if (label_smoothing < 0.0 || label_smoothing > 1.0) {
+    return false;
+  }
+  // The fused kernel reads weight as a dense length-V fp32 vector. Only take
+  // the fast path for a defined weight that is exactly 1-D of length V
+  // (== number of classes) AND has the same dtype as the logits; anything
+  // else falls through to the reference, which raises the canonical
+  // "weight tensor should be defined ..." (wrong shape) or "expected scalar
+  // type ..." (wrong dtype) error. The dtype check matters because the kernel
+  // up-casts the weight to fp32 internally, so it would otherwise silently
+  // accept a mismatched-dtype weight that the reference rejects.
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight);
+  const Tensor& weight_ = *weight_maybe_owned;
+  if (weight_.defined() &&
+      !(weight_.dim() == 1 && weight_.sym_numel() == self.sym_size(1) &&
+        weight_.scalar_type() == self.scalar_type())) {
+    return false;
+  }
+  return true;
+}
+
 Tensor cross_entropy_loss_symint(
     const Tensor& self,
     const Tensor& target,
@@ -637,6 +776,12 @@ Tensor cross_entropy_loss_symint(
     c10::SymInt ignore_index,
     double label_smoothing) {
   Tensor ret;
+  if (can_use_fused_mps_cross_entropy(
+          self, target, weight, label_smoothing, ignore_index)) {
+    return cross_entropy_loss_2d_fused_mps(
+        self, target, weight, reduction, ignore_index.guard_int(__FILE__, __LINE__),
+        label_smoothing);
+  }
   if (self.sym_sizes() == target.sym_sizes()) {
     // Assume soft targets when input and target shapes are the same
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
@@ -751,6 +896,43 @@ Tensor nll_loss_nd_symint(
     }
   }
   return ret;
+}
+
+
+// Device-agnostic Meta-key implementations for the fused cross-entropy ops.
+// Kept here rather than in the MPS-only CrossEntropy.mm: the Meta dispatch is
+// registered on every build (shape tracing for FakeTensor / torch.compile /
+// export), so its implementations must compile on non-Apple platforms too.
+std::tuple<Tensor, Tensor, Tensor> _fused_cross_entropy_loss_2d_forward_meta(const Tensor& self,
+                                                                             const Tensor& target,
+                                                                             const std::optional<Tensor>& weight_opt,
+                                                                             int64_t ignore_index,
+                                                                             double label_smoothing) {
+  (void)target;
+  (void)weight_opt;
+  (void)ignore_index;
+  (void)label_smoothing;
+  int64_t B = self.dim() == 2 ? self.size(0) : 0;
+  auto loss = at::empty({B}, self.options().dtype(kFloat));
+  auto lse = at::empty({B}, self.options().dtype(kFloat));
+  auto weight_per_row = at::empty({B}, self.options().dtype(kFloat));
+  return {loss, lse, weight_per_row};
+}
+
+Tensor _fused_cross_entropy_loss_2d_backward_meta(const Tensor& grad_loss,
+                                                  const Tensor& self,
+                                                  const Tensor& target,
+                                                  const std::optional<Tensor>& weight_opt,
+                                                  const Tensor& lse,
+                                                  int64_t ignore_index,
+                                                  double label_smoothing) {
+  (void)grad_loss;
+  (void)target;
+  (void)weight_opt;
+  (void)lse;
+  (void)ignore_index;
+  (void)label_smoothing;
+  return at::empty_like(self);
 }
 
 } // namespace at::native
