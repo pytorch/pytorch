@@ -5,8 +5,6 @@ import copy
 import tempfile
 import unittest
 
-from parameterized import parameterized
-
 import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
@@ -17,8 +15,12 @@ from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS, parametrize
 from torch.utils import _pytree as pytree
 
 
@@ -218,6 +220,8 @@ def make_dynamic_cls(cls, strict=False):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @staticmethod
     def get_module():
         class M(torch.nn.Module):
@@ -261,39 +265,33 @@ class TestNativeRT(TestCase):
 
         return M()
 
-    parameters = []
-    for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            continue
-        for module, sample_inputs in [
-            (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
-            (
-                get_module_multi_output.__func__().to(device),
-                (torch.randn(4, 4).to(device),),
-            ),
-            (
-                get_model_pytree.__func__().to(device),
+    def _aoti_case(self, device, case):
+        if case == "basic":
+            return self.get_module().to(device), (torch.randn(4, 4, device=device),)
+        if case == "multi_output":
+            return (
+                self.get_module_multi_output().to(device),
+                (torch.randn(4, 4, device=device),),
+            )
+        if case == "pytree":
+            return (
+                self.get_model_pytree().to(device),
                 (
                     (
-                        torch.randn(4, 4).to(device),
+                        torch.randn(4, 4, device=device),
                         (
-                            torch.randn(4, 4).to(device),
-                            torch.randn(4, 4).to(device),
+                            torch.randn(4, 4, device=device),
+                            torch.randn(4, 4, device=device),
                         ),
                     ),
                 ),
-            ),
-        ]:
-            parameters.append(
-                (
-                    device,
-                    module,
-                    sample_inputs,
-                )
             )
+        raise AssertionError(f"unknown aoti case: {case}")
 
-    @parameterized.expand(parameters)
-    def test_aoti(self, device, m, sample_inputs):
+    @requires_capabilities(Capability.lib.triton)
+    @parametrize("case", ["basic", "multi_output", "pytree"])
+    def test_aoti(self, device, case):
+        m, sample_inputs = self._aoti_case(device, case)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
 
@@ -376,10 +374,15 @@ class TestNativeRT(TestCase):
                     raise e
 
 
+instantiate_device_type_tests(TestNativeRT, globals())
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestSelectScalarOverload(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_floor_divide_default_scalar(self) -> None:
         # PT2 export lowers `x // 10` to aten.floor_divide.default with a scalar
         # Int argument (the #90923 Scalar->Tensor broadcast).  Its default
