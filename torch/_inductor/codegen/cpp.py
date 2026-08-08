@@ -1548,10 +1548,11 @@ class CppVecOverrides(CppOverrides):
                 "remainder vec implementation expect the same inputs' dtype."
             )
         if is_integer_dtype(a.dtype):
-            # Doing blend to set the remaining bits of b to non-zero
+            # Padded divisor lanes must stay non-zero: masked tail loads
+            # zero-fill the unused lanes, and a zero there trips the
+            # divide-by-zero check even though the lane is never stored.
             _t = f"decltype({a})"
-            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
             return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
