@@ -84,6 +84,7 @@
 #ifdef USE_MEM_EFF_ATTENTION
 #ifndef USE_ROCM
 // MemoryEfficient Attention Specific Imports for CUDA
+#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
@@ -1399,7 +1400,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -2027,8 +2036,9 @@ __global__ void rand_uniform_kernel(
 
   const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
 
-  const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
-      head_id * (n_queries * n_keys);
+  // See NOTE [Mem-efficient attention dropout RNG offset]
+  const int64_t dropout_seq_start = gemm_kernel_utils::dropout_rng_offset(
+      batch_id, head_id, n_heads, n_queries, n_keys);
   const int64_t query_start_idx = query_idx * n_keys;
 
   curandStatePhilox4_32_10_t curand_state;
@@ -2038,7 +2048,7 @@ __global__ void rand_uniform_kernel(
       offset + dropout_seq_start + query_start_idx,
       &curand_state);
 
-  for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
+  for (int64_t key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
     float4 rand_quad = curand_uniform4(&curand_state);
 
 #pragma unroll

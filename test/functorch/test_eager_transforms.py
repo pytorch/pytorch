@@ -5883,6 +5883,39 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(observed, [(None, None, None)])
 
     @onlyCPU
+    def test_cpu_flash_sdpa_backward_vmap_empty_batch(self, device):
+        query = torch.randn(1, 2, 3, 4, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+        out, logsumexp = (
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                query, key, value
+            )
+        )
+        logsumexp = logsumexp.detach().requires_grad_()
+
+        def backward(grad_out):
+            return torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False
+            )
+
+        grad_out = out.new_empty((0,) + out.shape, requires_grad=True)
+        with enable_python_dispatcher():
+            actual = torch.vmap(backward)(grad_out)
+        expected = tuple(query.new_empty((0,) + query.shape) for _ in range(3))
+        self.assertEqual(actual, expected)
+        differentiable_inputs = (grad_out, query, key, value, out)
+        actual_grads = torch.autograd.grad(
+            sum(result.sum() for result in actual),
+            differentiable_inputs + (logsumexp,),
+            allow_unused=True,
+        )
+        expected_grads = tuple(
+            torch.zeros_like(arg) for arg in differentiable_inputs
+        ) + (None,)
+        self.assertEqual(actual_grads, expected_grads)
+
+    @onlyCPU
     def test_cpu_flash_sdpa_backward_subset_requires_grad(self, device):
         torch.manual_seed(0)
         query = torch.randn(1, 2, 3, 4, device=device)
@@ -5924,9 +5957,10 @@ class TestCompileTransforms(TestCase):
         )
         # This registration defines the generated forward's double-backward
         # convention, not the standalone native backward kernel's numerical
-        # Jacobian. derivatives.yaml marks logsumexp non-differentiable, so
-        # following these saved-tensor partials would produce a wrong Hessian.
-        self.assertEqual(out_grads, (None, None))
+        # Jacobian. The out partial is a materialized structural zero so
+        # compiled autograd can accumulate it through the generated forward;
+        # derivatives.yaml marks logsumexp non-differentiable.
+        self.assertEqual(out_grads, (torch.zeros_like(out), None))
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)

@@ -34,6 +34,7 @@ from torch.optim.lr_scheduler import (
 )
 from torch.optim.swa_utils import SWALR
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     load_tests,
     parametrize,
@@ -48,6 +49,8 @@ load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class SchedulerTestNet(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()

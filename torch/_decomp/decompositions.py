@@ -25,8 +25,12 @@ from torch._C._functorch import (
     TransformType,
 )
 from torch._decomp import register_decomposition
-from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+from torch._functorch.pyfunctorch import (
+    retrieve_current_functorch_interpreter,
+    VmapInterpreter,
+)
 from torch._functorch.utils import enable_single_level_autograd_function
+from torch._functorch.vmap import unwrap_batched
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     IntLike,
@@ -3199,11 +3203,12 @@ def _max_unpoolnd(
             ),
         )
 
-    # The native CPU kernel preserves the input's memory format
-    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
-    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    # The native CPU kernel (aten/src/ATen/native/MaxUnpooling.cpp) and the XPU
+    # kernel (torch-xpu-ops MaxUnpoolingKernels.cpp) preserve the input's memory
+    # format via suggest_memory_format, while the CUDA kernel and the 3d kernels
+    # always return contiguous output.
     def _restride(t: TensorLike) -> TensorLike:
-        if dim == 2 and self.device.type == "cpu":
+        if dim == 2 and self.device.type in ("cpu", "xpu"):
             return t.contiguous(memory_format=utils.suggest_memory_format(self))
         return t
 
@@ -6072,6 +6077,12 @@ def _scaled_dot_product_flash_attention_for_cpu_backward_vjp(
     ):
         if needs_grad:
             result[index] = grad if create_graph else grad.detach()
+    if needs_input_grad[4]:
+        # The generated forward links `out` back to query/key/value.  Its
+        # partial here is zero, but materialize that zero so gradient
+        # accumulation (including compiled autograd) does not try to add an
+        # undefined contribution from the forward's backward node.
+        result[4] = torch.zeros_like(_out)
     return tuple(result)
 
 
@@ -6204,8 +6215,87 @@ def _scaled_dot_product_flash_attention_for_cpu_backward_functorch(
     if grad_out is None:
         return None, None, None
 
-    tensor_args = (grad_out, query, key, value, out, logsumexp, attn_mask)
-    if interpreter.key() != TransformType.Grad or not any(
+    tensor_args = tuple(
+        None if arg is None else torch._C._functorch.unwrap_if_dead(arg)
+        for arg in (grad_out, query, key, value, out, logsumexp, attn_mask)
+    )
+    if interpreter.key() == TransformType.Vmap:
+        vmap_interpreter = cast(VmapInterpreter, interpreter)
+        level = interpreter.level()
+        batch_size = vmap_interpreter.batch_size()
+        unwrapped_args, in_dims = unwrap_batched(tensor_args, level)
+
+        def call_backward(args: tuple[Tensor | None, ...]) -> Any:
+            # Removing the batch wrapper can expose a dead GradTrackingTensor
+            # left behind by vjp. Unwrap it before redispatching with the current
+            # vmap interpreter lowered.
+            args = tuple(
+                None if arg is None else torch._C._functorch.unwrap_if_dead(arg)
+                for arg in args
+            )
+            return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+                args[4],
+                args[5],
+                dropout_p,
+                is_causal,
+                attn_mask=args[6],
+                scale=scale,
+            )
+
+        with interpreter.lower():
+            if all(in_dim is None for in_dim in in_dims):
+                return call_backward(tensor_args)
+
+            if batch_size == 0:
+                differentiable_zero = sum(arg[:0].sum() for arg in unwrapped_args[:5])
+                stacked_results = tuple(
+                    (
+                        tensor.unsqueeze(0).expand((0,) + tensor.shape)
+                        if in_dim is None
+                        else tensor.movedim(in_dim, 0)
+                    )
+                    + differentiable_zero
+                    for tensor, in_dim in zip(unwrapped_args[1:4], in_dims[1:4])
+                )
+            else:
+                results = []
+                for index in range(batch_size):
+                    args = tuple(
+                        arg if in_dim is None else arg.select(in_dim, index)
+                        for arg, in_dim in zip(unwrapped_args, in_dims)
+                    )
+                    results.append(call_backward(args))
+                stacked_results = tuple(
+                    torch.stack([result[output_index] for result in results])
+                    for output_index in range(3)
+                )
+
+        return (
+            torch._C._functorch._add_batch_dim(stacked_results[0], 0, level),
+            torch._C._functorch._add_batch_dim(stacked_results[1], 0, level),
+            torch._C._functorch._add_batch_dim(stacked_results[2], 0, level),
+        )
+
+    if interpreter.key() != TransformType.Grad:
+        with torch.enable_grad(), interpreter.lower():
+            return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                dropout_p,
+                is_causal,
+                attn_mask=attn_mask,
+                scale=scale,
+            )
+
+    if not any(
         arg is not None and is_functorch_wrapped_tensor(arg) for arg in tensor_args
     ):
         with torch.enable_grad(), interpreter.lower():
