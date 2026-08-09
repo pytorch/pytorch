@@ -42,7 +42,10 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    UnsupportedMutationAliasingException,
+)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -65,9 +68,10 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
-    add_no_storage_overlap_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
+    guard_input_overlapping,
+    guard_input_storage_aliasing,
     remove_dupe_metadata,
 )
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
@@ -1109,9 +1113,10 @@ def _create_runtime_wrapper(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
                     else:
-                        assert meta.mutates_data, (  # noqa: S101
-                            f"expected mutates_data for input {inpt_idx}"
-                        )
+                        if not meta.mutates_data:
+                            raise AssertionError(
+                                f"expected mutates_data for input {inpt_idx}"
+                            )
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
@@ -1585,6 +1590,7 @@ class EffectTokensWrapper(CompilerWrapper):
 #
 @dataclass
 class AOTDedupeWrapper(CompilerWrapper):
+    arg_pos_to_original_pos: list[int] = field(default_factory=list)
     keep_arg_mask: list[bool] = field(default_factory=list)
     add_dupe_map: list[int] = field(default_factory=list)
     old_input_metadata: list[InputAliasInfo] = field(default_factory=list)
@@ -1609,6 +1615,13 @@ class AOTDedupeWrapper(CompilerWrapper):
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
+        self.arg_pos_to_original_pos.clear()
+        self.arg_pos_to_original_pos.extend(range(len(flat_args)))
+        guard_input_storage_aliasing(
+            aot_config,
+            flat_args,
+            fw_metadata.input_info,  # type: ignore[arg-type]
+        )
 
         # Strategy 1: For any input that is not mutated, we can leafify it if we
         # need to remove a duplicate.
@@ -1704,6 +1717,41 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         self.keep_arg_mask = keep_arg_mask
         self.add_dupe_map = add_dupe_map
+        self.arg_pos_to_original_pos.clear()
+        self.arg_pos_to_original_pos.extend(
+            original_pos
+            for original_pos, keep_arg in enumerate(keep_arg_mask)
+            if keep_arg
+        )
+
+        duplicate_input_source_pairs: list[
+            tuple[torch._guards.Source, torch._guards.Source]
+        ] = []
+        tracing_context = TracingContext.try_get()
+        input_source_mapping = aot_config.aot_autograd_arg_pos_to_source
+        if tracing_context is not None and input_source_mapping:
+            for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(
+                zip(add_dupe_map, keep_arg_mask)
+            ):
+                if keep_arg:
+                    continue
+                kept_arg_pos = self.arg_pos_to_original_pos[kept_pos]
+                dupe_arg_source = (
+                    input_source_mapping[dupe_arg_pos]
+                    if dupe_arg_pos < len(input_source_mapping)
+                    else None
+                )
+                kept_arg_source = (
+                    input_source_mapping[kept_arg_pos]
+                    if kept_arg_pos < len(input_source_mapping)
+                    else None
+                )
+                if dupe_arg_source is None or kept_arg_source is None:
+                    raise UnsupportedMutationAliasingException(
+                        "Encountered mutated duplicate inputs with an unguardable "
+                        "identity relationship from a source-less AOTAutograd input"
+                    )
+                duplicate_input_source_pairs.append((kept_arg_source, dupe_arg_source))
 
         deduped_flat_args = self.remove_dupe_args(flat_args)
         # TODO: instead of arbitrarily removing args, it might be useful to
@@ -1716,26 +1764,14 @@ class AOTDedupeWrapper(CompilerWrapper):
             fw_metadata, keep_arg_mask, add_dupe_map
         )
 
-        if (
-            tracing_context := TracingContext.try_get()
-            and aot_config.aot_autograd_arg_pos_to_source
-        ):
-            # TODO(voz): This structure is 1:1, we could consider an alternate structure like
-            # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
-            # which feels like needless complexity for a tiny bit of efficiency at this point.
-            for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(
-                zip(add_dupe_map, keep_arg_mask)
-            ):
-                if not keep_arg:
-                    dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        dupe_arg_pos
-                    ]
-                    kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        kept_pos
-                    ]
-                    tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
-                        DuplicateInputs(kept_arg_source, dupe_arg_source)
-                    )
+        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+        # which feels like needless complexity for a tiny bit of efficiency at this point.
+        if tracing_context is not None:
+            for kept_arg_source, dupe_arg_source in duplicate_input_source_pairs:
+                tracing_context.guards_context.aotautograd_guards.append(
+                    DuplicateInputs(kept_arg_source, dupe_arg_source)
+                )
 
         @simple_wraps(flat_fn)
         def wrapped_flat_fn(
@@ -1846,6 +1882,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     # Currently, the only reason we need to plumb this bool is because
     # the synthetic base code prohibits more cases in the autograd case than the inference case.
     trace_joint: bool  # TODO: refactor trace_joint
+    arg_pos_to_original_pos: list[int] = field(default_factory=list)
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
     base_groups: dict[int, list[int]] = field(
@@ -1863,6 +1900,15 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         fw_metadata: ViewAndMutationMeta,
     ) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
+        input_pos_to_source_pos = self.arg_pos_to_original_pos or list(
+            range(len(flat_args))
+        )
+        overlapping_by_storage_group = guard_input_overlapping(
+            aot_config,
+            flat_args,  # type: ignore[arg-type]
+            fw_metadata.input_info,
+            input_pos_to_source_pos,
+        )
         (
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
@@ -1873,6 +1919,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_descs,
             fw_metadata.input_info,
             is_inference=is_inference,
+            overlapping_by_storage_group=overlapping_by_storage_group,
         )
 
         # Happy path: we don't need synthetic bases
@@ -2169,40 +2216,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 #   b_base = torch.Tensor(b.storage())
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
-def _guard_unaliased_mutated_input_pairs(
-    aot_config: AOTConfig,
-    storage_ref_to_idx: dict[StorageWeakRef, list[int]],
-    mutated_input_info: list[InputAliasInfo],
-) -> None:
-    storage_groups = list(storage_ref_to_idx.values())
-    if all(len(indices) == 1 for indices in storage_groups):
-        mutated_indices = [
-            indices[0]
-            for indices in storage_groups
-            if mutated_input_info[indices[0]].mutates_data
-        ]
-        if (
-            len(mutated_indices) == len(storage_groups)
-            and aot_config.aot_autograd_arg_pos_to_source
-            and all(
-                aot_config.aot_autograd_arg_pos_to_source[i] is not None
-                for i in mutated_indices
-            )
-        ):
-            add_no_storage_overlap_guard(aot_config, mutated_indices)
-            return
-
-    for left_pos, left_indices in enumerate(storage_groups):
-        for right_indices in storage_groups[left_pos + 1 :]:
-            for left_idx in left_indices:
-                for right_idx in right_indices:
-                    if (
-                        mutated_input_info[left_idx].mutates_data
-                        or mutated_input_info[right_idx].mutates_data
-                    ):
-                        add_no_storage_overlap_guard(aot_config, [left_idx, right_idx])
-
-
 def merge_view_inputs(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
@@ -2212,6 +2225,7 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
+    overlapping_by_storage_group: dict[tuple[int, ...], set[int]] | None = None,
 ) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
@@ -2235,12 +2249,13 @@ def merge_view_inputs(
         return True
 
     def _format_input(idx: int) -> str:
-        if (
-            aot_config.aot_autograd_arg_pos_to_source is not None
-            and idx < len(aot_config.aot_autograd_arg_pos_to_source)
-            and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
-        ):
-            source = aot_config.aot_autograd_arg_pos_to_source[idx]
+        input_source_mapping = aot_config.aot_autograd_arg_pos_to_source
+        source = (
+            input_source_mapping[idx]
+            if input_source_mapping is not None and idx < len(input_source_mapping)
+            else None
+        )
+        if source is not None:
             name = getattr(source, "local_name", source.name)
         else:
             name = fwd_inputs_descs[idx].expr()
@@ -2263,16 +2278,12 @@ def merge_view_inputs(
     base_args_descs = []
     other_args_descs = []
     for i, (inpt, source) in enumerate(zip(fwd_inputs, fwd_inputs_descs)):
-        if isinstance(inpt, Tensor):
+        if isinstance(inpt, Tensor) and torch._C._has_storage(inpt):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
             other_args_descs.append(source)
-
-    _guard_unaliased_mutated_input_pairs(
-        aot_config, storage_ref_to_idx, mutated_input_info
-    )
 
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
@@ -2302,9 +2313,14 @@ def merge_view_inputs(
         # have overlapping memory.
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
-        aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            aot_config, fwd_inputs, aliased_input_indices
-        )
+        if overlapping_by_storage_group is None:
+            aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
+                fwd_inputs, aliased_input_indices
+            )
+        else:
+            aliased_input_indices_no_false_sharing = overlapping_by_storage_group[
+                tuple(aliased_input_indices)
+            ]
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
                 fwd_inputs[curr_idx] for curr_idx in aliased_input_indices

@@ -281,6 +281,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -486,6 +487,21 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
+
+
+"""
+A class representing the exact storage-sharing partition among input tensors.
+
+Sources in the same group must share a StorageImpl, while sources in different
+groups must have different StorageImpls.  This is distinct from StorageOverlap:
+disjoint views can share a storage without overlapping, and that relationship
+still affects AOTAutograd's synthetic-base calling convention.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageAliasing(GuardEnvExpr):
+    source_groups: list[list[Source]]
 
 
 """
@@ -821,7 +837,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -1004,7 +1020,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information

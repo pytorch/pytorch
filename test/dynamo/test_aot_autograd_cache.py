@@ -35,12 +35,18 @@ from torch._functorch._aot_autograd.autograd_cache import (
     check_cacheable,
     sanitize_gm_for_cache,
 )
+from torch._functorch._aot_autograd.descriptors import DummyAOTInput
+from torch._functorch._aot_autograd.input_output_analysis import (
+    guard_input_storage_aliasing,
+)
+from torch._functorch._aot_autograd.runtime_wrappers import AOTDedupeWrapper
 from torch._functorch._aot_autograd.schemas import (
     AOTConfig,
     CacheableAOTConfig,
     InputAliasInfo,
+    ViewAndMutationMeta,
 )
-from torch._guards import StorageOverlap, TracingContext
+from torch._guards import StorageAliasing, StorageOverlap, TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomGraphPass,
@@ -55,6 +61,7 @@ from torch._inductor.standalone_compile import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import UnsupportedMutationAliasingException
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import (
@@ -69,17 +76,25 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     skipIfWindows,
+    skipIfXpu,
     subtest,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+)
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -361,6 +376,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 LocalSource("a", is_input=True),
                 LocalSource("b", is_input=True),
                 LocalSource("c", is_input=True),
+                LocalSource("d", is_input=True),
             ],
             is_export=False,
             no_tangents=False,
@@ -368,43 +384,59 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             precompile_backend_id=None,
         )
 
+        mutated_base = torch.ones(4)
+        unmutated_base = torch.ones(4)
+        args = [
+            mutated_base[:2],
+            mutated_base[1:3],
+            unmutated_base[:2],
+            unmutated_base[1:3],
+        ]
+
         tracing_context = TracingContext(None)
         with torch._guards.tracing(tracing_context):
             AOTAutogradCache._install_cache_hit_guards(
-                [torch.ones(2), torch.ones(2), torch.ones(2)],
+                args,
                 aot_config,
                 [
                     input_alias_info(mutates_data=True),
                     input_alias_info(mutates_data=False),
                     input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
                 ],
             )
 
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
         overlap_guards = [
             guard
             for guard in tracing_context.guards_context.aotautograd_guards
             if isinstance(guard, StorageOverlap)
         ]
-        self.assertEqual(len(overlap_guards), 2)
-        self.assertTrue(all(not guard.overlapping_sources for guard in overlap_guards))
+        self.assertEqual(len(aliasing_guards), 1)
         self.assertEqual(
-            {
-                tuple(
-                    getattr(source, "local_name", source.name)
-                    for source in guard.non_overlapping_sources
-                )
-                for guard in overlap_guards
-            },
-            {("a", "b"), ("a", "c")},
+            [len(group) for group in aliasing_guards[0].source_groups], [2, 2]
         )
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].overlapping_sources
+            ],
+            ["a", "b"],
+        )
+        self.assertEqual(overlap_guards[0].non_overlapping_sources, [])
 
     def test_cache_hit_many_unaliased_mutated_inputs_use_single_guard(self):
         from torch._dynamo.source import LocalSource
 
-        def input_alias_info() -> InputAliasInfo:
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
             return InputAliasInfo(
                 is_leaf=False,
-                mutates_data=True,
+                mutates_data=mutates_data,
                 mutates_metadata=False,
                 mutations_hidden_from_autograd=False,
                 mutations_under_no_grad_or_inference_mode=False,
@@ -440,19 +472,24 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             AOTAutogradCache._install_cache_hit_guards(
                 [torch.ones(2) + i for i in range(num_args)],
                 aot_config,
-                [input_alias_info() for _ in range(num_args)],
+                [input_alias_info(i % 2 == 0) for i in range(num_args)],
             )
 
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
         overlap_guards = [
             guard
             for guard in tracing_context.guards_context.aotautograd_guards
             if isinstance(guard, StorageOverlap)
         ]
-        self.assertEqual(len(overlap_guards), 1)
-        self.assertEqual(overlap_guards[0].overlapping_sources, [])
+        self.assertEqual(len(overlap_guards), 0)
+        self.assertEqual(len(aliasing_guards), 1)
         self.assertEqual(
-            len(overlap_guards[0].non_overlapping_sources),
-            num_args,
+            [len(group) for group in aliasing_guards[0].source_groups],
+            [1] * num_args,
         )
 
     def test_cache_hit_storage_overlap_guards_with_synthetic_base_metadata(self):
@@ -509,34 +546,268 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 ],
             )
 
+        aliasing_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageAliasing)
+        ]
         overlap_guards = [
             guard
             for guard in tracing_context.guards_context.aotautograd_guards
             if isinstance(guard, StorageOverlap)
         ]
-        self.assertEqual(len(overlap_guards), 6)
+        self.assertEqual(len(aliasing_guards), 1)
         self.assertEqual(
-            {
-                tuple(
-                    getattr(source, "local_name", source.name)
-                    for source in guard.overlapping_sources
-                )
-                for guard in overlap_guards
-                if guard.overlapping_sources
-            },
-            {("a", "b")},
+            [len(group) for group in aliasing_guards[0].source_groups], [2, 1, 1]
         )
+        self.assertEqual(len(overlap_guards), 1)
         self.assertEqual(
-            {
-                tuple(
-                    getattr(source, "local_name", source.name)
-                    for source in guard.non_overlapping_sources
-                )
-                for guard in overlap_guards
-                if guard.non_overlapping_sources
-            },
-            {("a", "c"), ("a", "d"), ("b", "c"), ("b", "d"), ("c", "d")},
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].overlapping_sources
+            ],
+            ["a", "b"],
         )
+        self.assertEqual(overlap_guards[0].non_overlapping_sources, [])
+
+    def test_input_alias_collection_is_grouped_by_storage(self):
+        base1 = torch.arange(8)
+        base2 = torch.arange(8)
+        inputs = [
+            base1[:3],
+            base1[2:5],
+            base1[5:7],
+            base2[:4],
+            base2[3:7],
+            torch.ones(2),
+            torch.ones(2),
+        ]
+
+        with (
+            patch.object(
+                autograd_cache,
+                "compute_overlapping_tensors",
+                wraps=autograd_cache.compute_overlapping_tensors,
+            ) as overlap_mock,
+            patch.object(
+                autograd_cache,
+                "input_has_symbolic_metadata",
+                wraps=autograd_cache.input_has_symbolic_metadata,
+            ) as symbolic_mock,
+        ):
+            autograd_cache._collect_input_tensor_alias_info(inputs)
+
+        self.assertEqual(overlap_mock.call_count, 4)
+        self.assertEqual(symbolic_mock.call_count, len(inputs))
+        for call in overlap_mock.call_args_list:
+            tensors = call.args[0]
+            self.assertGreater(len(tensors), 1)
+            storage = tensors[0].untyped_storage()._cdata
+            self.assertTrue(all(t.untyped_storage()._cdata == storage for t in tensors))
+
+    def test_input_alias_collection_handles_no_storage_tensors(self):
+        sparse = torch.sparse_coo_tensor([[0]], [1.0], (2,))
+        self.assertEqual(
+            autograd_cache._collect_input_tensor_alias_info([sparse, sparse]),
+            ([0, 1], ((0, 1),), (), ()),
+        )
+
+    def test_cache_hit_overlap_guards_use_deduped_input_sources(self):
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        sources = [
+            LocalSource(name, is_input=True) for name in ("a", "a_dupe", "b", "b_dupe")
+        ]
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=sources,
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        base = torch.arange(8)
+        a = base[:2]
+        b = base[4:6]
+        args = [a, a, b, b]
+        dedupe_wrapper = AOTDedupeWrapper(
+            keep_arg_mask=[True, False, True, False],
+            add_dupe_map=[0, 0, 1, 1],
+        )
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [input_alias_info(True), input_alias_info(False)],
+                [dedupe_wrapper],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 1)
+        self.assertEqual(overlap_guards[0].overlapping_sources, [])
+        self.assertEqual(
+            [
+                getattr(source, "local_name", source.name)
+                for source in overlap_guards[0].non_overlapping_sources
+            ],
+            ["a", "b"],
+        )
+
+    def test_partial_input_sources_bypass_unguardable_storage_relation(self):
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                None,
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        base = torch.arange(8)
+        args = [base[:2], base[6:], base[1:7]]
+        input_info = [
+            input_alias_info(True),
+            input_alias_info(False),
+            input_alias_info(False),
+        ]
+
+        cold_context = TracingContext(None)
+        with torch._guards.tracing(cold_context):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException, "source-less AOTAutograd input"
+            ):
+                guard_input_storage_aliasing(aot_config, args, input_info)
+
+        cache_context = TracingContext(None)
+        with torch._guards.tracing(cache_context):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException, "source-less AOTAutograd input"
+            ):
+                AOTAutogradCache._install_cache_hit_guards(args, aot_config, input_info)
+
+    def test_partial_input_sources_bypass_mutated_duplicate_specialization(self):
+        def input_alias_info(mutates_metadata: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=False,
+                mutates_metadata=mutates_metadata,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                None,
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+        input_info = [input_alias_info(False), input_alias_info(True)]
+        fw_metadata = ViewAndMutationMeta(
+            input_info=input_info,
+            output_info=[],
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            traced_tangents_descs=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+        )
+        arg = torch.ones(2)
+
+        with torch._guards.tracing(TracingContext(None)):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException,
+                "mutated duplicate inputs.*source-less AOTAutograd input",
+            ):
+                AOTDedupeWrapper().pre_compile(
+                    lambda *args: (list(args), []),
+                    [arg, arg],
+                    [DummyAOTInput(0), DummyAOTInput(1)],
+                    aot_config,
+                    fw_metadata=fw_metadata,
+                )
+
+        dedupe_wrapper = AOTDedupeWrapper(
+            keep_arg_mask=[True, False], add_dupe_map=[0, 0]
+        )
+        with torch._guards.tracing(TracingContext(None)):
+            with self.assertRaisesRegex(
+                UnsupportedMutationAliasingException,
+                "mutated duplicate inputs.*source-less AOTAutograd input",
+            ):
+                AOTAutogradCache._install_cache_hit_guards(
+                    [arg, arg], aot_config, input_info, [dedupe_wrapper]
+                )
 
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
@@ -880,7 +1151,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -1024,7 +1294,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -1219,7 +1489,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1241,7 +1511,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1275,7 +1545,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1297,7 +1567,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1317,7 +1587,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1370,7 +1640,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1448,7 +1718,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(fn(a3), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1504,7 +1774,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1569,7 +1839,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.local_var_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1629,7 +1899,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self.assertEqual(fn(a2), result)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1691,7 +1961,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.recursive_func_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1747,7 +2017,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.factory_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1815,7 +2085,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         result = torch.ops.test.lru_cache_triton_op(a)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2301,7 +2571,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2316,8 +2586,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def f(x, y):
             return x.sin() + y
 
-        x = torch.randn(10, device="cuda")
-        y = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=device_type)
+        y = torch.randn(10, device=device_type)
         with torch.no_grad():
             result = f(x, y)
             self.assertEqual(result, x.sin() + y)
@@ -2362,7 +2632,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2372,7 +2642,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"saved_tensors_hooks_filtering_mode": "all"})
     def test_saved_tensors_hooks_autograd_cache(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
 
         def pack_cpu(x):
             return x.to(device="cpu")
@@ -2464,7 +2734,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2485,7 +2755,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             x = x.relu()
             return x
 
-        device = torch.device("cuda:0")
+        device = torch.device(f"{device_type}:0")
         backend = "inductor"
 
         def inp_fn():
@@ -3704,7 +3974,7 @@ class _MockEntryForPickleTest:
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return device_type
 
     def default_config(self):
         return AOTConfig(
@@ -3902,26 +4172,70 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(split_storage_key[1], ((0, 1), (2,)))
         self.assertNotEqual(false_sharing_key, split_storage_key)
 
-    def test_input_alias_cache_paths_suppress_shape_env_guards(self):
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-        fake_base = fake_mode.from_tensor(
-            torch.arange(10.0),
-            source=LocalSource("base"),
-            symbolic_context=StatelessSymbolicContext(
-                dynamic_sizes=[DimDynamic.DYNAMIC],
-                constraint_sizes=[None],
-            ),
+    def test_input_alias_cache_key_preserves_duplicate_overlap_pairs(self):
+        disjoint_base = torch.arange(8.0)
+        disjoint_a = disjoint_base[:4]
+        disjoint_b = disjoint_base[4:]
+        disjoint_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            [disjoint_a, disjoint_a, disjoint_b, disjoint_b]
         )
-        with fake_mode:
-            inputs = [fake_base[:-1], fake_base[1:]]
 
-        guards_before = list(shape_env.guards)
-        tracing_context = TracingContext(fake_mode)
+        overlapping_base = torch.arange(6.0)
+        overlapping_a = overlapping_base[:4]
+        overlapping_b = overlapping_base[2:]
+        overlapping_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            [overlapping_a, overlapping_a, overlapping_b, overlapping_b]
+        )
+
+        self.assertEqual(disjoint_key[:2], overlapping_key[:2])
+        self.assertEqual(disjoint_key[2], ((0, 1), (2, 3)))
+        self.assertNotEqual(disjoint_key, overlapping_key)
+
+    def test_input_alias_cache_paths_suppress_shape_env_guards(self):
+        def make_inputs():
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            fake_base = fake_mode.from_tensor(
+                torch.arange(10.0),
+                source=LocalSource("base"),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC],
+                    constraint_sizes=[None],
+                ),
+            )
+            with fake_mode:
+                inputs = [fake_base[:-1], fake_base[1:]]
+            return shape_env, fake_mode, inputs
+
+        def input_alias_info():
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=True,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        key_shape_env, key_fake_mode, key_inputs = make_inputs()
+        key_guards_before = list(key_shape_env.guards)
+        with torch._guards.tracing(TracingContext(key_fake_mode)):
+            key = autograd_cache._compute_input_tensor_alias_cache_key(key_inputs)
+
+        self.assertEqual(key[1], ((0, 1),))
+        self.assertEqual(key[2], ((0, 1),))
+        self.assertEqual(key_shape_env.guards, key_guards_before)
+
+        hit_shape_env, hit_fake_mode, hit_inputs = make_inputs()
+        hit_guards_before = list(hit_shape_env.guards)
+        tracing_context = TracingContext(hit_fake_mode)
         with torch._guards.tracing(tracing_context):
-            key = autograd_cache._compute_input_tensor_alias_cache_key(inputs)
             AOTAutogradCache._install_cache_hit_guards(
-                inputs,
+                hit_inputs,
                 dataclasses.replace(
                     self.default_config(),
                     aot_autograd_arg_pos_to_source=[
@@ -3929,32 +4243,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                         LocalSource("right", is_input=True),
                     ],
                 ),
-                [
-                    InputAliasInfo(
-                        is_leaf=False,
-                        mutates_data=True,
-                        mutates_metadata=False,
-                        mutations_hidden_from_autograd=False,
-                        mutations_under_no_grad_or_inference_mode=False,
-                        mutation_inductor_storage_resize=False,
-                        mutates_storage_metadata=False,
-                        mutation_is_shallow_copy_data=False,
-                        requires_grad=False,
-                        keep_input_mutations=False,
-                    )
-                    for _ in inputs
-                ],
+                [input_alias_info() for _ in hit_inputs],
             )
 
-        self.assertEqual(key[1], ((0, 1),))
-        self.assertEqual(key[2], ((0, 1),))
         self.assertTrue(
             any(
-                isinstance(guard, StorageOverlap)
+                isinstance(guard, (StorageAliasing, StorageOverlap))
                 for guard in tracing_context.guards_context.aotautograd_guards
             )
         )
-        self.assertEqual(shape_env.guards, guards_before)
+        self.assertEqual(hit_shape_env.guards, hit_guards_before)
 
     def test_different_global_configs(self):
         def fn(x):
@@ -4345,7 +4643,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
+    @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold
         exec'd launcher keys that aren't picklable.
