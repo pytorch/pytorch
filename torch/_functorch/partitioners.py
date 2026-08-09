@@ -1371,7 +1371,7 @@ def _extract_fwd_bwd_modules(
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
     # Stamp is_static_input on primal placeholders for the backward
-    # compiler; see Note: [is_static_input on backward placeholders] in
+    # compiler; see Note: [static_input_idxs semantics] in
     # torch/_inductor/compile_fx.py. This must happen here, while primals
     # are still 1:1 with flat forward inputs, because staticness is tracked
     # positionally (static_lifetime_input_nodes derives from

@@ -248,6 +248,49 @@ static_inputs_log = torch._logging.getArtifactLogger(
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
+# Note: [static_input_idxs semantics]
+#
+# static_input_idxs marks inputs whose tensors are address-stable: the same
+# tensor (same data_ptr) is expected on every call, as opposed to a fresh
+# allocation per call. In the forward these are params, buffers, and
+# mark_static_address inputs (fw_metadata.static_input_indices); in the
+# backward, saved tensors (see below).
+#
+# Two mechanisms consume this:
+# - cudagraphs records static inputs at their own addresses instead of
+#   allocating graph-owned buffers and copying into them per replay
+#   (cudagraphify_impl). Copying a weight per call is unacceptable, so an
+#   address change must be handled by re-recording (cudagraph trees,
+#   #126822), never by copying.
+# - The alignment fixup (get_input_idxs_to_check) exempts static inputs that
+#   were aligned at compile time from the runtime copy_if_misaligned check:
+#   a stable address implies stable alignment, and cloning would break the
+#   address cudagraphs recorded.
+# Codegen itself does NOT consult staticness: triton code assumes the
+# alignment of the example inputs (see Note: [Input Alignment handling in
+# Inductor]), with the runtime check as the safety net for non-static
+# inputs. Consequently a misclassified static input is a correctness bug,
+# not a missed optimization: kernels may run with a baked-in alignment the
+# runtime tensor doesn't satisfy (CUDA misaligned address), and cudagraph
+# replay may read a stale address.
+#
+# "Address-stable" is per-recompile, not absolute: with
+# inline_inbuilt_nn_modules (#126822) an unguarded static input may legally
+# move, and cudagraphs re-records. TODO: if the new address is misaligned,
+# the alignment baked into existing kernels is wrong and we IMA; dynamo
+# needs an alignment guard on unguarded static inputs so a misaligned swap
+# recompiles instead.
+#
+# In the backward, staticness cannot be looked up positionally: the
+# backward's input list is (saved values in partitioner-chosen order,
+# tangents, ...), so forward input indices don't apply there. Instead, the
+# producer of the backward graph stamps meta["is_static_input"] on
+# placeholders it knows to be address-stable; AOTAutograd's partitioner
+# does this in _extract_fwd_bwd_modules, where primals are still 1:1 with
+# flat forward inputs. Unstamped placeholders fall back to name-based
+# classification (all "primals_*" static; see compile_fx_backward), so
+# producers that do not stamp (custom partition_fns) keep the historical,
+# less safe behavior.
 def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
@@ -2010,21 +2053,9 @@ def get_input_idxs_to_check(
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
             #
-            # A static input is weight-like: address-stable across calls, and
-            # the compiled artifact must never copy it per call (cudagraphs
-            # records its address; see cudagraphify_impl). So if the example
-            # is aligned, every call's input is aligned and the runtime check
-            # is skippable; cloning would also break the address the
-            # cudagraph recorded. This is why misclassifying a non-static
-            # input as static crashes rather than deoptimizes -- see
-            # Note: [is_static_input on backward placeholders].
-            #
-            # TODO: "address-stable" is per-recompile, not absolute: with
-            # inline_inbuilt_nn_modules (#126822) an unguarded static input
-            # may legally move (cudagraphs re-records), and if the new
-            # address is misaligned the baked-in alignment here is wrong and
-            # we IMA. Dynamo needs an alignment guard on unguarded static
-            # inputs so a misaligned swap recompiles instead.
+            # Static inputs are address-stable, so compile-time alignment
+            # holds for every call and cloning would break the address
+            # cudagraphs recorded; see Note: [static_input_idxs semantics].
             if i in static_input_idxs and tensor_is_aligned(input):
                 continue
             if not should_assume_input_aligned(input):
@@ -2811,35 +2842,17 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
-        # Note: [is_static_input on backward placeholders]
-        #
-        # A backward placeholder may carry meta["is_static_input"], declaring
-        # whether its runtime tensor is address-stable across calls (a param/
-        # buffer/mark_static_address input, as opposed to e.g. a plain user
-        # input that was saved for backward and gets a fresh tensor every
-        # call). Inductor uses this to decide which inputs may have
-        # address-derived properties (alignment) baked into generated code
-        # versus needing the runtime copy_if_misaligned treatment; a wrong
-        # "static" here is a misaligned-address crash, not a deoptimization.
-        #
-        # Whoever produces the backward graph is responsible for stamping,
-        # because only the producer can map staticness (tracked positionally
-        # over the flat forward inputs, fw_metadata.static_input_indices)
-        # onto its choice and ordering of saved tensors; by the time the
-        # graph reaches us here, that correspondence is gone. AOTAutograd's
-        # partitioner stamps in _extract_fwd_bwd_modules, where primals are
-        # still 1:1 with flat forward inputs. Unstamped placeholders fall
-        # back to the historical name-based classification below (all
-        # "primals_*" static), so producers that do not stamp (custom
-        # partition_fns) keep the old, less safe behavior.
-        #
-        # Static backward inputs are thus the saved tensors, minus two
-        # over-approximations of the name-based classification:
+        # Static backward inputs (see Note: [static_input_idxs semantics])
+        # are the saved tensors, minus two over-approximations of the
+        # name-based classification:
         # 1. When the forward was partitioned, saved activations from inline
         #    code between partitions are NOT at fixed addresses; keep only
         #    "primals_*" (get_static_bw_input_idxs).
-        # 2. Saved-for-backward plain user inputs, demoted via the stamp as
-        #    described above.
+        # 2. A saved-for-backward plain user input is a "primals_*" but gets
+        #    a fresh tensor every call; the partitioner stamps
+        #    meta["is_static_input"] to demote it to the runtime
+        #    copy_if_misaligned treatment. Unstamped placeholders default to
+        #    static, preserving the name-based classification.
         if compiler_config_extra.forward_is_partitioned.value:
             candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
