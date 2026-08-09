@@ -123,9 +123,10 @@ def switch(
 
     Restrictions:
         - Each branch must have the same signature as operands and return the same
-          output structure (shape, dtype, etc.). Constant ``int`` and ``None`` leaves
-          are also permitted in branch outputs and are merged across branches (an
-          unbacked SymInt is introduced when ``int`` leaves differ between branches).
+          output structure (shape, dtype, etc.). Constant ``int`` (but not ``bool``)
+          and ``None`` leaves are also permitted and must have matching types across
+          branches. An unbacked SymInt is introduced when ``int`` leaves differ,
+          although the Inductor backend currently requires their values to match.
         - Branches cannot have in-place mutations on inputs or global variables.
     """
 
@@ -380,7 +381,10 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
     # Shortcut if a branch produces None outputs; then all branches need to produce None
     if any(x is None for x in xs):
         if not all(x is None for x in xs):
-            raise AssertionError(f"expected all leaves to be None, got {xs}")
+            raise RuntimeError(
+                "torch.switch branches must return the same type for corresponding "
+                f"output leaves, but got {[type(x).__name__ for x in xs]}"
+            )
         return None
 
     # In case all branches return an int, use an unbacked symbol as the merge result

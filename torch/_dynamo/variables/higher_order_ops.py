@@ -2518,23 +2518,23 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     gb_type="torch.cond: unsupported branch return type",
                     context=str(ret_val),
-                    explanation="Expected branches to return a possibly nested pytree of tensors or constant ints.",
+                    explanation="Expected branches to return a possibly nested pytree of tensors, constant ints, or None.",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
             for ret in unpack_iterable(tx, ret_val):
-                if ret.is_python_constant() and not isinstance(
-                    ret.as_python_constant(), int
-                ):
-                    unimplemented(
-                        gb_type="torch.cond: unsupported branch return type (constant non-int)",
-                        context=str(ret_val),
-                        explanation="Constants returned from branches must be ints.",
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                        ],
-                    )
+                if ret.is_python_constant():
+                    constant = ret.as_python_constant()
+                    if not (type(constant) is int or constant is None):
+                        unimplemented(
+                            gb_type="torch.cond: unsupported branch return type (constant non-int)",
+                            context=str(ret_val),
+                            explanation="Constants returned from branches must be int (but not bool) or None.",
+                            hints=[
+                                *graph_break_hints.USER_ERROR,
+                            ],
+                        )
             return ret_val, ret_spec, ret_graph, ret_lifted_freevars
 
         (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
@@ -2751,15 +2751,14 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             for ret in ret_val.unpack_var_sequence(tx):
                 if ret.is_python_constant():
                     const = ret.as_python_constant()
-                    # Python floats in branch outputs are blocked upstream by
-                    # validate_subgraph_output_types (shared HOP gate); we
-                    # mirror the whitelist here to keep the error specific to
-                    # torch.switch. bool is implicitly accepted via the int check.
-                    if not (isinstance(const, int) or const is None):
+                    # The shared HOP gate accepts bool as an int-like value.
+                    # Switch deliberately uses the stricter exact-int-or-None
+                    # contract here so it matches cond and fake output merging.
+                    if not (type(const) is int or const is None):
                         unimplemented(
                             gb_type="torch.switch: unsupported branch return type (constant)",
                             context=str(ret_val),
-                            explanation="Constants returned from branches must be int or None.",
+                            explanation="Constants returned from branches must be int (but not bool) or None.",
                             hints=[*graph_break_hints.USER_ERROR],
                         )
             return ret_val, ret_spec, ret_graph, ret_lifted_freevars

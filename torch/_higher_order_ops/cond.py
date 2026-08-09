@@ -127,11 +127,13 @@ def cond(
           scope that is being traced.
 
         false_fn (Callable): A callable function (a -> b) that is within the
-          scope that is being traced. The true branch and false branch must
-          have consistent input and outputs, meaning the inputs have to be
-          the same, and the outputs have to be the same type and shape. Int
-          output is also allowed. We'll make the output dynamic by turning it
-          into a symint.
+          scope that is being traced. The true and false branches must accept
+          the same inputs and return the same pytree structure. Corresponding
+          tensor leaves must have the same metadata, such as shape and dtype.
+          Constant ``int`` (but not ``bool``) and ``None`` leaves are also
+          allowed and must have matching types across branches. Differing
+          ``int`` values are merged into an unbacked SymInt, although the
+          Inductor backend currently requires their values to match.
 
         operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
           true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
@@ -159,8 +161,11 @@ def cond(
 
           - The function signature must match with operands.
 
-          - The function must return a tensor with the same metadata, e.g. shape,
-            dtype, etc.
+          - The functions must return the same pytree structure. Corresponding
+            tensor leaves must have the same metadata, e.g. shape, dtype, etc.
+            Corresponding non-tensor leaves may be ``int`` (but not ``bool``) or
+            ``None`` and must have the same type. The Inductor backend currently
+            requires corresponding ``int`` leaves to have the same value.
 
           - The function cannot have in-place mutations on global variables.
             (Note: in-place tensor operations such as `add_` for intermediate results
@@ -461,7 +466,10 @@ def _merge_output(
 
     if a is None or b is None:
         if not (a is None and b is None):
-            raise AssertionError(f"expected both a and b to be None, got a={a}, b={b}")
+            raise RuntimeError(
+                "torch.cond branches must return the same type for corresponding "
+                f"output leaves, but got {type(a).__name__} and {type(b).__name__}"
+            )
         return None
 
     def min_max(s0, s1):
@@ -482,8 +490,9 @@ def _merge_output(
         return _merge_ints_to_symint([a, b], mode)
 
     if not (type(a) is FakeTensor and type(b) is FakeTensor):
-        raise AssertionError(
-            f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
+        raise RuntimeError(
+            "torch.cond branches must return the same type for corresponding "
+            f"output leaves, but got {type(a).__name__} and {type(b).__name__}"
         )
 
     # Note: we don't check size, stride because

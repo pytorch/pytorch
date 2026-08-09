@@ -9069,7 +9069,7 @@ def triton_kernel_wrap_(
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(
     pred, true_fn, false_fn, operands
-) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer | ir.NoneAsConstantBuffer]:
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
@@ -9086,7 +9086,9 @@ def cond(
 
 
 @register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
-def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+def switch(
+    index, branches, operands
+) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer | ir.NoneAsConstantBuffer]:
     # TODO: cudagraph support for torch.switch is not yet implemented; always disable.
     msg = "control flow operator: torch.switch."
     if stack_trace := V.graph.current_node.meta.get("stack_trace", None):

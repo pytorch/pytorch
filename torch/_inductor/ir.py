@@ -286,6 +286,7 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
                     int,
                     EffectfulKernel,
                     ShapeAsConstantBuffer,
+                    NoneAsConstantBuffer,
                     OpaqueMultiOutput,
                 ),
             ):
@@ -10610,11 +10611,14 @@ class TensorBox(MutableBox):
     def create(data: ShapeAsConstantBuffer) -> ShapeAsConstantBuffer: ...
     @overload
     @staticmethod
+    def create(data: NoneAsConstantBuffer) -> NoneAsConstantBuffer: ...
+    @overload
+    @staticmethod
     def create(data: IRNode) -> TensorBox: ...
 
     @staticmethod
     def create(data: IRNode):
-        if isinstance(data, ShapeAsConstantBuffer):
+        if isinstance(data, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
             return data
         return TensorBox(StorageBox(data))
 
@@ -10958,14 +10962,14 @@ class Switch(ExternKernel):
         branches: Non-empty sequence of subgraphs representing the individual branches.
         operands: Input tensors passed to the individual subgraphs.
         is_cond: True when this node represents a torch.cond (boolean 2-branch select).
-        outputs: MultiOutput nodes representing the node's outputs.
+        outputs: MultiOutput nodes or constants representing the node's outputs.
     """
 
     selector: IRNode | None = None
     branches: Sequence[Subgraph] | None = None
     operands: Sequence[IRNode] | None = None
     is_cond: bool = False
-    outputs: Sequence[MultiOutput] | None = None
+    outputs: Sequence[IRNode] | None = None
 
     def __init__(
         self,
@@ -11005,7 +11009,7 @@ class Switch(ExternKernel):
         branches: list[Subgraph],
         operands: list[TensorBox],
         is_cond: bool = False,
-    ) -> list[MultiOutput]:
+    ) -> list[IRNode]:
         """Create a sequence of IRNodes from a switch/cond statement."""
         # pyrefly: ignore [bad-assignment]
         selector = cls.realize_input(selector)
@@ -11029,21 +11033,24 @@ class Switch(ExternKernel):
 
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
-            fake_tensors: Sequence[torch.Tensor],
+            fake_tensors: Sequence[torch.Tensor | int | None],
             branch_fakes: Sequence[torch.Tensor | int | None],
         ) -> list[IRNode]:
             ret = []
             for output, fake, branch_fake in zip(
                 graph_outputs, fake_tensors, branch_fakes
             ):
-                if isinstance(output, ShapeAsConstantBuffer):
+                if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                     ret.append(output)
                 else:
+                    if not isinstance(fake, torch.Tensor):
+                        raise AssertionError((output, fake))
                     strides = fake.stride()
                     # merged strides can contain unbacked symbols (from mismatched
                     # branch output shapes) undefined inside the subgraph
                     if has_free_unbacked_symbols(strides):
-                        # pyrefly: ignore [missing-attribute]
+                        if not isinstance(branch_fake, torch.Tensor):
+                            raise AssertionError((output, branch_fake))
                         strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
@@ -11098,6 +11105,20 @@ class Switch(ExternKernel):
             if len(ref_outputs) != len(b_outputs):
                 raise AssertionError((ref_outputs, b_outputs))
             for i, (r_o, b_o) in enumerate(zip(ref_outputs, b_outputs)):
+                if isinstance(
+                    r_o, (ShapeAsConstantBuffer, NoneAsConstantBuffer)
+                ) or isinstance(b_o, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                    if type(r_o) is not type(b_o):
+                        raise AssertionError((i, r_o, b_o))
+                    if isinstance(r_o, ShapeAsConstantBuffer):
+                        b_o = cast(ShapeAsConstantBuffer, b_o)
+                        if r_o.expr != b_o.expr:
+                            raise NotImplementedError(
+                                f"Inductor does not support {op_name} branches with "
+                                "differing constant outputs. "
+                                f"Got {r_o.expr} and {b_o.expr} at output {i}."
+                            )
+                    continue
                 if r_o.get_device() != b_o.get_device():
                     raise AssertionError((i, r_o, b_o))
                 if r_o.get_dtype() != b_o.get_dtype():
@@ -11129,30 +11150,36 @@ class Switch(ExternKernel):
             is_cond=is_cond,
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    # pyrefly: ignore [bad-argument-type]
-                    device=output.get_device()
-                    if output.get_device() is not None
-                    else device,  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=[_maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[_maybe_expr(sz) for sz in merged_output.stride()],
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                switch,
-                [(list, i)],
+        outputs: list[IRNode] = []
+        # As the branch outputs are equivalent, we can use the first branch as
+        # a template. Constants do not allocate a switch tensor output slot.
+        for i, (output, merged_output) in enumerate(
+            zip(ref_outputs, V.graph.current_node.meta["val"])
+        ):
+            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                outputs.append(output)
+                continue
+            if not isinstance(merged_output, torch.Tensor):
+                raise AssertionError((output, merged_output))
+            outputs.append(
+                MultiOutput(
+                    FixedLayout(
+                        # pyrefly: ignore [bad-argument-type]
+                        device=output.get_device()
+                        if output.get_device() is not None
+                        else device,  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=[_maybe_expr(sz) for sz in merged_output.size()],
+                        stride=[_maybe_expr(sz) for sz in merged_output.stride()],
+                        offset=output.get_layout().offset,
+                        is_pinned=output.get_layout().is_pinned,
+                    ),
+                    switch,
+                    [(list, i)],
+                )
             )
-            # as the true and false outputs are equivalent,
-            # we can use either of them here as a "template"
-            for i, (output, merged_output) in enumerate(
-                zip(ref_outputs, V.graph.current_node.meta["val"])
-            )
-        ]
 
-        switch.outputs = outputs  # type: ignore[assignment]
+        switch.outputs = outputs
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,

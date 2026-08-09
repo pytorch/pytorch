@@ -2757,6 +2757,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for inner_output, outer_output in zip(
             subgraph.graph.graph_outputs, outer_outputs
         ):
+            # codegen_switch uses None to preserve the logical position of a
+            # compile-time constant output without emitting an assignment.
+            if outer_output is None:
+                continue
             src = inner_output.codegen_reference()
             if not isinstance(inner_output, ir.ShapeAsConstantBuffer):
                 # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
@@ -2816,6 +2820,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
         outer_outputs = []
         for out in node.outputs:
+            if isinstance(out, (ir.ShapeAsConstantBuffer, ir.NoneAsConstantBuffer)):
+                outer_outputs.append(None)
+                continue
             # in ABI-compatible mode, ir.MultiOutput is not codegened,
             # hence pre-declare output variables directly and separately
             self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
