@@ -913,34 +913,47 @@ def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
     xs_in_dims, additional_in_dims = in_dims
     xs_move_dims = _batch_dims_as_last(xs_in_dims)
     additional_move_dims = _batch_dims_as_last(additional_in_dims)
+    batch_size = interpreter.batch_size()
     # combine_fn is called with (lhs xs leaves, rhs xs leaves, additional_inputs),
     # so the xs batch-dim markers must be duplicated. See generic_associative_scan.
     after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
 
     with interpreter.lower():
         # generic_associative_scan feeds combine_fn outputs back as the left-hand
-        # args on later levels, reusing after_move_dims; that is only valid if the
-        # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
-        # raise a clear error otherwise instead of silently mismatching downstream.
+        # args on later scan levels, so the outputs must carry the same batch dims
+        # as xs. That fails when an output leaf is batched while its xs leaf is not
+        # (e.g. batched additional_inputs with unbatched xs, or a pytree where an
+        # output leaf becomes batched via another leaf). Probe the combine_fn on
+        # first slices to learn the output batch dims, then expand each such xs leaf
+        # so batchedness is uniform through the recursion.
+        probe = _VmapCombineFnWrapper(
+            combine_fn, after_move_dims, batch_size, interpreter.randomness()
+        )
+        xs_slices = [first_slice_copy(x) for x in unbatched_xs]
+        probe(*xs_slices, *xs_slices, *unbatched_additional_inputs)
+        # The probe invokes combine_fn directly, so out_dims is always populated.
+        out_dims = probe.out_dims
+        if out_dims is None:
+            raise AssertionError("probe must populate out_dims")
+
+        reconciled_xs = [
+            x.unsqueeze(-1).expand(*x.shape, batch_size)
+            if xd is None and od == -1
+            else x
+            for x, xd, od in zip(unbatched_xs, xs_move_dims, out_dims)
+        ]
+        run_move_dims = (*out_dims, *out_dims, *additional_move_dims)
         wrapper = _VmapCombineFnWrapper(
-            combine_fn,
-            after_move_dims,
-            interpreter.batch_size(),
-            interpreter.randomness(),
-            expected_out_dims=xs_move_dims,
+            combine_fn, run_move_dims, batch_size, interpreter.randomness()
         )
         unwrapped_out = associative_scan_op(
-            wrapper, unbatched_xs, unbatched_additional_inputs
+            wrapper, reconciled_xs, unbatched_additional_inputs
         )
 
-    out_dims = wrapper.out_dims
-    if out_dims is None:
-        # Scan was a no-op (scan length < 2): the combine_fn is never called, so
-        # outputs alias xs one-to-one and their batch dims equal the xs batch dims.
-        out_dims = xs_move_dims
+    final_out_dims = wrapper.out_dims if wrapper.out_dims is not None else out_dims
     # wrap_batched matches bdims against the output container; associative_scan_op
     # returns a list, so pass a tuple to align with the tuple out_dims.
-    return wrap_batched(tuple(unwrapped_out), out_dims, interpreter.level())
+    return wrap_batched(tuple(unwrapped_out), final_out_dims, interpreter.level())
 
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):

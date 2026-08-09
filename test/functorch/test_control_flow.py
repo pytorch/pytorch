@@ -10770,51 +10770,94 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
 
-    @skipIfTorchDynamo("not a dynamo test")
-    def test_associative_scan_in_vmap_unbatched_xs_error(self):
-        # Batched additional_inputs (hi) with unbatched xs: the combine_fn outputs
-        # become batched while xs is not, so the outputs' batch dims diverge from
-        # xs on later scan levels. This is not supported yet; the batch rule detects
-        # it up front and raises a clear error rather than a cryptic broadcast one.
-        xs = torch.randn(4, 2)
-        h = torch.randn(3, 2)
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_unbatched_xs(self, combine_mode, device):
+        xs = torch.randn(5, 2, device=device)
+        h = torch.randn(3, 2, device=device)
 
-        def vmap_fn(xs, h):
+        def fn(xs, h):
             def inner_fn(hi):
                 def combine_fn(a, b):
                     return a + b + hi
 
-                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+                return associative_scan(
+                    combine_fn, xs, dim=0, combine_mode=combine_mode
+                )
 
             return torch.vmap(inner_fn, in_dims=0)(h)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "combine_fn outputs to keep the same batched arguments as its xs inputs",
-        ):
-            vmap_fn(xs, h)
+        out = fn(xs, h)
+        # Reference: loop associative_scan over the batch, capturing each hi slice.
+        exp = torch.stack(
+            [
+                associative_scan(
+                    lambda a, b, hi=h[i]: a + b + hi, xs, dim=0, combine_mode="generic"
+                )
+                for i in range(h.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
 
-    @skipIfTorchDynamo("not a dynamo test")
-    def test_associative_scan_in_vmap_mixed_batched_pytree_error(self):
-        a = torch.randn(3, 5, 2)
-        b = torch.randn(5, 2)
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_mixed_batched_pytree(self, combine_mode, device):
+        a = torch.randn(3, 5, 2, device=device)
+        b = torch.randn(5, 2, device=device)
 
         def combine_fn(l, r):
-            return {"a": l["a"] + r["a"], "b": l["b"] * r["a"]}
+            return {"a": l["a"] + r["a"], "b": l["b"] + r["b"] + r["a"]}
 
         def fn(a, b):
             def inner_fn(ai):
                 return associative_scan(
-                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode="pointwise"
+                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode=combine_mode
                 )
 
             return torch.vmap(inner_fn, in_dims=0)(a)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "combine_fn outputs to keep the same batched arguments as its xs inputs",
-        ):
-            fn(a, b)
+        out = fn(a, b)
+        exp_list = [
+            associative_scan(
+                combine_fn, {"a": a[i], "b": b}, dim=0, combine_mode="generic"
+            )
+            for i in range(a.shape[0])
+        ]
+        exp = {k: torch.stack([o[k] for o in exp_list]) for k in ("a", "b")}
+        self.assertEqual(out, exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_unbatched_xs_multilevel(
+        self, combine_mode, device
+    ):
+        xs = torch.randn(7, 2, device=device)
+        h = torch.randn(4, 2, device=device)
+
+        def fn(xs, h):
+            def inner_fn(hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xs, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(h)
+
+        out = fn(xs, h)
+        exp = torch.stack(
+            [
+                associative_scan(
+                    lambda a, b, hi=h[i]: a + b + hi, xs, dim=0, combine_mode="generic"
+                )
+                for i in range(h.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
 
     @skipIfTorchDynamo("not a dynamo test")
     def test_associative_scan_op_in_vmap_eager(self):
