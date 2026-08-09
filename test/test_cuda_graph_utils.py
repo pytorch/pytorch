@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
+    _get_annotatable_types,
     _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
@@ -112,6 +113,29 @@ class TestMarkKernels(TestCase):
         with mark_kernels("test"):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
+
+    def test_event_nodes_are_annotatable(self):
+        """Event record/wait nodes are annotatable so the profiler can place their
+        spans on the intended stream lane (they are stream-ordered but do not
+        occupy the device)."""
+        from cuda.bindings import driver
+
+        annotatable = _get_annotatable_types()
+        for name in (
+            "CU_GRAPH_NODE_TYPE_EVENT_RECORD",
+            "CU_GRAPH_NODE_TYPE_WAIT_EVENT",
+        ):
+            self.assertIn(getattr(driver.CUgraphNodeType, name), annotatable)
+
+    def test_host_nodes_are_annotatable(self):
+        """Host nodes are annotatable so the profiler can place their spans on the
+        intended stream lane (they are stream-ordered but do not occupy the
+        device)."""
+        from cuda.bindings import driver
+
+        self.assertIn(
+            driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_HOST, _get_annotatable_types()
+        )
 
     def test_memset_nodes_are_annotated(self):
         """Memset graph nodes get annotated, not just kernels and memcpys.
@@ -977,8 +1001,8 @@ class TestIsAvailable(TestCase):
 
 
 # Host-side test of the graph-instantiate hook registry: consumers register hooks that a
-# CUDAGraph fans out to via run_graph_instantiate_hooks at the end of instantiate(). The
-# registry just passes the graph through, so a sentinel stands in for it. No CUDA needed.
+# CUDAGraph fans out to at the end of instantiate(). The registry just passes the graph
+# through, so a sentinel stands in for it. No CUDA needed.
 class TestGraphInstantiateHooks(TestCase):
     def tearDown(self):
         import torch.cuda.graphs as cg
@@ -986,16 +1010,22 @@ class TestGraphInstantiateHooks(TestCase):
         cg._global_instantiate_hooks.clear()
         super().tearDown()
 
+    @staticmethod
+    def _run(graph):
+        import torch.cuda.graphs as cg
+
+        cg._run_global_hooks(cg._global_instantiate_hooks, graph)
+
     def test_register_run_unregister(self):
         import torch.cuda.graphs as cg
 
         seen = []
         graph = object()
         handle = cg.register_graph_instantiate_hook(lambda g: seen.append(g))
-        cg.run_graph_instantiate_hooks(graph)
+        self._run(graph)
         self.assertEqual(seen, [graph])
         handle.remove()
-        cg.run_graph_instantiate_hooks(graph)  # unregistered: not called again
+        self._run(graph)  # unregistered: not called again
         self.assertEqual(seen, [graph])
 
     def test_multiple_hooks_all_run(self):
@@ -1005,7 +1035,7 @@ class TestGraphInstantiateHooks(TestCase):
         cg.register_graph_instantiate_hook(lambda g: seen_a.append(g))
         cg.register_graph_instantiate_hook(lambda g: seen_b.append(g))
         graph = object()
-        cg.run_graph_instantiate_hooks(graph)
+        self._run(graph)
         self.assertEqual((seen_a, seen_b), ([graph], [graph]))
 
     def test_run_swallows_hook_errors(self):
@@ -1019,7 +1049,7 @@ class TestGraphInstantiateHooks(TestCase):
         cg.register_graph_instantiate_hook(boom)
         cg.register_graph_instantiate_hook(lambda g: seen.append(g))
         graph = object()
-        cg.run_graph_instantiate_hooks(graph)  # first raises, second still runs
+        self._run(graph)  # first raises, second still runs
         self.assertEqual(seen, [graph])
 
     @requires_cuda
@@ -1046,8 +1076,8 @@ class TestGraphInstantiateHooks(TestCase):
 
 
 # Host-side test of the graph-destroy hook registry: consumers register per-resolver
-# cleanup hooks that a CUDAGraph invokes (gated on graph_destroy_hooks_active) via
-# run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
+# cleanup hooks that a CUDAGraph invokes (gated on _graph_destroy_hooks_active) via
+# _run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
 class TestGraphDestroyHooks(TestCase):
     def tearDown(self):
         import torch.cuda.graphs as cg
@@ -1059,14 +1089,14 @@ class TestGraphDestroyHooks(TestCase):
         import torch.cuda.graphs as cg
 
         seen = []
-        self.assertFalse(cg.graph_destroy_hooks_active())
+        self.assertFalse(cg._graph_destroy_hooks_active())
         handle = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
-        self.assertTrue(cg.graph_destroy_hooks_active())
-        cg.run_graph_destroy_hooks({7})
+        self.assertTrue(cg._graph_destroy_hooks_active())
+        cg._run_graph_destroy_hooks({7})
         self.assertEqual(seen, [{7}])
         handle.remove()
-        self.assertFalse(cg.graph_destroy_hooks_active())
-        cg.run_graph_destroy_hooks({8})  # unregistered: not called again
+        self.assertFalse(cg._graph_destroy_hooks_active())
+        cg._run_graph_destroy_hooks({8})  # unregistered: not called again
         self.assertEqual(seen, [{7}])
 
     def test_multiple_hooks_all_run(self):
@@ -1075,7 +1105,7 @@ class TestGraphDestroyHooks(TestCase):
         seen_a, seen_b = [], []
         cg.register_graph_destroy_hook(lambda ids: seen_a.append(set(ids)))
         cg.register_graph_destroy_hook(lambda ids: seen_b.append(set(ids)))
-        cg.run_graph_destroy_hooks({5})
+        cg._run_graph_destroy_hooks({5})
         self.assertEqual((seen_a, seen_b), ([{5}], [{5}]))
 
     def test_run_swallows_hook_errors(self):
@@ -1088,7 +1118,7 @@ class TestGraphDestroyHooks(TestCase):
 
         cg.register_graph_destroy_hook(boom)
         cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
-        cg.run_graph_destroy_hooks({1})  # first raises, second still runs
+        cg._run_graph_destroy_hooks({1})  # first raises, second still runs
         self.assertEqual(seen, [{1}])
 
     @requires_cuda
@@ -1206,6 +1236,165 @@ class TestAnnotateTrace(TestCase):
         args = self._annotated_args({42: ["phase_a"]})
         self.assertEqual(args["name"], "phase_a")
         self.assertNotIn("annotation", args)
+
+
+# Every global lifecycle registry behaves the same way -- register / fan out / remove, with
+# per-hook errors swallowed so one consumer cannot break the step for another -- so the
+# contract is checked once per registry. The instantiate and destroy registries have their own
+# classes above; these are the four that pair with a per-graph hook.
+GLOBAL_HOOK_REGISTRIES = [
+    "capture_start",
+    "capture_end",
+    "instantiate",
+    "replay_start",
+    "replay_end",
+]
+
+
+@instantiate_parametrized_tests
+class TestGraphGlobalLifecycleHooks(TestCase):
+    def tearDown(self):
+        import torch.cuda.graphs as cg
+
+        for name in GLOBAL_HOOK_REGISTRIES:
+            getattr(cg, f"_global_{name}_hooks").clear()
+        super().tearDown()
+
+    @staticmethod
+    def _api(name):
+        # The fan-out is private -- only CUDAGraph calls it -- so drive it the way the graph
+        # does, with the registry the register_* function writes to.
+        import torch.cuda.graphs as cg
+
+        registry = getattr(cg, f"_global_{name}_hooks")
+        return (
+            getattr(cg, f"register_graph_{name}_hook"),
+            lambda graph: cg._run_global_hooks(registry, graph),
+        )
+
+    @parametrize("name", GLOBAL_HOOK_REGISTRIES)
+    def test_register_run_unregister(self, name):
+        register, run = self._api(name)
+        seen = []
+        graph = object()  # the registry passes the graph through untouched
+        handle = register(seen.append)
+        run(graph)
+        self.assertEqual(seen, [graph])
+        handle.remove()
+        run(graph)  # unregistered: not called again
+        self.assertEqual(seen, [graph])
+
+    @parametrize("name", GLOBAL_HOOK_REGISTRIES)
+    def test_run_swallows_hook_errors(self, name):
+        register, run = self._api(name)
+        seen = []
+
+        def boom(g):
+            raise RuntimeError("boom")
+
+        register(boom)
+        register(seen.append)
+        graph = object()
+        run(graph)  # first raises, second still runs
+        self.assertEqual(seen, [graph])
+
+    @parametrize("name", GLOBAL_HOOK_REGISTRIES)
+    def test_only_registration_is_public(self, name):
+        import torch.cuda.graphs as cg
+
+        self.assertIn(f"register_graph_{name}_hook", cg.__all__)
+        self.assertFalse(hasattr(cg, f"run_graph_{name}_hooks"))
+
+    @requires_cuda
+    def test_fire_points_over_a_real_graph(self):
+        # Each registry fires at its own point in one graph's life, for a graph the consumer
+        # never built: capture start once, capture end once, instantiate once, and the replay
+        # pair once per replay.
+        import torch.cuda.graphs as cg
+
+        seen = []
+        for name in GLOBAL_HOOK_REGISTRIES:
+            handle = getattr(cg, f"register_graph_{name}_hook")(
+                lambda g, name=name: seen.append(name)
+            )
+            self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        # keep_graph=False instantiates from capture_end, so instantiate lands after it.
+        self.assertEqual(seen, ["capture_start", "capture_end", "instantiate"])
+        for _ in range(2):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(
+            seen[3:],
+            ["replay_start", "replay_end", "replay_start", "replay_end"],
+        )
+        g.reset()
+
+    @requires_cuda
+    def test_global_hooks_run_before_per_graph_hooks(self):
+        # Ordering matches instantiate(): the global fan-out runs first, then the graph's own
+        # hooks. A consumer registering both sees them in that order.
+        import torch.cuda.graphs as cg
+
+        order = []
+        handle = cg.register_graph_capture_start_hook(lambda g: order.append("global"))
+        self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        g.register_capture_start_hook(lambda gr: order.append("per-graph"))
+        with torch.cuda.graph(g):
+            _ = x + 1
+        self.assertEqual(order, ["global", "per-graph"])
+        g.reset()
+
+    @requires_cuda
+    def test_capture_start_hook_sees_live_capture(self):
+        # The hook fires with capture already under way -- that is what lets it read capture
+        # state, and why its docs forbid issuing CUDA work.
+        import torch.cuda.graphs as cg
+
+        capturing = []
+        handle = cg.register_graph_capture_start_hook(
+            lambda g: capturing.append(torch.cuda.is_current_stream_capturing())
+        )
+        self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        self.assertEqual(capturing, [True])
+        g.reset()
+
+    @requires_cuda
+    def test_replay_end_hook_fires_when_launch_raises(self):
+        # The end hook is in a finally, so a start hook is always balanced by an end even if
+        # the launch itself fails; the launch error still propagates.
+        import torch.cuda.graphs as cg
+
+        seen = []
+        for name in ("replay_start", "replay_end"):
+            handle = getattr(cg, f"register_graph_{name}_hook")(
+                lambda g, name=name: seen.append(name)
+            )
+            self.addCleanup(handle.remove)
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            _ = x + 1
+        with unittest.mock.patch.object(
+            torch._C._CUDAGraph, "replay", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                g.replay()
+        self.assertEqual(seen, ["replay_start", "replay_end"])
+        g.reset()
 
 
 if __name__ == "__main__":
