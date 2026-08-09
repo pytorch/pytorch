@@ -268,8 +268,10 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   address cudagraphs recorded.
 # Codegen itself does NOT consult staticness: triton code assumes the
 # alignment of the example inputs (see Note: [Input Alignment handling in
-# Inductor]), with the runtime check as the safety net for non-static
-# inputs. Consequently a misclassified static input is a correctness bug,
+# Inductor]). An input whose example was misaligned gets no-assumption code
+# and never needs a check or copy; an aligned example bakes in the fast
+# path, with the runtime check as the safety net for non-static inputs.
+# Consequently a misclassified static input is a correctness bug,
 # not a missed optimization: kernels may run with a baked-in alignment the
 # runtime tensor doesn't satisfy (CUDA misaligned address), and cudagraph
 # replay may read a stale address.
