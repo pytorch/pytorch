@@ -4350,14 +4350,6 @@ class Scheduler:
         ) and use_pipelined_autotuning():
             torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
 
-        if config.combo_kernels:
-            with dynamo_timed(
-                "Scheduler.create_combo_kernel_nodes",
-                log_pt2_compile_event=True,
-                log_waitcounter=True,
-            ):
-                self.create_combo_kernel_nodes(num_ck_nodes=None)
-
         # torch.cond and torch.switch can contain arbitrary subgraphs with collectives;
         # reordering them can cause an nccl hang.
         self._enforce_switch_ordering()
@@ -4373,6 +4365,19 @@ class Scheduler:
                 self.name_to_fused_node,
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
+            )
+
+        if config.combo_kernels:
+            with dynamo_timed(
+                "Scheduler.create_combo_kernel_nodes",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.create_combo_kernel_nodes(num_ck_nodes=None)
+            from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+            assign_memory_planning_info_for_scheduler_buffers(
+                self.nodes, self.name_to_buf
             )
 
         # reorder_for_compute_comm_overlap may do benchmarking to estimate
@@ -6565,6 +6570,7 @@ class Scheduler:
             node_to_idx = mem_ctx.node_to_idx
         else:
             node_to_idx = {n: i for i, n in enumerate(self.nodes)}
+        output_order = node_to_idx.copy()
 
         def _register_accept(
             combo_node: ForeachKernelSchedulerNode,
@@ -6581,6 +6587,7 @@ class Scheduler:
             for node in accepted:
                 fused_nodes.remove(node)
             fused_nodes.add(combo_node)
+            output_order[combo_node] = min(output_order[node] for node in accepted)
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
@@ -6638,7 +6645,7 @@ class Scheduler:
                     )
                     _register_accept(combo_node, window, num)
 
-        self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
+        self.nodes = sorted(fused_nodes, key=output_order.__getitem__)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
             "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
