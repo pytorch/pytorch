@@ -250,60 +250,69 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 
 # Note: [static_input_idxs semantics]
 #
-# static_input_idxs marks inputs whose tensors are address-stable: the same
-# tensor (same data_ptr) is expected on every call, as opposed to a fresh
-# allocation per call. In the forward these are params, buffers, and
-# mark_static_address inputs (fw_metadata.static_input_indices); in the
-# backward, saved tensors (see below).
+# static_input_idxs is one bit standing in for two distinct properties of
+# an input, consumed by two different mechanisms:
 #
-# Two mechanisms consume this:
-# - cudagraphs records static inputs at their own addresses instead of
-#   allocating graph-owned buffers and copying into them per replay
-#   (cudagraphify_impl). Copying a weight per call is unacceptable, so an
-#   address change must be handled by re-recording (cudagraph trees,
-#   #126822), never by copying.
-# - The alignment fixup (get_input_idxs_to_check) exempts static inputs that
-#   were aligned at compile time from the runtime copy_if_misaligned check:
-#   a stable address implies stable alignment, and cloning would break the
-#   address cudagraphs recorded.
-# Codegen itself does NOT consult staticness: triton code assumes the
-# alignment of the example inputs (see Note: [Input Alignment handling in
-# Inductor]), and staticness only decides whether that assumption gets a
-# runtime safety net. What makes an input static:
+# - ADDRESS-stable: the same data_ptr every call. Consumed by cudagraphs
+#   only: static inputs are recorded at their own addresses instead of
+#   being copied into graph-owned buffers per replay (cudagraphify_impl).
+#   Copying a weight per call is unacceptable, so an address change must
+#   be handled by re-recording (cudagraph trees, #126822), never copying.
+# - ALIGNMENT-stable: data_ptr % 16 is the same every call. Consumed by
+#   the alignment fixup (get_input_idxs_to_check): static inputs whose
+#   example was aligned are exempted from the runtime copy_if_misaligned
+#   check, because re-checking a tensor whose alignment cannot change is
+#   waste and cloning it would break the address cudagraphs recorded.
 #
-#   input                              | static?
-#   -----------------------------------+---------------------------------
-#   nn.Module param/buffer             | yes, unguarded (auto, #130391)
-#   mark_static_address(guard=True)    | yes, guarded (data_ptr guard)
-#   mark_static_address(guard=False)   | yes, unguarded
-#   plain user input                   | no
-#   bw: saved activation               | yes*
-#   bw: saved forward input            | same as it was in the forward
-#   bw: tangent                        | no
+# Address-stable implies alignment-stable, and for forward inputs the two
+# coincide, so one bit suffices there. They diverge for backward saved
+# activations (alignment-stable always; address-stable only under
+# cudagraphs) -- see the backward rows below.
 #
-#   * for the consumer that's active: without cudagraphs its address is
-#     fresh each call but only alignment is consumed, and that is stable
-#     for inductor-lowered intermediates (allocator-aligned base plus
-#     deterministic codegen offsets -- a saved odd-offset view is stably
-#     misaligned, so bw codegen makes no assumption for it). With
-#     cudagraphs it lives at a stable offset in the graph pool -- except
-#     activations from inline code between graph partitions, which are
-#     demoted (get_static_bw_input_idxs, see compile_fx_backward). A saved
-#     alias of a user input takes the "saved forward input" row: the
-#     partitioner saves the base primal and recomputes the view in
-#     backward. KNOWN HOLE: a saved *fallback op* output (e.g. a custom
-#     op) is allocated by arbitrary user code, so its alignment may vary
-#     call to call; it is classified static here (unstamped, non-primal)
-#     and gets no runtime check, so an alignment flip IMAs in the
-#     backward. Inductor judges fallback output alignment from the fake
-#     tensor (ir.py, V.graph.unaligned_buffers), which cannot express
-#     "sometimes misaligned"; TORCHINDUCTOR_ALIGNMENT_ASSERTS (default on
-#     in OSS) catches the fake-vs-real mismatch in the forward, and
+# Codegen itself consumes NEITHER: triton code assumes the alignment of
+# the example inputs (see Note: [Input Alignment handling in Inductor]),
+# and staticness only decides whether that assumption gets a runtime
+# safety net. Per input kind:
+#
+#   forward input                     | addr-stable    | align-stable
+#   ----------------------------------+----------------+------------------
+#   nn.Module param/buffer            | yes [1]        | yes
+#   mark_static_address(guard=True)   | yes, ptr guard | yes
+#   mark_static_address(guard=False)  | yes [1]        | yes
+#   plain user input                  | no             | no
+#
+#   backward input                    | addr-stable    | align-stable
+#   ----------------------------------+----------------+------------------
+#   saved fw input                    | same as that input in the forward
+#   saved inductor intermediate       | cudagraphs [2] | yes [2]
+#   saved fallback (custom) op output | cudagraphs     | NO: KNOWN HOLE [3]
+#   tangent                           | no             | no
+#
+# [1] per-recompile: may legally move under inline_inbuilt_nn_modules
+#     (#126822); cudagraphs re-records. TODO: if the new address is
+#     misaligned, alignment baked into existing kernels is wrong and we
+#     IMA; dynamo needs an alignment guard on unguarded statics so a
+#     misaligned swap recompiles instead.
+# [2] allocator-aligned base + deterministic codegen offsets: even a saved
+#     odd-offset view is stably misaligned, so bw codegen makes no
+#     assumption for it. Under cudagraphs, activations from inline code
+#     between graph partitions are NOT pool-allocated and get demoted
+#     (get_static_bw_input_idxs, see compile_fx_backward). A saved alias
+#     of a user input takes the "saved fw input" row: the partitioner
+#     saves the base primal and recomputes the view in backward.
+# [3] allocated by arbitrary user code, so alignment may vary call to
+#     call, but it is classified static (unstamped, non-primal) and gets
+#     no runtime check: an alignment flip IMAs in the backward. Inductor
+#     judges fallback output alignment from the fake tensor (ir.py,
+#     V.graph.unaligned_buffers), which cannot express "sometimes
+#     misaligned". TORCHINDUCTOR_ALIGNMENT_ASSERTS (default on in OSS)
+#     catches the fake-vs-real mismatch in the forward;
 #     TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT=1 is the workaround.
 #
-# and what each combination does, where "aligned" means statically known
-# 16-byte aligned (tensor_is_aligned; a symbolic storage_offset that cannot
-# be proven aligned counts as misaligned even if the example happens to be):
+# What each combination does at runtime, where "aligned" means statically
+# known 16-byte aligned (tensor_is_aligned; a symbolic storage_offset that
+# cannot be proven aligned counts as misaligned even if the example
+# happens to be):
 #
 #   example input       | codegen         | runtime (no cudagraphs)
 #   --------------------+-----------------+------------------------------
@@ -330,31 +339,19 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 # runtime tensor doesn't satisfy (CUDA misaligned address), and cudagraph
 # replay may read a stale address.
 #
-# "Address-stable" is per-recompile, not absolute: with
-# inline_inbuilt_nn_modules (#126822) an unguarded static input may legally
-# move, and cudagraphs re-records. TODO: if the new address is misaligned,
-# the alignment baked into existing kernels is wrong and we IMA; dynamo
-# needs an alignment guard on unguarded static inputs so a misaligned swap
-# recompiles instead.
-#
-# The backward graph's inputs are tangents plus saved tensors, and a saved
-# tensor's staticness derives from what it is: a saved activation is
-# allocated by the compiled forward (address-stable while cudagraphs owns
-# the pool, and always aligned), while a saved forward *input* is exactly
-# as static as it was in the forward -- a saved param is address-stable, a
-# saved plain user input is not. So classifying backward inputs requires
-# mapping each saved primal back to the forward input it came from and
-# consulting the forward's static_input_indices. That mapping cannot be
-# done positionally from here: the backward's input list is (saved values
-# in partitioner-chosen order, tangents, ...), so forward input indices
-# don't apply to it. Instead, the producer of the backward graph -- the
-# only party that still knows the correspondence -- stamps
-# meta["is_static_input"] on placeholders it knows to be address-stable;
-# AOTAutograd's partitioner does this in _extract_fwd_bwd_modules, where
-# primals are still 1:1 with flat forward inputs. Unstamped placeholders
-# fall back to name-based classification (all "primals_*" static; see
-# compile_fx_backward), so producers that do not stamp (custom
-# partition_fns) keep the historical, less safe behavior.
+# Per the backward table, classifying a saved fw input requires mapping it
+# back to the forward input it came from and consulting the forward's
+# static_input_indices. That mapping cannot be done positionally from
+# here: the backward's input list is (saved values in partitioner-chosen
+# order, tangents, ...), so forward input indices don't apply to it.
+# Instead, the producer of the backward graph -- the only party that still
+# knows the correspondence -- stamps meta["is_static_input"] on
+# placeholders it knows to be address-stable; AOTAutograd's partitioner
+# does this in _extract_fwd_bwd_modules, where primals are still 1:1 with
+# flat forward inputs. Unstamped placeholders fall back to name-based
+# classification (all "primals_*" static; see compile_fx_backward), so
+# producers that do not stamp (custom partition_fns) keep the historical,
+# less safe behavior.
 def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
