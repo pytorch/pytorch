@@ -3539,6 +3539,8 @@ class GuardManager {
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
+    cloned_mgr->_max_saved_pointers_for_recursive_dict_tags_check =
+        _max_saved_pointers_for_recursive_dict_tags_check;
     for (const auto& guard : _leaf_guards) {
       cloned_mgr->record_leaf_guard_properties(guard);
       cloned_mgr->_leaf_guards.emplace_back(guard);

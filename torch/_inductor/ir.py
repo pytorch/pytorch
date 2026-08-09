@@ -6402,8 +6402,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.layout == caller.layout  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.layout != caller.layout:
+            raise AssertionError("Expected self.layout == caller.layout")
 
         render = self.make_kernel_render
         prev_kind = self._render_kind
@@ -6421,9 +6423,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-        assert isinstance(caller, NVUniversalGemmCaller), type(caller)  # noqa: S101
-        assert self.get_size() == caller.layout.size  # noqa: S101
-        assert self.get_stride() == caller.layout.stride  # noqa: S101
+        if not isinstance(caller, NVUniversalGemmCaller):
+            raise AssertionError(f"expected NVUniversalGemmCaller, got {type(caller)}")
+        if self.get_size() != caller.layout.size:
+            raise AssertionError("Expected self.get_size() == caller.layout.size")
+        if self.get_stride() != caller.layout.stride:
+            raise AssertionError("Expected self.get_stride() == caller.layout.stride")
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
@@ -6608,9 +6613,8 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - render: function that returns source code string
         """
         if epilogue_fn_code is not None:
-            assert epilogue_var_renames is not None, (  # noqa: S101
-                "epilogue_fn_code requires epilogue_var_renames"
-            )
+            if epilogue_var_renames is None:
+                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
 
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,

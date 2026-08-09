@@ -161,6 +161,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeMROSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -2403,10 +2404,18 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
+        list_source = self.get_source()
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(self.get_source(), i),
+                # A type is always the first item in its own MRO. Reuse the
+                # type source so duplicate tracking does not install a
+                # redundant object-aliasing guard between the two sources.
+                source=(
+                    list_source.base
+                    if i == 0 and isinstance(list_source, TypeMROSource)
+                    else GetItemSource(list_source, i)
+                ),
                 tx=self.tx,
             )
             for i, item in enumerate(value)

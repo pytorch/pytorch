@@ -605,8 +605,12 @@ user_stack=None)
         foo_mgr.mark_tag_safe_root()
 
         cloned_root = guard_manager.clone_manager(lambda x: True)
+        cloned_foo_mgr = cloned_root.get_child_managers()[0]
+        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
         self.assertTrue(cloned_root.check({"foo": foo}))
+        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
         self.assertTrue(cloned_root.check({"foo": foo}))
+        self.assertFalse(cloned_foo_mgr.is_recursive_dict_tag_matching_disabled())
 
     def test_weakref_alive_guard(self):
         root = RootGuardManager()
@@ -1471,6 +1475,38 @@ class TagSafetyChecks(RecursiveDictTagTests):
         self.assertFalse(d_mgr.is_tag_safe())
         self.assertFalse(d_a_mgr.is_tag_safe())
 
+    def test_nested_relational_guard_not_tag_safe(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Mod(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.a = (value,)
+
+        base = torch.randn(2)
+        different = base.clone()
+        mod = Mod(base)
+
+        def fn(t, x, m):
+            if x is m.a[0]:
+                return t + 1
+            return t - 1
+
+        with torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True):
+            counter = CompileCounter()
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            t = torch.tensor(0)
+
+            self.assertEqual(
+                [
+                    opt_fn(t, base, mod).item(),
+                    opt_fn(t, base, mod).item(),
+                    opt_fn(t, different, mod).item(),
+                ],
+                [1, 1, -1],
+            )
+            self.assertEqual(counter.frame_count, 2)
+
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
             c = 2
@@ -1513,9 +1549,15 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from utils import install_guard_manager_testing_hook
 
         def hook(guard_wrapper, f_locals, builder):
-            from torch._dynamo.source import LocalSource
+            from torch._dynamo.source import LocalSource, TypeSource
 
             baz_source = LocalSource("baz")
+
+            # type(baz).__mro__[0] and type(baz) are the same object. Their
+            # sources should be canonicalized rather than related by a
+            # redundant object-aliasing guard, which would make baz tag-unsafe.
+            baz_type_mgr = builder.get_guard_manager_from_source(TypeSource(baz_source))
+            self.assertFalse(baz_type_mgr.has_unoptimized_relational_guard())
 
             # Check tagness of baz
             baz_mgr = builder.get_guard_manager_from_source(baz_source)
