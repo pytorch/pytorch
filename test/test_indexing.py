@@ -49,6 +49,13 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class GpuCoverageProbe(TestCase):
+    """gpu-coverage control probe. DO NOT LAND."""
+
+    def test_gpucov_probe_ungated(self):
+        self.assertTrue(True)
+
+
 class TestIndexing(TestCase):
     def test_index(self, device):
         def consec(size, start=1):
