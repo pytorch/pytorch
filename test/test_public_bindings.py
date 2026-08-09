@@ -421,6 +421,7 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
                 "torch._native.ops.scatter_add.",
+                "torch._native.ops.sum.inner_tree_kernel",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
                 "torch.profiler._cupti.",
