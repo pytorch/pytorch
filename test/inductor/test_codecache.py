@@ -3554,6 +3554,31 @@ class TestFxGraphCacheHashing(TestCase):
         with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
             CacheabilityValidator(gm, require_shape_env=False).validate()
 
+    def test_cacheability_validator_checks_symbolic_custom_class_constant(self):
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
+
+        def graph_with_attr(attr):
+            graph = torch.fx.Graph()
+            output = graph.get_attr("opaque")
+            graph.output(output)
+            return torch.fx.GraphModule({"opaque": attr}, graph)
+
+        gm = graph_with_attr(torch.Generator())
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache symbolic custom class constants"
+        ):
+            CacheabilityValidator(gm, require_shape_env=False).validate_graph(
+                include_constants=True
+            )
+
+        leaf_gm = graph_with_attr(_LeafCallable(torch.neg))
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache symbolic custom class constants"
+        ):
+            CacheabilityValidator(leaf_gm, require_shape_env=False).validate_graph(
+                include_constants=True
+            )
+
     def _nested_region_gm(self, patches):
         from torch._higher_order_ops.invoke_subgraph import (
             get_invoke_subgraph_compile_options,

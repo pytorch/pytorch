@@ -12,7 +12,12 @@ from torch._higher_order_ops.utils import register_fake
 from torch._library.opaque_object import register_custom_class
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    _trust_graph_owned_opaque_constant,
+    get_proxy_mode,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
 from torch.nn.utils.stateless import _reparametrize_module
 
 
@@ -776,6 +781,10 @@ def invoke_leaf_function_autograd(
 # TODO: aliasing is not allowed
 @invoke_leaf_function.py_functionalize_impl
 def invoke_leaf_function_functionalization(ctx, *all_args, **kwargs):
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is not None:
+        _trust_leaf_callables(all_args, proxy_mode.tracer)
+
     from torch._higher_order_ops.auto_functionalize import (
         can_auto_functionalize,
         do_auto_functionalize_v2,
@@ -798,8 +807,18 @@ def invoke_leaf_function_functionalization(ctx, *all_args, **kwargs):
     )
 
 
+def _trust_leaf_callables(all_args, tracer):
+    for callable_arg in all_args[:2]:
+        if type(callable_arg) is not _LeafCallable:
+            raise AssertionError(
+                "invoke_leaf_function expects compiler-owned _LeafCallable operands"
+            )
+        _trust_graph_owned_opaque_constant(callable_arg, tracer)
+
+
 @invoke_leaf_function.py_impl(ProxyTorchDispatchMode)
 def invoke_leaf_function_proxy_mode(proxy_mode, *all_args, **kwargs):
+    _trust_leaf_callables(all_args, proxy_mode.tracer)
     out = invoke_leaf_function(*all_args, **kwargs)
     proxies = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, all_args)
     proxy = proxy_mode.tracer.create_proxy(

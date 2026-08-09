@@ -4,7 +4,10 @@ from typing import Any, cast, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
+from torch._higher_order_ops.invoke_leaf_function import (
+    _trust_leaf_callables,
+    invoke_leaf_function,
+)
 from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.schema import HopSchema
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -176,6 +179,12 @@ def with_effects_proxy(
 ) -> tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
+
+    # invoke_leaf_function owns its first two static callable operands. A
+    # with_effects node can be retraced directly without redispatching through
+    # invoke_leaf_function's proxy implementation, so preserve that provenance.
+    if op is invoke_leaf_function:
+        _trust_leaf_callables(args, mode.tracer)
 
     proxy_token = mode.tracer.unwrap_proxy(token)
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)

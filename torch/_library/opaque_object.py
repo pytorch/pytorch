@@ -87,9 +87,10 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
 # Type for reconstruct_fn: called by PythonKeyTracer.create_arg when make_fx
-# encounters an untracked opaque reference (e.g. a backward closure capture).
-# Should derive the object from existing graph inputs or return None to fall
-# back to get_attr.  Args: (obj, get_tracked_proxy, tracer).
+# encounters an untracked symbolic custom class (e.g. a backward closure capture).
+# It must derive the object solely from tracked graph inputs; any discriminator
+# that affects object identity must be represented in the graph. Return None when
+# the object cannot be reconstructed safely. Args: (obj, get_tracked_proxy, tracer).
 ReconstructFn: TypeAlias = Callable[
     [CustomClassBase, Callable[[CustomClassBase], "Proxy | None"], "PythonKeyTracer"],
     "Proxy | None",
@@ -187,6 +188,11 @@ def register_custom_class(
             - MemberType.USE_REAL: Evaluates with the real object at compile time and
               bakes the result as a constant
             - MemberType.INLINED: Inlines the method call into the trace
+        reconstruct_fn (callable | None): Reconstructs an otherwise untracked
+            symbolic object from tracked graph inputs. The result must be a
+            deterministic graph derivation of those inputs, and every value that
+            affects object identity must be represented or guarded in the graph.
+            Return None when safe reconstruction is not possible.
     """
     import torch.utils._pytree as pytree
 

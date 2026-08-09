@@ -142,6 +142,93 @@ _P = ParamSpec("_P")
 R = TypeVar("R")
 _Ts = TypeVarTuple("_Ts")
 
+_EXPLICIT_GRAPH_OWNED_OPAQUES: contextvars.ContextVar[
+    tuple[FakeScriptObject | CustomClassBase, ...]
+] = contextvars.ContextVar("explicit_graph_owned_opaques", default=())
+
+
+def _opaque_canonical_key(obj: object) -> tuple[type[object], int] | None:
+    """Return a stable identity for custom classes whose Python wrapper can change."""
+    if isinstance(obj, torch.Generator):
+        # C++ redispatch can rewrap a Python Generator subclass as the base
+        # type. Read the base descriptor directly so subclass attributes cannot
+        # spoof the handle, and normalize all wrappers to one canonical type.
+        cdata_descriptor = torch.Generator.__dict__["_cdata"]
+        cdata = typing.cast(Any, cdata_descriptor).__get__(obj, type(obj))
+        return torch.Generator, cdata
+    return None
+
+
+def _trust_graph_owned_opaque_constant(
+    obj: FakeScriptObject | CustomClassBase, tracer: _ProxyTracer
+) -> None:
+    """Approve one exact graph-owned object for the current tracer invocation.
+
+    This is only for explicit preexisting FX get_attrs or lowering-owned static
+    operands whose identity is deliberately part of the graph. The strong reference
+    is cleared before tracer reuse. User objects and type-wide exemptions must not
+    use this path.
+    """
+    real_obj = obj.real_obj if isinstance(obj, FakeScriptObject) else obj
+    if not is_opaque_symbolic_type(type(real_obj)):
+        raise AssertionError(f"Expected a symbolic custom class, got {type(real_obj)}")
+    tracer._graph_owned_opaque_constants[id(real_obj)] = real_obj
+
+
+@contextmanager
+def _allow_graph_owned_opaque_constants(
+    objects: Sequence[FakeScriptObject | CustomClassBase],
+) -> Generator[None, None, None]:
+    """Scope an exact source-derived allowlist to one make_fx trace."""
+    token = _EXPLICIT_GRAPH_OWNED_OPAQUES.set(tuple(objects))
+    try:
+        yield
+    finally:
+        _EXPLICIT_GRAPH_OWNED_OPAQUES.reset(token)
+
+
+def _graph_owned_opaques_from_graph_module(
+    root: fx.GraphModule,
+) -> tuple[FakeScriptObject | CustomClassBase, ...]:
+    """Collect exact symbolic objects referenced by explicit FX get_attr nodes."""
+    result: dict[int, FakeScriptObject | CustomClassBase] = {}
+    missing = object()
+
+    for graph_module in root.modules():
+        if not isinstance(graph_module, fx.GraphModule):
+            continue
+        for node in graph_module.graph.nodes:
+            if node.op != "get_attr":
+                continue
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"Expected get_attr target to be a string, got {node.target}"
+                )
+            attr: object = graph_module
+            for atom in node.target.split("."):
+                if not isinstance(attr, torch.nn.Module):
+                    break
+                next_attr: object = missing
+                for registry_name in ("_parameters", "_buffers", "_modules"):
+                    registry = attr.__dict__.get(registry_name, {})
+                    if atom in registry:
+                        next_attr = registry[atom]
+                        break
+                if next_attr is missing and atom in attr.__dict__:
+                    next_attr = attr.__dict__[atom]
+                if next_attr is missing:
+                    break
+                attr = next_attr
+            else:
+                if isinstance(attr, (FakeScriptObject, CustomClassBase)):
+                    real_attr = (
+                        attr.real_obj if isinstance(attr, FakeScriptObject) else attr
+                    )
+                    if is_opaque_symbolic_type(type(real_attr)):
+                        result[id(real_attr)] = attr
+    return tuple(result.values())
+
+
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
 pytree.register_pytree_node(
@@ -324,15 +411,41 @@ def set_proxy_slot(
                 except AttributeError:
                     pass
 
+            canonical_obj = real_obj if real_obj is not None else obj
+            canonical_key = _opaque_canonical_key(canonical_obj)
+            canonical_entry = (
+                tracer._opaque_canonical_proxy.get(canonical_key)
+                if canonical_key is not None
+                else None
+            )
+            if canonical_entry is not None:
+                tracer.opaque_tracker[obj] = canonical_entry[1]
+                if real_obj is not None:
+                    tracer._opaque_real_obj_proxy.setdefault(
+                        id(real_obj), canonical_entry[1]
+                    )
+                return
+
             if real_obj is not None:
                 existing = tracer._opaque_real_obj_proxy.get(id(real_obj))
                 if existing is not None:
                     tracer.opaque_tracker[obj] = existing
+                    tracked_proxy = existing
                 else:
                     tracer.opaque_tracker[obj] = proxy
                     tracer._opaque_real_obj_proxy[id(real_obj)] = proxy
+                    tracked_proxy = proxy
             else:
                 tracer.opaque_tracker[obj] = proxy
+                tracked_proxy = proxy
+
+            if canonical_key is not None:
+                # Keep the original wrapper alive so its C++ handle cannot be
+                # destroyed and reused for a different object during this trace.
+                tracer._opaque_canonical_proxy[canonical_key] = (
+                    canonical_obj,
+                    tracked_proxy,
+                )
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -1544,6 +1657,8 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
+    tracer._opaque_canonical_proxy = {}
+    tracer._graph_owned_opaque_constants = {}
     tracer.sympy_expr_tracker = {}
     tracer._current_device_node = None
     # Stores the torch function that was called during tracing
@@ -1564,6 +1679,11 @@ class PythonKeyTracer(Tracer):
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
+    # Maps stable C++ wrapper identities to a strong reference and proxy.
+    # Generator arguments can be rewrapped while retaining the same handle.
+    _opaque_canonical_proxy: dict[tuple[type[object], int], tuple[object, Proxy]]
+    # Exact objects intentionally embedded by an existing graph or lowering.
+    _graph_owned_opaque_constants: dict[int, CustomClassBase]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
@@ -1576,6 +1696,30 @@ class PythonKeyTracer(Tracer):
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         _init_proxy_trackers(self)
+
+    def trace(  # type: ignore[override]
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        self.opaque_tracker = WeakIdKeyDictionary()
+        self._opaque_real_obj_proxy = {}
+        self._opaque_canonical_proxy = {}
+        self._graph_owned_opaque_constants = {}
+        graph_owned_opaques = _EXPLICIT_GRAPH_OWNED_OPAQUES.get()
+        # Consume the source allowlist for this tracer only. Nested tracers must
+        # establish their own provenance, while the enclosing scope is restored
+        # afterward for intentional sequential traces.
+        token = _EXPLICIT_GRAPH_OWNED_OPAQUES.set(())
+        try:
+            for obj in graph_owned_opaques:
+                _trust_graph_owned_opaque_constant(obj, self)
+            if isinstance(root, fx.GraphModule):
+                for obj in _graph_owned_opaques_from_graph_module(root):
+                    _trust_graph_owned_opaque_constant(obj, self)
+            return super().trace(root, concrete_args)
+        finally:
+            _EXPLICIT_GRAPH_OWNED_OPAQUES.reset(token)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -1611,27 +1755,111 @@ class PythonKeyTracer(Tracer):
             # pyrefly: ignore [bad-return]
             return a.constant
 
-        # Try reconstructing untracked opaque reference types from existing
+        # Try reconstructing untracked symbolic custom classes from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
         if isinstance(a, (FakeScriptObject, CustomClassBase)):
+            proxy = self._get_tracked_opaque_proxy(a)
+            if proxy is not None:
+                return proxy.node
             node = self._try_reconstruct_opaque(a)
             if node is not None:
                 return node
+            real_obj = self._opaque_real_obj(a)
+            if is_opaque_symbolic_type(
+                type(real_obj)
+            ) and not self._allow_constant_opaque(a):
+                if isinstance(real_obj, torch.Generator):
+                    guidance = (
+                        "Create the Generator outside the traced function and pass "
+                        "it as an input."
+                    )
+                else:
+                    guidance = (
+                        "Pass the object as a graph input or register a reconstruct_fn "
+                        "that derives it from tracked inputs."
+                    )
+                raise RuntimeError(
+                    f"An untracked symbolic custom class object "
+                    f"({type(real_obj).__name__}) reached FX graph creation. "
+                    "FX would otherwise bake this object into the graph as "
+                    "a get_attr constant with no input guard, which can "
+                    "produce stale or missing objects when the graph is reused. "
+                    f"{guidance}"
+                )
 
         return super().create_arg(a)  # type: ignore[return-value]
+
+    def _opaque_real_obj(
+        self, a: FakeScriptObject | CustomClassBase
+    ) -> CustomClassBase:
+        return a.real_obj if isinstance(a, FakeScriptObject) else a
+
+    def _allow_constant_opaque(self, obj: FakeScriptObject | CustomClassBase) -> bool:
+        real_obj = self._opaque_real_obj(obj)
+        return self._graph_owned_opaque_constants.get(id(real_obj)) is real_obj
+
+    def _get_tracked_opaque_proxy(
+        self, obj: FakeScriptObject | CustomClassBase
+    ) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=False)
+
+    def _get_reconstruct_opaque_proxy(self, obj: CustomClassBase) -> Proxy | None:
+        return self._get_tracked_opaque_proxy_impl(obj, allow_equal_real_obj=True)
+
+    def _get_tracked_opaque_proxy_impl(
+        self,
+        obj: FakeScriptObject | CustomClassBase,
+        *,
+        allow_equal_real_obj: bool,
+    ) -> Proxy | None:
+        proxy = get_proxy_slot(obj, self, None)
+        if proxy is not None:
+            return proxy
+
+        real_obj = self._opaque_real_obj(obj)
+        proxy = self._opaque_real_obj_proxy.get(id(real_obj))
+        if proxy is not None:
+            return proxy
+
+        canonical_key = _opaque_canonical_key(real_obj)
+        if canonical_key is not None:
+            canonical_entry = self._opaque_canonical_proxy.get(canonical_key)
+            if canonical_entry is not None:
+                return canonical_entry[1]
+
+        if real_obj is not obj:
+            proxy = get_proxy_slot(real_obj, self, None)
+            if proxy is not None:
+                return proxy
+
+        if not allow_equal_real_obj:
+            return None
+
+        # The object may be identity-different but equal to a tracked
+        # FSO's real_obj. This happens because maybe_to_fake_obj creates
+        # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
+        # object from the one held by submesh._root_mesh. Equality
+        # comparison is needed, not identity.
+        for tracked_obj, p in self.opaque_tracker.items():
+            if not isinstance(tracked_obj, FakeScriptObject):
+                continue
+            if tracked_obj.real_obj == real_obj:
+                return p
+        return None
 
     def _try_reconstruct_opaque(
         self, a: FakeScriptObject | CustomClassBase
     ) -> fx.node.Node | None:
-        """Try to reconstruct an opaque object from existing graph inputs.
+        """Try to reconstruct a symbolic custom class from existing graph inputs.
 
-        When make_fx encounters an untracked opaque reference type (e.g. a
-        DeviceMesh submesh captured by a backward closure), this method checks
-        if the type has a registered reconstruct_fn that can derive the object
-        from inputs already in the graph.  Returns an FX Node on success,
-        None on failure (falls back to get_attr constant).
+        When make_fx encounters an untracked object (e.g. a DeviceMesh submesh
+        captured by a backward closure), this method checks if the type has a
+        registered reconstruct_fn that can derive the object from inputs already
+        in the graph. The registered function is a provenance contract: its result
+        must depend only on tracked inputs, with every identity-relevant choice
+        represented in the graph. Returns an FX Node on success, or None on failure.
         """
-        real_obj: CustomClassBase = a.real_obj if isinstance(a, FakeScriptObject) else a
+        real_obj = self._opaque_real_obj(a)
 
         if not is_opaque_symbolic_type(type(real_obj)):
             return None
@@ -1641,23 +1869,7 @@ class PythonKeyTracer(Tracer):
             return None
 
         def get_tracked_proxy(obj: CustomClassBase) -> Proxy | None:
-            proxy = self._opaque_real_obj_proxy.get(id(obj))
-            if proxy is not None:
-                return proxy
-            proxy = get_proxy_slot(obj, self, None)
-            if proxy is not None:
-                return proxy
-            # The object may be identity-different but equal to a tracked
-            # FSO's real_obj. This happens because maybe_to_fake_obj creates
-            # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
-            # object from the one held by submesh._root_mesh. Equality
-            # comparison is needed, not identity.
-            for tracked_obj, p in self.opaque_tracker.items():
-                if not isinstance(tracked_obj, FakeScriptObject):
-                    continue
-                if tracked_obj.real_obj == obj:
-                    return p
-            return None
+            return self._get_reconstruct_opaque_proxy(obj)
 
         result = reconstruct_fn(real_obj, get_tracked_proxy, self)
         if result is None:
@@ -2277,6 +2489,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
+    _opaque_canonical_proxy: dict[tuple[type[object], int], tuple[object, Proxy]]
+    _graph_owned_opaque_constants: dict[int, CustomClassBase]
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
@@ -3188,6 +3402,12 @@ class _MakefxTracer:
             stack.enter_context(proxy_mode)
             stack.enter_context(disable_autocast_cache())
             stack.enter_context(_set_make_fx_tracer(self))
+            if isinstance(f, fx.GraphModule):
+                stack.enter_context(
+                    _allow_graph_owned_opaque_constants(
+                        _graph_owned_opaques_from_graph_module(f)
+                    )
+                )
 
             # Under compile-on-one-rank, redirect legacy in-place c10d
             # collectives to functional collectives so the ProcessGroup flows
