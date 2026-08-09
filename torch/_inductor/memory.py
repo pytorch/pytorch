@@ -374,12 +374,13 @@ def _apply_inplace_reuses(
     for output_name in inplace_reuses:
         name_to_buf_info[output_name].size_alloc = 0
     for input_name in reused_inputs:
-        name_to_buf_info[input_name].size_free = 0
+        if input_name in name_to_buf_info:
+            name_to_buf_info[input_name].size_free = 0
 
     for output_name in inplace_reuses.keys() - reused_inputs:
-        name_to_buf_info[output_name].size_free = original_size_free[
-            sources[output_name]
-        ]
+        name_to_buf_info[output_name].size_free = original_size_free.get(
+            sources[output_name], 0
+        )
 
 
 def compute_memory_timeline(

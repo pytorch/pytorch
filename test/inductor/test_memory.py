@@ -384,6 +384,18 @@ class TestOperatorReorderForPeakMemory(TestCase):
             [(100, 0), (0, 100)],
         )
 
+    def test_inplace_reuse_of_untracked_input(self):
+        buffer = mock.Mock()
+        buffer.get_name.return_value = "destination"
+        infos = [memory.BufferInfo(buffer, 100, 100, 0, 0)]
+
+        memory._apply_inplace_reuses(infos, {"destination": "graph_input"})
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(0, 0)],
+        )
+
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     def test_inplace_buffer_reuse_peak_memory_estimate(self):
         def f(x, weight, bias):
