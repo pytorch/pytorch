@@ -6694,6 +6694,14 @@ class GraphModule(torch.nn.Module):
             associative_scan(fct_output_output_alias, inp, 0)
 
 
+# Skip a @parametrize("device", ...) case when device is cuda but no GPU is present.
+_skip_cuda_if_unavailable = decorateIf(
+    unittest.skip("Test requires CUDA."),
+    lambda params: params["device"] == torch.device("cuda")
+    and not torch.cuda.is_available(),
+)
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
@@ -10331,8 +10339,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(compile_out, exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_simple(self, combine_mode):
-        x = torch.randn(3, 4, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_simple(self, combine_mode, device):
+        x = torch.randn(3, 4, 2, device=device)
 
         def combine_fn(a, b):
             return a + b
@@ -10350,18 +10360,18 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
         )
         self.assertEqual(out, exp)
-        # Only generic mode is compile-checked on CPU. pointwise scan lowers
-        # only on a Triton backend (BackendFeature.SCAN), so pointwise + compile
-        # is CUDA-only and covered by the @requires_cuda tests below (e.g.
-        # test_associative_scan_in_vmap_pointwise_compile). generic never builds
-        # a HOP (it lowers to the pure-Python scan recursion), so it composes
-        # with compile on any device.
+        # See Note [associative_scan vmap coverage].
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_pytree(self, combine_mode):
-        xs = {"a": torch.randn(3, 5, 2), "b": torch.randn(3, 5, 2)}
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_pytree(self, combine_mode, device):
+        xs = {
+            "a": torch.randn(3, 5, 2, device=device),
+            "b": torch.randn(3, 5, 2, device=device),
+        }
 
         def combine_fn(l, r):
             return {"a": l["a"] + r["a"], "b": l["b"] * r["b"]}
@@ -10393,8 +10403,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_reverse(self, combine_mode):
-        x = torch.randn(3, 4, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_reverse(self, combine_mode, device):
+        x = torch.randn(3, 4, 2, device=device)
 
         def combine_fn(a, b):
             return a * b
@@ -10419,8 +10431,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_nested(self, combine_mode):
-        x = torch.randn(2, 3, 4, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_nested(self, combine_mode, device):
+        x = torch.randn(2, 3, 4, 2, device=device)
 
         def combine_fn(a, b):
             return a + b
@@ -10450,9 +10464,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode):
-        x = torch.randn(3, 4, 2)
-        h = torch.randn(3, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode, device):
+        x = torch.randn(3, 4, 2, device=device)
+        h = torch.randn(3, 2, device=device)
 
         def fn(x, h):
             def inner_fn(xi, hi):
@@ -10477,8 +10493,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode):
-        x = torch.randn(3, 1, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode, device):
+        x = torch.randn(3, 1, 2, device=device)
 
         def combine_fn(a, b):
             return a + b
@@ -10611,8 +10629,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
-        x = torch.randn(4, 3, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode, device):
+        x = torch.randn(4, 3, 2, device=device)
 
         def combine_fn(a, b):
             return a + b
@@ -10637,8 +10657,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode):
-        x = torch.randn(3, 4, 2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode, device):
+        x = torch.randn(3, 4, 2, device=device)
 
         def combine_fn(a, b):
             return a + b
@@ -10664,9 +10686,13 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    def test_associative_scan_in_vmap_unbatched_additional_inputs(self, combine_mode):
-        x = torch.randn(3, 4, 2)
-        h = torch.randn(2)
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_unbatched_additional_inputs(
+        self, combine_mode, device
+    ):
+        x = torch.randn(3, 4, 2, device=device)
+        h = torch.randn(2, device=device)
 
         def fn(x, h):
             def inner_fn(xi, hi):
@@ -10690,8 +10716,66 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_nonzero_scan_dim(self, combine_mode, device):
+        # The frontend moves the scan dim to 0 (associative_scan.py movedim),
+        # while the batch rule parks the batch dim on the last axis; exercise the
+        # interaction with a scan dim that is neither 0 nor the batched axis.
+        x = torch.randn(3, 4, 5, device=device)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=1, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=1) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @_skip_cuda_if_unavailable
+    def test_associative_scan_in_vmap_zero_length_scan_dim(self, combine_mode, device):
+        # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0
+        # note in associative_scan) and each batch element returns its input.
+        x = torch.randn(3, 0, 2, device=device)
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
     @skipIfTorchDynamo("not a dynamo test")
     def test_associative_scan_in_vmap_unbatched_xs_error(self):
+        # Batched additional_inputs (hi) with unbatched xs: the combine_fn outputs
+        # become batched while xs is not, so the outputs' batch dims diverge from
+        # xs on later scan levels. This is not supported yet; the batch rule detects
+        # it up front and raises a clear error rather than a cryptic broadcast one.
         xs = torch.randn(4, 2)
         h = torch.randn(3, 2)
 
@@ -10706,10 +10790,31 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "The size of tensor a \\(3\\) must match the size of tensor b \\(2\\) "
-            "at non-singleton dimension 3",
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
         ):
             vmap_fn(xs, h)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_mixed_batched_pytree_error(self):
+        a = torch.randn(3, 5, 2)
+        b = torch.randn(5, 2)
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["a"]}
+
+        def fn(a, b):
+            def inner_fn(ai):
+                return associative_scan(
+                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode="pointwise"
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
+        ):
+            fn(a, b)
 
     @skipIfTorchDynamo("not a dynamo test")
     def test_associative_scan_op_in_vmap_eager(self):
