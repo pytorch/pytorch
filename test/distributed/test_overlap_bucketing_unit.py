@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -1546,6 +1547,54 @@ class TestFusibleNodeOverlap(InductorTestCase):
             str(out.graph)
         )
         self.assertEqual(len(scheduler.collective_info), 1)
+
+
+class TestOverlapSchedulingNoMemoryLimit(TestCase):
+    """Test overlap scheduling without a memory-increase limit."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_no_memory_limit(self):
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(x, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, 4, group_name
+            )
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return all_gather @ w
+
+        gm = make_fx(func, tracing_mode="fake")(torch.randn(8, 16), torch.randn(16, 16))
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            schedule_overlap_bucketing(
+                gm,
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+            )
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])

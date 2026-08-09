@@ -528,7 +528,7 @@ class OverlapScheduler:
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+            self.memory_tracker = MemoryTracker(self.graph)
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
