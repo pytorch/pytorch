@@ -18,6 +18,7 @@ import math
 import operator
 import os
 import pickle
+import queue
 import random
 import re
 import subprocess
@@ -8031,6 +8032,104 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 f_opt(x)
 
         _do_test(g)
+
+    def test_fx_tracing_and_compile_are_isolated_across_threads(self):
+        trace_entered = threading.Event()
+        release_trace = threading.Event()
+        trace_finished = threading.Event()
+        errors: queue.Queue[Exception] = queue.Queue()
+        traced_modules: queue.Queue[torch.fx.GraphModule] = queue.Queue()
+        shared_weight = torch.nn.Parameter(torch.randn(4, 4))
+
+        class TraceModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+                self.weight = shared_weight
+
+            def forward(self, x):
+                trace_entered.set()
+                if not release_trace.wait(timeout=10):
+                    raise AssertionError("Compile backend did not start")
+                return self.relu(x) + self.weight
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = shared_weight
+
+            def forward(self, x):
+                return x @ self.weight
+
+        model = Model().eval()
+
+        def trace_worker():
+            try:
+                traced_modules.put(torch.fx.symbolic_trace(TraceModule()))
+            except Exception as e:
+                errors.put(e)
+                release_trace.set()
+            finally:
+                trace_finished.set()
+
+        def backend(gm, _example_inputs):
+            # Dynamo enters _maybe_revert_all_patches before invoking the backend.
+            # Let the FX trace proceed while that context is active to verify that
+            # this thread cannot revert the tracing thread's patches.
+            release_trace.set()
+            if not trace_finished.wait(timeout=10):
+                raise AssertionError("FX trace worker did not finish")
+            return gm.forward
+
+        def compile_worker():
+            try:
+                if not trace_entered.wait(timeout=10):
+                    raise AssertionError("FX trace worker did not start")
+                x = torch.randn(3, 4)
+                with torch.no_grad():
+                    opt_model = torch.compile(model, backend=backend, dynamic=True)
+                    self.assertEqual(opt_model(x), model(x))
+            except Exception as e:
+                errors.put(e)
+            finally:
+                release_trace.set()
+
+        trace_thread = threading.Thread(target=trace_worker)
+        compile_thread = threading.Thread(target=compile_worker)
+        trace_thread.start()
+        compile_thread.start()
+        trace_thread.join(timeout=30)
+        compile_thread.join(timeout=30)
+
+        self.assertFalse(trace_thread.is_alive())
+        self.assertFalse(compile_thread.is_alive())
+        if not errors.empty():
+            raise errors.get()
+        self.assertEqual(traced_modules.qsize(), 1)
+        traced_module = traced_modules.get()
+        self.assertEqual(
+            [
+                node.target
+                for node in traced_module.graph.nodes
+                if node.op == "call_module"
+            ],
+            ["relu"],
+        )
+        self.assertEqual(
+            [
+                node.target
+                for node in traced_module.graph.nodes
+                if node.op == "get_attr"
+            ],
+            ["weight"],
+        )
+        self.assertIs(
+            torch.nn.Module.__call__, torch.fx._symbolic_trace._orig_module_call
+        )
+        self.assertIs(
+            torch.nn.Module.__getattr__,
+            torch.fx._symbolic_trace._orig_module_getattr,
+        )
 
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
