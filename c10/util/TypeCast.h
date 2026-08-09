@@ -11,6 +11,7 @@
 #include <c10/util/overflows.h>
 #include <c10/util/safe_conv.h>
 
+#include <limits>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -58,13 +59,60 @@ struct maybe_bool<true, src_t> {
   }
 };
 
-// Float -> integer is UB on out-of-range/NaN values; we keep the
-// platform-defined result for NumPy compatibility and suppress UBSan only
-// here, so the dispatching template below stays UBSan-clean.
+template <typename T>
+using scalar_value_type_t = std::remove_cv_t<std::remove_reference_t<T>>;
+
+template <typename T>
+constexpr bool is_saturating_float_to_signed_int_source_v =
+    !is_complex<scalar_value_type_t<T>>::value &&
+    std::numeric_limits<scalar_value_type_t<T>>::is_specialized &&
+    !std::numeric_limits<scalar_value_type_t<T>>::is_integer;
+
+template <typename src_t>
+C10_HOST_DEVICE static inline constexpr auto signed_int_compare_value(
+    src_t src) {
+  using source_t = scalar_value_type_t<src_t>;
+  using compare_t = std::conditional_t<
+      (std::numeric_limits<source_t>::digits <=
+       std::numeric_limits<float>::digits),
+      float,
+      source_t>;
+  return static_cast<compare_t>(src);
+}
+
+// Float -> integer is UB on out-of-range/NaN values. For scalar floating
+// sources to signed integer destinations on host, out-of-range values saturate
+// and NaN maps to 0 before casting below. Device-compiled paths and unsigned
+// destinations keep the platform-defined result for compatibility.
+// Suppress UBSan only here, so the dispatching template below stays
+// UBSan-clean.
 template <typename dest_t, typename src_t>
-C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
+C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline constexpr dest_t
 unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
+}
+
+template <typename dest_t, typename src_t>
+C10_HOST_DEVICE static inline constexpr dest_t saturated_cast_to_signed_int(
+    src_t src) {
+  static_assert(is_saturating_float_to_signed_int_source_v<src_t>);
+  static_assert(std::is_integral_v<dest_t>);
+  static_assert(std::is_signed_v<dest_t>);
+  const auto src_for_compare = signed_int_compare_value(src);
+  using compare_t = decltype(src_for_compare);
+  constexpr auto lower =
+      static_cast<compare_t>(std::numeric_limits<dest_t>::lowest());
+  constexpr auto upper = -lower;
+  if (src_for_compare != src_for_compare) {
+    return static_cast<dest_t>(0);
+  }
+  if (src_for_compare < lower) {
+    return std::numeric_limits<dest_t>::lowest();
+  }
+  if (src_for_compare >= upper) {
+    return std::numeric_limits<dest_t>::max();
+  }
+  return unchecked_cast_to_int<dest_t>(src_for_compare);
 }
 
 template <typename dest_t, typename src_t>
@@ -73,6 +121,15 @@ struct static_cast_with_inter_type {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     if constexpr (
+        std::is_integral_v<dest_t> && std::is_signed_v<dest_t> &&
+        is_saturating_float_to_signed_int_source_v<decltype(r)>) {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || \
+    defined(__HIP_ARCH__)
+      return unchecked_cast_to_int<dest_t>(r);
+#else
+      return saturated_cast_to_signed_int<dest_t>(r);
+#endif
+    } else if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
     } else {
