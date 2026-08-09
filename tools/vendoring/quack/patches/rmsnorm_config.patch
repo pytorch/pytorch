@@ -1,0 +1,13 @@
+# Keep the RMSNorm-only vendored subset self-contained.
+#
+# The upstream docstring compares this module with gemm_config, which is not
+# part of the subset now that FlexGEMM uses the modern external QuACK runtime.
+#
+
+--- a/rmsnorm_config.py
++++ b/rmsnorm_config.py
+@@ -4,2 +4,2 @@
+-Mirrors :mod:`quack.gemm_config`: frozen dataclasses that capture the launch
+-knobs, plus arch-specific factories that own the heuristics.
++Uses frozen dataclasses to capture the launch knobs, plus arch-specific
++factories that own the heuristics.

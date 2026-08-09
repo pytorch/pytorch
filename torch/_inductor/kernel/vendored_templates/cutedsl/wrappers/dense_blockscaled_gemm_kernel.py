@@ -343,16 +343,19 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
 
         stream = to_cuda_stream(stream)
         compiled_gemm = compiled_artifact.compiled_obj
-
-        # TVM FFI needs a torch.cuda.Stream, not a raw int handle
-        if isinstance(stream, int):
-            stream = torch.cuda.ExternalStream(stream)
+        torch_stream = (
+            stream
+            if isinstance(stream, torch.cuda.Stream)
+            else torch.cuda.ExternalStream(
+                int(stream), device=args.out.tensor.runtime_tensor.device
+            )
+        )
 
         # Runtime arg list must match _compile: alpha always trails stream.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = _ones_alpha()
-        with torch.cuda.stream(stream):
+        with torch.cuda.stream(torch_stream):
             epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
 
         local_reduce_out = getattr(args, "local_reduce_out", None)
