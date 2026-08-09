@@ -781,6 +781,33 @@ class TestDecomp(TestCase):
         self.assertIn("rsqrt", graph_str)
         self.assertNotIn("reciprocal", graph_str)
 
+    def test_inductor_batch_norm_eval_decomposition(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(input, weight, bias, mean, var):
+            return torch.ops.aten._native_batch_norm_legit_no_training.default(
+                input, weight, bias, mean, var, 0.1, 1e-05
+            )
+
+        shape = (2, 3, 4, 4)
+        input = torch.randn(shape, device=device)
+        weight = torch.randn(3, device=device)
+        bias = torch.randn(3, device=device)
+        mean = torch.randn(3, device=device)
+        var = torch.rand(3, device=device) + 1.0
+
+        fx_g = make_fx(
+            func,
+            decomposition_table=torch._inductor.decomposition.decompositions,
+        )(input, weight, bias, mean, var)
+        graph_str = fx_g.code
+        self.assertIn("rsqrt", graph_str)
+        self.assertNotIn("reciprocal", graph_str)
+        if torch.device(device).type == "cuda" and torch.version.hip is None:
+            self.assertIn("addcmul", graph_str)
+        else:
+            self.assertNotIn("addcmul", graph_str)
+
     def test_arange_graph(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
 

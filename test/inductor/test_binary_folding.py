@@ -4,11 +4,13 @@ import importlib
 import itertools
 import os
 import sys
+from unittest.mock import patch
 
 import torch
 from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
+from torch._inductor.fx_passes import binary_folding
 from torch.testing._internal.common_cuda import TEST_CUDNN
 
 
@@ -342,6 +344,23 @@ if HAS_CPU and not torch.backends.mps.is_available():
         common = check_model
         device = "cpu"
         autocast = torch.cpu.amp.autocast
+
+        @inductor_config.patch({"enable_linear_binary_folding": False})
+        def test_disabled_linear_binary_folding_short_circuits(self):
+            class LinearNode:
+                target = aten.addmm.default
+
+            # Inspecting symbolic linear metadata can specialize dynamic shapes,
+            # even though linear binary folding is disabled.
+            with patch.object(
+                binary_folding, "_is_foldable_computation", return_value=False
+            ) as check:
+                self.assertFalse(
+                    binary_folding._check_computation_and_broadcast_op(
+                        LinearNode(), None
+                    )
+                )
+                check.assert_not_called()
 
         @torch.no_grad()
         def test_conv_binary_folding_rejects_dynamic_bias(self):

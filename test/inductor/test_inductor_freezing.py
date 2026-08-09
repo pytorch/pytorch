@@ -574,6 +574,130 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
     @torch._inductor.config.patch(layout_optimization=False)
+    def test_shared_conv_bn_keeps_addcmul(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class SharedConvBN(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, bias=True, kernel_size=3, stride=2)
+                self.bn = torch.nn.BatchNorm2d(32, eps=0.001, dtype=torch.float)
+
+            def forward(self, x):
+                y = self.conv(x)
+                return self.bn(y), y
+
+        mod = SharedConvBN().eval().to(self.device).to(torch.float16)
+        x = torch.rand(3, 3, 32, 32).to(self.device).to(torch.float16)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(foo, mod, x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["binary_folding"], 0)
+        FileCheck().check("tl.fma").run(code[0])
+
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_weight_first_conv_chain_keeps_addcmul(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class WeightFirstConv(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, kernel_size=3)
+                shape = (1, 32, 1, 1)
+                self.mean = torch.nn.Parameter(torch.rand(shape))
+                self.weight = torch.nn.Parameter(torch.rand(shape))
+                self.invstd = torch.nn.Parameter(torch.rand(shape))
+                self.bias = torch.nn.Parameter(torch.rand(shape))
+
+            def forward(self, x):
+                xmu = self.conv(x) - self.mean
+                return torch.addcmul(self.bias, self.weight * xmu, self.invstd)
+
+        mod = WeightFirstConv().eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32, device=self.device)
+
+        counters.clear()
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(torch.compile(mod), x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-5, rtol=1e-5)
+        self.assertEqual(counters["inductor"]["binary_folding"], 1)
+        FileCheck().check("tl.fma").run(code[0])
+
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_deep_conv_chain_keeps_addcmul(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class DeepConvChain(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, kernel_size=3)
+                shape = (1, 32, 1, 1)
+                self.mean = torch.nn.Parameter(torch.rand(shape))
+                self.scale = torch.nn.Parameter(torch.rand(shape))
+                self.divisor = torch.nn.Parameter(torch.rand(shape) + 0.5)
+                self.invstd = torch.nn.Parameter(torch.rand(shape))
+                self.bias = torch.nn.Parameter(torch.rand(shape))
+
+            def forward(self, x):
+                out = self.conv(x) - self.mean
+                out = out * self.scale
+                out = out / self.divisor
+                return torch.addcmul(self.bias, out, self.invstd)
+
+        mod = DeepConvChain().eval().to(self.device)
+        x = torch.rand(3, 3, 8, 8, device=self.device)
+
+        counters.clear()
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(torch.compile(mod), x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-5, rtol=1e-5)
+        FileCheck().check("tl.fma").run(code[0])
+
+    @torch._inductor.config.patch(
+        layout_optimization=False, enable_linear_binary_folding=True
+    )
+    def test_folded_linear_bn(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class LinearBN(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 32)
+                self.bn = torch.nn.BatchNorm1d(32)
+
+            def forward(self, x):
+                return self.bn(self.linear(x))
+
+        mod = LinearBN().eval().to(self.device)
+        x = torch.rand(4, 8, device=self.device)
+
+        counters.clear()
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled = torch.compile(mod)(x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-5, rtol=1e-5)
+        self.assertEqual(counters["inductor"]["binary_folding"], 4)
+
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
         x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
         running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
