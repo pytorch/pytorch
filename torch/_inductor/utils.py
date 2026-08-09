@@ -3062,6 +3062,90 @@ def get_gpu_shared_memory() -> int:
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
+# Philox generates 128 bits (4 x uint32) per counter increment, and the eager
+# dropout kernels consume exactly one such quad per unrolled iteration.
+PHILOX_ENGINE_CALLS = 4
+PHILOX_UNROLL = 4
+
+# Fallback hardware threads per EU for XPU. This is not exposed through
+# torch.xpu.get_device_properties(), while the eager launch policy
+# (syclMaxWorkItemsPerTile in torch-xpu-ops) needs it. All currently supported
+# Intel GPU architectures use 8.
+_XPU_HW_THREADS_PER_EU = 8
+
+# Grain size used by the CPU eager RNG.
+_CPU_GRAIN_SIZE = 32768
+
+
+def eager_rng_align_supported(device: torch.device) -> bool:
+    return device.type in ("cuda", "xpu")
+
+
+def get_eager_rng_vec_width(device: torch.device, dtype: torch.dtype) -> int:
+    """Elements handled per thread by the eager dropout kernel.
+
+    CUDA widens to 8 for 16-bit dtypes, while the XPU kernel static_asserts
+    VecSize <= 4 (see torch-xpu-ops src/ATen/native/xpu/sycl/Dropout.cpp), so
+    it stays at 4 for every dtype.
+    """
+    if device.type == "cuda" and dtype in (torch.float16, torch.bfloat16):
+        return 8
+    return PHILOX_ENGINE_CALLS
+
+
+def _eager_rng_launch_geometry(device: torch.device) -> tuple[int, int]:
+    if device.type == "cuda":
+        idx = device.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+        prop = torch.cuda.get_device_properties(idx)
+        # aten/src/ATen/native/cuda/Dropout.cu uses a fixed 256-thread block.
+        threads_per_group = 256
+        max_groups = prop.multi_processor_count * (
+            prop.max_threads_per_multi_processor // threads_per_group
+        )
+        return threads_per_group, max_groups
+
+    if device.type == "xpu":
+        idx = device.index
+        if idx is None:
+            idx = torch.xpu.current_device()
+        prop = torch.xpu.get_device_properties(idx)
+        sub_group_size = max(prop.sub_group_sizes)
+        eu_per_subslice = prop.gpu_eu_count // prop.gpu_subslice_count
+        # syclMaxWorkItemsPerSubSlice() in torch-xpu-ops src/comm/DeviceProperties.h
+        threads_per_group = sub_group_size * eu_per_subslice
+        # syclMaxWorkItemsPerTile() / threads_per_group
+        max_work_items = prop.gpu_eu_count * sub_group_size * _XPU_HW_THREADS_PER_EU
+        return threads_per_group, max_work_items // threads_per_group
+
+    return _CPU_GRAIN_SIZE, 1
+
+
+def get_eager_rng_threads_per_round(device: torch.device, nelem: int) -> int:
+    """Number of threads the eager RNG kernel launches for ``nelem`` elements.
+
+    This mirrors calc_execution_policy()/the Dropout.cu grid computation: the
+    grid is clamped to what the device can hold resident, so the value is
+    shape dependent. Both the offset accounting and the generated kernel must
+    use the same number or the compiled stream desynchronizes from eager.
+    """
+    threads_per_group, max_groups = _eager_rng_launch_geometry(device)
+    num_groups = (nelem + threads_per_group - 1) // threads_per_group
+    # sym_min/sym_max keep this guard-free when nelem is a symbolic shape.
+    num_groups = torch.sym_max(torch.sym_min(num_groups, max_groups), 1)
+    return threads_per_group * num_groups
+
+
+def get_eager_rng_offset(device: torch.device, nelem: int) -> int:
+    if nelem == 0:
+        return 0
+    threads_per_round = get_eager_rng_threads_per_round(device, nelem)
+    return (
+        (nelem - 1) // (threads_per_round * PHILOX_UNROLL) + 1
+    ) * PHILOX_ENGINE_CALLS
+
+
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())

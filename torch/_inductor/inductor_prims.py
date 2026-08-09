@@ -101,16 +101,21 @@ randint = make_prim(
 
 def _reserve_rng_state(device: torch.device, used_offset):
     """
-    Reserve `used_offset` 32-bit Philox samples on the given CUDA device and
+    Reserve `used_offset` 32-bit Philox samples on the given device and
     return (seed, base), where base is in Philox-4x32 units.
 
     This mirrors how Inductor accounts for Philox consumption so compiled
     dropout kernels can reconstruct eager RNG state.
     """
     dev = device if isinstance(device, torch.device) else torch.device(device)
+
+    if dev.type == "xpu":
+        return _reserve_rng_state_xpu(dev, used_offset)
+
     if dev.type != "cuda":
-        # Only CUDA devices have Philox-based CUDAGenerator. For non-CUDA
-        # devices this prim should be dead code and never actually run.
+        # Only CUDA/XPU devices have a Philox-based generator Inductor can
+        # align with. For other devices this prim should be dead code and
+        # never actually run.
         return 0, 0
 
     dev_index = _get_device_index(dev, optional=True)
@@ -130,6 +135,33 @@ def _reserve_rng_state(device: torch.device, used_offset):
     else:
         base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
     return seed_t, base
+
+
+def _reserve_rng_state_xpu(dev: torch.device, used_offset):
+    """
+    XPU equivalent of the CUDA reservation above.
+
+    inductor_reserve_rng_state() is implemented only for CUDA/ROCm (see
+    torch/csrc/inductor/inductor_ops_gpu.cpp), so the reservation is done
+    through the generator's public offset API instead. Unlike the C++ op this
+    read-modify-write is not atomic and is not XPU-graph aware, so concurrent
+    RNG consumers or graph capture are not supported yet.
+    """
+    dev_index = dev.index
+    if dev_index is None:
+        dev_index = torch.xpu.current_device()
+
+    gen = torch.xpu.default_generators[dev_index]
+    seed = gen.initial_seed()
+    offset = gen.get_offset()
+    # set_offset() requires a multiple of 4, matching XPUGeneratorState::increase.
+    gen.set_offset(offset + ((used_offset + 3) // 4) * 4)
+
+    opts = {"device": dev, "dtype": torch.int64}
+    return (
+        torch.tensor([seed], **opts),  # type: ignore[arg-type]
+        torch.tensor([offset // 4], **opts),  # type: ignore[arg-type]
+    )
 
 
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:

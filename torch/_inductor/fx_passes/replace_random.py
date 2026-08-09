@@ -14,6 +14,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from ..utils import eager_rng_align_supported, get_eager_rng_offset
 from ..virtualized import V
 
 
@@ -38,22 +39,10 @@ def _shape_to_offset(shape, device: torch.device):
     elif isinstance(device, str):
         device = torch.device(device)
 
-    if device.type != "cuda":
+    if not eager_rng_align_supported(device):
         return 0
 
-    block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
-
-    device_property = torch.cuda.get_device_properties(device)
-
-    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-    max_grid = device_property.multi_processor_count * blocks_per_sm
-    grid_size = (nelem + block_size - 1) // block_size
-    grid_size = -torch.sym_min(-grid_size, -1)
-    grid_size = torch.sym_min(grid_size, max_grid)
-
-    return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+    return get_eager_rng_offset(device, nelem)
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
@@ -214,7 +203,11 @@ def replace_random(
     device = get_device(device)
     replacement_fn = replacement
 
-    if mode == "rand" and config.align_random_eager and device.type == "cuda":
+    if (
+        mode == "rand"
+        and config.align_random_eager
+        and eager_rng_align_supported(device)
+    ):
         # Only enable when align_random_eager is on.
         def replacement_align(size):
             offset = _shape_to_offset(size, device)

@@ -88,6 +88,9 @@ from .utils import (
     ceildiv,
     convert_symint_to_expr,
     decode_device,
+    eager_rng_align_supported,
+    get_eager_rng_threads_per_round,
+    get_eager_rng_vec_width,
     is_dynamic,
     is_gpu,
     is_nvidia_sm100_or_later,
@@ -3127,24 +3130,11 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
-def get_threads_per_round(device: torch.device):
+def get_threads_per_round(device: torch.device, nelem: int):
     if not isinstance(device, torch.device):
         device = torch.device(device)
 
-    if device.type == "cuda":
-        idx = device.index
-        if idx is None:
-            idx = torch.cuda.current_device()
-
-        prop = torch.cuda.get_device_properties(idx)
-        threads_per_round = (
-            prop.multi_processor_count * prop.max_threads_per_multi_processor
-        )
-    else:
-        _CPU_GRAIN_SIZE = 32768
-        threads_per_round = _CPU_GRAIN_SIZE
-
-    return threads_per_round
+    return get_eager_rng_threads_per_round(device, nelem)
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
@@ -3168,15 +3158,12 @@ def inductor_random(
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    if config.align_random_eager and device.type == "cuda":
-        threads_per_round = get_threads_per_round(device)
-
-        def _vec_from_dtype(dt: torch.dtype) -> int:
-            if dt in (torch.float16, torch.bfloat16):
-                return 8
-            return 4
-
-        vec = _vec_from_dtype(align_dtype)
+    if config.align_random_eager and eager_rng_align_supported(device):
+        nelem = 1
+        for s in size:
+            nelem *= s
+        threads_per_round = get_threads_per_round(device, nelem)
+        vec = get_eager_rng_vec_width(device, align_dtype)
 
         def inner_fn(index):
             rng_seed = seed_loader([0])
