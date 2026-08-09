@@ -7428,12 +7428,33 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(res_scalar.dtype, torch.float32)
         self.assertEqual(res_scalar.device.type, torch.device(self.device).type)
 
-        # Confirm non-eager compilation
+        # Scalar-std overloads still use the fast-random decomposition.
         torch.manual_seed(0)
-        eager_out = torch.normal(mean, std)
+        eager_out = fn_scalar()
         torch.manual_seed(0)
-        compiled_out = compiled(mean, std)
+        compiled_out = compiled_scalar()
         self.assertNotEqual(eager_out, compiled_out)
+
+    @parametrize("mean_is_tensor", (False, True))
+    @config.patch(implicit_fallbacks=True)
+    def test_normal_tensor_std_validation(self, mean_is_tensor):
+        if self.device != "cpu":
+            raise unittest.SkipTest("tensor std errors are asynchronous on GPU")
+
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros(4, device=self.device) if mean_is_tensor else 0.0
+        std = torch.full((4,), 0.5, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        self.assertEqual(compiled(mean, std).shape, std.shape)
+
+        std.fill_(-1.0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"normal expects all elements of std >= 0\.0"
+        ):
+            compiled(mean, std)
 
     def test_embedding(self):
         m = torch.nn.Sequential(
