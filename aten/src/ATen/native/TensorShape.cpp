@@ -4147,6 +4147,22 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
     shape.push_back(self.sym_sizes()[i]);
   }
 
+  // Flattening a statically size-one leading dimension into a single symbolic
+  // dimension is always a view. Handle this directly so reshape viewability
+  // does not specialize on whether the symbolic dimension is size one.
+  if (self.unsafeGetTensorImpl()->has_symbolic_sizes_strides() &&
+      start_dim == 0 && end_dim == 1 &&
+      TORCH_STATICALLY_KNOWN_TRUE(self.sym_sizes()[0].sym_eq(1)) &&
+      !TORCH_STATICALLY_KNOWN_TRUE(self.sym_sizes()[1].sym_eq(1))) {
+    c10::SymDimVector strides;
+    strides.reserve(shape.size());
+    strides.push_back(self.sym_strides()[1]);
+    for (const auto i : c10::irange(end_dim + 1, self.dim())) {
+      strides.push_back(self.sym_strides()[i]);
+    }
+    return self.as_strided_symint(shape, strides);
+  }
+
   return native::reshape_symint(self, shape);
 }
 

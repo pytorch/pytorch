@@ -200,6 +200,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
+// Registered through the generated native-functions table.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 Tensor group_norm(
     const Tensor& input,
     int64_t num_groups,
@@ -221,8 +223,25 @@ Tensor group_norm(
   const auto HxW = c10::multiply_integers(input_shape.slice(2));
   check_group_norm_inputs(input, weight, bias, C, HxW, num_groups);
 
+  const bool preserve_cpu_memory_format =
+      input.device().is_cpu() || input.is_privateuseone();
+  const bool has_symbolic_sizes_strides =
+      input.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (preserve_cpu_memory_format && has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast;
+  } else if (
+      preserve_cpu_memory_format && has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast3d)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast3d;
+  }
+  const auto& X =
+      has_symbolic_sizes_strides ? input.clone(memory_format) : input;
   return std::get<0>(at::native_group_norm_symint(
-      input, weight, bias, N, C, HxW, num_groups, eps));
+      X, weight, bias, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
