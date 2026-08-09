@@ -2742,6 +2742,62 @@
       ]
     }
   ],
+  "GB0786": [
+    {
+      "Gb_type": "Tensor.backward() with create_graph=True",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve the reference-cycle and warning semantics of create_graph=True.",
+      "Hints": [
+        "Use torch.autograd.grad() for higher-order gradients.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4165": [
+    {
+      "Gb_type": "Tensor.backward() with traceable tensor subclass inputs",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot safely identify gradient-accumulation targets for traceable tensor subclasses.",
+      "Hints": [
+        "Run backward() outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5668": [
+    {
+      "Gb_type": "Tensor.backward() with leaf tensor hooks",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve all autograd-engine semantics used by hooks on leaf tensors.",
+      "Hints": [
+        "Run backward() outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0950": [
+    {
+      "Gb_type": "Tensor.backward() with AccumulateGrad node hooks",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve hooks registered directly on a leaf's AccumulateGrad node.",
+      "Hints": [
+        "Run backward() outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2761": [
+    {
+      "Gb_type": "Tensor.backward() with invalid explicit inputs",
+      "Context": "backward(inputs={provided_vars})",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve eager validation for this explicit inputs collection.",
+      "Hints": [
+        "Pass only tensors with requires_grad=True, or run backward() ",
+        "outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0179": [
     {
       "Gb_type": "copy.deepcopy()",
@@ -3532,6 +3588,63 @@
       "Hints": [
         "Remove param warn_only in function call torch.use_deterministic_algorithms.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8102": [
+    {
+      "Gb_type": "Tensor.backward() with non-strided tensor",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering does not support non-strided tensors.",
+      "Hints": [
+        "Run backward() on this tensor outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Tensor.backward() with non-strided tensor",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering does not support non-strided tensors.",
+      "Hints": [
+        "Run backward() on this tensor outside the compiled region."
+      ]
+    }
+  ],
+  "GB6484": [
+    {
+      "Gb_type": "Tensor.backward() with post-accumulate-grad hooks",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve post-accumulate-grad hooks.",
+      "Hints": [
+        "Run backward() outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Tensor.backward() with post-accumulate-grad hooks",
+      "Context": "call_method {self} backward",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot preserve post-accumulate-grad hooks.",
+      "Hints": [
+        "Run backward() outside the compiled region."
+      ]
+    }
+  ],
+  "GB6873": [
+    {
+      "Gb_type": "Tensor.backward() with non-strided gradients",
+      "Context": "gradient for backward input {idx}",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot accumulate non-strided gradients.",
+      "Hints": [
+        "Run backward() outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Tensor.backward() with non-strided gradients",
+      "Context": "gradient for backward input {idx}",
+      "Explanation": "Dynamo's Tensor.backward() lowering cannot accumulate non-strided gradients.",
+      "Hints": [
+        "Run backward() outside the compiled region."
       ]
     }
   ],
@@ -6099,6 +6212,25 @@
       "Hints": [
         "Remove the __post_init__ method from the frozen dataclass.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2897": [
+    {
+      "Gb_type": "backward() with untracked leaf tensors",
+      "Context": "call_method {self} backward",
+      "Explanation": "Tensor.backward() cannot be captured because Dynamo cannot see the leaf tensors that receive gradients. This can happen when the autograd graph crosses a graph-break boundary.",
+      "Hints": [
+        "Call backward() in the same compiled region as the forward computation.",
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+      ]
+    },
+    {
+      "Gb_type": "backward() with untracked leaf tensors",
+      "Context": "call_method {self} backward",
+      "Explanation": "Tensor.backward() cannot be captured because Dynamo cannot see the leaf tensors that receive gradients. This can happen when the autograd graph crosses a graph-break boundary.",
+      "Hints": [
+        "Call backward() in the same compiled region as the forward computation."
       ]
     }
   ],

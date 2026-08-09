@@ -69,7 +69,7 @@ import torch._guards
 from torch._utils_internal import get_file_path_2
 
 from . import config
-from .utils import counters
+from .utils import counters, graph_break_stats_lock
 
 
 if TYPE_CHECKING:
@@ -321,15 +321,17 @@ class Unsupported(TorchDynamoException):
         self.logged = False
 
     def remove_from_stats(self) -> None:
-        if self.category is None:
-            raise AssertionError("category must be set before removing from stats")
-        counters[self.category][self.msg] -= 1
-        if counters[self.category][self.msg] <= 0:
-            del counters[self.category][self.msg]
+        with graph_break_stats_lock:
+            if self.category is None:
+                raise AssertionError("category must be set before removing from stats")
+            counters[self.category][self.msg] -= 1
+            if counters[self.category][self.msg] <= 0:
+                del counters[self.category][self.msg]
 
     def add_to_stats(self, category: str = "unimplemented") -> None:
-        self.category = category
-        counters[category][self.msg] += 1
+        with graph_break_stats_lock:
+            self.category = category
+            counters[category][self.msg] += 1
 
 
 class UnknownPropertiesDuringBackwardTrace(TorchDynamoException):

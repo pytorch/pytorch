@@ -3,11 +3,16 @@
 import copy
 import re
 import textwrap
+from collections import OrderedDict
+from unittest import mock
 
 import torch
 import torch._dynamo
+from torch._dynamo.exc import AutogradGradRestartAnalysis
+from torch._dynamo.output_graph import GraphCompileReason, OutputGraph
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
+    CompileCounter,
     EagerAndRecordGraphs,
     normalize_gm,
 )
@@ -950,7 +955,7 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
 
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
@@ -1040,7 +1045,7 @@ class GraphModule(torch.nn.Module):
 
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
-        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
+        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = True);  gradient = None
 
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
@@ -1088,7 +1093,7 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True, retain_graph = True)
 
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
@@ -1102,7 +1107,7 @@ class GraphModule(torch.nn.Module):
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
 
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
@@ -1399,6 +1404,499 @@ backward() with non-leaf tensor
         eager_grad = eager_vjp_fn(torch.ones(()))
         self.assertEqual(compiled_y, eager_y)
         self.assertEqual(compiled_grad, eager_grad)
+
+
+@torch._dynamo.config.patch(trace_autograd_ops=False)
+@skipIfTorchDynamo()
+class TestTensorBackwardDefaultConfig(TestCase):
+    @skipIfCrossRef
+    def test_tensor_backward_without_inputs_traces_by_default(self):
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = copy.deepcopy(mod_eager)
+        x = torch.randn(2, 4)
+
+        def fn(mod, x):
+            loss = mod(x).sum()
+            loss.backward()
+            return loss.detach()
+
+        eager_result = fn(mod_eager, x)
+
+        compiled_fn = torch.compile(
+            lambda x: fn(mod_compiled, x), backend="aot_eager", fullgraph=True
+        )
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    @skipIfCrossRef
+    def test_tensor_backward_explicit_unused_input(self):
+        def fn(x, unused):
+            (x * 2).sum().backward(inputs=[x, unused])
+
+        x = torch.ones(3, requires_grad=True)
+        unused = torch.ones(3, requires_grad=True)
+        torch.compile(fn, backend="eager", fullgraph=True)(x, unused)
+
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+        self.assertIsNone(unused.grad)
+
+    @skipIfCrossRef
+    def test_tensor_backward_explicit_none_inputs(self):
+        def fn(x):
+            (x * 2).sum().backward(inputs=None)
+
+        x = torch.ones(3, requires_grad=True)
+        torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_invalid_mixed_explicit_inputs_fallback(self):
+        def fn(x, invalid):
+            (x * 2).sum().backward(inputs=[x, invalid])
+
+        x = torch.ones(3, requires_grad=True)
+        invalid = torch.ones(3)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x, invalid)
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with invalid explicit inputs",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requires_grad"):
+            torch.compile(fn, backend="eager")(x, invalid)
+
+    @skipIfCrossRef
+    def test_tensor_backward_ordered_dict_inputs_fallback(self):
+        def fn(x):
+            (x * 2).sum().backward(inputs=OrderedDict([("x", x)]))
+
+        x = torch.ones(3, requires_grad=True)
+        with self.assertRaises(TypeError):
+            fn(x)
+
+        x = torch.ones(3, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with invalid explicit inputs",
+        )
+
+    @skipIfCrossRef
+    def test_tensor_backward_create_graph_fallback(self):
+        def fn(x):
+            (x**3).backward(create_graph=True)
+            return x.grad
+
+        x = torch.tensor(2.0, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            cm.exception.gb_type, "Tensor.backward() with create_graph=True"
+        )
+
+        self.addCleanup(setattr, x, "grad", None)
+        with self.assertWarnsRegex(UserWarning, "reference cycle"):
+            grad = torch.compile(fn, backend="eager")(x)
+        self.assertTrue(grad.requires_grad)
+        self.assertEqual(torch.autograd.grad(grad, x), (torch.tensor(12.0),))
+
+    @skipIfCrossRef
+    def test_tensor_backward_traceable_subclass_fallback(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(x):
+            (x * 2).sum().backward()
+
+        x = AsyncCollectiveTensor(torch.ones(2, requires_grad=True))
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with traceable tensor subclass inputs",
+        )
+
+        torch.compile(fn, backend="eager")(x)
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_direct_autograd_grad_still_requires_config(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            loss = mod(x).sum()
+            (weight_grad, bias_grad) = torch.autograd.grad(
+                loss, tuple(mod.parameters())
+            )
+            return weight_grad, bias_grad
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "trace_autograd_ops=False",
+        ):
+            compiled_fn(x)
+
+    @skipIfCrossRef
+    def test_tensor_backward_rejects_external_grad_fn_by_default(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4, requires_grad=True)
+        external = x * 2
+
+        def fn(external_input):
+            loss = mod(external_input).sum()
+            loss.backward()
+            return loss.detach()
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            compiled_fn(external)
+
+    @skipIfCrossRef
+    def test_tensor_backward_after_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+
+        def fn(x, y):
+            x_out = x * 2
+            torch._dynamo.graph_break()
+            y_out = y * 3
+            x_out.sum().backward()
+            y_out.sum().backward()
+
+        x = torch.ones(2, requires_grad=True)
+        y = torch.ones(2, requires_grad=True)
+        torch.compile(fn, backend="eager")(x, y)
+
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+        self.assertEqual(y.grad, torch.full_like(y, 3))
+        self.assertTrue(
+            any(
+                "backward() with untracked leaf tensors" in reason
+                for reason in torch._dynamo.utils.counters["graph_break"]
+            )
+        )
+
+    @skipIfCrossRef
+    def test_tensor_backward_with_untracked_leaf_fullgraph(self):
+        x = torch.ones(2, requires_grad=True)
+        loss = (x * 2).sum()
+
+        compiled_fn = torch.compile(
+            lambda loss: loss.backward(), backend="eager", fullgraph=True
+        )
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            compiled_fn(loss)
+
+        self.assertEqual(cm.exception.gb_type, "backward() with untracked leaf tensors")
+
+    @skipIfCrossRef
+    def test_tensor_backward_sparse_grad(self):
+        index = torch.tensor([0, 2, 2])
+
+        def fn(x):
+            torch.gather(x, 0, index, sparse_grad=True).sum().backward()
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        x = torch.randn(4, requires_grad=True)
+        compiled_fn(x)
+        self.assertTrue(x.grad.is_sparse)
+        self.assertEqual(x.grad.to_dense(), torch.tensor([1.0, 0.0, 2.0, 0.0]))
+
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.ones_like(x)
+        compiled_fn(x)
+        self.assertFalse(x.grad.is_sparse)
+        self.assertEqual(x.grad, torch.tensor([2.0, 1.0, 3.0, 1.0]))
+
+        x = torch.randn(4, requires_grad=True)
+        torch._dynamo.reset()
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            fullgraph_fn(x)
+        self.assertEqual(
+            cm.exception.gb_type, "Tensor.backward() with non-strided gradients"
+        )
+
+    @skipIfCrossRef
+    def test_tensor_backward_post_accumulate_grad_hook_fullgraph(self):
+        x = torch.ones(3, requires_grad=True)
+        handle = x.register_post_accumulate_grad_hook(lambda tensor: None)
+
+        compiled_fn = torch.compile(
+            lambda: (x * 2).sum().backward(), backend="eager", fullgraph=True
+        )
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            compiled_fn()
+
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with post-accumulate-grad hooks",
+        )
+        handle.remove()
+
+    @skipIfCrossRef
+    def test_tensor_backward_post_accumulate_grad_hook_fallback(self):
+        x = torch.ones(3, requires_grad=True)
+        hook_calls = []
+
+        def hook(tensor):
+            hook_calls.append(1)
+            tensor.grad.mul_(5)
+
+        handle = x.register_post_accumulate_grad_hook(hook)
+        torch.compile(lambda: (x * 2).sum().backward(), backend="eager")()
+
+        self.assertEqual(hook_calls, [1])
+        self.assertEqual(x.grad, torch.full_like(x, 10))
+        handle.remove()
+
+    @skipIfCrossRef
+    def test_tensor_backward_post_accumulate_grad_hook_registered_in_graph(self):
+        x = torch.ones(3, requires_grad=True)
+
+        def fn(x):
+            x.register_post_accumulate_grad_hook(lambda tensor: None)
+            (x * 2).sum().backward()
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            compiled_fn(x)
+
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with post-accumulate-grad hooks",
+        )
+
+    @skipIfCrossRef
+    def test_tensor_backward_post_accumulate_grad_hook_removed_in_graph(self):
+        x = torch.ones(3, requires_grad=True)
+
+        def fn(x):
+            handle = x.register_post_accumulate_grad_hook(lambda tensor: None)
+            handle.remove()
+            (x * 2).sum().backward()
+
+        torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_post_accumulate_grad_hook_recompiles(self):
+        x = torch.ones(3, requires_grad=True)
+        hook_calls = []
+
+        def fn():
+            (x * 2).sum().backward()
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        compiled_fn()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+        x.grad = None
+        handle = x.register_post_accumulate_grad_hook(
+            lambda tensor: hook_calls.append(tensor.grad.clone())
+        )
+        compiled_fn()
+
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(hook_calls, [torch.full_like(x, 2)])
+        handle.remove()
+
+    @skipIfCrossRef
+    def test_tensor_backward_accumulate_grad_node_hook_fallback(self):
+        for hook_method in ("register_hook", "register_prehook"):
+            with self.subTest(hook_method=hook_method):
+                x = torch.ones(3, requires_grad=True)
+                hook_calls = []
+
+                def fn():
+                    (x * 2).sum().backward()
+
+                cnt = CompileCounter()
+                compiled_fn = torch.compile(fn, backend=cnt)
+                compiled_fn()
+                self.assertEqual(cnt.frame_count, 1)
+
+                x.grad = None
+                node = x.expand_as(x).grad_fn.next_functions[0][0]
+                handle = getattr(node, hook_method)(
+                    lambda *args: hook_calls.append(args)
+                )
+                compiled_fn()
+
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(len(hook_calls), 1)
+                self.assertEqual(x.grad, torch.full_like(x, 2))
+
+                x.grad = None
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                self.assertEqual(
+                    cm.exception.gb_type,
+                    "Tensor.backward() with AccumulateGrad node hooks",
+                )
+
+                handle.remove()
+                x.grad = None
+                compiled_fn()
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(len(hook_calls), 1)
+                self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_multi_grad_hook_fallback(self):
+        def fn(x):
+            (x * 2).sum().backward()
+
+        for mode in ("all", "any"):
+            with self.subTest(mode=mode):
+                torch._dynamo.reset()
+                x = torch.ones(3, requires_grad=True)
+                hook_calls = []
+                handle = torch.autograd.graph.register_multi_grad_hook(
+                    (x,), lambda grads: hook_calls.append(grads), mode=mode
+                )
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+                self.assertEqual(
+                    cm.exception.gb_type,
+                    "Tensor.backward() with leaf tensor hooks",
+                )
+
+                torch.compile(fn, backend="eager")(x)
+                self.assertEqual(len(hook_calls), 1)
+                grad = hook_calls[0][0] if mode == "all" else hook_calls[0]
+                self.assertEqual(grad, torch.full_like(x, 2))
+                handle.remove()
+
+    @skipIfCrossRef
+    def test_tensor_backward_leaf_hook_registered_in_graph(self):
+        def fn(x):
+            x.register_hook(lambda grad: grad * 5)
+            (x * 2).sum().backward()
+
+        x = torch.ones(3, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            cm.exception.gb_type,
+            "Tensor.backward() with leaf tensor hooks",
+        )
+
+        torch.compile(fn, backend="eager")(x)
+        self.assertEqual(x.grad, torch.full_like(x, 10))
+
+    @skipIfCrossRef
+    def test_tensor_backward_leaf_hook_removed_in_graph(self):
+        def fn(x):
+            handle = x.register_hook(lambda grad: grad * 5)
+            handle.remove()
+            (x * 2).sum().backward()
+
+        x = torch.ones(3, requires_grad=True)
+        torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_hook_check_does_not_run_fx_nodes(self):
+        x = torch.ones(3, requires_grad=True)
+
+        def fn(x):
+            (x * 2).sum().backward()
+
+        with mock.patch.object(
+            torch._dynamo.variables.tensor.TensorVariable,
+            "get_real_value",
+            side_effect=AssertionError("must not execute FX nodes to inspect hooks"),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_restart_does_not_overcount_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+        torch._dynamo.utils.graph_break_reasons.clear()
+        self.addCleanup(torch._dynamo.utils.counters.clear)
+        self.addCleanup(torch._dynamo.utils.graph_break_reasons.clear)
+
+        @torch._dynamo.disable
+        def collect_results(loss):
+            return loss
+
+        def fn(x):
+            loss = (x * 2).sum()
+            loss.backward()
+            return collect_results(loss)
+
+        x = torch.ones(2, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager")
+        result = compiled_fn(x)
+
+        collect_results_breaks = sum(
+            count
+            for reason, count in torch._dynamo.utils.counters["graph_break"].items()
+            if "collect_results" in reason
+        )
+        collect_results_reasons = sum(
+            "collect_results" in reason.reason
+            for reason in torch._dynamo.utils.graph_break_reasons
+        )
+        self.assertEqual(collect_results_breaks, 1)
+        self.assertEqual(collect_results_reasons, 1)
+        self.assertEqual(result, torch.tensor(4.0))
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    @skipIfCrossRef
+    def test_tensor_backward_restart_preserves_unrelated_graph_break_stats(self):
+        torch._dynamo.utils.counters.clear()
+        torch._dynamo.utils.graph_break_reasons.clear()
+        self.addCleanup(torch._dynamo.utils.counters.clear)
+        self.addCleanup(torch._dynamo.utils.graph_break_reasons.clear)
+        sentinel = "unrelated graph break during restart"
+        validate_outputs = OutputGraph._validate_outputs_safe_for_autograd_nodes
+
+        def validate_outputs_with_sentinel(output_graph, rv, tx):
+            try:
+                return validate_outputs(output_graph, rv, tx)
+            except AutogradGradRestartAnalysis:
+                torch._dynamo.utils.counters["graph_break"][sentinel] += 1
+                GraphCompileReason(sentinel, [])
+                raise
+
+        def fn(x):
+            loss = (x * 2).sum()
+            loss.backward()
+            return loss
+
+        x = torch.ones(2, requires_grad=True)
+        with mock.patch.object(
+            OutputGraph,
+            "_validate_outputs_safe_for_autograd_nodes",
+            validate_outputs_with_sentinel,
+        ):
+            result = torch.compile(fn, backend="eager")(x)
+
+        self.assertEqual(torch._dynamo.utils.counters["graph_break"][sentinel], 1)
+        self.assertEqual(
+            sum(
+                reason.reason == sentinel
+                for reason in torch._dynamo.utils.graph_break_reasons
+            ),
+            1,
+        )
+        self.assertEqual(result, torch.tensor(4.0))
+        self.assertEqual(x.grad, torch.full_like(x, 2))
 
 
 if __name__ == "__main__":

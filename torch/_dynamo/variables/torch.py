@@ -930,6 +930,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         self,
         value: Callable[..., Any],
         kind: AllowInGraphKind | None = None,
+        *,
+        is_tensor_backward: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -944,6 +946,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kind = AllowInGraphKind.DEFAULT
 
         self.kind = kind
+        if is_tensor_backward and value is not torch.autograd.grad:
+            raise AssertionError(
+                "is_tensor_backward is only valid for torch.autograd.grad"
+            )
+        self.is_tensor_backward = is_tensor_backward
 
     def __repr__(self) -> str:
         return f"TorchInGraphFunctionVariable({self.value}, kind={self.kind})"
@@ -3043,7 +3050,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .lists import BaseListVariable
             from .tensor import TensorVariable
 
-            if not config.trace_autograd_ops:
+            if not config.trace_autograd_ops and not self.is_tensor_backward:
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",

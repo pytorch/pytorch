@@ -150,6 +150,7 @@ from .utils import (
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
+    graph_break_stats_lock,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -1139,13 +1140,17 @@ def break_graph_if_unsupported(
                     exc=excp,
                 )
 
-                if isinstance(excp, Unsupported):
-                    excp.remove_from_stats()
-                    excp.add_to_stats("graph_break")
-                speculation.reason = GraphCompileReason(
-                    getattr(excp, "msg", str(excp)),
-                    getattr(excp, "real_stack", [self.frame_summary()]),
-                )
+                with graph_break_stats_lock:
+                    if isinstance(excp, Unsupported):
+                        excp.remove_from_stats()
+                        excp.add_to_stats("graph_break")
+                    speculation.reason = GraphCompileReason(
+                        getattr(excp, "msg", str(excp)),
+                        getattr(excp, "real_stack", [self.frame_summary()]),
+                        _graph_break_counter_key=(
+                            excp.msg if isinstance(excp, Unsupported) else None
+                        ),
+                    )
             finally:
                 self.current_instruction_push = prev_push
             speculation.fail_and_restart_analysis(self.error_on_graph_break)

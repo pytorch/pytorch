@@ -3936,6 +3936,7 @@ guard_failures: collections.defaultdict[Any, list[Any]] = collections.defaultdic
 
 # Keep a record of graph break reasons for logging
 graph_break_reasons: list[torch._dynamo.output_graph.GraphCompileReason] = []
+graph_break_stats_lock = threading.RLock()
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously

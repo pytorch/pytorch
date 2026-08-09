@@ -144,6 +144,7 @@ from .source import (
     GlobalSource,
     GlobalStateSource,
     GlobalWeakRefSource,
+    GradAccumulatorNodeHooksSource,
     GradSource,
     ImportSource,
     ListGetItemSource,
@@ -803,6 +804,11 @@ def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
+def has_grad_accumulator_node_hooks(x: torch.Tensor) -> bool:
+    """Return whether a leaf's AccumulateGrad has Node pre/post hooks."""
+    return torch._C._dynamo.utils.has_grad_accumulator_node_hooks(x)
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -850,6 +856,7 @@ def _get_closure_vars() -> dict[str, object]:
             "device": torch.device,
             "___from_numpy": from_numpy,
             "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
+            "___has_grad_accumulator_node_hooks": has_grad_accumulator_node_hooks,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -1988,6 +1995,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=unwrap_async_collective_tensor,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GradAccumulatorNodeHooksSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=has_grad_accumulator_node_hooks,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
