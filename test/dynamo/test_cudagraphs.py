@@ -232,9 +232,10 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/185074
         from torch._dynamo.exc import TorchRuntimeError
 
-        @torch.compile(backend="eager")
         def fn(x):
             return x + 1
+
+        comp_fn = torch.compile(backend="eager")(fn)
 
         x = torch.randn(10, device="cuda")
 
@@ -245,7 +246,9 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         ):
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(g):
-                fn(x)
+                comp_fn(x)
+
+        self.assertEqual(comp_fn(x), fn(x))
 
 
 if __name__ == "__main__":

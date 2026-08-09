@@ -46,8 +46,8 @@ def _noop_kernel(*args, **kwargs):
 
 
 def get_cache_path() -> Path:
-    if _state.CACHE_DIR is not None:
-        cache_dir = Path(_state.CACHE_DIR)
+    if (cache_dir_override := _state.get_cache_dir()) is not None:
+        cache_dir = Path(cache_dir_override)
     else:
         cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -83,25 +83,8 @@ def _compute_source_fingerprint() -> str:
     return h.hexdigest()
 
 
-def _canonicalize_cache_key_item(item):
-    """Convert cache-key inputs to stable, pickleable representations."""
-    stable_key = getattr(item, "__quack_cache_key__", None)
-    if stable_key is not None:
-        return ("__quack_callable__", stable_key)
-    if isinstance(item, (tuple, list)):
-        return tuple(_canonicalize_cache_key_item(x) for x in item)
-    if isinstance(item, dict):
-        return tuple(
-            sorted(
-                (_canonicalize_cache_key_item(k), _canonicalize_cache_key_item(v))
-                for k, v in item.items()
-            )
-        )
-    return item
-
-
 def _key_to_hash(key: tuple) -> str:
-    return hashlib.sha256(pickle.dumps(_canonicalize_cache_key_item(key))).hexdigest()
+    return hashlib.sha256(pickle.dumps(key)).hexdigest()
 
 
 # ---------------------------------------------------------------------------

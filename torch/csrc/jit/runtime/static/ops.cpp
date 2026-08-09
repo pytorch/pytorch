@@ -163,7 +163,7 @@ static at::Tensor& flatten_copy_out(
 
 namespace {
 
-// This is annoying and sily, but it's solving a real problem: the
+// This is annoying and silly, but it's solving a real problem: the
 // _MSC_VER version causes an ICE on our old clang5 builds. The
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
