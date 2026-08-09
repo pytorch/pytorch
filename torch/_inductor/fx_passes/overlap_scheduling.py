@@ -629,6 +629,11 @@ class OverlapScheduler:
         Check if prefetching this collective would exceed memory budget at ANY compute node
         between now and when it's used.
         """
+        # No memory caps configured (both None): memory tracking is disabled,
+        # so a prefetch can never be rejected on memory grounds.
+        if self.memory_tracker is None:
+            return False
+
         info = self.collective_info[start_node]
         size = info.size_bytes
 
@@ -932,7 +937,8 @@ class OverlapScheduler:
                 # Defer exposed waits until hidden or over memory budget
                 info = self.collective_info[self.wait_to_start[node]]
                 over_budget = (
-                    self.memory_tracker.current_memory_bytes
+                    self.memory_tracker is not None
+                    and self.memory_tracker.current_memory_bytes
                     > self.allowed_peak_memory_bytes
                 )
                 should_schedule = not info.is_exposed or over_budget
@@ -1137,12 +1143,18 @@ class OverlapScheduler:
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
-        self.memory_tracker.schedule_node(node)
+        if self.memory_tracker is not None:
+            self.memory_tracker.schedule_node(node)
 
+        current_memory_bytes = (
+            self.memory_tracker.get_current_memory_bytes()
+            if self.memory_tracker is not None
+            else 0
+        )
         log.debug(
             "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
             node.name,
-            self.memory_tracker.get_current_memory_bytes(),
+            current_memory_bytes,
             len(self.scheduled),
         )
 
@@ -1613,7 +1625,10 @@ class OverlapScheduler:
             potentially_hidden_collectives
         )
         counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
-        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+        rescheduled_peak_memory = (
+            self.memory_tracker.peak_memory if self.memory_tracker is not None else 0
+        )
+        counters["inductor"]["rescheduled_mem"] = rescheduled_peak_memory
 
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
@@ -1624,7 +1639,7 @@ class OverlapScheduler:
             len(bad_exposed),
             len(potentially_hidden_collectives),
             self.original_peak_memory,
-            self.memory_tracker.peak_memory,
+            rescheduled_peak_memory,
             total_exposed,
             hideable_exposed_ms,
             total_potential_exposed,
