@@ -9,11 +9,14 @@ implementation is kept minimal and reuses Triton's compilation pipeline.
 
 import functools
 import hashlib
-import itertools
+import logging
 from typing import Any
 
 from ...ir import ChoiceCaller
 from ..common import KernelTemplate
+
+
+log = logging.getLogger(__name__)
 
 
 # Import TritonTemplateKernel only when needed to avoid circular imports
@@ -44,40 +47,39 @@ def _get_gluon_template_kernel_class():
             @gluon.jit decorator with necessary imports.
             """
 
-            def jit_lines(self):
-                """
-                Return gluon imports and @gluon.jit decorator since the wrapper kernel needs
-                to be JIT-compiled to create layout objects and call the inner Gluon kernel functions.
+            def _jit_decorator(self):
+                return "@gluon.jit"
 
-                We call the parent's jit_lines() to get the @triton_heuristics.template() decorator
-                which creates the CachingAutotuner, then replace @triton.jit with @gluon.jit.
-                """
+            def _constexpr(self):
+                return "gl.constexpr"
+
+            def _index_dtype_expr(self, dtype: str):
+                return _gluon_index_dtype(dtype)
+
+            def jit_lines(self):
                 import textwrap
 
-                # Get the parent's jit_lines which includes @triton_heuristics.template(...)
                 parent_jit_lines = super().jit_lines()
-
-                # Remove leading whitespace from parent's jit_lines (it may be indented for template insertion)
                 parent_jit_lines = textwrap.dedent(parent_jit_lines)
-
-                # Add Gluon imports and replace @triton.jit with @gluon.jit
-                result = """
+                return (
+                    """
 from triton.experimental import gluon
 from triton.experimental.gluon import language as gl
 
-""" + parent_jit_lines.replace("@triton.jit", "@gluon.jit")
+"""
+                    + parent_jit_lines
+                )
 
-                return result
+            def size(self, name: str | None, index: int):
+                return self._size_expr(name, index)
 
-            def render(
-                self, template, kwargs, record_input_dependent_tracked_event=False
-            ):
-                """
-                Override render to compute Gluon layout parameters before rendering template.
+            def stride(self, name, index=None):
+                return self._stride_expr(name, index)
 
-                We call get_default_for() to get layouts with appropriate swizzle widths,
-                then extract parameters and pass them as template variables.
-                """
+            def output_stride(self, index):
+                return self._output_stride_expr(index)
+
+            def _add_layout_kwargs(self, kwargs):
                 from triton.experimental.gluon import language as gl
 
                 # Get block dimensions from kwargs
@@ -134,6 +136,26 @@ from triton.experimental.gluon import language as gl
                 # Add dtype strings for template
                 kwargs["INPUT_DTYPE"] = input_dtype_str
                 kwargs["OUTPUT_DTYPE"] = output_dtype_str
+                kwargs["INDEX_DTYPE_EXPR"] = _gluon_index_dtype(self.index_dtype)
+                kwargs["INPUT_ELEMENT_BITWIDTH"] = input_torch_dtype.itemsize * 8
+                kwargs["OUTPUT_ELEMENT_BITWIDTH"] = output_torch_dtype.itemsize * 8
+
+                # Flip to True manually (no config knob) to enable Proton
+                # profiling scopes inside the generated kernel.
+                kwargs["ENABLE_PROTON_PROFILING"] = False
+
+                return kwargs
+
+            def render(
+                self, template, kwargs, record_input_dependent_tracked_event=False
+            ):
+                """
+                Override render to compute Gluon layout parameters before rendering template.
+
+                We call get_default_for() to get layouts with appropriate swizzle widths,
+                then extract parameters and pass them as template variables.
+                """
+                kwargs = self._add_layout_kwargs(kwargs)
 
                 # Call parent render with updated kwargs
                 return super().render(
@@ -145,20 +167,36 @@ from triton.experimental.gluon import language as gl
     return _gluon_template_kernel_class
 
 
-class GluonTemplateKernel:
-    """
-    Factory class for creating GluonTemplateKernel instances.
+def _gluon_index_dtype(dtype: str):
+    return {
+        "tl.int32": "gl.int32",
+        "tl.int64": "gl.int64",
+    }[dtype]
 
-    This class acts as a factory to create instances of the actual GluonTemplateKernel
-    implementation, which is created lazily to avoid circular imports.
-    """
 
-    def __new__(cls, *args, **kwargs):
-        # Get the cached subclass
-        kernel_class = _get_gluon_template_kernel_class()
-        # Create an instance of the actual subclass
-        instance = kernel_class(*args, **kwargs)
-        return instance
+# Cache for the GluonTritonTemplate subclass
+_gluon_triton_template_class = None
+
+
+def _get_gluon_triton_template_class():
+    """
+    Lazily create and cache the TritonTemplate subclass that drives Gluon
+    codegen. This avoids circular imports while ensuring proper inheritance.
+    """
+    global _gluon_triton_template_class
+    if _gluon_triton_template_class is None:
+        from ...select_algorithm import TritonTemplate
+
+        class GluonTritonTemplate(TritonTemplate):
+            def _constexpr(self):
+                return "gl.constexpr"
+
+            def _index_dtype_expr(self, dtype: str):
+                return _gluon_index_dtype(dtype)
+
+        _gluon_triton_template_class = GluonTritonTemplate
+
+    return _gluon_triton_template_class
 
 
 class GluonTemplate(KernelTemplate):
@@ -169,7 +207,6 @@ class GluonTemplate(KernelTemplate):
     overrides compilation to use Gluon's ASTSource and extended IR builder.
     """
 
-    index_counter = itertools.count()
     all_templates: dict[str, "GluonTemplate"] = {}
 
     def __init__(
@@ -187,18 +224,15 @@ class GluonTemplate(KernelTemplate):
         GluonTemplate.all_templates[name] = self
         self.debug = debug
 
-        # Create TritonTemplate with GluonTemplateKernel
-        from ...select_algorithm import TritonTemplate
-
-        self._triton_template = TritonTemplate(
+        self._triton_template = _get_gluon_triton_template_class()(
             name=self.name,
             grid=self.grid,
             source=self.source,
             debug=self.debug,
+            kernel_name_prefix="",
         )
-        self._triton_template.kernel_name_prefix = ""
         # Override the kernel_type for this specific instance
-        self._triton_template.kernel_type = GluonTemplateKernel
+        self._triton_template.kernel_type = _get_gluon_template_kernel_class()
 
     @staticmethod
     @functools.lru_cache(None)  # type: ignore[misc]
@@ -222,9 +256,13 @@ class GluonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
-        except Exception as e:
-            return NotImplementedError(f"Gluon template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller | None:  # type: ignore[override]
         """
@@ -233,17 +271,9 @@ class GluonTemplate(KernelTemplate):
         Uses TritonTemplate infrastructure with GluonTemplateKernel which
         overrides compilation to use Gluon's ASTSource and extended IR builder.
         """
-        import torch
-
         from ...select_algorithm import identity
 
-        # Compute element bitwidth from input dtype
         input_nodes = kwargs.get("input_nodes", ())
-        if input_nodes:
-            dtype = input_nodes[0].get_dtype()
-            element_bitwidth = torch.tensor([], dtype=dtype).element_size() * 8
-        else:
-            element_bitwidth = 16
 
         # Extract required positional/named arguments for TritonTemplate.generate
         layout = kwargs.pop("layout")
@@ -252,9 +282,6 @@ class GluonTemplate(KernelTemplate):
 
         # Remove input_nodes from kwargs since we'll pass it as positional
         kwargs.pop("input_nodes", None)
-
-        # Add element bitwidth to remaining kwargs (these become template variables)
-        kwargs["ELEMENT_BITWIDTH"] = element_bitwidth
 
         # Use TritonTemplate's generate with fusion disabled
         # GluonTemplateKernel will override compilation to use Gluon's compiler

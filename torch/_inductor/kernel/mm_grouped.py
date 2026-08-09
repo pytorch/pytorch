@@ -127,9 +127,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(
-    dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None, a_is_2d=None, b_is_2d=None
-):
+def gluon_grouped_mm_configs(dtype_AB, a_is_2d=None, b_is_2d=None):
     import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
@@ -137,11 +135,6 @@ def gluon_grouped_mm_configs(
 
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
-        dtype_C=dtype_C,
-        dtype_acc=dtype_acc,
-        M=M,
-        N=N,
-        K=K,
         exhaustive=exhaustive,
     )
 
@@ -168,7 +161,6 @@ def gluon_grouped_mm_configs(
                     "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
                     "NUM_LOAD_THREAD_REGISTERS": gluon_config.NUM_LOAD_THREAD_REGISTERS,
                     "NUM_COMPUTE_THREAD_REGISTERS": gluon_config.NUM_COMPUTE_THREAD_REGISTERS,
-                    "MAXNREG": gluon_config.MAXNREG,
                     "NUM_SMS": get_num_sms(),
                 },
                 num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
@@ -606,6 +598,7 @@ def _tuned_grouped_mm_common(
         is_nonzero
         and use_gluon_template(layout)
         and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
+        and not scaled
     ):
         kwargs = {
             "A_IS_2D": a_is_2d,
@@ -615,11 +608,6 @@ def _tuned_grouped_mm_common(
         }
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
-            dtype_C=layout.dtype,
-            dtype_acc=torch.float32,
-            M=m,
-            N=layout.size[-1],
-            K=k,
             a_is_2d=a_is_2d,
             b_is_2d=b_is_2d,
         ):

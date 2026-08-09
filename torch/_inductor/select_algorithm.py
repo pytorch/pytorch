@@ -894,10 +894,19 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def _jit_decorator(self):
+        return "@triton.jit"
+
+    def _constexpr(self):
+        return "tl.constexpr"
+
+    def _index_dtype_expr(self, dtype: str):
+        return dtype
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
-            return "@triton.jit"
+            return self._jit_decorator()
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta: TritonMeta = {
@@ -974,7 +983,7 @@ class TritonTemplateKernel(TritonKernel):
             @triton_heuristics.template(
                 {template_args}
             )
-            @triton.jit
+            {self._jit_decorator()}
         """
 
     def gen_argdefs(self):
@@ -1000,12 +1009,15 @@ class TritonTemplateKernel(TritonKernel):
             raise ValueError(f"Output buffer '{buf_name}' not found in args")
         return output
 
-    def output_stride(self, index):
-        """Get the stride of the output buffer at the given index."""
+    def _output_stride_expr(self, index):
         if self.output_node is None:
             raise ValueError("No output node available")
         val = self.output_node.get_stride()
         return texpr(self.rename_indexing(val[index]))
+
+    def output_stride(self, index):
+        """Get the stride of the output buffer at the given index."""
+        return self._output_stride_expr(index)
 
     def def_kernel(self, *argnames):
         """
@@ -1087,13 +1099,7 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook("<DEF_KERNEL>", hook)
 
-    def size(self, name: str | None, index: int):
-        """
-        Hook called from template code to get the size of an arg.
-        Will add needed args to pass it in if it is dynamic.
-        Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
-        int64 indexing is needed to prevent overflow in size arithmetic.
-        """
+    def _size_expr(self, name: str | None, index: int):
         if not isinstance(index, int):
             raise AssertionError(f"expected index to be int, got {type(index)}")
         if name is None:
@@ -1102,16 +1108,23 @@ class TritonTemplateKernel(TritonKernel):
             if not isinstance(name, str):
                 raise AssertionError(f"expected name to be str, got {type(name)}")
             val = self.named_input_nodes[name].get_size()[index]
-        result = texpr(self.rename_indexing(val))
-        if self.index_dtype == "tl.int64":
-            return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
-        return result
+        return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index=None):
+    def _index_expr(self, expr: str):
+        if self.index_dtype == "tl.int64":
+            return f"tl.full([], {expr}, dtype=INDEX_DTYPE)"
+        return expr
+
+    def size(self, name: str | None, index: int):
         """
-        Hook called from template code to get the stride of an arg.
+        Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
+        Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
+        int64 indexing is needed to prevent overflow in size arithmetic.
         """
+        return self._index_expr(self._size_expr(name, index))
+
+    def _stride_expr(self, name, index=None):
         if name is None:
             val = self.output_node.get_stride()
         else:
@@ -1122,6 +1135,13 @@ class TritonTemplateKernel(TritonKernel):
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+
+    def stride(self, name, index=None):
+        """
+        Hook called from template code to get the stride of an arg.
+        Will add needed args to pass it in if it is dynamic.
+        """
+        return self._stride_expr(name, index)
 
     def _get_subgraph(self, subgraph_number: int):
         if not isinstance(subgraph_number, int):
@@ -1452,7 +1472,9 @@ class TritonTemplateKernel(TritonKernel):
                     )
             else:
                 self.prologue_cache[block_name] = block_size
-                self.prologue.writeline(f"{block_name}: tl.constexpr = {block_size}")
+                self.prologue.writeline(
+                    f"{block_name}: {self._constexpr()} = {block_size}"
+                )
         else:
             block_name = block_size
         line0 = f"{offset_name} = {texpr(tma_index)}"
@@ -2715,6 +2737,7 @@ class TritonTemplate(KernelTemplate):
         grid: Any,
         source: str,
         debug=False,
+        kernel_name_prefix: str = "triton_",
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
         always_freeze_layout: bool = False,
@@ -2731,7 +2754,7 @@ class TritonTemplate(KernelTemplate):
             raise AssertionError("duplicate template name")
         TritonTemplate.all_templates[name] = self
         self.debug = debug
-        self.kernel_name_prefix = "triton_"
+        self.kernel_name_prefix = kernel_name_prefix
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
@@ -2751,6 +2774,12 @@ class TritonTemplate(KernelTemplate):
     def uid(self) -> str:
         # unique by prefixing with triton
         return f"triton::{self.name}"
+
+    def _constexpr(self):
+        return "tl.constexpr"
+
+    def _index_dtype_expr(self, dtype: str):
+        return dtype
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
@@ -2836,11 +2865,10 @@ class TritonTemplate(KernelTemplate):
         defines = StringIO()
 
         for name, val in kwargs.items():
-            defines.write(f"{name} : tl.constexpr = {val}\n")
+            defines.write(f"{name} : {self._constexpr()} = {val}\n")
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
-        kernel_name_prefix = getattr(self, "kernel_name_prefix", "triton_")
-        kernel_name = f"{kernel_name_prefix}{self.name}"
+        kernel_name = f"{self.kernel_name_prefix}{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(
@@ -2855,7 +2883,9 @@ class TritonTemplate(KernelTemplate):
             index_dtype = "tl.int64"
 
         # Add index dtype to defines so it's available in the template
-        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
+        defines.write(
+            f"INDEX_DTYPE : {self._constexpr()} = {self._index_dtype_expr(index_dtype)}\n"
+        )
         defines = defines.getvalue()
 
         kernel_options = {
@@ -3108,8 +3138,9 @@ class TritonTemplate(KernelTemplate):
             for e in result.kernel_args_sizevars_keys
         )
 
-        kernel_name_prefix = getattr(self, "kernel_name_prefix", "triton_")
-        kernel_hash_name = f"{kernel_name_prefix}{self.name}_{next(self.index_counter)}"
+        kernel_hash_name = (
+            f"{self.kernel_name_prefix}{self.name}_{next(self.index_counter)}"
+        )
 
         # Extract workspace metadata for async autotuning (don't create tensor here
         # as it can't be pickled for subprocess communication)
@@ -3180,7 +3211,7 @@ class TritonTemplate(KernelTemplate):
         bmreq = bmreq_cls(
             module_path=result.mod.__file__,
             module_cache_key=result.mod.key,
-            kernel_name=f"{kernel_name_prefix}{self.name}",
+            kernel_name=f"{self.kernel_name_prefix}{self.name}",
             extra_args=[*extra_args, *workspace_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,

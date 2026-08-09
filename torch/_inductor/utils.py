@@ -95,7 +95,7 @@ if TYPE_CHECKING:
     from torch.fx.node import Node
     from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
-    from .codegen.common import WorkspaceArg
+    from .codegen.common import BackendFeature, WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .dependencies import Dep
     from .graph import GraphLowering
@@ -1907,28 +1907,21 @@ def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
     ]
 
 
-def use_triton_template(
+def _use_template_backend(
     layout: Layout,
-    *,
+    backend: str,
+    template_feature: BackendFeature,
     enable_int32: bool = False,
     enable_float8: bool = False,
     check_max_autotune: bool = True,
-    backend: str = "TRITON",
 ) -> bool:
-    from .codegen.common import BackendFeature, has_backend_feature
+    from .codegen.common import has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
-    backend_upper = backend.upper()
-    if backend_upper == "TRITON":
-        template_feature = BackendFeature.TRITON_TEMPLATES
-    elif backend_upper == "GLUON":
-        template_feature = BackendFeature.GLUON_TEMPLATES
-    else:
-        raise ValueError(f"Unknown template backend: {backend}")
     return (
         (
             (
@@ -1939,12 +1932,47 @@ def use_triton_template(
         )
         # some callers handle max-autotune checking externally
         and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend(backend_upper)
+        and _use_autotune_backend(backend)
         and has_backend_feature(layout.device, template_feature)
     )
 
 
-use_gluon_template = functools.partial(use_triton_template, backend="GLUON")
+def use_triton_template(
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
+) -> bool:
+    from .codegen.common import BackendFeature
+
+    return _use_template_backend(
+        layout,
+        "TRITON",
+        BackendFeature.TRITON_TEMPLATES,
+        enable_int32=enable_int32,
+        enable_float8=enable_float8,
+        check_max_autotune=check_max_autotune,
+    )
+
+
+def use_gluon_template(
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
+) -> bool:
+    from .codegen.common import BackendFeature
+
+    return _use_template_backend(
+        layout,
+        "GLUON",
+        BackendFeature.GLUON_TEMPLATES,
+        enable_int32=enable_int32,
+        enable_float8=enable_float8,
+        check_max_autotune=check_max_autotune,
+    )
 
 
 def can_use_tma(

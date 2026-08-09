@@ -29,6 +29,18 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
 import triton.profiler.language as pl
 
 
+@gluon.jit
+def _proton_enter_scope(name: gl.constexpr):
+    if {{ENABLE_PROTON_PROFILING}}:
+        pl.enter_scope(name)
+
+
+@gluon.jit
+def _proton_exit_scope(name: gl.constexpr):
+    if {{ENABLE_PROTON_PROFILING}}:
+        pl.exit_scope(name)
+
+
 @aggregate
 class PartitionArgs:
     a_desc: tma.tensor_descriptor
@@ -65,7 +77,6 @@ class PartitionArgs:
     BLOCK_K: gl.constexpr
     NUM_BLOCKS: gl.constexpr
     NUM_COMPUTE_WARPS: gl.constexpr
-    NUM_STORE_WARPS: gl.constexpr
 
     @gluon.constexpr_function
     def __init__(
@@ -104,7 +115,6 @@ class PartitionArgs:
         BLOCK_K,
         NUM_BLOCKS,
         NUM_COMPUTE_WARPS,
-        NUM_STORE_WARPS,
     ):
         self.a_desc = a_desc
         self.b_desc = b_desc
@@ -140,7 +150,6 @@ class PartitionArgs:
         self.BLOCK_K = gl.constexpr(BLOCK_K)
         self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
         self.NUM_COMPUTE_WARPS = gl.constexpr(NUM_COMPUTE_WARPS)
-        self.NUM_STORE_WARPS = gl.constexpr(NUM_STORE_WARPS)
 
 
 @aggregate
@@ -376,7 +385,7 @@ class Counter:
 
 @gluon.jit
 def load_partition(pargs: PartitionArgs):
-    pl.enter_scope("load_partition")
+    _proton_enter_scope("load_partition")
 
     G = pargs.G
     M = pargs.M
@@ -386,7 +395,6 @@ def load_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
-    NUM_COMPUTE_WARPS: gl.constexpr = pargs.NUM_COMPUTE_WARPS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -414,53 +422,56 @@ def load_partition(pargs: PartitionArgs):
                 a_smem = pargs.a_smem_bufs.index(state.index)
                 b_smem = pargs.b_smem_bufs.index(state.index)
 
-                with pl.scope("load_barrier_wait_empty"):
-                    mbarrier.wait(load_buf_empty_bar, state.phase)
+                _proton_enter_scope("load_barrier_wait_empty")
+                mbarrier.wait(load_buf_empty_bar, state.phase)
+                _proton_exit_scope("load_barrier_wait_empty")
 
-                with pl.scope("load_barrier_expect"):
-                    mbarrier.expect(
-                        load_buf_full_bar,
-                        pargs.a_desc.block_type.nbytes + pargs.b_desc.block_type.nbytes,
-                    )
+                _proton_enter_scope("load_barrier_expect")
+                mbarrier.expect(
+                    load_buf_full_bar,
+                    pargs.a_desc.block_type.nbytes + pargs.b_desc.block_type.nbytes,
+                )
+                _proton_exit_scope("load_barrier_expect")
 
-                with pl.scope("load_tma_async"):
-                    tma.async_copy_global_to_shared(
-                        pargs.a_desc,
+                _proton_enter_scope("load_tma_async")
+                tma.async_copy_global_to_shared(
+                    pargs.a_desc,
 {%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
-                        [tile_iter.m_offset, k_offset],
+                    [tile_iter.m_offset, k_offset],
 {%- else %}
-                        [k_offset, tile_iter.m_offset],
+                    [k_offset, tile_iter.m_offset],
 {%- endif %}
 {%- else %}
 {%- if A_IS_K_MAJOR %}
-                        [group_iter.g, tile_iter.m_offset, k_offset],
+                    [group_iter.g, tile_iter.m_offset, k_offset],
 {%- else %}
-                        [group_iter.g, k_offset, tile_iter.m_offset],
+                    [group_iter.g, k_offset, tile_iter.m_offset],
 
 {%- endif %}
 {%- endif %}
-                        load_buf_full_bar,
-                        a_smem
-                    )
-                    tma.async_copy_global_to_shared(
-                        pargs.b_desc,
+                    load_buf_full_bar,
+                    a_smem
+                )
+                tma.async_copy_global_to_shared(
+                    pargs.b_desc,
 {%- if B_IS_2D %}
 {%- if B_IS_K_MAJOR %}
-                        [tile_iter.n_offset, k_offset],
+                    [tile_iter.n_offset, k_offset],
 {%- else %}
-                        [k_offset, tile_iter.n_offset],
+                    [k_offset, tile_iter.n_offset],
 {%- endif %}
 {%- else %}
 {%- if B_IS_K_MAJOR %}
-                        [group_iter.g, tile_iter.n_offset, k_offset],
+                    [group_iter.g, tile_iter.n_offset, k_offset],
 {%- else %}
-                        [group_iter.g, k_offset, tile_iter.n_offset],
+                    [group_iter.g, k_offset, tile_iter.n_offset],
 {%- endif %}
 {%- endif %}
-                        load_buf_full_bar,
-                        b_smem
-                    )
+                    load_buf_full_bar,
+                    b_smem
+                )
+                _proton_exit_scope("load_tma_async")
 
                 state = state.next()
 
@@ -468,12 +479,12 @@ def load_partition(pargs: PartitionArgs):
 
         group_iter = group_iter.next()
 
-    pl.exit_scope("load_partition")
+    _proton_exit_scope("load_partition")
 
 
 @gluon.jit
 def compute_partition(pargs: PartitionArgs):
-    pl.enter_scope("compute_partition")
+    _proton_enter_scope("compute_partition")
 
     G = pargs.G
     M = pargs.M
@@ -522,8 +533,9 @@ def compute_partition(pargs: PartitionArgs):
         while tile_iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
 
-            with pl.scope("compute_barrier_wait_acc_empty"):
-                mbarrier.wait(acc_buf_empty_bar, acc_state.phase)
+            _proton_enter_scope("compute_barrier_wait_acc_empty")
+            mbarrier.wait(acc_buf_empty_bar, acc_state.phase)
+            _proton_exit_scope("compute_barrier_wait_acc_empty")
 
             acc = pargs.acc_tmem_bufs.index(acc_state.index)
             use_acc = False
@@ -532,46 +544,53 @@ def compute_partition(pargs: PartitionArgs):
                 load_buf_empty_bar = load_buf_empty_bars.index(load_state.index)
                 load_buf_full_bar = load_buf_full_bars.index(load_state.index)
 
-                with pl.scope("compute_barrier_wait_load_full"):
-                    mbarrier.wait(load_buf_full_bar, load_state.phase)
+                _proton_enter_scope("compute_barrier_wait_load_full")
+                mbarrier.wait(load_buf_full_bar, load_state.phase)
+                _proton_exit_scope("compute_barrier_wait_load_full")
 
-                with pl.scope("compute_data_prep"):
-                    a_smem = pargs.a_smem_bufs.index(load_state.index)
-                    b_smem = pargs.b_smem_bufs.index(load_state.index)
+                _proton_enter_scope("compute_data_prep")
+                a_smem = pargs.a_smem_bufs.index(load_state.index)
+                b_smem = pargs.b_smem_bufs.index(load_state.index)
 {%- if not A_IS_K_MAJOR %}
-                    a_smem = a_smem.permute((1, 0))
+                a_smem = a_smem.permute((1, 0))
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
-                    b_smem = b_smem.permute((1, 0))
+                b_smem = b_smem.permute((1, 0))
 {%- endif %}
 
 {%- if K_IS_VARYING %}
-                    if k + BLOCK_K > group_iter.k_size:
-                        with pl.scope("mask_k_tail"):
-                            mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
-                            a = a_smem.load(gl.AutoLayout())
-                            # Only mask A, as zeroing A's columns
-                            # makes corresponding B rows irrelevant.
-                            a = gl.where(mask[None, :], a, 0)
-                            a_smem.store(a)
-                            # No barrier needed, as K_IS_VARYING
-                            # requires NUM_COMPUTE_WARPS=1.
-                            fence_async_shared()
+                if k + BLOCK_K > group_iter.k_size:
+                    _proton_enter_scope("mask_k_tail")
+                    mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
+                    a = a_smem.load(gl.AutoLayout())
+                    # Only mask A, as zeroing A's columns
+                    # makes corresponding B rows irrelevant.
+                    a = gl.where(mask[None, :], a, 0)
+                    a_smem.store(a)
+                    # No barrier needed, as K_IS_VARYING
+                    # requires NUM_COMPUTE_WARPS=1.
+                    fence_async_shared()
+                    _proton_exit_scope("mask_k_tail")
 {%- endif %}
 
-                with pl.scope("compute_mma"):
-                    tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
+                _proton_exit_scope("compute_data_prep")
 
-                with pl.scope("compute_commit_empty"):
-                    tcgen05_commit(load_buf_empty_bar)
+                _proton_enter_scope("compute_mma")
+                tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
+                _proton_exit_scope("compute_mma")
+
+                _proton_enter_scope("compute_commit_empty")
+                tcgen05_commit(load_buf_empty_bar)
+                _proton_exit_scope("compute_commit_empty")
 
                 use_acc = True
                 load_state = load_state.next()
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
-            with pl.scope("compute_commit_acc_full"):
-                tcgen05_commit(acc_buf_full_bar)
+            _proton_enter_scope("compute_commit_acc_full")
+            tcgen05_commit(acc_buf_full_bar)
+            _proton_exit_scope("compute_commit_acc_full")
 
             acc_state = acc_state.next()
 
@@ -579,12 +598,12 @@ def compute_partition(pargs: PartitionArgs):
 
         group_iter = group_iter.next()
 
-    pl.exit_scope("compute_partition")
+    _proton_exit_scope("compute_partition")
 
 
 @gluon.jit
 def store_partition(pargs: PartitionArgs):
-    pl.enter_scope("store_partition")
+    _proton_enter_scope("store_partition")
 
     G = pargs.G
     M = pargs.M
@@ -592,7 +611,6 @@ def store_partition(pargs: PartitionArgs):
     K = pargs.K
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
-    BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
@@ -623,51 +641,59 @@ def store_partition(pargs: PartitionArgs):
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
-            with pl.scope("store_barrier_wait_acc_full"):
-                mbarrier.wait(acc_buf_full_bar, acc_state.phase)
+            _proton_enter_scope("store_barrier_wait_acc_full")
+            mbarrier.wait(acc_buf_full_bar, acc_state.phase)
+            _proton_exit_scope("store_barrier_wait_acc_full")
 
-            with pl.scope("store_tmem_load"):
-                acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
-                acc = acc_tmem.load()
+            _proton_enter_scope("store_tmem_load")
+            acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
+            acc = acc_tmem.load()
+            _proton_exit_scope("store_tmem_load")
 
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
 
-            with pl.scope("store_convert"):
+            _proton_enter_scope("store_convert")
 {%- if USE_TMA_STORE %}
-                c = acc.to(pargs.c_desc.dtype)
+            c = acc.to(pargs.c_desc.dtype)
 {%- else %}
-                c = acc.to(pargs.output_dtype)
+            c = acc.to(pargs.output_dtype)
 {%- endif %}
+            _proton_exit_scope("store_convert")
 
-            with pl.scope("store_barrier_arrive"):
-                mbarrier.arrive(acc_buf_empty_bar, count=1)
+            _proton_enter_scope("store_barrier_arrive")
+            mbarrier.arrive(acc_buf_empty_bar, count=1)
+            _proton_exit_scope("store_barrier_arrive")
 
 {%- if C_IS_2D %}
-            with pl.scope("store_masked"):
-                offs_m = gl.arange(0, BLOCK_M)
-                offs_n = gl.arange(0, BLOCK_N)
+            _proton_enter_scope("store_masked")
+            offs_m = gl.arange(0, BLOCK_M)
+            offs_n = gl.arange(0, BLOCK_N)
 
-                idx_m = tile_iter.m_offset + offs_m
-                idx_n = tile_iter.n_offset + offs_n
+            idx_m = (tile_iter.m_offset + offs_m).to({{INDEX_DTYPE_EXPR}})
+            idx_n = (tile_iter.n_offset + offs_n).to({{INDEX_DTYPE_EXPR}})
 
-                mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
-                mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
-                mask = mask_m[:, None] & mask_n[None, :]
+            mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
+            mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
+            mask = mask_m[:, None] & mask_n[None, :]
 
-                c_ptrs = pargs.c_ptr + idx_m[:, None] * pargs.c_stride_m + idx_n[None, :] * pargs.c_stride_n
+            c_ptrs = pargs.c_ptr + idx_m[:, None] * pargs.c_stride_m + idx_n[None, :] * pargs.c_stride_n
 
-                gl.store(c_ptrs, c, mask=mask)
+            gl.store(c_ptrs, c, mask=mask)
+            _proton_exit_scope("store_masked")
 {%- else %}
-            with pl.scope("store_tma_wait"):
-                tma.store_wait(pendings=0)
+            _proton_enter_scope("store_tma_wait")
+            tma.store_wait(pendings=0)
+            _proton_exit_scope("store_tma_wait")
 
-            with pl.scope("store_smem_write"):
-                c_smem.store(c)
+            _proton_enter_scope("store_smem_write")
+            c_smem.store(c)
+            _proton_exit_scope("store_smem_write")
 
-            with pl.scope("store_fence_and_tma"):
-                fence_async_shared()
-                tma.async_copy_shared_to_global(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
+            _proton_enter_scope("store_fence_and_tma")
+            fence_async_shared()
+            tma.async_copy_shared_to_global(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
+            _proton_exit_scope("store_fence_and_tma")
 {%- endif %}
 
             tile_iter = tile_iter.next()
@@ -675,11 +701,12 @@ def store_partition(pargs: PartitionArgs):
         group_iter = group_iter.next()
 
 {%- if USE_TMA_STORE %}
-    with pl.scope("store_final_tma_wait"):
-        tma.store_wait(pendings=0)
+    _proton_enter_scope("store_final_tma_wait")
+    tma.store_wait(pendings=0)
+    _proton_exit_scope("store_final_tma_wait")
 {%- endif %}
 
-    pl.exit_scope("store_partition")
+    _proton_exit_scope("store_partition")
 
 
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
@@ -690,7 +717,7 @@ def store_partition(pargs: PartitionArgs):
     # Layout objects with computed swizzle widths for the given block dimensions
     a_layout: gl.constexpr = gl.NVMMASharedLayout(
         swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{ELEMENT_BITWIDTH}},
+        element_bitwidth={{INPUT_ELEMENT_BITWIDTH}},
         rank=2,
         transposed=False,
         fp4_padded=False,
@@ -698,7 +725,7 @@ def store_partition(pargs: PartitionArgs):
     )
     b_layout: gl.constexpr = gl.NVMMASharedLayout(
         swizzle_byte_width={{B_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{ELEMENT_BITWIDTH}},
+        element_bitwidth={{INPUT_ELEMENT_BITWIDTH}},
         rank=2,
         transposed=False,
         fp4_padded=False,
@@ -706,7 +733,7 @@ def store_partition(pargs: PartitionArgs):
     )
     c_layout: gl.constexpr = gl.NVMMASharedLayout(
         swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}},
-        element_bitwidth={{ELEMENT_BITWIDTH}},
+        element_bitwidth={{OUTPUT_ELEMENT_BITWIDTH}},
         rank=2,
         transposed=False,
         fp4_padded=False,
@@ -900,7 +927,6 @@ def store_partition(pargs: PartitionArgs):
         BLOCK_K,
         NUM_BLOCKS,
         NUM_COMPUTE_WARPS,
-        NUM_STORE_WARPS,
     )
 
     # Launch warp-specialized kernel

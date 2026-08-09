@@ -14,7 +14,6 @@ class GluonGroupedMMConfig:
     NUM_STORE_WARPS: int = 4
     NUM_LOAD_THREAD_REGISTERS: int = 24
     NUM_COMPUTE_THREAD_REGISTERS: int = 24
-    MAXNREG: int = 128
 
 
 def compute_stage_variants_gluon(
@@ -22,9 +21,6 @@ def compute_stage_variants_gluon(
     BLOCK_N: int,
     BLOCK_K: int,
     dtype,
-    num_store_warps: int = 4,
-    occupancy: int = 1,
-    smem_capacity: int = 228 * 1024,
     tmem_max_columns: int = 512,
     exhaustive: bool = False,
     max_configs: int = 4,
@@ -40,7 +36,7 @@ def compute_stage_variants_gluon(
     import torch
 
     dtype_bytes = torch.tensor([], dtype=dtype).element_size()
-    smem_limit = 232448  # 227 KB hardware limit
+    smem_limit = 227 * 1024  # hardware limit
 
     # Calculate SMEM usage
     a_bytes_per_stage = BLOCK_M * BLOCK_K * dtype_bytes
@@ -101,11 +97,6 @@ def compute_stage_variants_gluon(
 
 def get_grouped_mm_configs(
     dtype_AB,
-    dtype_C=None,
-    dtype_acc=None,
-    M=None,
-    N=None,
-    K=None,
     exhaustive: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
@@ -113,9 +104,6 @@ def get_grouped_mm_configs(
 
     Args:
         dtype_AB: Data type for A and B matrices
-        dtype_C: Data type for C matrix (unused, for compatibility)
-        dtype_acc: Data type for accumulation (unused, for compatibility)
-        M, N, K: Problem dimensions (optional)
         exhaustive: If True, use full search space. Otherwise use handpicked configs.
 
     Returns:
@@ -152,7 +140,6 @@ def get_grouped_mm_configs(
 
     NUM_LOAD_THREAD_REGISTERS_vals = [24]
     NUM_COMPUTE_THREAD_REGISTERS_vals = [24]
-    MAXNREG_vals = [128]
 
     if exhaustive:
         # Exhaustive: iterate over all combinations
@@ -165,7 +152,6 @@ def get_grouped_mm_configs(
             num_store_warps,
             num_load_thread_registers,
             num_compute_thread_registers,
-            maxnreg,
         ) in itertools.product(
             BLOCK_M_vals,
             BLOCK_N_vals,
@@ -175,30 +161,16 @@ def get_grouped_mm_configs(
             NUM_STORE_WARP_vals,
             NUM_LOAD_THREAD_REGISTERS_vals,
             NUM_COMPUTE_THREAD_REGISTERS_vals,
-            MAXNREG_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
                 dtype=dtype_AB,
-                num_store_warps=num_store_warps,
                 exhaustive=True,
             )
 
             for num_load_buffers, num_acc_buffers in buffer_variants:
-                total_regs = (
-                    (num_load_warps + num_compute_warps + num_store_warps)
-                    * 32
-                    * maxnreg
-                )
-                REGS_PER_SM = 65536
-                MAX_CTAS_PER_SM = 32
-                estimated_occupancy = min(REGS_PER_SM // total_regs, MAX_CTAS_PER_SM)
-
-                if estimated_occupancy < 1:
-                    continue
-
                 configs.append(
                     GluonGroupedMMConfig(
                         BLOCK_M=BLOCK_M,
@@ -211,7 +183,6 @@ def get_grouped_mm_configs(
                         NUM_STORE_WARPS=num_store_warps,
                         NUM_LOAD_THREAD_REGISTERS=num_load_thread_registers,
                         NUM_COMPUTE_THREAD_REGISTERS=num_compute_thread_registers,
-                        MAXNREG=maxnreg,
                     )
                 )
     else:
@@ -224,7 +195,6 @@ def get_grouped_mm_configs(
             num_store_warps,
             num_load_thread_registers,
             num_compute_thread_registers,
-            maxnreg,
         ) in itertools.product(
             block_mn_pairs,
             BLOCK_K_vals,
@@ -233,30 +203,16 @@ def get_grouped_mm_configs(
             NUM_STORE_WARP_vals,
             NUM_LOAD_THREAD_REGISTERS_vals,
             NUM_COMPUTE_THREAD_REGISTERS_vals,
-            MAXNREG_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
                 dtype=dtype_AB,
-                num_store_warps=num_store_warps,
                 exhaustive=False,
             )
 
             for num_load_buffers, num_acc_buffers in buffer_variants:
-                total_regs = (
-                    (num_load_warps + num_compute_warps + num_store_warps)
-                    * 32
-                    * maxnreg
-                )
-                REGS_PER_SM = 65536
-                MAX_CTAS_PER_SM = 32
-                estimated_occupancy = min(REGS_PER_SM // total_regs, MAX_CTAS_PER_SM)
-
-                if estimated_occupancy < 1:
-                    continue
-
                 configs.append(
                     GluonGroupedMMConfig(
                         BLOCK_M=BLOCK_M,
@@ -269,7 +225,6 @@ def get_grouped_mm_configs(
                         NUM_STORE_WARPS=num_store_warps,
                         NUM_LOAD_THREAD_REGISTERS=num_load_thread_registers,
                         NUM_COMPUTE_THREAD_REGISTERS=num_compute_thread_registers,
-                        MAXNREG=maxnreg,
                     )
                 )
 
