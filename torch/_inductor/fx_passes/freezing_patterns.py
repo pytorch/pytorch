@@ -33,8 +33,16 @@ pass_patterns = [
 
 binary_folding_pass = PatternMatcherPass()
 
+_BINARY_FOLDING_ROUNDS = 4
+_ADDCMUL_DECOMPOSITION_FOLDS = 2
 
-def _foldable_computation_root(node) -> torch.fx.Node | None:
+
+def _foldable_computation_root(
+    node,
+    remaining_binary_folds: int = (
+        _BINARY_FOLDING_ROUNDS - _ADDCMUL_DECOMPOSITION_FOLDS
+    ),
+) -> torch.fx.Node | None:
     from .binary_folding import (
         _binary_ops,
         _check_computation_and_broadcast_op,
@@ -50,9 +58,11 @@ def _foldable_computation_root(node) -> torch.fx.Node | None:
         return node if _is_foldable_computation(node) else None
     if node.target not in _binary_ops:
         return None
+    if remaining_binary_folds == 0:
+        return None
 
     lhs, rhs = node.args[0], node.args[1]
-    computation_root = _foldable_computation_root(lhs)
+    computation_root = _foldable_computation_root(lhs, remaining_binary_folds - 1)
     if computation_root is not None and _check_computation_and_broadcast_op(
         computation_root, rhs
     ):
@@ -128,7 +138,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
         fake_tensor_prop(gm, aot_example_inputs, True)
         _decompose_foldable_addcmul(gm.graph)
 
-    for _ in range(4):
+    for _ in range(_BINARY_FOLDING_ROUNDS):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
         fake_tensor_prop(gm, aot_example_inputs, True)

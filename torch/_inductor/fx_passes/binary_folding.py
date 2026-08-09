@@ -137,7 +137,17 @@ def _get_weight_and_bias_nodes(computation_node):
     raise AssertionError(f"unexpected computation op {computation_node.target}")
 
 
+def _is_computation_binary_folding_enabled(computation_node):
+    return computation_node.target is aten.convolution.default or (
+        config.enable_linear_binary_folding
+        and computation_node.target in (aten.addmm.default, aten.mm.default)
+    )
+
+
 def _is_foldable_computation(computation_node):
+    if not _is_computation_binary_folding_enabled(computation_node):
+        return False
+
     weight_node, bias_node = _get_weight_and_bias_nodes(computation_node)
     if weight_node.op != "get_attr":
         return False
@@ -151,6 +161,12 @@ def _is_foldable_computation(computation_node):
 
 
 def _check_computation_and_broadcast_op(computation_node, other, has_reshape=False):
+    # Keep this check before inspecting metadata.  In particular, comparing
+    # symbolic linear shapes below can add guards even when linear binary
+    # folding is disabled.
+    if not _is_computation_binary_folding_enabled(computation_node):
+        return False
+
     if not _is_foldable_computation(computation_node):
         return False
     if (
@@ -192,10 +208,7 @@ def _check_computation_and_broadcast_op(computation_node, other, has_reshape=Fal
     elif not isinstance(other, float):
         return False
 
-    return computation_node.target is aten.convolution.default or (
-        config.enable_linear_binary_folding
-        and computation_node.target in (aten.addmm.default, aten.mm.default)
-    )
+    return True
 
 
 @functools.cache

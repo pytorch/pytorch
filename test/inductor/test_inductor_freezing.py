@@ -637,6 +637,39 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(counters["inductor"]["binary_folding"], 1)
         FileCheck().check("tl.fma").run(code[0])
 
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_deep_conv_chain_keeps_addcmul(self):
+        if self.device != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("requires CUDA")
+
+        class DeepConvChain(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 32, kernel_size=3)
+                shape = (1, 32, 1, 1)
+                self.mean = torch.nn.Parameter(torch.rand(shape))
+                self.scale = torch.nn.Parameter(torch.rand(shape))
+                self.divisor = torch.nn.Parameter(torch.rand(shape) + 0.5)
+                self.invstd = torch.nn.Parameter(torch.rand(shape))
+                self.bias = torch.nn.Parameter(torch.rand(shape))
+
+            def forward(self, x):
+                out = self.conv(x) - self.mean
+                out = out * self.scale
+                out = out / self.divisor
+                return torch.addcmul(self.bias, out, self.invstd)
+
+        mod = DeepConvChain().eval().to(self.device)
+        x = torch.rand(3, 3, 8, 8, device=self.device)
+
+        counters.clear()
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(torch.compile(mod), x)
+
+        self.assertEqual(out_compiled, out_eager, atol=1e-5, rtol=1e-5)
+        FileCheck().check("tl.fma").run(code[0])
+
     @torch._inductor.config.patch(
         layout_optimization=False, enable_linear_binary_folding=True
     )
