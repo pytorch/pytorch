@@ -146,6 +146,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
