@@ -282,13 +282,24 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   bw: tangent                        | no
 #
 #   * for the consumer that's active: without cudagraphs its address is
-#     fresh each call but only alignment is consumed, and inductor
-#     allocations are always 16-byte aligned; with cudagraphs it lives at
-#     a stable offset in the graph pool -- except activations from inline
-#     code between graph partitions, which are demoted
-#     (get_static_bw_input_idxs, see compile_fx_backward). A saved alias
-#     of a user input takes the "saved forward input" row: the partitioner
-#     saves the base primal and recomputes the view in the backward.
+#     fresh each call but only alignment is consumed, and that is stable
+#     for inductor-lowered intermediates (allocator-aligned base plus
+#     deterministic codegen offsets -- a saved odd-offset view is stably
+#     misaligned, so bw codegen makes no assumption for it). With
+#     cudagraphs it lives at a stable offset in the graph pool -- except
+#     activations from inline code between graph partitions, which are
+#     demoted (get_static_bw_input_idxs, see compile_fx_backward). A saved
+#     alias of a user input takes the "saved forward input" row: the
+#     partitioner saves the base primal and recomputes the view in
+#     backward. KNOWN HOLE: a saved *fallback op* output (e.g. a custom
+#     op) is allocated by arbitrary user code, so its alignment may vary
+#     call to call; it is classified static here (unstamped, non-primal)
+#     and gets no runtime check, so an alignment flip IMAs in the
+#     backward. Inductor judges fallback output alignment from the fake
+#     tensor (ir.py, V.graph.unaligned_buffers), which cannot express
+#     "sometimes misaligned"; TORCHINDUCTOR_ALIGNMENT_ASSERTS (default on
+#     in OSS) catches the fake-vs-real mismatch in the forward, and
+#     TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT=1 is the workaround.
 #
 # and what each combination does, where "aligned" means statically known
 # 16-byte aligned (tensor_is_aligned; a symbolic storage_offset that cannot
