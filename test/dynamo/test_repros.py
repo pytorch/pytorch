@@ -8531,10 +8531,10 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(x_compiled2.size(), x_eager2.size())
         self.assertEqual(x_compiled2.stride(), x_eager2.stride())
 
-    @torch._dynamo.config.patch(assume_static_by_default=True)
+    @expectedFailureDynamic
     def test_issue_185888_as_strided_inplace_rank_change(self):
         # Rank-changing as_strided_ (1D -> 2D)
-        # Forced to static shapes because dynamic shape guard generation
+        # Expected failure under dynamic shapes because guard generation
         # expects invariant rank and throws IndexError on rank change.
         def fn(x):
             x.as_strided_((2, 2), (2, 1))
