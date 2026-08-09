@@ -14194,6 +14194,71 @@ class TestViewOpsMPS(TestCaseMPS):
             self.assertEqual(x.view(6).shape, [6])
 
 class TestConvolutionMPS(TestCaseMPS):
+    @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
+    @parametrize(
+        "kernel_size,stride,dilation,padding",
+        [
+            (3, 1, 3, 3),
+            (3, 1, 5, 5),
+            (3, 3, 1, 1),
+            (4, 2, 1, 1),
+            (5, 1, 1, 2),
+            (5, 2, 1, 2),
+            (6, 3, 1, 2),
+            (7, 1, 3, 9),
+            (7, 1, 5, 15),
+            (7, 1, 9, 27),
+            (10, 4, 1, 0),
+            (11, 1, 1, 5),
+            (11, 1, 3, 15),
+            (11, 1, 5, 25),
+            (12, 6, 1, 3),
+            (16, 8, 1, 4),
+        ],
+        name_fn=lambda kernel_size, stride, dilation, padding: (
+            f"k{kernel_size}_s{stride}_d{dilation}_p{padding}"
+        ),
+    )
+    @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv1d_mpp_model_geometries(self, dtype, kernel_size, stride, dilation, padding, with_bias):
+        torch.manual_seed(0)
+        input_length = max(257, dilation * (kernel_size - 1) + 17)
+        x = torch.randn(2, 7, input_length).to(dtype).float()
+        weight = torch.randn(33, 7, kernel_size).to(dtype).float()
+        bias = torch.randn(33).to(dtype).float() if with_bias else None
+        expected = F.conv1d(x, weight, bias, stride=stride, padding=padding, dilation=dilation)
+        actual = F.conv1d(
+            x.to(device="mps", dtype=dtype),
+            weight.to(device="mps", dtype=dtype),
+            None if bias is None else bias.to(device="mps", dtype=dtype),
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+        )
+        tol = {torch.float32: 1e-4, torch.float16: 5e-3, torch.bfloat16: 5e-2}[dtype]
+        self.assertEqual(actual.float().cpu(), expected, atol=tol, rtol=tol)
+
+    @unittest.skipIf(MACOS_VERSION < 26.2, "MPP Conv1d requires macOS 26.2 or newer")
+    @parametrize(
+        "kernel_size,stride,dilation",
+        [(4, 2, 1), (7, 1, 3), (7, 1, 9), (12, 6, 1), (16, 8, 1)],
+        name_fn=lambda kernel_size, stride, dilation: f"k{kernel_size}_s{stride}_d{dilation}",
+    )
+    def test_conv1d_mpp_causal_padding(self, kernel_size, stride, dilation):
+        torch.manual_seed(0)
+        left_padding = dilation * (kernel_size - 1)
+        x = torch.randn(2, 7, 257)
+        weight = torch.randn(33, 7, kernel_size)
+        expected = F.conv1d(F.pad(x, (left_padding, 0)), weight, stride=stride, dilation=dilation)
+        actual = F.conv1d(
+            F.pad(x.to("mps"), (left_padding, 0)),
+            weight.to("mps"),
+            stride=stride,
+            dilation=dilation,
+        )
+        self.assertEqual(actual.cpu(), expected, atol=1e-4, rtol=1e-4)
+
     def test_conv1d_all_strides_paddings(self):
         # https://github.com/pytorch/pytorch/issues/82921
         def helper(stride, padding):

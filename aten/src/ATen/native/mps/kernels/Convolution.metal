@@ -856,17 +856,33 @@ kernel void conv3d_mpp(
   INSTANTIATE_CONV1D_MPP_TILES(KW, SX, DX, CNAME, SRCC, nobias, false)
 // clang-format on
 
-// Deduplicated direct conv1d specs from the surveyed model shapes (wav2vec2
-// k10s5 / k3s2 / k2s2, Whisper k3s1 / k3s2, EnCodec k7s1 / k8s4, TCN k3 d2/d4).
-INSTANTIATE_CONV1D_MPP(10, 5, 1, dyn, -1)
-INSTANTIATE_CONV1D_MPP(10, 5, 1, 1, 1)
+// Deduplicated direct conv1d specs from surveyed speech, audio codec,
+// vocoder, EEG, and temporal convolution model shapes.
 INSTANTIATE_CONV1D_MPP(2, 2, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 2, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 1, 3, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 1, 4, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 1, 5, dyn, -1)
 INSTANTIATE_CONV1D_MPP(3, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(3, 3, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(4, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(5, 1, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(5, 2, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(6, 3, 1, dyn, -1)
 INSTANTIATE_CONV1D_MPP(7, 1, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(7, 1, 3, dyn, -1)
+INSTANTIATE_CONV1D_MPP(7, 1, 5, dyn, -1)
+INSTANTIATE_CONV1D_MPP(7, 1, 9, dyn, -1)
 INSTANTIATE_CONV1D_MPP(8, 4, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(10, 4, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(10, 5, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(10, 5, 1, 1, 1)
+INSTANTIATE_CONV1D_MPP(11, 1, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(11, 1, 3, dyn, -1)
+INSTANTIATE_CONV1D_MPP(11, 1, 5, dyn, -1)
+INSTANTIATE_CONV1D_MPP(12, 6, 1, dyn, -1)
+INSTANTIATE_CONV1D_MPP(16, 8, 1, dyn, -1)
 
 // Deduplicated direct Conv3d specs from the surveyed model shapes.
 INSTANTIATE_CONV3D_MPP_GROUPED(1, 1, 2, 1, 1, 2)
