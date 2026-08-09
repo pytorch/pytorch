@@ -161,6 +161,9 @@ specialize_int = False
 # support codegen on float (this is to be fixed).
 specialize_float = False
 
+# Max ops per ComputedLazyConstantVariable chain before realizing under guards; 0 disables
+computed_lazy_constant_max_nodes = 64
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
@@ -447,7 +450,7 @@ optimize_ddp_lazy_compile = False
 
 # lambda guarding on object aliasing to improve opportunity for dict tag
 # optimization
-use_lamba_guard_for_object_aliasing = True
+use_lamba_guard_for_object_aliasing = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
@@ -538,8 +541,8 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
-# Trace through direct torch.autograd.grad calls or graph break. Tensor.backward
-# uses this machinery internally regardless of the flag.
+# Tensor.backward() always traces through this machinery; this flag only gates
+# direct torch.autograd.grad calls.
 trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile

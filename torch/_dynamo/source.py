@@ -1204,6 +1204,24 @@ class UnwrapCollectiveTensorSource(ChainedSource):
         return "___unwrap_async_collective_tensor({0})"
 
 
+@dataclass_with_cached_hash(frozen=True)
+class GradAccumulatorNodeHooksSource(ChainedSource):
+    """Guard-only source for hooks registered directly on AccumulateGrad."""
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.guards", "has_grad_accumulator_node_hooks"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "___has_grad_accumulator_node_hooks({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)

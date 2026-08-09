@@ -159,6 +159,7 @@ from .utils import (
     get_static_address_type,
     get_unique_name_wrt,
     graph_break_reasons,
+    graph_break_stats_lock,
     increment_op_count,
     istype,
     lazy_format_graph_code,
@@ -338,10 +339,61 @@ class GraphCompileReason:
 
     # Indicates if this was a graph break reason due to graph break.
     graph_break: bool = True
+    # Set only when this reason owns one counters["graph_break"] occurrence.
+    # Generic GraphCompileReason call sites do not necessarily update counters.
+    _graph_break_counter_key: str | None = dc_field(
+        default=None, repr=False, compare=False
+    )
+    _stats_rolled_back: bool = dc_field(
+        default=False, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
-        if self.graph_break:
-            graph_break_reasons.append(self)
+        with graph_break_stats_lock:
+            if self.graph_break:
+                graph_break_reasons.append(self)
+
+    def rollback_stats(self) -> None:
+        """Remove only the graph-break stats owned by this reason."""
+        with graph_break_stats_lock:
+            if self._stats_rolled_back:
+                return
+
+            counter_key = self._graph_break_counter_key
+            reason_index = None
+            if self.graph_break:
+                reason_index = next(
+                    (
+                        index
+                        for index, reason in enumerate(graph_break_reasons)
+                        if reason is self
+                    ),
+                    None,
+                )
+                if reason_index is None:
+                    raise AssertionError(
+                        "graph break reason is missing from global stats"
+                    )
+
+            counter_entry = None
+            if counter_key is not None:
+                count = counters["graph_break"][counter_key]
+                if count <= 0:
+                    raise AssertionError(
+                        "graph break counter is missing from global stats"
+                    )
+                counter_entry = (counter_key, count)
+
+            if reason_index is not None:
+                del graph_break_reasons[reason_index]
+            if counter_entry is not None:
+                counter_key, count = counter_entry
+                if count == 1:
+                    del counters["graph_break"][counter_key]
+                else:
+                    counters["graph_break"][counter_key] = count - 1
+            self._graph_break_counter_key = None
+            self._stats_rolled_back = True
 
 
 def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
@@ -2720,6 +2772,10 @@ class OutputGraph(OutputGraphCommon):
         if tx.speculation_log.autograd_grad_leaked_tensors:
             # Set the flag to graph break at autograd.grad on retry
             tx.speculation_log.graph_break_on_autograd_grad = True
+            # This subgraph is discarded by the restart. Its reason may have
+            # been created by an earlier speculation attempt, so remove that
+            # exact reason instead of snapshotting process-global statistics.
+            self.compile_subgraph_reason.rollback_stats()
             raise exc.AutogradGradRestartAnalysis(
                 restart_reason="autograd.grad consumed grad_fns of returned tensors"
             )

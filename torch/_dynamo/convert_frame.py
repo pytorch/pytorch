@@ -163,7 +163,6 @@ from .utils import (
     gen_record_file_name,
     get_hook_for_recompile_user_context,
     get_metrics_context,
-    graph_break_reasons,
     increment_frame,
     is_namedtuple,
     istype,
@@ -1593,8 +1592,6 @@ def compile_frame(  # type: ignore[return]
     last_attempt_start_time = None
     for attempt in itertools.count():
         CompileContext.get().attempt = attempt
-        graph_break_stats = counters["graph_break"].copy()
-        graph_break_reasons_len = len(graph_break_reasons)
 
         try:
             with dynamo_timed(f"compile_attempt_{attempt}", log_pt2_compile_event=True):
@@ -1614,10 +1611,6 @@ def compile_frame(  # type: ignore[return]
                     last_attempt_start_time=last_attempt_start_time,
                 )
         except exc.RestartAnalysis as e:
-            if isinstance(e, exc.AutogradGradRestartAnalysis):
-                counters["graph_break"].clear()
-                counters["graph_break"].update(graph_break_stats)
-                del graph_break_reasons[graph_break_reasons_len:]
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
             log.info(
