@@ -898,6 +898,22 @@ def compile_fx_inner(
                 "will be skipped.",
                 stacklevel=2,
             )
+        import os as _os
+
+        if _os.environ.get("PROFILE_INDUCTOR"):
+            import atexit
+            import cProfile
+
+            global _IND_PROF
+            try:
+                _IND_PROF
+            except NameError:
+                _IND_PROF = cProfile.Profile()
+                atexit.register(
+                    lambda: _IND_PROF.dump_stats(_os.environ["PROFILE_INDUCTOR"])
+                )
+            _IND_PROF.enable()
+            stack.callback(_IND_PROF.disable)
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -1430,20 +1446,27 @@ class _InProcessFxCompile(FxCompile):
                 f"graph {graph_id}",
             )
 
-            fd = io.StringIO()
-            torch._dynamo.repro.after_aot.save_graph_repro(
-                fd, gm, example_inputs, "inductor", save_dir=None
-            )
-            runnable_graph_str = fd.getvalue()
+            # Building this parses the source of every Triton kernel in the
+            # graph, and the result is only ever used as a structured-trace
+            # artifact, so skip it when nothing is collecting them.
+            from torch._logging._internal import trace_log
 
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "fx_graph_runnable",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: runnable_graph_str,
-            )
+            runnable_graph_str = ""
+            if trace_log.handlers:
+                fd = io.StringIO()
+                torch._dynamo.repro.after_aot.save_graph_repro(
+                    fd, gm, example_inputs, "inductor", save_dir=None
+                )
+                runnable_graph_str = fd.getvalue()
+
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "fx_graph_runnable",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: runnable_graph_str,
+                )
 
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot

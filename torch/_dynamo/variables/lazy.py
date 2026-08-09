@@ -147,6 +147,12 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             cache = tx.output.variable_tracker_cache
             cached = cache.get(source)
             if cached is not None:
+                # A cache hit skips VariableBuilder, which is where reads are
+                # normally recorded. Without this, a source materialized before
+                # a nested compile region ran contributes nothing to that
+                # region's traced_sources, and the reuse machinery cannot tell
+                # that the region read it.
+                tx.output.current_tracer.traced_sources.add(source)
                 return cached
             vt = LazyVariableTracker(LazyCache(value, source), source=source)
             cache[source] = vt
