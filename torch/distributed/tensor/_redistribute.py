@@ -36,6 +36,7 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._debug_mode import get_active_debug_mode
+from torch.utils._typing_utils import not_none
 
 
 logger = logging.getLogger(__name__)
@@ -65,11 +66,12 @@ def _redistribute_cost_sort_key(cost: FloatLikeType) -> float:
     if not free_symbols:
         return float(expr)
 
-    hint_overrides = cost.node.shape_env.var_to_hint_override
+    shape_env = not_none(cost.node.shape_env)
+    hint_overrides = shape_env.var_to_hint_override
     if free_symbols.issubset(hint_overrides):
         return float(expr.xreplace(hint_overrides))
 
-    return float(cost.node.shape_env.optimization_hint(expr, fallback=None))
+    return float(shape_env.optimization_hint(expr, fallback=None))
 
 
 @contextlib.contextmanager
@@ -316,7 +318,9 @@ def _get_flattened_mesh_by_layout(
     input) rather than as a get_attr constant holding an unpicklable
     ProcessGroup.
     """
-    if _are_we_tracing() and torch.distributed.config.compile_on_one_rank:
+    import torch.compiler.config
+
+    if _are_we_tracing() and torch.compiler.config.compile_on_one_rank:
         # Pre-check: the custom op can't return None (torch.library doesn't
         # support Optional opaque return types), so guard here first.
         if _get_flattened_mesh_by_layout_impl(mesh, mesh_dims) is None:
@@ -1616,9 +1620,10 @@ def redistribute_local_tensor(
             # This is safe because _StridedShard.is_shard() returns False, so
             # _comm_type_key() returns None and flattening is never attempted.
             if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
-                assert mesh_to_use is device_mesh, (  # noqa: S101
-                    "_StridedShard redistribute assumes no flattened transforms"
-                )
+                if mesh_to_use is not device_mesh:
+                    raise AssertionError(
+                        "_StridedShard redistribute assumes no flattened transforms"
+                    )
 
             num_chunks = mesh_to_use.size(mesh_dim=i)
 

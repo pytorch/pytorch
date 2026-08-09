@@ -889,7 +889,7 @@ def conv_backwards(
     weight: list[int],
     biases: Optional[list[int]],
 ):
-    # Bias gradient is always generated regardess of if biases is supplied
+    # Bias gradient is always generated regardless of if biases is supplied
     return _copy(input), _copy(weight), [grad_output[1]]
 
 
