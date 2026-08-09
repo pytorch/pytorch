@@ -277,9 +277,18 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   mark_static_address(guard=True)    | yes, guarded (data_ptr guard)
 #   mark_static_address(guard=False)   | yes, unguarded
 #   plain user input                   | no
-#   bw: saved activation               | yes (inductor-allocated)
+#   bw: saved activation               | yes*
 #   bw: saved forward input            | same as it was in the forward
 #   bw: tangent                        | no
+#
+#   * for the consumer that's active: without cudagraphs its address is
+#     fresh each call but only alignment is consumed, and inductor
+#     allocations are always 16-byte aligned; with cudagraphs it lives at
+#     a stable offset in the graph pool -- except activations from inline
+#     code between graph partitions, which are demoted
+#     (get_static_bw_input_idxs, see compile_fx_backward). A saved alias
+#     of a user input takes the "saved forward input" row: the partitioner
+#     saves the base primal and recomputes the view in the backward.
 #
 # and what each combination does, where "aligned" means statically known
 # 16-byte aligned (tensor_is_aligned; a symbolic storage_offset that cannot
