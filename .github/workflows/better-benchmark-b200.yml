@@ -2,6 +2,12 @@
 name: Better Benchmark B200
 
 on:
+  # GitHub only enables workflow_dispatch after a new workflow lands on the
+  # default branch, so use this trigger to validate the workflow in its PR.
+  pull_request:
+    paths:
+      - .github/workflows/better-benchmark-b200.yml
+      - .ci/pytorch/test.sh
   workflow_dispatch:
 
 concurrency:
