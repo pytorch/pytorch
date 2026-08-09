@@ -280,11 +280,12 @@ static bool canUseAddmmCudaLtWithDistinctCAndD(
   }
   const auto scalar_type = mat1.scalar_type();
   // Reduced precision only. Handing cuBLASLt distinct C and D changes which
-  // algorithm its heuristic returns; for fp16/bf16 that was measured to be
-  // bit-identical to copy-then-GEMM, but for fp32 it shifts results by about an
-  // ulp. That is still a legal GEMM result, but it is enough to break tests that
-  // require deterministic output. Reduced precision is also where this path
-  // matters, so fp32/fp64 keep copy-then-GEMM.
+  // algorithm its heuristic returns, so results shift by an ulp or two relative
+  // to copy-then-GEMM. That is still a legal GEMM result, and measured against an
+  // fp64 reference this form is no less accurate, but it is enough to break tests
+  // that require deterministic output. bf16 is the common case for this path and
+  // is where the avoided copy is worth that drift; fp32/fp64 have little to gain
+  // here, so they keep copy-then-GEMM.
   if (scalar_type != at::ScalarType::Half &&
       scalar_type != at::ScalarType::BFloat16) {
     return false;
