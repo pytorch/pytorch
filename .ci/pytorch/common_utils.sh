@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -117,6 +117,19 @@ function pip_install() {
 function pip_uninstall() {
   # uninstall 2 times
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
+}
+
+function get_pkg_versions() {
+  python3 -c "
+import importlib.metadata as metadata
+import sys
+
+for pkg in sys.argv[1:]:
+    try:
+        print(f'{pkg}=={metadata.version(pkg)}')
+    except metadata.PackageNotFoundError:
+        print(f'{pkg}==NOT_INSTALLED')
+" "$@"
 }
 
 function get_exit_code() {
@@ -216,7 +229,28 @@ function install_fbgemm() {
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}" --recurse-submodules
-    python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    # FIXME: Remove this worakaround after FBGEMM build is fixed
+    # fbgemm emits six empty PT2 wrapper TUs for deprecated optimizers
+    # (has_cpu_support=False, has_gpu_support=False). Under CI's S3-backed sccache
+    # (classic/preprocessor-off mode, whose key ignores both the input path and -o)
+    # these collapse to one cached object that is copied to the other outputs, so every
+    # copy carries the same __hip_cuid symbol and the HIP link fails with
+    # "multiple definition of __hip_cuid_...". Force every compile in this build to
+    # recache so each identical source is compiled independently; clang folds -o into
+    # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
+    # scoped to the ROCm build so it does not affect the PyTorch build (already built).
+    if [[ "${build_variant}" == "rocm" ]]; then
+      # The inductor-periodic ROCm benchmark job runs its tests only on MI350
+      # (gfx950), so build fbgemm for that single arch instead of the image's
+      # multi-arch default to cut build time.
+      if [[ "${GITHUB_WORKFLOW}" == "inductor-periodic" ]]; then
+        SCCACHE_RECACHE=1 PYTORCH_ROCM_ARCH="gfx950" python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+      else
+        SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+      fi
+    else
+      python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    fi
     popd
 
     # Save the wheel before cleaning up
@@ -317,7 +351,16 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  pip_install flash-attn-4==4.0.0b15
+  # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
+  if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
+    pip_install "flash-attn-4[cu13]==4.0.0b17"
+  else
+    pip_install flash-attn-4==4.0.0b17
+  fi
+  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
+  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
+  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
+  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
   echo "FlashAttention 4 installation complete."
 }
 
@@ -341,6 +384,8 @@ function install_cutlass_dsl() {
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
   pip_install nvmath-python
+  # nvmath-python upgrades numpy to 2.x; realign scipy to a matching build. See #189034.
+  pip_install "scipy==1.13.1"
   echo "nvmath-python installation complete."
 }
 
@@ -378,6 +423,18 @@ function install_cutlass_api() {
 
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
+  if ! which sccache &> /dev/null; then
+    if [[ -n "${SCCACHE_BUCKET:-}" ]]; then
+      # sccache was configured for this build (SCCACHE_BUCKET is set) but the
+      # binary is missing: that's a real misconfiguration, not an optional tool
+      # being absent, so fail the build (callers run under `set -e`).
+      echo "::error::sccache was expected (SCCACHE_BUCKET is set) but the sccache binary was not found; failing the build."
+      return 1
+    fi
+    # sccache genuinely not in use here: warn (#188060) but don't fail the build.
+    echo "::warning::sccache not found, skipping build statistics. If this build was expected to use sccache, check its installation/configuration."
+    return
+  fi
   sccache --show-stats
 
   if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then

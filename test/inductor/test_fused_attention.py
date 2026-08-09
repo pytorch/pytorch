@@ -913,6 +913,35 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
+    def _test_sdpa_rewriter_13_non_transpose_permute(self, dtype):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            attn_weight = torch.bmm(query, key.permute(1, 2, 0)).softmax(dim=-1)
+            attn_weight = torch.nn.functional.dropout(
+                attn_weight, p=0.5, training=training
+            )
+            return torch.bmm(attn_weight, value)
+
+        args = [
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+            torch.randn((3, 8, 4), device=self.device, dtype=dtype),
+            torch.randn((8, 3, 4), device=self.device, dtype=dtype),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=True,
+            check_train=False,
+            override_check_equal=True,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -956,7 +985,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False)
 
-    def _test_sdpa_rewriter_16(self):
+    def _test_sdpa_rewriter_16(
+        self,
+        check_train=True,
+        override_check_equal=False,
+    ):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -983,7 +1016,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            dot_prod_attention,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
+        )
 
         # also check batch_size=1 because the graph is slightly different
         tensor_shape = (1, 2, 16, 32)
@@ -993,10 +1032,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
         ]
         self._check_common(
-            dot_prod_attention, args1=args, contains=False, has_dropout=True
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
         )
 
-    def _test_sdpa_rewriter_16_fp32_mask(self):
+    def _test_sdpa_rewriter_16_fp32_mask(
+        self,
+        check_train=True,
+        override_check_equal=False,
+    ):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1020,7 +1068,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
+        self._check_common(
+            dot_prod_attention,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
+        )
 
         # also check batch_size=1 because the graph is slightly different
         tensor_shape = (1, 2, 16, 32)
@@ -1030,7 +1084,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
         ]
         self._check_common(
-            dot_prod_attention, args1=args, contains=False, has_dropout=True
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=check_train,
+            override_check_equal=override_check_equal,
         )
 
     def _test_sdpa_rewriter_17(self):
@@ -1528,7 +1587,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self.assertLessEqual(
             copy_count_cached,
             copy_count_uncached,
-            f"Expected caching to produce <= copy_ ops (got {copy_count_cached}) "
+            lambda msg: f"{msg}\nExpected caching to produce <= copy_ ops (got {copy_count_cached}) "
             f"vs no caching ({copy_count_uncached})",
         )
 
@@ -1802,13 +1861,18 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_15_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
-        # Pattern 16 is disabled on NVIDIA CUDA (disable_cuda=True) but enabled on ROCm
         if TEST_WITH_ROCM:
             test_sdpa_rewriter_16_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16
             )
             test_sdpa_rewriter_16_fp32_mask_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
+            )
+        elif GPU_TYPE == "cuda":
+            test_sdpa_rewriter_16_inference_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16,
+                check_train=False,
+                override_check_equal=True,
             )
         test_sdpa_rewriter_17_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
@@ -1977,6 +2041,13 @@ if HAS_CPU:
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
         use_static_shapes = False
+
+    class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        device = "cpu"
+        test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
+            dtype=torch.float32,
+        )
 
 
 if __name__ == "__main__":

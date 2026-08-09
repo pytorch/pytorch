@@ -748,7 +748,7 @@ inspect.getfile = _patched_getfile
 class _PackageResourceReader:
     """Private class used to support PackageImporter.get_resource_reader().
 
-    Confirms to the importlib.abc.ResourceReader interface. Allowed to access
+    Conforms to the importlib.abc.ResourceReader interface. Allowed to access
     the innards of PackageImporter.
     """
 

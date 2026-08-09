@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 name: Claude Distributed Triage Cron
 
 on:
@@ -20,7 +21,7 @@ on:
 jobs:
   sweep:
     if: github.repository == 'pytorch/pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: bedrock
     permissions:
