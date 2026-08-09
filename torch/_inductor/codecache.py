@@ -1651,6 +1651,10 @@ class FxGraphHashDetails:
         # path is out of scope here and should be handled by the custom pass
         # providing a rank-aware UUID.
         #
+        # reorder_for_compute_comm_overlap is intentionally excluded: it
+        # operates at the scheduler level (comms.py) and does not call
+        # merge_all_gather_bucket, so it does not embed rank.
+        #
         # See https://github.com/pytorch/pytorch/issues/188332
         if (
             (
