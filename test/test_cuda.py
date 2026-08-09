@@ -7261,7 +7261,6 @@ print(value, end="")
         finally:
             random.setstate(state)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
@@ -7269,12 +7268,10 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
@@ -7308,17 +7305,14 @@ print(value, end="")
             # test the order of magnitude
             self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
