@@ -771,6 +771,75 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_grouped_reduction_conversion_contract(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+
+        def classify(value):
+            square = Expr("mul", (value, value))
+            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
+            return grouped_reduction_ir(
+                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
+            )
+
+        fp32 = Expr("to_dtype", (load, torch.float32))
+        self.assertEqual(classify(fp32), ("sum", "square"))
+        fp16_then_fp32 = Expr(
+            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
+        )
+        self.assertIsNone(classify(fp16_then_fp32))
+        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
+        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
+
+    def test_grouped_reduction_ir_normalizes_loop_representation(self):
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+        )
+
+        load = Expr("load", ("gemm", 0, None))
+        reduction = Expr("reduction", (torch.float32, torch.float32, "sum", load))
+        analysis = GemmEpilogueIRAnalysis({"out": GemmEpilogueIRStore(0, reduction)})
+
+        self.assertEqual(
+            analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
+            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+        )
+
+    def test_grouped_reduction_rejects_ambiguous_composite(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+            GemmEpilogueIRStore,
+            grouped_reduction_ir,
+        )
+
+        summed = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "sum", Expr("load", ("gemm", 0, None))),
+        )
+        maximum = Expr(
+            "reduction",
+            (torch.float32, torch.float32, "max", Expr("load", ("gemm", 0, None))),
+        )
+        store = GemmEpilogueIRStore(0, Expr("add", (summed, maximum)))
+        self.assertIsNone(grouped_reduction_ir(store, "gemm", 4, torch.float32))
+
+    def test_epilogue_ir_preserves_empty_tuple_argument(self):
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression,
+        )
+
+        expression = GemmEpilogueIRExpression("reshape", ("value", ()))
+        self.assertEqual(expression.args, ("value", ()))
+        self.assertEqual(expression.kwargs, ())
+
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
         kernel = MagicMock()
@@ -1241,6 +1310,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             fn, a, b, scale_a, scale_b, *biases
         )
         self.assertEqual(epilogue_fused, expected_fused)
+        # Random packed FP4 operands can produce NaNs in the reference GEMM.
         torch.testing.assert_close(
             result, fn(a, b, scale_a, scale_b, *biases), equal_nan=True
         )

@@ -123,9 +123,10 @@ def switch(
 
     Restrictions:
         - Each branch must have the same signature as operands and return the same
-          output structure (shape, dtype, etc.). Constant ``int`` and ``None`` leaves
-          are also permitted in branch outputs and are merged across branches (an
-          unbacked SymInt is introduced when ``int`` leaves differ between branches).
+          output structure (shape, dtype, etc.). Constant ``int`` (but not ``bool``)
+          and ``None`` leaves are also permitted and must have matching types across
+          branches. An unbacked SymInt is introduced when ``int`` leaves differ,
+          although the Inductor backend currently requires their values to match.
         - Branches cannot have in-place mutations on inputs or global variables.
     """
 
