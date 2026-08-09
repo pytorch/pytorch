@@ -378,16 +378,23 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            # On NVLink-fabric hardware both the RendezvousRequest and handle
-            # exchange go through pg_all_gather → 2 allgathers. On hardware
-            # without NVLink fabric only the RendezvousRequest uses
-            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
-            self.assertIn(
-                len(ag_entries),
-                [1, 2],
-                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
-                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            has_mc = symm_mem_hdl.multicast_ptr != 0
+            # Exchanges routed through the PG: the RendezvousRequest allgather
+            # (always), the handle exchange allgather (NVLink-fabric hardware
+            # only; elsewhere handles go through ipc_channel), and, when
+            # multicast is set up, a success-flag allgather plus a multicast
+            # handle broadcast (fabric only).
+            lo, hi = (2, 3) if has_mc else (1, 2)
+            self.assertTrue(
+                lo <= len(ag_entries) <= hi,
+                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"(multicast={has_mc}), got {len(ag_entries)}: "
+                f"{[e['profiling_name'] for e in entries]}",
             )
+            self.assertLessEqual(len(bc_entries), 1)
+            if bc_entries:
+                self.assertTrue(has_mc)
 
             symm_mem_hdl.barrier()
             for peer in range(self.world_size):
