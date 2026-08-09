@@ -233,9 +233,6 @@ def install_config_module(module: ModuleType) -> None:
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
-                fallback = getattr(value, "__fallback__", None)
-                if fallback is not None:
-                    fallbacks[f"{name}."] = f"{fallback}."
                 if dest is module:
                     setattr(dest, key, proxy)
                 else:
@@ -244,13 +241,11 @@ def install_config_module(module: ModuleType) -> None:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config: dict[str, _ConfigEntry] = {}
-    fallbacks: dict[str, str] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
-    module._config_fallbacks = fallbacks  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
@@ -394,10 +389,6 @@ class ConfigModule(ModuleType):
     _config: dict[str, _ConfigEntry]
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
-    # Maps a subconfig prefix (e.g. "xpu.") to a fallback prefix (e.g. "cutlass.").
-    # When a name under the first prefix is missing, the name under the fallback
-    # prefix is used instead, so the fallback is resolved dynamically.
-    _config_fallbacks: dict[str, str]
     _hash_dirty_var: ContextVar[bool]
     _hash_cache_var: ContextVar[bytes | None]
     # Per-thread cache state, backed by ContextVar so each thread/context gets
@@ -428,10 +419,7 @@ class ConfigModule(ModuleType):
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._config:
-            fallback = self._resolve_fallback_name(name)
-            if fallback is None:
-                raise AttributeError(f"{self.__name__}.{name} does not exist")
-            return self.__setattr__(fallback, value)
+            raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
             # Issue deprecation warning on write (once per config)
             config = self._config[name]
@@ -448,6 +436,7 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
             if config.hide:
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
 
@@ -480,30 +469,10 @@ class ConfigModule(ModuleType):
             return config.default
 
         except KeyError as e:
-            fallback = self._resolve_fallback_name(name)
-            if fallback is not None:
-                return self.__getattr__(fallback)
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
-    def _resolve_fallback_name(self, name: str) -> str | None:
-        """Map a missing config name to its fallback name, if one is registered.
-
-        E.g. with a registered fallback "xpu." -> "cutlass.", the missing name
-        "xpu.compile_opt_level" resolves to "cutlass.compile_opt_level".
-        """
-        for prefix, fallback_prefix in self._config_fallbacks.items():
-            if name.startswith(prefix):
-                candidate = f"{fallback_prefix}{name[len(prefix) :]}"
-                if candidate in self._config:
-                    return candidate
-        return None
-
     def __delattr__(self, name: str) -> None:
-        if name not in self._config:
-            fallback = self._resolve_fallback_name(name)
-            if fallback is not None:
-                return self.__delattr__(fallback)
         self._hash_dirty_var.set(True)
         self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
@@ -513,16 +482,24 @@ class ConfigModule(ModuleType):
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
-    ) -> tuple[ModuleType, str] | None:
+    ) -> tuple[object, str] | None:
         alias = entry.alias
         if alias is None:
             return None
-        module_name, constant_name = alias.rsplit(".", 1)
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError as e:
-            raise AttributeError(f"config alias {alias} does not exist") from e
-        return module, constant_name
+        # The leading components of the alias form an importable module and the
+        # trailing components are attributes on it (e.g. a `cutlass.foo`
+        # sub-config field of torch._inductor.config). Import the longest
+        # importable module prefix, then walk the remaining attributes.
+        parts = alias.split(".")
+        for i in range(len(parts) - 1, 0, -1):
+            try:
+                container: Any = importlib.import_module(".".join(parts[:i]))
+            except ImportError:
+                continue
+            for attr in parts[i:-1]:
+                container = getattr(container, attr)
+            return container, parts[-1]
+        raise AttributeError(f"config alias {alias} does not exist")
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
         data = self._get_alias_module_and_name(entry)
@@ -1028,3 +1005,25 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     if value == "0":
         return False
     return default
+
+
+def alias_fields_from(parent_cls):
+    """Class decorator adding an alias for every public field of ``parent_cls``
+    that the decorated class does not override.
+
+    Unlike copying, aliases resolve dynamically: reading or writing an aliased
+    field on the child reads/writes the parent's field, so later changes to the
+    parent (e.g. user overrides) are reflected on the child.
+    """
+    prefix = f"{parent_cls.__module__}.{parent_cls.__qualname__}"
+    annotations = inspect.get_annotations(parent_cls)
+
+    def wrapper(child_cls):
+        for k, v in parent_cls.__dict__.items():
+            if k.startswith("_") or k in child_cls.__dict__:
+                continue
+            value_type = annotations.get(k, type(v))
+            setattr(child_cls, k, Config(alias=f"{prefix}.{k}", value_type=value_type))
+        return child_cls
+
+    return wrapper
