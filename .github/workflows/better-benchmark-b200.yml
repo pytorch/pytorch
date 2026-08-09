@@ -2,12 +2,8 @@
 name: Better Benchmark B200
 
 on:
-  # GitHub only enables workflow_dispatch after a new workflow lands on the
-  # default branch, so use this trigger to validate the workflow in its PR.
-  pull_request:
-    paths:
-      - .github/workflows/better-benchmark-b200.yml
-      - .ci/pytorch/test.sh
+  schedule:
+    - cron: 0 7 * * *
   workflow_dispatch:
 
 concurrency:
@@ -23,7 +19,7 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: github.repository_owner == 'pytorch'
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
