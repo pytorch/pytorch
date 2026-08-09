@@ -151,6 +151,7 @@ torch.library.define(
     "(Tensor x) -> (Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+torch.library.define("testlib::additional_inputs_side_effect", "(Tensor x) -> Tensor")
 torch.library.define(
     "testlib::foo_unbacked",
     "(Scalar x) -> (Tensor)",
@@ -196,6 +197,20 @@ def foo_unbacked(x):
     if x < 6:
         return torch.ones(4, 4)
     return torch.ones(4, 4)
+
+
+_ADDITIONAL_INPUTS_SIDE_EFFECTS = []
+
+
+@torch.library.impl("testlib::additional_inputs_side_effect", "CPU")
+def additional_inputs_side_effect_impl(x):
+    _ADDITIONAL_INPUTS_SIDE_EFFECTS.append(tuple(x.shape))
+    return x.clone()
+
+
+@torch.library.register_fake("testlib::additional_inputs_side_effect")
+def additional_inputs_side_effect_fake(x):
+    return torch.empty_like(x)
 
 
 @dataclass
@@ -368,6 +383,42 @@ class TestDynamismExpression(TestCase):
             Slice(),
             inp,
             dynamic_shapes=dynamic_shapes,
+        )
+
+    def _check_export_slice_static_bound_crosses_dynamic_dim(self, indices):
+        dynamic_shapes = {"x": {1: Dim("len", min=0, max=13)}}
+        for index in indices:
+            with self.subTest(index=index):
+
+                class Slice(torch.nn.Module):
+                    def forward(self, x):
+                        return x[:, index]
+
+                for width in (3, 8):
+                    x = torch.randn(4, width)
+                    ep = export(
+                        Slice(),
+                        (x,),
+                        dynamic_shapes=dynamic_shapes,
+                    )
+                    self.assertEqual(len(ep.range_constraints), 1)
+                    self.assertEqual(ep._guards_code, [])
+                    for new_width in (0, 3, 5, 8, 13):
+                        y = torch.randn(4, new_width)
+                        self.assertEqual(ep.module()(y), y[:, index])
+
+    def test_export_slice_static_bound_crosses_dynamic_dim(self):
+        self._check_export_slice_static_bound_crosses_dynamic_dim((slice(None, 5),))
+
+    def test_export_slice_static_bound_crosses_dynamic_dim_variants(self):
+        self._check_export_slice_static_bound_crosses_dynamic_dim(
+            (
+                slice(5, None),
+                slice(None, -5),
+                slice(-5, None),
+                slice(3, 5),
+                slice(-5, -2),
+            )
         )
 
     def test_no_grad_param_inplace(self):
@@ -4783,8 +4834,10 @@ def forward(self, causal_mask, fill_value):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 x, y = xs["data"][0]
+                if not (x.shape[0] >= 8):
+                    raise AssertionError(f"expected x.shape[0] >= 8, got {x.shape[0]}")
                 assert y.shape[0] <= 32  # noqa: S101
-                return x[6:], y + 2
+                return x + 1, y + 2
 
         x, y = torch.randn(8), torch.randn(8)
 
@@ -6442,7 +6495,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 f"Expected 1 range constraint, got {len(ep.range_constraints)}"
             )
         vr = next(iter(ep.range_constraints.values()))
-        self.assertEqual(vr.lower, 3)
+        self.assertEqual(vr.lower, 2)
 
     def test_unbacked_linear_layer_norm_input(self):
         class MyModel(torch.nn.Module):
@@ -6669,9 +6722,13 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->2, 4->2, 3->3
             bad_args=(torch.randn(2), [torch.randn(2)], {"k": torch.randn(3)}),
             run_time_msg=escape(
-                "Guard failed: x.size()[0] >= 3"
+                "Guard failed: torch.sym_min(3, y[0].size()[0]) == 3"
             ),  # expected >= 3, but got 2
-            compile_time_msg="Expected input.*to be >= 3, but got 2",
+            compile_time_msg=escape(
+                "Expected additional input to satisfy the exported program, "
+                "but got runtime assertion error: Guard failed: "
+                "torch.sym_min(3, y[0].size()[0]) == 3"
+            ),
         )
 
         expect_error(
@@ -6689,7 +6746,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             run_time_msg=escape(
                 "Guard failed: z['k'].size()[0] == 3"
             ),  # expected 3, but got 4
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
+            compile_time_msg=r"Expected input.*shape\[0\] to be <= 3, but got 4",
         )
 
     def test_additional_inputs_constants(self):
@@ -6869,6 +6926,54 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                         },
                         strict=strict,
                     )
+
+    def test_additional_inputs_verify_does_not_run_program(self):
+        _ADDITIONAL_INPUTS_SIDE_EFFECTS.clear()
+
+        class SideEffect(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.testlib.additional_inputs_side_effect(x)
+
+        ai = torch.export.AdditionalInputs()
+        ai.add((torch.ones(4),))
+
+        export(SideEffect(), (torch.ones(3),), dynamic_shapes=ai)
+
+        self.assertEqual(_ADDITIONAL_INPUTS_SIDE_EFFECTS, [])
+
+    def test_additional_inputs_verify_preserves_rng_state(self):
+        class Random(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand_like(x)
+
+        input1 = (torch.ones(3),)
+        input2 = (torch.ones(4),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input2)
+        rng_state = torch.get_rng_state().clone()
+
+        export(Random(), input1, dynamic_shapes=ai)
+
+        self.assertEqual(torch.get_rng_state(), rng_state)
+
+    @requires_gpu
+    def test_additional_inputs_verify_preserves_accelerator_rng_state(self):
+        device = torch.device(f"{device_type}:0")
+
+        class Random(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand(x.shape, device=device).cpu()
+
+        input1 = (torch.ones(3),)
+        input2 = (torch.ones(4),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input2)
+        device_module = torch.get_device_module(device_type)
+        rng_state = device_module.get_rng_state(device).clone()
+
+        export(Random(), input1, dynamic_shapes=ai)
+
+        self.assertEqual(device_module.get_rng_state(device), rng_state)
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
@@ -8782,8 +8887,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 "Suggested fixes(.*\n)*.*"
                 "_dx = Dim\(\\'_dx\\', max=12\)(.*\n)*.*"
                 "dx = 3\*_dx - 1(.*\n)*.*"
-                "dy = 3\*_dx(.*\n)*.*"
-                "dz = 3\*_dx \+ 2"
+                "dy = 3\*_dx"
             ),
         ):
             export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
@@ -8866,7 +8970,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # turn dim into derived dim/relation
         class Foo(torch.nn.Module):
             def forward(self, x, y):
-                return x + y[4:]
+                if y.shape[0] == x.shape[0] + 4:
+                    return x + y[: x.shape[0]]
+                return x
 
         inps = (torch.randn(6, 4), torch.randn(10, 4))
         dynamic_shapes = {
@@ -13911,13 +14017,21 @@ graph():
         for z in zs:
             dynamic_shapes[z] = (Dim.DYNAMIC, Dim.DYNAMIC)
 
+        ep = export(m, (x, y, zs), dynamic_shapes=dynamic_shapes)
+        self.assertEqual(ep.module()(x, y, zs), m(x, y, zs))
+
+        x_valid = torch.randn(3, 5)
+        y_valid = torch.randn(3, 6)
+        zs_valid = [torch.randn(2, 5), torch.randn(4, 5)]
+        self.assertEqual(
+            ep.module()(x_valid, y_valid, zs_valid), m(x_valid, y_valid, zs_valid)
+        )
+
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            r"Constraints violated.*\n.*"
-            r"You marked L\['y'\].size\(\)\[0\] as dynamic but your code specialized it to be a constant \(3\).*"
-            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO.",
+            AssertionError,
+            escape("Guard failed: torch.sym_min(3, x.size()[0]) == y.size()[0]"),
         ):
-            export(m, (x, y, zs), dynamic_shapes=dynamic_shapes)
+            ep.module()(torch.randn(5, 5), torch.randn(2, 6), zs)
 
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
@@ -17607,7 +17721,7 @@ def forward(self, x):
                 for node in ep.graph.nodes
             ].count(True)
             if private_api:
-                self.assertEqual(num_asserts, 6)
+                self.assertEqual(num_asserts, 3)
                 with self.assertRaisesRegex(
                     RuntimeError,
                     r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",

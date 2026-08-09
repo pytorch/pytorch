@@ -1148,6 +1148,17 @@ class AdditionalInputs:
             torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
+            if hasattr(epm, "_guards_fn"):
+                flat_args_with_path = torch.export._unlift._check_inputs_match(
+                    args, kwargs or {}, epm._in_spec
+                )
+                try:
+                    epm._guards_fn(*(arg for _, arg in flat_args_with_path))
+                except AssertionError as e:
+                    raise RuntimeError(
+                        "Expected additional input to satisfy the exported program, "
+                        f"but got runtime assertion error: {e}"
+                    ) from e
 
 
 def _warn_on_None_dynamic_shape_dimension():

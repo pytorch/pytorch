@@ -268,13 +268,27 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         guard_or_false,
         guard_or_true,
         is_nested_int,
+        statically_known_false,
+        statically_known_true,
     )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    # Export must not turn metadata-only contiguity probes into user-visible
+    # constraints. Normal torch.compile still relies on the hinted guard path.
+    if false_if_dde and torch.compiler.is_exporting():
+        maybe_guard_or_false = statically_known_true
+
+        def maybe_guard_or_true(x):
+            return not statically_known_false(x)
+
+    elif false_if_dde:
+        maybe_guard_or_false = guard_or_false
+        maybe_guard_or_true = guard_or_true
+    else:
+        maybe_guard_or_false = eval_eager
+        maybe_guard_or_true = eval_eager
 
     expected_stride = 1
     expected_stride_max = 1
@@ -311,13 +325,20 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     """
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
-        guard_size_oblivious,
+        statically_known_true,
     )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    # Keep normal torch.compile on the hinted guard path while making export's
+    # metadata-only contiguity probe guard-free.
+    if false_if_dde:
+        maybe_guard_or_false = (
+            statically_known_true if torch.compiler.is_exporting() else guard_or_false
+        )
+    else:
+        maybe_guard_or_false = eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True

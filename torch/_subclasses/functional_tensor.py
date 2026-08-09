@@ -195,28 +195,42 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(
-            # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
-            # Calling the overload that has kwargs causes us to go down the first overload path,
-            # which will **always** specialize sizes.
-            # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
-            cls,
-            elem.shape,  # sizes
-            elem.stride() if not is_sparse_any(elem) else None,  # strides
-            (
-                elem.storage_offset() if not is_sparse_any(elem) else None
-            ),  # storage_offset
-            None,  # memory_format
-            elem.dtype,  # dtype
-            elem.layout,  # layout
-            elem.device,  # device
-            False,  # pin_memory
-            elem.requires_grad,  # requires_grad
-            None,  # dispatch_sizes_strides_policy
-            False,  # dispatch_device
-            False,  # dispatch_layout
-            extra_dispatch_keys,  # _extra_dispatch_keys
+        tracing_context = torch._guards.TracingContext.try_get()
+        shape_env = (
+            tracing_context.fake_mode.shape_env
+            if tracing_context is not None and tracing_context.fake_mode is not None
+            else None
         )
+        # FunctionalTensor forwards metadata queries to elem, so computing the
+        # wrapper's metadata must not add export guards that elem does not need.
+        suppress_guards = (
+            shape_env.suppress_guards()
+            if torch.compiler.is_exporting() and shape_env is not None
+            else contextlib.nullcontext()
+        )
+        with suppress_guards:
+            out = torch.Tensor._make_wrapper_subclass(
+                # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                # Calling the overload that has kwargs causes us to go down the first overload path,
+                # which will **always** specialize sizes.
+                # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                cls,
+                elem.shape,  # sizes
+                elem.stride() if not is_sparse_any(elem) else None,  # strides
+                (
+                    elem.storage_offset() if not is_sparse_any(elem) else None
+                ),  # storage_offset
+                None,  # memory_format
+                elem.dtype,  # dtype
+                elem.layout,  # layout
+                elem.device,  # device
+                False,  # pin_memory
+                elem.requires_grad,  # requires_grad
+                None,  # dispatch_sizes_strides_policy
+                False,  # dispatch_device
+                False,  # dispatch_layout
+                extra_dispatch_keys,  # _extra_dispatch_keys
+            )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
 
