@@ -3,6 +3,8 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
@@ -20,6 +22,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
@@ -53,7 +56,6 @@ _NV_CONFIGS = [
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
             "BLOCK_K": block_size_k,
-            "NUM_CONSUMER_GROUPS": 1,
         },
         num_stages=num_stages,
         num_warps=num_warps,
@@ -74,13 +76,11 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, num_consumer_groups = (
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = (
             kw["BLOCK_M"],
             kw["BLOCK_N"],
             kw["BLOCK_K"],
             config.num_stages,
-            config.num_warps,
-            getattr(config, "num_consumer_groups", 0),
         )
 
         # 1. Prune NV configs depending on g and m.
@@ -106,19 +106,6 @@ def early_config_prune(g, m, dtsize, configs, named_args):
         required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory > max_shared_memory:
             continue
-
-        use_warp_specialization = num_consumer_groups >= 1
-
-        # 3. make sure we can partition for ws
-        if use_warp_specialization:
-            if num_warps != 4:
-                continue
-
-            # "tritongpu-warp-spec-data-partition"
-            m_slice = BLOCK_M // num_consumer_groups
-            n_slice = BLOCK_N // num_consumer_groups
-            if m_slice < 64 and n_slice < 256:
-                continue
 
         pruned_configs.append(config)
 
@@ -272,6 +259,26 @@ aten__scaled_grouped_mm = ExternKernelChoice(
     op_overload=aten._scaled_grouped_mm.default,
     has_out_variant=False,
 )
+
+
+def _tma_descriptor_max_offset_fits_in_int32(
+    mat: TensorBox, add_guards: bool = False
+) -> bool:
+    int32_max = torch.iinfo(torch.int32).max
+    max_offset = sum(
+        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+    )
+    if isinstance(max_offset, (int, sympy.Integer)):
+        if max_offset > int32_max:
+            return False
+        return True
+
+    condition = sympy.Le(max_offset, int32_max)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
 
 
 def can_use_triton_kernel(
@@ -441,8 +448,14 @@ def _tuned_grouped_mm_common(
             tl, "_experimental_make_tensor_descriptor"
         )
         use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
+            (
+                triton_has_make_tensor_descriptor
+                or triton_has_experimental_make_tensor_descriptor
+            )
+            and _descriptor_shape_fits_in_int32(mat_a.get_size())
+            and _descriptor_shape_fits_in_int32(mat_b.get_size())
+            and _tma_descriptor_max_offset_fits_in_int32(mat_a)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_b)
         )
         kwargs = {
             "SCALED": scaled,
