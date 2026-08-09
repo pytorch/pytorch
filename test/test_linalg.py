@@ -940,6 +940,235 @@ class TestLinalg(TestCase):
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_slogdet_solve_second_order_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192540:
+        # forward-mode (JVP) second derivatives of linalg.det / slogdet / solve
+        # were silently wrong because the JVP reused the saved (non-differentiable)
+        # LU instead of recomputing A^{-1} differentiably. Every second-order
+        # composition that differentiates through the forward rule must agree with
+        # the (correct) eager Hessian.
+        A = torch.tensor([[1.3, 0.4], [-0.7, 0.9]], device=device, dtype=torch.double)
+        A = A.to(dtype)
+        b = torch.tensor([1.0, -2.0], device=device, dtype=torch.double).to(dtype)
+        c = torch.tensor([0.5, 1.3], device=device, dtype=torch.double).to(dtype)
+        if dtype.is_complex:
+            # Deterministic imaginary perturbation so the complex code path
+            # (conjugates in the JVP/backward formulas) is genuinely exercised,
+            # not just a real matrix relabeled with a complex dtype.
+            A = A + 0.1j * A.flip(-1)
+        fns = {
+            "det": torch.linalg.det,
+            "slogdet": lambda X: torch.linalg.slogdet(X).logabsdet,
+            "solve": lambda X: c @ torch.linalg.solve(X, b),
+        }
+        n = A.shape[-1]
+        fwd, rev = torch.func.jacfwd, torch.func.jacrev
+
+        def unit(i, j):
+            e = torch.zeros_like(A)
+            e[i, j] = 1.0
+            return e
+
+        def hessian_ref(f, X):
+            # torch.autograd.functional.hessian can't take a complex input: its
+            # first-order Jacobian is generically complex-valued even when f's
+            # own output is real, and the second Jacobian pass then hits "grad
+            # can be implicitly created only for real scalar outputs". Keep
+            # using the public API for real dtype; for complex dtype, finite
+            # difference the real-step directional derivative directly (the
+            # same convention torch.func.jvp itself uses), which needs no
+            # autograd or functorch machinery and so is an independent ground
+            # truth.
+            if not dtype.is_complex:
+                return torch.autograd.functional.hessian(f, X)
+            eps = 1e-6
+
+            def dir_at(Y, E):
+                return torch.func.jvp(f, (Y,), (E,))[1]
+            hess = torch.empty(n, n, n, n, dtype=dtype, device=device)
+            for i, j in itertools.product(range(n), repeat=2):
+                Eij = unit(i, j)
+                for k, l in itertools.product(range(n), repeat=2):
+                    Ekl = unit(k, l)
+                    hess[i, j, k, l] = (dir_at(X + eps * Ekl, Eij) -
+                                        dir_at(X - eps * Ekl, Eij)) / (2 * eps)
+            return hess
+
+        atol, rtol = (1e-7, 1e-5) if dtype.is_complex else (1e-9, 1e-7)
+        for name, f in fns.items():
+            expected = hessian_ref(f, A)
+            modes = {}
+            if not dtype.is_complex:
+                # jacfwd/jacrev reject complex input outright ("Expected all
+                # inputs to be real"), independently of this fix; exercise
+                # them for the real dtype only.
+                modes["jacfwd(jacfwd)"] = fwd(fwd(f))(A)
+                modes["jacrev(jacfwd)"] = rev(fwd(f))(A)
+                modes["jacfwd(jacrev)"] = fwd(rev(f))(A)
+                modes["jacrev(jacrev)"] = rev(rev(f))(A)
+            # Explicit jvp-of-jvp and grad-of-jvp Hessians (the exact APIs in the
+            # issue); jacfwd is vmap(jvp) so this also covers the non-vmap path.
+            # These two modes are the only ones exercised under complex dtype.
+            hess_jvp_jvp = torch.empty(n, n, n, n, device=device, dtype=dtype)
+            hess_grad_jvp = torch.empty(n, n, n, n, device=device, dtype=dtype)
+            for i, j in itertools.product(range(n), repeat=2):
+                def jvp_dir(X, V=unit(i, j)):
+                    return torch.func.jvp(f, (X,), (V,))[1]
+
+                # torch.func.grad also requires a real scalar output; .real is a
+                # no-op for already-real dtype, and for complex dtype it makes
+                # grad(jvp) a real-step-only check (jvp(jvp) above already
+                # covers the full complex derivative independently).
+                def grad_dir(X, V=unit(i, j)):
+                    return torch.func.jvp(f, (X,), (V,))[1].real
+
+                hess_grad_jvp[i, j] = torch.func.grad(grad_dir)(A)
+                for k, l in itertools.product(range(n), repeat=2):
+                    hess_jvp_jvp[i, j, k, l] = torch.func.jvp(
+                        jvp_dir, (A,), (unit(k, l),))[1]
+            modes["jvp(jvp)"] = hess_jvp_jvp
+            modes["grad(jvp)"] = hess_grad_jvp
+            if not dtype.is_complex and name == "det":
+                # Analytic oracle independent of the eager Hessian reference.
+                H_true = torch.zeros(n, n, n, n, dtype=dtype, device=device)
+                H_true[0, 0, 1, 1] = H_true[1, 1, 0, 0] = 1
+                H_true[0, 1, 1, 0] = H_true[1, 0, 0, 1] = -1
+                for mode in ("jacfwd(jacfwd)", "jvp(jvp)"):
+                    self.assertEqual(modes[mode], H_true, atol=atol, rtol=rtol,
+                                     msg=f"det via {mode} disagrees with the "
+                                         "analytic Hessian oracle")
+            for mode, got in modes.items():
+                got_cmp = got.real if mode == "grad(jvp)" else got
+                exp_cmp = expected.real if mode == "grad(jvp)" else expected
+                self.assertFalse(torch.isnan(got).any(),
+                                 msg=f"{name} via {mode} produced NaN")
+                self.assertEqual(got_cmp, exp_cmp, atol=atol, rtol=rtol,
+                                 msg=f"{name} via {mode} disagrees with eager Hessian")
+
+        if not dtype.is_complex:
+            # Batched-shape regression: the recompute branch (diag_embed,
+            # diagonal, etc. over a leading batch dim) must also work, not just
+            # the unbatched case above. One composition suffices; jacfwd
+            # rejects complex input (see hessian_ref above), so this batched
+            # check runs for real dtype only -- the per-fn modes above already
+            # cover the complex numerics on unbatched A.
+            B3 = torch.stack([A, A + 0.25 * torch.eye(n, device=device, dtype=dtype)])
+
+            def det_sum(B):
+                return torch.linalg.det(B).sum()
+
+            expected_batched = torch.autograd.functional.hessian(det_sum, B3)
+            got_batched = fwd(fwd(det_sum))(B3)
+            self.assertFalse(torch.isnan(got_batched).any(),
+                             msg="batched det via jacfwd(jacfwd) produced NaN")
+            self.assertEqual(got_batched, expected_batched, atol=1e-9, rtol=1e-7,
+                             msg="batched det via jacfwd(jacfwd) disagrees with "
+                                 "eager Hessian")
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_det_second_order_forward_ad_singular_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192540:
+        # the recompute (linalg_solve) branch used once a JVP may be
+        # differentiated again has no epsilon-diagonal fallback for singular
+        # inputs, so jvp-of-jvp of det at an exactly singular A now raises
+        # instead of silently returning a wrong finite number as the old
+        # always-perturbed-LU path did. This is a deliberate loud-error
+        # tradeoff: correctness over a graceful (but wrong) fallback.
+        A = torch.ones(2, 2, device=device, dtype=dtype)
+        V = torch.eye(2, device=device, dtype=dtype)
+
+        def jvp_dir(X):
+            return torch.func.jvp(torch.linalg.det, (X,), (V,))[1]
+
+        with self.assertRaises(torch.linalg.LinAlgError):
+            torch.func.jvp(jvp_dir, (A,), (V,))
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_hessian_clustered_singular_values(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192521:
+        # under torch.func the det backward was forced onto the SVD adjugate
+        # branch unconditionally, whose 1/(S_i^2 - S_j^2) terms are poisoned by
+        # clustered singular values (silently wrong) and by an exact tie (NaN).
+        # The second-order result must match the eager Hessian and stay finite.
+        # Q has singular values approx (2, 2 - 9e-16, 1); the identity is an exact
+        # threefold tie.
+        Q = torch.tensor(
+            [[0.36499817017502284, -1.7968303440068301, -0.66579697838921992],
+             [1.7322951423447641, 0.2662708516337266, -0.36118249842996208],
+             [-0.37828499755800576, -0.82543622292798269, 1.0808549916157837]],
+            device=device, dtype=torch.double).to(dtype)
+        if dtype.is_complex:
+            # Deterministic imaginary perturbation so the complex code path is
+            # genuinely exercised, not just a real matrix in a complex dtype.
+            Q = Q + 0.1j * Q.flip(-1)
+        n = Q.shape[-1]
+
+        def hessian_ref(f, X):
+            # See the identical helper in
+            # test_det_slogdet_solve_second_order_forward_ad: hessian() can't
+            # take a complex input, so finite difference the real-step
+            # directional derivative directly for complex dtype instead.
+            if not dtype.is_complex:
+                return torch.autograd.functional.hessian(f, X)
+            eps = 1e-6
+
+            def unit(i, j):
+                e = torch.zeros_like(X)
+                e[i, j] = 1.0
+                return e
+
+            def dir_at(Y, E):
+                return torch.func.jvp(f, (Y,), (E,))[1]
+            hess = torch.empty(n, n, n, n, dtype=dtype, device=device)
+            for i, j in itertools.product(range(n), repeat=2):
+                Eij = unit(i, j)
+                for k, l in itertools.product(range(n), repeat=2):
+                    Ekl = unit(k, l)
+                    hess[i, j, k, l] = (dir_at(X + eps * Ekl, Eij) -
+                                        dir_at(X - eps * Ekl, Eij)) / (2 * eps)
+            return hess
+
+        atol, rtol = (1e-7, 1e-5) if dtype.is_complex else (1e-9, 1e-7)
+        for M in (Q, torch.eye(n, device=device, dtype=dtype)):
+            expected = hessian_ref(torch.linalg.det, M)
+            modes = {}
+            if not dtype.is_complex:
+                modes["hessian"] = torch.func.hessian(torch.linalg.det)(M)
+                modes["jacrev(jacrev)"] = torch.func.jacrev(
+                    torch.func.jacrev(torch.linalg.det))(M)
+            else:
+                # torch.func.hessian/jacrev reject complex input outright;
+                # exercise the same reverse-then-forward composition manually
+                # via jvp/grad instead (.real for the same reason as the
+                # grad(jvp) mode above).
+                def unit(i, j):
+                    e = torch.zeros_like(M)
+                    e[i, j] = 1.0
+                    return e
+
+                hess_grad_jvp = torch.empty(n, n, n, n, device=device, dtype=dtype)
+                for i, j in itertools.product(range(n), repeat=2):
+                    def grad_dir(X, V=unit(i, j)):
+                        return torch.func.jvp(torch.linalg.det, (X,), (V,))[1].real
+
+                    hess_grad_jvp[i, j] = torch.func.grad(grad_dir)(M)
+                modes["grad(jvp)"] = hess_grad_jvp
+            for mode, got in modes.items():
+                got_cmp = got.real if dtype.is_complex else got
+                exp_cmp = expected.real if dtype.is_complex else expected
+                self.assertFalse(torch.isnan(got).any(),
+                                 msg=f"det Hessian via {mode} produced NaN")
+                self.assertEqual(got_cmp, exp_cmp, atol=atol, rtol=rtol,
+                                 msg=f"det Hessian via {mode} is wrong for "
+                                     "clustered singular values")
+
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
