@@ -14222,7 +14222,6 @@ class TestConvolutionMPS(TestCaseMPS):
     @parametrize("with_bias", [False, True], name_fn=lambda with_bias: "bias" if with_bias else "no_bias")
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_conv1d_mpp_model_geometries(self, dtype, kernel_size, stride, dilation, padding, with_bias):
-        torch.manual_seed(0)
         input_length = max(257, dilation * (kernel_size - 1) + 17)
         x = torch.randn(2, 7, input_length).to(dtype).float()
         weight = torch.randn(33, 7, kernel_size).to(dtype).float()
