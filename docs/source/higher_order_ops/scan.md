@@ -27,6 +27,7 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    length: int | None = None,
     unroll: int | bool = 1,
 ) -> tuple[PyTree, PyTree]:
     carry = init

@@ -115,7 +115,12 @@ ncclRedOpRAII getNcclReduceOp(
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
         case ncclBfloat16:
-          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
+          // The scalar type must match the reduction datatype: NCCL reads
+          // ncclTypeSize(dataType) bytes from the factor. Using float here
+          // made NCCL read the low 2 bytes of a 4-byte float (zero for any
+          // power-of-two host scalar such as FSDP2's 1/factor), silently
+          // zeroing the reduction, and rejected bfloat16 device factors.
+          return unpackPreMulSum<at::BFloat16, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
@@ -561,6 +566,12 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
       isP2P_(isP2P),
       timingEnabled_(enableTiming),
       distDebugLevel_(distDebugLevel) {
+  if (pgDesc_.empty() || pgDesc_ == "undefined") {
+    logPrefix_ = c10::str("[PG GUID ", pgUID_, " Rank ", rank_, "] ");
+  } else {
+    logPrefix_ =
+        c10::str("[PG GUID ", pgUID_, "(", pgDesc_, ") Rank ", rank_, "] ");
+  }
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -610,7 +621,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       timingEnabled_(w.timingEnabled_),
       trace_id_(w.trace_id_),
       trace_reset_epoch_(w.trace_reset_epoch_),
-      distDebugLevel_(w.distDebugLevel_) {
+      distDebugLevel_(w.distDebugLevel_),
+      logPrefix_(w.logPrefix_) {
   exception_ = w.exception_;
 }
 
@@ -655,8 +667,7 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
 }
 
 const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -942,6 +953,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_->enable_reconfigure,
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
+
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order"; see groupRanks(). Materialize that mapping here rather than
+  // lazily, so groupRanks() is a pure read and needs no synchronization.
+  if (options_->global_ranks_in_group.empty()) {
+    defaultRanks_.resize(size_);
+    std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
+  }
 
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
@@ -2662,10 +2681,22 @@ const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
-    static std::vector<uint64_t> globalRanks(size_);
-    std::iota(globalRanks.begin(), globalRanks.end(), 0);
-    return globalRanks;
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order": _new_process_group_helper() only fills the vector in for
+  // subgroups, and a directly-constructed (stateless) ProcessGroupNCCL leaves
+  // it at its default. defaultRanks_ (built in the constructor) is therefore
+  // the right answer whenever it is empty.
+  //
+  // This must NOT be gated on local_id_ == 0. local_id_ is a process-global
+  // counter over every ProcessGroupNCCL ever constructed in this process, so
+  // the default group only gets 0 when it happens to be the first NCCL backend
+  // built. If any NCCL pg was created earlier -- a stateless pg, one inherited
+  // across fork(), or simply a previous init_process_group() that has since
+  // been destroyed -- the default group fell through to the empty
+  // global_ranks_in_group below and split() then indexed an empty vector,
+  // segfaulting on a null data pointer.
+  if (options_->global_ranks_in_group.empty()) {
+    return defaultRanks_;
   }
   return options_->global_ranks_in_group;
 }
@@ -2674,18 +2705,6 @@ void ProcessGroupNCCL::addEphemeralTimeout(
     const std::chrono::milliseconds& timeout) {
   std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   ephemeralTimeoutActive_ += timeout;
-}
-
-bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
-    const c10::intrusive_ptr<Work>& work,
-    const std::chrono::milliseconds& timeout) {
-  // Since collective returns a c10d::Work, we need to cast it to WorkNCCL.
-  if (auto workNCCL = c10::dynamic_intrusive_pointer_cast<WorkNCCL>(work)) {
-    // workNCCL is now a c10::intrusive_ptr<WorkNCCL>
-    return workNCCL->opTimeout_ == timeout;
-  }
-  C10_THROW_ERROR(
-      DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
 void ProcessGroupNCCL::broadcastSignal(
@@ -3058,11 +3077,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // reset log prefix to include group_desc
   logPrefix_ = createLogPrefix();
 
-#ifdef NCCL_COMM_DESCRIPTION
-  // Pass process group name and description to NCCL communicator
-  std::string commDesc = pg_desc_ + ':' + pg_uid_;
-  options_->config.commDesc = strdup(commDesc.c_str());
-#endif // NCCL_COMM_DESCRIPTION
+#ifdef NCCL_HAS_COMM_NAME
+  // Pass process group description and name to the NCCL communicator so the
+  // NCCL profiler (and NCCL Inspector) can recover the group semantics without
+  // scanning Python frames. NCCL config has no commDesc field, so use commName.
+  if (options_->config.commName == nullptr) {
+    std::string commName = pg_desc_ + ':' + pg_uid_;
+    options_->config.commName = strdup(commName.c_str());
+  }
+#endif // NCCL_HAS_COMM_NAME
 
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
@@ -5367,6 +5390,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
     const AllToAllOptions& opts) {
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
+  c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
+  c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
@@ -5404,9 +5429,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         opts.asyncOp,
         "nccl:all_to_all");
   } else {
-    c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
-    c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
-
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
             static_cast<int64_t>(seqCollective_) + 1,

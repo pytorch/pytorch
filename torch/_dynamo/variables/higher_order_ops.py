@@ -3308,7 +3308,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         match unroll_value:
             case bool():
                 unroll_value = _FULL_UNROLL if unroll_value else 1
-            case int() if unroll_value >= 1:
+            # scan_op uses -1 internally after normalizing public
+            # unroll=True. The public scan API rejects a user-provided -1.
+            case int() if unroll_value == _FULL_UNROLL or unroll_value >= 1:
                 pass
             case _:
                 unimplemented(
