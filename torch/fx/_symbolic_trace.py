@@ -449,7 +449,17 @@ class Tracer(TracerBase):
         if isinstance(a, _constant_attribute_types) or (
             is_opaque_symbolic_type(type(a))
         ):
-            qualname: str | None = self.tensor_attrs.get(a)
+            real_a = a.real_obj if isinstance(a, FakeScriptObject) else a
+            is_symbolic_opaque = is_opaque_symbolic_type(type(real_a))
+            if is_symbolic_opaque:
+                opaque_attr = self.opaque_attrs.get(id(real_a))
+                qualname = (
+                    opaque_attr[2]
+                    if opaque_attr is not None and opaque_attr[0] is real_a
+                    else None
+                )
+            else:
+                qualname = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -471,7 +481,10 @@ class Tracer(TracerBase):
                     raise AssertionError(
                         f"Expected qualname to be str, got {type(qualname)}"
                     )
-                self.tensor_attrs[a] = qualname
+                if is_symbolic_opaque:
+                    self.opaque_attrs[id(real_a)] = (real_a, a, qualname)
+                else:
+                    self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -860,13 +873,21 @@ class Tracer(TracerBase):
                 _ConstantAttributeType,
                 str,
             ] = {}
+            # Symbolic custom classes have reference semantics. Keying them (or
+            # their FakeScriptObject wrappers) in tensor_attrs would invoke user
+            # __eq__ / __hash__ and merge equal-but-distinct graph constants.
+            self.opaque_attrs: dict[int, tuple[object, object, str]] = {}
 
             def collect_tensor_attrs(
                 m: torch.nn.Module, prefix_atoms: list[str]
             ) -> None:
                 for k, v in m.__dict__.items():
-                    if isinstance(v, _constant_attribute_types):
-                        self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
+                    real_v = v.real_obj if isinstance(v, FakeScriptObject) else v
+                    qualname = ".".join(prefix_atoms + [k])
+                    if is_opaque_symbolic_type(type(real_v)):
+                        self.opaque_attrs[id(real_v)] = (real_v, v, qualname)
+                    elif isinstance(v, _constant_attribute_types):
+                        self.tensor_attrs[v] = qualname
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
 

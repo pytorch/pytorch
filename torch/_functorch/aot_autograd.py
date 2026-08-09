@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
@@ -27,12 +28,17 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_symbolic_type
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import (
+    _allow_graph_owned_opaque_constants,
+    make_fx,
+)
 
 from . import config
 from ._aot_autograd import autograd_cache
@@ -551,7 +557,7 @@ def create_aot_state(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
 
-    from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.fake_class_registry import maybe_to_fake_obj
     from torch._library.opaque_object import is_custom_class
 
     # Tracing may mutate the states the fake script object,
@@ -1438,8 +1444,21 @@ def aot_export_joint_with_descriptors(
     )
     aot_state.fw_metadata.act_input_paths = act_input_paths
 
-    # NB: no cache lookup!
-    aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+    # This API owns the module being captured and does not use a cache. Its exact
+    # module constants are explicit graph sources, rather than arbitrary Python
+    # objects discovered while tracing.
+    graph_owned_by_id: dict[int, FakeScriptObject | CustomClassBase] = {}
+    for submodule in mod.modules():
+        for obj in (submodule, *submodule.__dict__.values()):
+            if isinstance(obj, (FakeScriptObject, CustomClassBase)):
+                real_obj = obj.real_obj if isinstance(obj, FakeScriptObject) else obj
+                if is_opaque_symbolic_type(type(real_obj)):
+                    graph_owned_by_id[id(real_obj)] = obj
+
+    graph_owned_opaques = tuple(graph_owned_by_id.values())
+    with _allow_graph_owned_opaque_constants(graph_owned_opaques):
+        # NB: no cache lookup!
+        aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
 
     if out_spec is None or out_spec.spec is None:
         raise AssertionError("out_spec and out_spec.spec must not be None")
