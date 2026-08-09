@@ -49,6 +49,7 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
+_FULL_UNROLL = -1
 
 
 def wrap_combine_fn_flat(
@@ -106,6 +107,26 @@ def _build_empty_output_for_length_zero(
     return pytree.tree_map(_empty_or_passthrough, sample_y)
 
 
+def _validate_and_normalize_unroll(
+    unroll: int | bool,
+    *,
+    allow_full_unroll_marker: bool = False,
+) -> int:
+    if allow_full_unroll_marker and unroll == _FULL_UNROLL:
+        return _FULL_UNROLL
+    if isinstance(unroll, bool):
+        if not unroll:
+            return 1
+        return _FULL_UNROLL
+    if not isinstance(unroll, int):
+        raise RuntimeError(
+            f"Unroll must be a bool or a positive int, but got {type(unroll)}"
+        )
+    if unroll < 1:
+        raise RuntimeError(f"Unroll must be a positive int, but got {unroll}")
+    return unroll
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
@@ -116,6 +137,7 @@ def scan(
     dim: int = 0,
     reverse: bool = False,
     length: int | None = None,
+    unroll: int | bool = 1,
 ) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
@@ -152,6 +174,9 @@ def scan(
             ``length`` drives the number of iterations and ``combine_fn`` receives
             ``x=None`` each step. ``length=0`` with no xs tensors is supported in
             eager mode only; it is not supported under ``torch.compile``.
+        unroll (Union[int, bool]): How many scan iterations to unroll
+            in each loop iteration. ``False`` is equivalent to ``1`` and
+            ``True`` fully unrolls the scan length.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -191,6 +216,7 @@ def scan(
     # and we also want to the input ordering matches the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
+    _validate_and_normalize_unroll(unroll)
 
     # Determine whether xs carries any tensor data.
     xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
@@ -278,14 +304,17 @@ def scan(
         num_inp_leaves=len(leaves_xs),
     )
 
-    def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(combine_fn, leaves_init, leaves_xs, ())
+    def run_flattened_scan(combine_fn, leaves_init, leaves_xs, unroll):
+        return scan_op(
+            combine_fn, leaves_init, leaves_xs, additional_inputs=(), unroll=unroll
+        )
 
     carry, out = _maybe_compile_and_run_fn(
         run_flattened_scan,
         combine_fn,
         leaves_init,
         leaves_xs,
+        unroll,
     )
 
     if reverse:
@@ -311,6 +340,7 @@ class ScanOp(HigherOrderOperator):
         init,
         xs,
         additional_inputs,
+        unroll=1,
         *,
         mutated_arg_indices: str = "",
     ):
@@ -327,18 +357,36 @@ class ScanOp(HigherOrderOperator):
             if isinstance(additional_inputs, list)
             else additional_inputs
         )
+        unroll = _validate_and_normalize_unroll(
+            unroll,
+            allow_full_unroll_marker=True,
+        )
         validate_subgraph_args_types(additional_inputs)
         kwargs = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(combine_fn, init, xs, additional_inputs, **kwargs)
+        return super().__call__(
+            combine_fn, init, xs, additional_inputs, unroll, **kwargs
+        )
 
     # pyrefly: ignore [bad-override]
     def gen_schema(
-        self, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+        self,
+        combine_fn,
+        init,
+        xs,
+        additional_inputs,
+        unroll=1,
+        *,
+        mutated_arg_indices="",
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
+
+        unroll = _validate_and_normalize_unroll(
+            unroll,
+            allow_full_unroll_marker=True,
+        )
 
         all_inputs = tuple(
             list(init)
@@ -394,17 +442,26 @@ class ScanOp(HigherOrderOperator):
                 is_mutated=(offset + idx) in mutated_set,
             )
 
+        schema_gen.add_arg("unroll", unroll, default_value=1)
+
         for out in outputs:
             schema_gen.add_output(out)
 
-        schema_gen.add_schema_tree_spec(combine_fn, init, xs, additional_inputs)
+        schema_gen.add_schema_tree_spec(combine_fn, init, xs, additional_inputs, unroll)
         return schema_gen.gen_schema()
 
 
 scan_op = ScanOp()
 
 
-def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
+def generic_scan(operator, init, xs, dim=0, additional_inputs=(), unroll=1):
+    # Eager scan semantics do not use unroll, but keep validation aligned
+    # with compiled paths so invalid inputs fail consistently.
+    _ = _validate_and_normalize_unroll(
+        unroll,
+        allow_full_unroll_marker=True,
+    )
+
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -499,6 +556,7 @@ def trace_scan(
     init: list[torch.Tensor],
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
+    unroll: int,
     mutated_arg_indices: str = "",
 ):
     from torch._dynamo.utils import clone_input
@@ -543,7 +601,7 @@ def trace_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, init, xs, additional_inputs)
+    args = (combine_graph, init, xs, additional_inputs, unroll)
     kwargs = {}
     if mutated_arg_indices:
         kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -575,11 +633,15 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
+def scan_op_dense(
+    combine_fn, init, xs, additional_inputs, unroll, mutated_arg_indices=""
+):
     mode = _get_current_dispatch_mode()
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
-    return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
+    return generic_scan(
+        combine_fn, init, xs, additional_inputs=additional_inputs, unroll=unroll
+    )
 
 
 class ScanAutogradOp(torch.autograd.Function):
@@ -601,6 +663,7 @@ class ScanAutogradOp(torch.autograd.Function):
     def forward(
         ctx,
         hop_partitioned_graph,
+        unroll,
         n_init,
         n_xs,
         n_additional_inputs,
@@ -610,7 +673,7 @@ class ScanAutogradOp(torch.autograd.Function):
             operands, [n_init, n_xs, n_additional_inputs]
         )
         ctx._scan_impl = ScanAutogradImpl(
-            hop_partitioned_graph, init, xs, additional_inputs
+            hop_partitioned_graph, init, xs, additional_inputs, unroll
         )
         with torch._C._AutoDispatchBelowAutograd():
             return ctx._scan_impl.call_forward()
@@ -618,6 +681,7 @@ class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_fw_outputs):
         return (
+            None,
             None,
             None,
             None,
@@ -661,12 +725,18 @@ class ScanAutogradImpl:
     """
 
     def __init__(
-        self, hop_partitioned_graph: HopPartitionedGraph, init, xs, additional_inputs
+        self,
+        hop_partitioned_graph: HopPartitionedGraph,
+        init,
+        xs,
+        additional_inputs,
+        unroll,
     ):
         self.hop_partitioned_graph = hop_partitioned_graph
         self.init = init
         self.xs = xs
         self.additional_inputs = additional_inputs
+        self.unroll = unroll
         self.forward_intermediates_handling_policies: list[
             ScanForwardIntermediatesHandlingPolicy
         ] = []
@@ -841,7 +911,11 @@ class ScanAutogradImpl:
 
     def call_forward(self):
         fw_outputs_and_intermediates: tuple[Any] = scan_op(
-            self.hop_partitioned_graph.fw_gm, self.init, self.xs, self.additional_inputs
+            self.hop_partitioned_graph.fw_gm,
+            self.init,
+            self.xs,
+            self.additional_inputs,
+            self.unroll,
         )  # type: ignore[return-type]
         fw_outs = fw_outputs_and_intermediates[
             : self.hop_partitioned_graph.n_fw_outputs
@@ -986,6 +1060,7 @@ class ScanAutogradImpl:
             # TODO: torch.flip copies the tensor, we should optimize it away
             [torch.flip(x, (0,)) for x in pytree.tree_flatten(bw_xs)[0]],
             pytree.tree_flatten(bw_additional_inputs)[0],
+            self.unroll,
         )
         if grad_spec is None:
             raise AssertionError("grad_spec must not be None after scan_op")
@@ -1002,7 +1077,9 @@ class ScanAutogradImpl:
 
 
 @scan_op.py_autograd_impl
-def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
+def scan_autograd(
+    combine_fn, init, xs, additional_inputs, unroll, mutated_arg_indices=""
+):
     with disable_proxy_modes_tracing():
         # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
@@ -1031,6 +1108,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
 
     return ScanAutogradOp.apply(
         hop_partitioned_graph,
+        unroll,
         len(init),
         len(xs),
         len(additional_inputs),
@@ -1042,7 +1120,13 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
 def scan_proxy_mode(
-    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    mode,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    unroll,
+    mutated_arg_indices="",
 ):
     return trace_scan(
         mode,
@@ -1051,13 +1135,20 @@ def scan_proxy_mode(
         init,
         xs,
         additional_inputs,
+        unroll,
         mutated_arg_indices=mutated_arg_indices,
     )
 
 
 @scan_op.py_impl(FakeTensorMode)
 def scan_fake_tensor_mode(
-    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    mode,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    unroll,
+    mutated_arg_indices="",
 ):
     with mode:
         scan_length = xs[0].shape[0]
@@ -1086,7 +1177,13 @@ def scan_fake_tensor_mode(
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(
-    ctx, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    ctx,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    unroll,
+    mutated_arg_indices="",
 ):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
@@ -1100,6 +1197,7 @@ def scan_functionalize(
             init,
             xs,
             additional_inputs,
+            unroll,
             mutated_arg_indices=mutated_arg_indices,
         )
         if can_auto_functionalize(hop_instance):
@@ -1107,7 +1205,9 @@ def scan_functionalize(
                 ctx.mode,
                 hop_instance,
                 tuple(
-                    pytree.tree_flatten((combine_fn, init, xs, additional_inputs))[0]
+                    pytree.tree_flatten(
+                        (combine_fn, init, xs, additional_inputs, unroll)
+                    )[0]
                 ),
                 {},
             )
@@ -1139,6 +1239,7 @@ def scan_functionalize(
             unwrapped_init,
             unwrapped_xs,
             unwrapped_additional_inputs,
+            unroll,
             mutated_arg_indices=mutated_arg_indices,
         )
     return ctx.wrap_tensors(ret)
@@ -1146,7 +1247,13 @@ def scan_functionalize(
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def scan_batch_rule(
-    interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    interpreter,
+    combine_fn,
+    init,
+    xs,
+    additional_inputs,
+    unroll,
+    mutated_arg_indices="",
 ):
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
@@ -1201,6 +1308,7 @@ def scan_batch_rule(
             unbatched_init,
             unbatched_xs,
             unbatched_additional_inputs,
+            unroll,
             **op_kwargs,
         )
 
@@ -1211,9 +1319,10 @@ def scan_batch_rule(
 
 
 # dense implementation for scan. Used for testing only.
-def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
+def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None, unroll=1):
     carry_leaves, carry_spec = pytree.tree_flatten(init)
     inp_leaves, inp_spec = pytree.tree_flatten(xs)
+    _validate_and_normalize_unroll(unroll)
     xs_has_tensors = any(isinstance(l, torch.Tensor) for l in inp_leaves)
 
     if length is not None and not xs_has_tensors:
