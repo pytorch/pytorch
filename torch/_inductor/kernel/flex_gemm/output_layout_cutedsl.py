@@ -63,3 +63,29 @@ def blocked_128x4_output_layout_key(transposed: bool) -> str:
     orientation = "transposed" if transposed else "ordinary"
     digest = hashlib.sha256(source.encode()).hexdigest()
     return f"blocked_128x4:{orientation}:{digest}"
+
+
+def transposed_output_shape(batch, m, n, axis, ndim):
+    """Return the contiguous carrier shape for a transposed local reduction."""
+    if axis == 0:
+        return (batch, n, cute.sym_int()) if ndim == 3 else (n, cute.sym_int())
+    return (batch, cute.sym_int(), m) if ndim == 3 else (cute.sym_int(), m)
+
+
+@cute.jit
+def transposed_output_tensor(tensor: cute.Tensor) -> cute.Tensor:
+    """Expose contiguous transposed storage in logical reduction coordinates."""
+    return cute.make_tensor(
+        tensor.iterator,
+        cute.select(tensor.layout, mode=[0, 2, 1]),
+    )
+
+
+@functools.cache
+def transposed_output_layout_key() -> str:
+    """Include the transposed-layout callback source in QuACK's cache key."""
+    source = "".join(
+        inspect.getsource(callback)
+        for callback in (transposed_output_shape, transposed_output_tensor)
+    )
+    return f"transposed:{hashlib.sha256(source.encode()).hexdigest()}"
