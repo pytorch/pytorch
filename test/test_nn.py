@@ -1817,6 +1817,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    def test_weight_norm_empty_tensor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/191848
+        # weight_norm_cuda was launching kernels on empty tensors, causing an
+        # out-of-bounds memory read. Verify that it handles empty tensors safely.
+        for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
+            v = torch.empty_strided(
+                (5, 4, 16, 0), (64, 16, 1, 1), dtype=torch.float32, device=device
+            )
+            g = torch.empty_strided(
+                (0, 1, 16, 3), (48, 48, 3, 1), dtype=torch.float32, device=device
+            )
+            w, norms = torch._weight_norm(v, g, 0)
+            self.assertEqual(w.shape, v.shape)
+            self.assertEqual(norms.shape, g.shape)
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))

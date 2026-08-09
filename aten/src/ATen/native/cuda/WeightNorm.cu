@@ -353,6 +353,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
   auto norms = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(AccType));
 
+  if (v.numel() == 0) {
+    return std::tuple<Tensor, Tensor>{w, norms};
+  }
+
   const int ndims = v.dim();
 
   if(dim == 0)
@@ -441,6 +445,10 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
 
   auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  if (saved_v.numel() == 0) {
+    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+  }
 
   const int ndims = saved_v.dim();
 
