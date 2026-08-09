@@ -4,16 +4,14 @@
 
 using torch::stable::Tensor;
 
-Tensor my_permute(
-    const Tensor& self,
-    torch::headeronly::IntHeaderOnlyArrayRef dims) {
-  return torch::stable::permute(self, dims);
+Tensor my_floor_divide(const Tensor& self, const Tensor& other) {
+  return torch::stable::floor_divide(self, other);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
-  m.def("my_permute(Tensor self, int[] dims) -> Tensor");
+  m.def("my_floor_divide(Tensor self, Tensor other) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
-  m.impl("my_permute", TORCH_BOX(&my_permute));
+  m.impl("my_floor_divide", TORCH_BOX(&my_floor_divide));
 }
