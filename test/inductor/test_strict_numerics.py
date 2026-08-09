@@ -30,6 +30,9 @@ SUM_CASES = (
     ("persistent_fp16", (64, 256), 1, torch.float16),
     ("looped_bf16", (8, 12000), 1, torch.bfloat16),
     ("split_fp32", (8, 65536), 1, torch.float32),
+    ("persistent_fp64", (64, 256), 1, torch.float64),
+    ("looped_fp64", (8, 12000), 1, torch.float64),
+    ("split_fp64", (8, 65536), 1, torch.float64),
 )
 INNER_TREE_CALL = "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
 
@@ -59,8 +62,9 @@ LAYOUT_CASES = (
 )
 
 SIGNED_ZERO_CASES = (
-    ("multirow_1", 4, 1, True),
-    ("persistent", 64, 128, False),
+    ("multirow_fp32", 4, 1, True, torch.float32),
+    ("persistent_fp32", 64, 128, False, torch.float32),
+    ("persistent_fp64", 64, 128, False, torch.float64),
 )
 
 FUSION_CASES = (
@@ -109,20 +113,42 @@ class StrictNumericsTest(TestCase):
         result, code = self._run(fn, x, **cfg)
         self._assert_bitwise_equal(eager, result)
         self.assertIn(INNER_TREE_CALL, code)
+        return code
 
     @parametrize("case", SUM_CASES, name_fn=lambda c: c[0])
     def test_sum_bitwise(self, device, case):
-        _, shape, dim, dtype = case
-        self._check_sum(device, shape, dim, dtype)
+        name, shape, dim, dtype = case
+        code = self._check_sum(device, shape, dim, dtype)
+        if name.startswith("persistent"):
+            self.assertIn("@triton_heuristics.persistent_reduction(", code)
+        elif name.startswith("looped"):
+            self.assertIn("for r0_offset in", code)
+            self.assertEqual(code.count(INNER_TREE_CALL), 1)
+        else:
+            self.assertEqual(code.count(INNER_TREE_CALL), 2)
 
     @parametrize("case", SUM_VARIANTS, name_fn=lambda c: c[0])
     def test_sum_variants(self, device, case):
         _, shape, dim, dtype, keepdim, cfg = case
         self._check_sum(device, shape, dim, dtype, keepdim, **cfg)
 
-    def test_special_values_match_eager(self, device):
-        values = [0.0, -0.0, torch.inf, -torch.inf, torch.nan, 1e20, -1e20, 1.0]
-        x = torch.tensor(values, device=device).repeat(8, 38)[:, :300].contiguous()
+    @parametrize(
+        "input_dtype",
+        (torch.float32, torch.float64),
+        name_fn=lambda dtype: str(dtype).removeprefix("torch."),
+    )
+    def test_special_values_match_eager(self, device, input_dtype):
+        x = torch.zeros(6, 300, device=device, dtype=input_dtype)
+        x[0, 0] = torch.nan
+        x[1, 0] = torch.inf
+        x[2, 0] = -torch.inf
+        x[3, :2] = torch.tensor(
+            [torch.inf, -torch.inf], device=device, dtype=input_dtype
+        )
+        x[4] = -0.0
+        x[5] = torch.tensor(
+            [1e20, 1.0, -1e20, 1.0], device=device, dtype=input_dtype
+        ).repeat(75)
 
         def fn(z):
             return z.sum(1)
@@ -177,8 +203,8 @@ class StrictNumericsTest(TestCase):
 
     @parametrize("case", SIGNED_ZERO_CASES, name_fn=lambda c: c[0])
     def test_signed_zero(self, device, case):
-        _, rows, n, multirow = case
-        x = torch.full((rows, n), -0.0, device=device)
+        _, rows, n, multirow, dtype = case
+        x = torch.full((rows, n), -0.0, device=device, dtype=dtype)
 
         def fn(z):
             return torch.sum(z, 1)

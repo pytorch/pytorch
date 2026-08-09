@@ -7915,6 +7915,7 @@ def _strict_sum_layout_eligible(axis, dtype) -> bool:
         torch.float16,
         torch.bfloat16,
         torch.float32,
+        torch.float64,
     }:
         return False
     if (
