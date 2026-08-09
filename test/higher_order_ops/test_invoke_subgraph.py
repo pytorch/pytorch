@@ -4729,11 +4729,10 @@ class GraphModule(torch.nn.Module):
             return x.sin() if isinstance(c, bool) else x.cos()
 
         x = torch.randn(8)
-        fns = (
+        for fn in (
             lambda x: gn(x, Mode.ADD) + gn(x, 1),
             lambda x: hn(x, True) + hn(x, 1),
-        )
-        for fn in fns:
+        ):
             torch._dynamo.reset()
             with self._count_speculate_calls() as count:
                 res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
@@ -4906,6 +4905,111 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(count(), 2)
         finally:
             _reuse_test_global = None
+
+    def test_subgraph_reuse_attr_mutated_to_intermediate(self):
+        """A region reading an attribute set to a graph intermediate must retrace."""
+
+        class Holder:
+            def __init__(self):
+                self.t = torch.tensor(0.0)
+
+        holder = Holder()
+
+        @nested_compile_region
+        def gn(x):
+            return x + holder.t
+
+        def fn(x):
+            holder.t = x.sin()
+            return gn(x) + gn(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_container_item_mutated_to_intermediate(self):
+        """A region reading a list slot set to a graph intermediate must retrace.
+
+        Unlike test_subgraph_reuse_attr_mutated_to_intermediate, the list is
+        materialized before the region runs, so the region's read hits the
+        source-keyed VariableTracker cache instead of VariableBuilder.
+        """
+        global _reuse_test_global
+
+        @nested_compile_region
+        def gn(x):
+            return x + _reuse_test_global[0]
+
+        def fn(x):
+            _reuse_test_global[0] = x.sin()
+            return gn(x) + gn(x)
+
+        try:
+            _reuse_test_global = [torch.tensor(0.0)]
+            x = torch.randn(8)
+            ref = fn(x)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            self.assertEqual(count(), 2)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_closure_item_mutated_to_intermediate(self):
+        """A region reading a closed-over list slot set to a graph intermediate.
+
+        Unlike the global above, the read goes through a closure cell. Before
+        load_cell recorded the source the contents carry, the read and the
+        write named the cell differently, the mutation check found no overlap,
+        and this aborted with "Freevar has no source".
+        """
+        buf = [torch.tensor(0.0)]
+
+        @nested_compile_region
+        def gn(x):
+            return x + buf[0]
+
+        def fn(x):
+            buf[0] = x.sin()
+            return gn(x) + gn(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_closure_item_rebound_between_calls(self):
+        """A closed-over slot rebound to another tensor between two calls.
+
+        The same naming mismatch as the test above, but the new value has a
+        source, so nothing downstream rejects the region: the second call
+        silently reused the first call's tensor and returned 20 instead of 110.
+        """
+        buf = [None]
+
+        @nested_compile_region
+        def gn(x):
+            return x + buf[0]
+
+        def fn(x, y, z):
+            buf[0] = y
+            first = gn(x)
+            buf[0] = z
+            return first + gn(x)
+
+        x = torch.zeros(4)
+        y = torch.full((4,), 10.0)
+        z = torch.full((4,), 100.0)
+        ref = fn(x, y, z)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
+        self.assertEqual(res, ref)
+        self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_global_written_once_before_loop(self):
         """Conservative: a global written once, before any region runs, blocks reuse.
