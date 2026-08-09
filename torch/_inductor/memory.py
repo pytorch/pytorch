@@ -343,10 +343,51 @@ class BufferInfo:
     end_step: int
 
 
+def _apply_inplace_reuses(
+    buf_info_list: list[BufferInfo], inplace_reuses: dict[str, str]
+) -> None:
+    """Transfer physical allocation ownership through in-place reuse chains."""
+    name_to_buf_info = {info.buffer.get_name(): info for info in buf_info_list}
+    inplace_reuses = {
+        output_name: input_name
+        for output_name, input_name in inplace_reuses.items()
+        if output_name in name_to_buf_info
+    }
+    original_size_free = {
+        name: info.size_free for name, info in name_to_buf_info.items()
+    }
+    reused_inputs = OrderedSet(inplace_reuses.values())
+    sources: dict[str, str] = {}
+
+    for output_name in inplace_reuses:
+        source_name = output_name
+        path = OrderedSet[str]()
+        while source_name in inplace_reuses and source_name not in sources:
+            if source_name in path:
+                raise AssertionError("in-place reuse chain must not contain a cycle")
+            path.add(source_name)
+            source_name = inplace_reuses[source_name]
+        source_name = sources.get(source_name, source_name)
+        for name in path:
+            sources[name] = source_name
+
+    for output_name in inplace_reuses:
+        name_to_buf_info[output_name].size_alloc = 0
+    for input_name in reused_inputs:
+        if input_name in name_to_buf_info:
+            name_to_buf_info[input_name].size_free = 0
+
+    for output_name in inplace_reuses.keys() - reused_inputs:
+        name_to_buf_info[output_name].size_free = original_size_free.get(
+            sources[output_name], 0
+        )
+
+
 def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
+    inplace_reuses: dict[str, str] | None = None,
 ) -> tuple[
     list[BufferInfo],
     dict[BaseSchedulerNode, int],
@@ -432,6 +473,9 @@ def compute_memory_timeline(
                 )
             )
 
+    if inplace_reuses:
+        _apply_inplace_reuses(buf_info_list, inplace_reuses)
+
     return buf_info_list, node_to_step, buf_to_snode_last_use
 
 
@@ -487,6 +531,7 @@ def estimate_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
+    inplace_reuses: dict[str, str] | None = None,
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -497,7 +542,7 @@ def estimate_peak_memory(
         List[int]: memory usage at each node (or each step).
     """
     buf_info_list, _, _ = compute_memory_timeline(
-        nodes, name_to_freeable_input_buf, graph_outputs
+        nodes, name_to_freeable_input_buf, graph_outputs, inplace_reuses
     )
     return peak_memory_from_buf_info_list(buf_info_list, len(nodes))
 

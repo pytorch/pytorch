@@ -18544,9 +18544,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @staticmethod
     def _is_triggering_buffer_reuse(fn, *inputs):
-        with config.patch(allow_buffer_reuse=True):
+        with config.patch(allow_buffer_reuse=True, inplace_buffers=False):
             _, (code_allowed,) = run_and_get_code(fn, *inputs)
-        with config.patch(allow_buffer_reuse=False):
+        with config.patch(allow_buffer_reuse=False, inplace_buffers=False):
             _, (code_disallowed,) = run_and_get_code(fn, *inputs)
         code_allowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_allowed)
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)

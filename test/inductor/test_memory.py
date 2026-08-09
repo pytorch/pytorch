@@ -320,6 +320,119 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 # succ nodes should be forwarded to pre mutation buffer
                 self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
+    def test_inplace_reuse_transfers_physical_size(self):
+        def buffer_info(name, size, step):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, size, size, step, step)
+
+        infos = [
+            buffer_info("source", 100, 0),
+            buffer_info("middle", 98, 1),
+            buffer_info("destination", 95, 2),
+            buffer_info("later", 100, 3),
+        ]
+        memory._apply_inplace_reuses(
+            infos,
+            {
+                "destination": "middle",
+                "middle": "source",
+            },
+        )
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 0), (0, 0), (0, 100), (100, 100)],
+        )
+        self.assertEqual(
+            memory.peak_memory_from_buf_info_list(infos, 4),
+            (100, [100, 100, 100, 100, 0]),
+        )
+
+    def test_inplace_reuse_rejects_cycle(self):
+        def buffer_info(name):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, 100, 100, 0, 0)
+
+        infos = [buffer_info("a"), buffer_info("b")]
+        with self.assertRaisesRegex(AssertionError, "must not contain a cycle"):
+            memory._apply_inplace_reuses(infos, {"a": "b", "b": "a"})
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 100), (100, 100)],
+        )
+
+    def test_inplace_reuse_ignores_other_graphs(self):
+        def buffer_info(name):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, 100, 100, 0, 0)
+
+        infos = [buffer_info("source"), buffer_info("destination")]
+        memory._apply_inplace_reuses(
+            infos,
+            {
+                "destination": "source",
+                "other_graph_destination": "other_graph_source",
+            },
+        )
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 0), (0, 100)],
+        )
+
+    def test_inplace_reuse_of_untracked_input(self):
+        buffer = mock.Mock()
+        buffer.get_name.return_value = "destination"
+        infos = [memory.BufferInfo(buffer, 100, 100, 0, 0)]
+
+        memory._apply_inplace_reuses(infos, {"destination": "graph_input"})
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(0, 0)],
+        )
+
+    @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
+    def test_inplace_buffer_reuse_peak_memory_estimate(self):
+        def f(x, weight, bias):
+            return torch.relu(torch.nn.functional.linear(x, weight, bias))
+
+        n, k = 64, 8
+        x = torch.randn(n, k, device=GPU_TYPE)
+        weight = torch.randn(n, k, device=GPU_TYPE)
+        bias = torch.randn(n, device=GPU_TYPE)
+        buffer_size = n * n * torch.float32.itemsize
+        original_estimate = memory.estimate_peak_memory
+        cases = ((True, buffer_size), (False, 2 * buffer_size))
+
+        for inplace_buffers, expected_peak in cases:
+            estimates = []
+
+            def record_estimate(*args, **kwargs):
+                result = original_estimate(*args, **kwargs)
+                estimates.append(result[0])
+                return result
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    inplace_buffers=inplace_buffers,
+                    combo_kernels=False,
+                    force_disable_caches=True,
+                ),
+                mock.patch.object(memory, "estimate_peak_memory", record_estimate),
+            ):
+                code = run_and_get_triton_code(
+                    torch.compile(f, fullgraph=True), x, weight, bias
+                )
+
+            self.assertEqual(estimates[-1], expected_peak)
+            self.assertEqual("# reuse" in code, inplace_buffers)
+
     def test_fusing_reductions_increase_peak_memory(self):
         @torch.compile
         def f(a, b, c):
