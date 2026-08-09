@@ -343,6 +343,40 @@ class BufferInfo:
     end_step: int
 
 
+def _apply_inplace_reuses(
+    buf_info_list: list[BufferInfo], inplace_reuses: dict[str, str]
+) -> None:
+    """Transfer physical allocation ownership through in-place reuse chains."""
+    name_to_buf_info = {info.buffer.get_name(): info for info in buf_info_list}
+    original_size_free = {
+        name: info.size_free for name, info in name_to_buf_info.items()
+    }
+    reused_inputs = OrderedSet(inplace_reuses.values())
+    sources: dict[str, str] = {}
+
+    for output_name in inplace_reuses:
+        source_name = output_name
+        path = OrderedSet[str]()
+        while source_name in inplace_reuses and source_name not in sources:
+            if source_name in path:
+                raise AssertionError("in-place reuse chain must not contain a cycle")
+            path.add(source_name)
+            source_name = inplace_reuses[source_name]
+        source_name = sources.get(source_name, source_name)
+        for name in path:
+            sources[name] = source_name
+
+    for output_name in inplace_reuses:
+        name_to_buf_info[output_name].size_alloc = 0
+    for input_name in reused_inputs:
+        name_to_buf_info[input_name].size_free = 0
+
+    for output_name in inplace_reuses.keys() - reused_inputs:
+        name_to_buf_info[output_name].size_free = original_size_free[
+            sources[output_name]
+        ]
+
+
 def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
@@ -434,13 +468,7 @@ def compute_memory_timeline(
             )
 
     if inplace_reuses:
-        reused_inputs = OrderedSet(inplace_reuses.values())
-        for buf_info in buf_info_list:
-            name = buf_info.buffer.get_name()
-            if name in inplace_reuses:
-                buf_info.size_alloc = 0
-            if name in reused_inputs:
-                buf_info.size_free = 0
+        _apply_inplace_reuses(buf_info_list, inplace_reuses)
 
     return buf_info_list, node_to_step, buf_to_snode_last_use
 

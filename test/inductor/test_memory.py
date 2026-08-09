@@ -320,6 +320,50 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 # succ nodes should be forwarded to pre mutation buffer
                 self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
+    def test_inplace_reuse_transfers_physical_size(self):
+        def buffer_info(name, size, step):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, size, size, step, step)
+
+        infos = [
+            buffer_info("source", 100, 0),
+            buffer_info("middle", 98, 1),
+            buffer_info("destination", 95, 2),
+            buffer_info("later", 100, 3),
+        ]
+        memory._apply_inplace_reuses(
+            infos,
+            {
+                "destination": "middle",
+                "middle": "source",
+            },
+        )
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 0), (0, 0), (0, 100), (100, 100)],
+        )
+        self.assertEqual(
+            memory.peak_memory_from_buf_info_list(infos, 4),
+            (100, [100, 100, 100, 100, 0]),
+        )
+
+    def test_inplace_reuse_rejects_cycle(self):
+        def buffer_info(name):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, 100, 100, 0, 0)
+
+        infos = [buffer_info("a"), buffer_info("b")]
+        with self.assertRaisesRegex(AssertionError, "must not contain a cycle"):
+            memory._apply_inplace_reuses(infos, {"a": "b", "b": "a"})
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 100), (100, 100)],
+        )
+
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     def test_inplace_buffer_reuse_peak_memory_estimate(self):
         def f(x, weight, bias):
