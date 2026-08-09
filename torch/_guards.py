@@ -281,6 +281,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -760,10 +761,10 @@ class HopSubgraphCache:
     def get_autograd_key_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
-    def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None: ...
+    def add_proxy_dispatch_entry(self, identifier: object, key: Callable) -> None: ...
 
     @abstractmethod
-    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
+    def get_proxy_dispatch_entry(self, identifier: object) -> Callable | None: ...
 
     @abstractmethod
     def add_functionalize_schema_entry(
@@ -821,7 +822,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -845,7 +846,7 @@ class InvokeSubgraphReuseCondition:
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
-        self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.proxy_dispatch_cache: dict[object, Callable] = {}
         self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
@@ -880,10 +881,10 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_autograd_key_entry(self, identifier: str) -> Callable | None:
         return self.autograd_cache.get(identifier, None)
 
-    def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None:
+    def add_proxy_dispatch_entry(self, identifier: object, key: Callable) -> None:
         self.proxy_dispatch_cache[identifier] = key
 
-    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
+    def get_proxy_dispatch_entry(self, identifier: object) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
 
     def add_functionalize_schema_entry(
@@ -1004,7 +1005,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information

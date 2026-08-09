@@ -1591,7 +1591,13 @@ def decompose_auto_functionalized(graph):
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        if match.nodes[0].meta.get("has_effect", False):
+            for replacement_node in replacement_nodes:
+                if replacement_node.target is torch.ops.higher_order.cond:
+                    replacement_node.meta["has_effect"] = True
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
@@ -1632,12 +1638,23 @@ def decompose_auto_functionalized(graph):
             if len(args) != 1:
                 raise AssertionError(f"expected 1 arg, got {len(args)}")
             mutable_op = args[0]
-            return auto_functionalized_v2_dense(
-                mutable_op, only_clone_these_bases, **kwargs
+            # auto_functionalized_v2 has one packed return even when the dense
+            # decomposition contains a single tensor. Preserve that outer
+            # structure so replace_by_example rewrites its getitem users.
+            return (
+                auto_functionalized_v2_dense(
+                    mutable_op, only_clone_these_bases, **kwargs
+                ),
             )
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        if match.nodes[0].meta.get("has_effect", False):
+            for replacement_node in replacement_nodes:
+                if replacement_node.target is torch.ops.higher_order.cond:
+                    replacement_node.meta["has_effect"] = True
 
     graph_pass.apply(graph)
 
@@ -2023,6 +2040,62 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def _is_addcdiv_fma_eligible(match: Match) -> bool:
+    """Guards for the addcdiv FMA re-fusion pass."""
+    # aten.addcdiv requires floating-point self; check inp, not output, because
+    # aten.div promotes integers to float so the output is float even for int inp.
+    inp_val = match.kwargs["inp"].meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and inp_val.dtype.is_floating_point):
+        return False
+    # tl.fma / div_rn are Triton GPU-only
+    out_val = match.output_node().meta.get("val")
+    if not (
+        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
+    ):
+        return False
+    # aten.addcdiv requires all tensor args to be floating-point; integer
+    # constants and SymInts can appear as t1/t2 in decomposed graphs.
+    for key in ("t1", "t2"):
+        node = match.kwargs.get(key)
+        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
+        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
+            return False
+    # aten.addcdiv requires a scalar value, not a tensor
+    return not isinstance(match.kwargs.get("value"), torch.fx.Node)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        KeywordArg("inp"),
+        CallFunction(
+            aten.mul.Tensor,
+            CallFunction(aten.div.Tensor, KeywordArg("t1"), KeywordArg("t2")),
+            KeywordArg("value"),
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=_is_addcdiv_fma_eligible,
+)
+def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
+    """Re-fuse ``inp + (t1/t2)*value`` back into ``aten.addcdiv``.
+
+    torch.addcdiv is CompositeImplicitAutograd: it decomposes into
+    aten.div + aten.mul + aten.add before Inductor sees the graph, making the
+    FMA-aware lowering in lowering.py unreachable.  Re-inserting a single
+    aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
+    """
+
+    def repl(
+        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
+    ) -> torch.Tensor:
+        return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
+
+    counters["inductor"]["addcdiv_fma_fused"] += 1
+    match.replace_by_example(repl, [inp, t1, t2, value])
 
 
 def register_partial_reduction_pattern():

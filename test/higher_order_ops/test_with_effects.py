@@ -1,5 +1,6 @@
 # Owner(s): ["module: functorch"]
 # ruff: noqa: F841
+import operator
 import unittest
 from collections import deque
 from functools import partial
@@ -19,6 +20,7 @@ from functorch.compile import (
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import tracing, TracingContext
+from torch._higher_order_ops._effect_token_utils import EffectTokenAnalyzer
 from torch._higher_order_ops.cond import cond_op
 from torch._higher_order_ops.effects import (
     _EffectType,
@@ -142,6 +144,20 @@ def forward(self, arg1_1):
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
     return (add,)""",
             )
+
+    def test_effect_token_analyzer_rejects_negative_getitem(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        x = graph.placeholder("x")
+        effect = graph.call_function(
+            with_effects, (token, torch.ops.aten.sin.default, x)
+        )
+        result = graph.call_function(operator.getitem, (effect, -1))
+        graph.output((result,))
+        module = torch.fx.GraphModule({}, graph)
+
+        analyzer = EffectTokenAnalyzer(lambda module, node: 0)
+        self.assertFalse(analyzer.is_definite_token_output(module, result))
 
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
@@ -914,13 +930,11 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         finally:
             handle.destroy()
 
-    def test_compile_aot_eager_cond_with_effect_in_branch(self):
-        with torch.library._scoped_library("mylib_aot_eager_cond_effect", "FRAGMENT"):
+    def test_compile_cpu_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library("mylib_cpu_cond_effect", "FRAGMENT"):
             recorded = []
 
-            @torch.library.custom_op(
-                "mylib_aot_eager_cond_effect::record", mutates_args=()
-            )
+            @torch.library.custom_op("mylib_cpu_cond_effect::record", mutates_args=())
             def record(x: torch.Tensor, prefix: str) -> None:
                 recorded.append(prefix)
 
@@ -929,11 +943,11 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
                 return
 
             record.register_effect(_EffectType.ORDERED)
-            has_side_effect(torch.ops.mylib_aot_eager_cond_effect.record.default)
+            has_side_effect(torch.ops.mylib_cpu_cond_effect.record.default)
 
             def fn(x, pred):
                 def true_fn(x):
-                    torch.ops.mylib_aot_eager_cond_effect.record(x, "true")
+                    torch.ops.mylib_cpu_cond_effect.record(x, "true")
                     return x + 1
 
                 def false_fn(x):
@@ -941,17 +955,674 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
 
                 return torch.cond(pred, true_fn, false_fn, (x,))
 
-            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            for backend in ("aot_eager", "inductor"):
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
+
+                x = torch.ones(2, requires_grad=True)
+                recorded.clear()
+                out = compiled(x, torch.tensor(True))
+                self.assertEqual(out, x + 1)
+                out.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
+                self.assertEqual(recorded, ["true"])
+
+                x = torch.ones(2, requires_grad=True)
+                recorded.clear()
+                out = compiled(x, torch.tensor(False))
+                self.assertEqual(out, x - 1)
+                out.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
+                self.assertEqual(recorded, [])
+
+    def test_compile_effect_only_cond_preserves_order(self):
+        with torch.library._scoped_library("mylib_effect_only_cond", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op("mylib_effect_only_cond::record", mutates_args=())
+            def record(x: torch.Tensor, label: str) -> None:
+                recorded.append(label)
+
+            @record.register_fake
+            def record_fake(x, label):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_effect_only_cond.record.default)
+
+            def fn(x, pred):
+                def true_fn(x):
+                    torch.ops.mylib_effect_only_cond.record(x, "inside")
+                    return ()
+
+                def false_fn(x):
+                    return ()
+
+                torch.cond(pred, true_fn, false_fn, (x,))
+                torch.ops.mylib_effect_only_cond.record(x, "after")
+                return x + 1
+
+            for backend in ("aot_eager", "inductor"):
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
+                for pred, expected in ((True, ["inside", "after"]), (False, ["after"])):
+                    x = torch.ones(2)
+                    recorded.clear()
+                    self.assertEqual(
+                        compiled(x, torch.tensor(pred)), torch.full_like(x, 2)
+                    )
+                    self.assertEqual(recorded, expected)
+
+    def test_compile_cond_with_effect_and_input_mutation(self):
+        with torch.library._scoped_library("mylib_cond_effect_mutation", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_cond_effect_mutation::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append(x.clone())
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_cond_effect_mutation.record.default)
+
+            def fn(x, pred):
+                def true_fn(x):
+                    torch.ops.mylib_cond_effect_mutation.record(x)
+                    x.add_(1)
+                    return x
+
+                def false_fn(x):
+                    x.sub_(1)
+                    return x
+
+                with torch.no_grad():
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            for backend in ("aot_eager", "inductor"):
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
+                for pred, expected in ((True, 2), (False, 0)):
+                    x = torch.ones(2)
+                    recorded.clear()
+                    self.assertEqual(
+                        compiled(x, torch.tensor(pred)), torch.full_like(x, expected)
+                    )
+                    self.assertEqual(x, torch.full_like(x, expected))
+                    self.assertEqual(len(recorded), int(pred))
+
+            def effect_before_cond(x, y, pred):
+                def true_fn(x, y):
+                    x.add_(1)
+                    return y
+
+                def false_fn(x, y):
+                    x.sub_(1)
+                    return y
+
+                torch.ops.mylib_cond_effect_mutation.record(y)
+                with torch.no_grad():
+                    return torch.cond(pred, true_fn, false_fn, (x, y))
+
             x = torch.ones(2)
+            y = torch.arange(2.0)
+            recorded.clear()
+            self.assertEqual(
+                torch.compile(effect_before_cond, backend="inductor", fullgraph=True)(
+                    x, y, torch.tensor(True)
+                ),
+                y,
+            )
+            self.assertEqual(recorded, [y])
+
+            def ignored_cond_result(x, y, pred):
+                def true_fn(x):
+                    torch.ops.mylib_cond_effect_mutation.record(x)
+                    x.add_(1)
+                    return x
+
+                def false_fn(x):
+                    x.sub_(1)
+                    return x
+
+                with torch.no_grad():
+                    torch.cond(pred, true_fn, false_fn, (x,))
+                torch.ops.mylib_cond_effect_mutation.record(y)
+                return y + 1
+
+            x = torch.ones(2)
+            y = torch.arange(2.0)
+            recorded.clear()
+            self.assertEqual(
+                torch.compile(ignored_cond_result, backend="inductor", fullgraph=True)(
+                    x, y, torch.tensor(True)
+                ),
+                y + 1,
+            )
+            self.assertEqual(recorded, [torch.ones(2), y])
+            self.assertEqual(x, torch.full_like(x, 2))
+
+            def empty_cond_result(x, pred):
+                def true_fn(x):
+                    torch.ops.mylib_cond_effect_mutation.record(x)
+                    x.add_(1)
+                    return ()
+
+                def false_fn(x):
+                    x.sub_(1)
+                    return ()
+
+                with torch.no_grad():
+                    torch.cond(pred, true_fn, false_fn, (x,))
+                return x * 2
+
+            compiled = torch.compile(
+                empty_cond_result, backend="inductor", fullgraph=True
+            )
+            for pred, expected, num_records in (
+                (True, 4, 1),
+                (False, 0, 0),
+            ):
+                x = torch.ones(2)
+                recorded.clear()
+                self.assertEqual(
+                    compiled(x, torch.tensor(pred)), torch.full_like(x, expected)
+                )
+                self.assertEqual(x, torch.full_like(x, expected / 2))
+                self.assertEqual(len(recorded), num_records)
+
+    def test_compile_nested_cond_with_effect_and_input_mutation(self):
+        with torch.library._scoped_library(
+            "mylib_nested_cond_effect_mutation", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_nested_cond_effect_mutation::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append(x.clone())
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_nested_cond_effect_mutation.record.default)
+
+            def outer_true(x, inner_pred):
+                def inner_true(x):
+                    torch.ops.mylib_nested_cond_effect_mutation.record(x)
+                    x.add_(1)
+                    return (x,)
+
+                def inner_false(x):
+                    x.sub_(1)
+                    return (x,)
+
+                return cond_op(inner_pred, inner_true, inner_false, (x,))
+
+            def outer_false(x, inner_pred):
+                x.mul_(2)
+                return (x,)
+
+            true_graph = make_fx(outer_true)(torch.ones(2), torch.tensor(True))
+            false_graph = make_fx(outer_false)(torch.ones(2), torch.tensor(True))
+
+            def fn(x, outer_pred, inner_pred):
+                with torch.no_grad():
+                    return cond_op(
+                        outer_pred,
+                        true_graph,
+                        false_graph,
+                        (x, inner_pred),
+                    )[0]
+
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            for outer_pred, inner_pred, expected, num_records in (
+                (True, True, 2, 1),
+                (True, False, 0, 0),
+                (False, True, 2, 0),
+            ):
+                x = torch.ones(2)
+                recorded.clear()
+                self.assertEqual(
+                    compiled(
+                        x,
+                        torch.tensor(outer_pred),
+                        torch.tensor(inner_pred),
+                    ),
+                    torch.full_like(x, expected),
+                )
+                self.assertEqual(x, torch.full_like(x, expected))
+                self.assertEqual(len(recorded), num_records)
+
+    def test_compile_nested_cond_does_not_replay_forward_effect_in_backward(self):
+        with torch.library._scoped_library(
+            "mylib_nested_cond_backward_replay", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_nested_cond_backward_replay::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append("forward")
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_nested_cond_backward_replay.record.default)
+
+            def fn(x, outer_pred, inner_pred):
+                def outer_true(x, inner_pred):
+                    def inner_true(x):
+                        torch.ops.mylib_nested_cond_backward_replay.record(x)
+                        return x.sin()
+
+                    def inner_false(x):
+                        return x.sin()
+
+                    return torch.cond(inner_pred, inner_true, inner_false, (x,))
+
+                def outer_false(x, inner_pred):
+                    return x.sin()
+
+                return torch.cond(outer_pred, outer_true, outer_false, (x, inner_pred))
+
+            x = torch.ones(2, requires_grad=True)
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            recorded.clear()
+            compiled(x, torch.tensor(True), torch.tensor(True)).sum().backward()
+            self.assertEqual(recorded, ["forward"])
+
+    def test_cond_rejects_live_forward_effect_result_in_backward(self):
+        with torch.library._scoped_library("mylib_cond_live_effect_result", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_cond_live_effect_result::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> torch.Tensor:
+                recorded.append("forward")
+                return x.clone()
+
+            @record.register_fake
+            def record_fake(x):
+                return x.clone()
+
+            def backward(ctx, grad):
+                return grad
+
+            record.register_autograd(backward)
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_cond_live_effect_result.record.default)
+
+            def false_fn(x):
+                return (x.sin(),)
+
+            def live_true_fn(x):
+                return (torch.ops.mylib_cond_live_effect_result.record(x).sin(),)
+
+            x = torch.ones(2, requires_grad=True)
+            recorded.clear()
+            out = cond_op(torch.tensor(True), live_true_fn, false_fn, (x,))[0]
+            self.assertEqual(recorded, ["forward"])
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "effectful branch operation whose result is required for backward",
+            ):
+                out.sum().backward()
+            self.assertEqual(recorded, ["forward"])
+
+            def outer_true_fn(x, inner_pred):
+                return cond_op(inner_pred, live_true_fn, false_fn, (x,))
+
+            def outer_false_fn(x, inner_pred):
+                return false_fn(x)
+
+            x = torch.ones(2, requires_grad=True)
+            recorded.clear()
+            out = cond_op(
+                torch.tensor(True),
+                outer_true_fn,
+                outer_false_fn,
+                (x, torch.tensor(True)),
+            )[0]
+            self.assertEqual(recorded, ["forward"])
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "effectful branch operation whose result is required for backward",
+            ):
+                out.sum().backward()
+            self.assertEqual(recorded, ["forward"])
+
+            def dead_true_fn(x):
+                return (torch.ops.mylib_cond_live_effect_result.record(x) * 2,)
+
+            x = torch.ones(2, requires_grad=True)
+            recorded.clear()
+            cond_op(torch.tensor(True), dead_true_fn, false_fn, (x,))[
+                0
+            ].sum().backward()
+            self.assertEqual(x.grad, torch.full_like(x, 2))
+            self.assertEqual(recorded, ["forward"])
 
             recorded.clear()
-            self.assertEqual(compiled(x, torch.tensor(True)), x + 1)
-            self.assertEqual(recorded, ["true"])
+            with torch.no_grad():
+                out = cond_op(
+                    torch.tensor(True), live_true_fn, false_fn, (torch.ones(2),)
+                )[0]
+            self.assertEqual(out, torch.ones(2).sin())
+            self.assertEqual(recorded, ["forward"])
+
+            def compiled_fn(x, pred):
+                def true_fn(x):
+                    return torch.ops.mylib_cond_live_effect_result.record(x).sin()
+
+                def false_fn(x):
+                    return x.sin()
+
+                return torch.cond(pred, true_fn, false_fn, (x,))
 
             recorded.clear()
-            self.assertEqual(compiled(x, torch.tensor(False)), x - 1)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "effectful branch operation whose result is required for backward",
+            ):
+                torch.compile(compiled_fn, backend="aot_eager", fullgraph=True)(
+                    torch.ones(2, requires_grad=True),
+                    torch.tensor(True),
+                )
             self.assertEqual(recorded, [])
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_compile_cond_with_effectful_invoke_subgraph(self):
+        with torch.library._scoped_library(
+            "mylib_cond_effectful_invoke_subgraph", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_cond_effectful_invoke_subgraph::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append(x.shape)
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_cond_effectful_invoke_subgraph.record.default
+            )
+
+            @torch.compiler.nested_compile_region
+            def region(x):
+                torch.ops.mylib_cond_effectful_invoke_subgraph.record(x)
+                return x + 1
+
+            def fn(x, pred):
+                def true_fn(x):
+                    return region(x)
+
+                def false_fn(x):
+                    return x - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,))
+
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            for pred, expected_count in ((True, 1), (False, 0)):
+                x = torch.ones(2, requires_grad=True)
+                recorded.clear()
+                out = compiled(x, torch.tensor(pred))
+                self.assertEqual(out, x + 1 if pred else x - 1)
+                out.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
+                self.assertEqual(len(recorded), expected_count)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_export_nested_effectful_invoke_subgraphs(self):
+        with torch.library._scoped_library(
+            "mylib_nested_effectful_invoke_subgraphs", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_nested_effectful_invoke_subgraphs::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, label: str) -> None:
+                recorded.append(label)
+
+            @record.register_fake
+            def record_fake(x, label):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_nested_effectful_invoke_subgraphs.record.default
+            )
+
+            @torch.compiler.nested_compile_region
+            def inner(x):
+                torch.ops.mylib_nested_effectful_invoke_subgraphs.record(x, "inner")
+                return x + 1
+
+            @torch.compiler.nested_compile_region
+            def outer(x):
+                return inner(x) * 2
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    torch.ops.mylib_nested_effectful_invoke_subgraphs.record(x, "root")
+                    return outer(x)
+
+            x = torch.ones(2)
+            ep = torch.export.export(M(), (x,)).run_decompositions()
+            for _ in range(2):
+                recorded.clear()
+                self.assertEqual(ep.module()(x), (x + 1) * 2)
+                self.assertEqual(recorded, ["root", "inner"])
+                ep.validate()
+
+            @torch.compiler.nested_compile_region
+            def effect_only(x):
+                torch.ops.mylib_nested_effectful_invoke_subgraphs.record(
+                    x, "effect_only"
+                )
+                return ()
+
+            class EffectOnlyM(torch.nn.Module):
+                def forward(self, x):
+                    effect_only(x)
+                    return x + 1
+
+            ep = torch.export.export(EffectOnlyM(), (x,)).run_decompositions()
+            for materialize in (ep.module, lambda: torch.export.unflatten(ep)):
+                recorded.clear()
+                self.assertEqual(materialize()(x), x + 1)
+                self.assertEqual(recorded, ["effect_only"])
+                ep.validate()
+
+            @torch.compiler.nested_compile_region
+            def dynamic_output(x):
+                torch.ops.mylib_nested_effectful_invoke_subgraphs.record(x, "dynamic")
+                return torch.nonzero(x)
+
+            class DynamicOutputM(torch.nn.Module):
+                def forward(self, x):
+                    return dynamic_output(x)
+
+            ep = torch.export.export(DynamicOutputM(), (x,)).run_decompositions()
+            mod = ep.module()
+            from torch._guards import detect_fake_mode
+            from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts
+
+            placeholder_values = [
+                node.meta["val"]
+                for node in mod.graph.nodes
+                if node.op == "placeholder" and "val" in node.meta
+            ]
+            fake_mode = detect_fake_mode(placeholder_values)
+            self.assertIsNotNone(fake_mode)
+            with fake_mode:
+                PropagateUnbackedSymInts(mod).run(*placeholder_values)
+            recorded.clear()
+            self.assertEqual(mod(x), torch.nonzero(x))
+            self.assertEqual(recorded, ["dynamic"])
+            ep.validate()
+
+    def test_export_effect_result_negative_getitem_preserves_source(self):
+        with torch.library._scoped_library(
+            "mylib_effect_result_negative_getitem", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_effect_result_negative_getitem::record_and_add",
+                mutates_args=(),
+            )
+            def record_and_add(x: torch.Tensor) -> torch.Tensor:
+                recorded.append("effect")
+                return x + 1
+
+            @record_and_add.register_fake
+            def record_and_add_fake(x):
+                return torch.empty_like(x)
+
+            record_and_add.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_effect_result_negative_getitem.record_and_add.default
+            )
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return (
+                        torch.ops.mylib_effect_result_negative_getitem.record_and_add(x)
+                    )
+
+            x = torch.ones(2)
+            ep = torch.export.export(M(), (x,)).run_decompositions()
+            effect_node = next(
+                node
+                for node in ep.graph.nodes
+                if node.target is torch.ops.higher_order.with_effects
+            )
+            result_node = next(
+                user
+                for user in effect_node.users
+                if user.target is operator.getitem and user.args[1] == 1
+            )
+            result_node.args = (effect_node, -1)
+            ep.graph_module.recompile()
+            ep.validate()
+
+            for materialize in (ep.module, lambda: torch.export.unflatten(ep)):
+                for _ in range(2):
+                    recorded.clear()
+                    self.assertEqual(materialize()(x), x + 1)
+                    self.assertEqual(recorded, ["effect"])
+                    ep.validate()
+
+            self.assertIn("torch.ops.higher_order.with_effects", ep.graph_module.code)
+
+            @torch.library.custom_op(
+                "mylib_effect_result_negative_getitem::record_none",
+                mutates_args=(),
+            )
+            def record_none(x: torch.Tensor) -> None:
+                recorded.append("none")
+
+            @record_none.register_fake
+            def record_none_fake(x):
+                return
+
+            record_none.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_effect_result_negative_getitem.record_none.default
+            )
+
+            class NoReturnM(torch.nn.Module):
+                def forward(self, x):
+                    torch.ops.mylib_effect_result_negative_getitem.record_none(x)
+                    return x + 1
+
+            ep = torch.export.export(NoReturnM(), (x,)).run_decompositions()
+            effect_node = next(
+                node
+                for node in ep.graph.nodes
+                if node.target is torch.ops.higher_order.with_effects
+            )
+            token_node = next(
+                user
+                for user in effect_node.users
+                if user.target is operator.getitem and user.args[1] == 0
+            )
+            token_node.args = (effect_node, -2)
+            ep.graph_module.recompile()
+            ep.validate()
+            recorded.clear()
+            self.assertEqual(ep.module()(x), x + 1)
+            self.assertEqual(recorded, ["none"])
+
+            @torch.library.custom_op(
+                "mylib_effect_result_negative_getitem::dynamic_pair",
+                mutates_args=(),
+            )
+            def dynamic_pair(
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                recorded.append("pair")
+                return torch.nonzero(x), torch.nonzero(x + 1)
+
+            @dynamic_pair.register_fake
+            def dynamic_pair_fake(x):
+                ctx = torch.library.get_ctx()
+                first = ctx.new_dynamic_size()
+                second = ctx.new_dynamic_size()
+                return (
+                    torch.empty((first, x.dim()), dtype=torch.int64, device=x.device),
+                    torch.empty((second, x.dim()), dtype=torch.int64, device=x.device),
+                )
+
+            dynamic_pair.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_effect_result_negative_getitem.dynamic_pair.default
+            )
+
+            class DynamicPairM(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib_effect_result_negative_getitem.dynamic_pair(
+                        x
+                    )
+
+            ep = torch.export.export(DynamicPairM(), (x,)).run_decompositions()
+            mod = ep.module()
+            from torch._guards import detect_fake_mode
+            from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts
+
+            placeholder_values = [
+                node.meta["val"]
+                for node in mod.graph.nodes
+                if node.op == "placeholder" and "val" in node.meta
+            ]
+            fake_mode = detect_fake_mode(placeholder_values)
+            self.assertIsNotNone(fake_mode)
+            with fake_mode:
+                PropagateUnbackedSymInts(mod).run(*placeholder_values)
+            recorded.clear()
+            self.assertEqual(
+                mod(x),
+                (torch.nonzero(x), torch.nonzero(x + 1)),
+            )
+            self.assertEqual(recorded, ["pair"])
+            ep.validate()
+
+    @skipIfTorchDynamo("Tests the error from a nested torch.compile call")
     def test_compile_cond_rejects_none_operand(self):
         def fn(x, pred):
             def true_fn(x, unused):
@@ -965,9 +1636,48 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Observed exception",
+            r"None is not a valid torch\.cond operand",
         ):
             compiled(torch.ones(2), torch.tensor(True))
+
+    def test_cond_effect_mismatched_output_structure(self):
+        with torch.library._scoped_library(
+            "mylib_cond_effect_mismatched_output", "FRAGMENT"
+        ):
+
+            @torch.library.custom_op(
+                "mylib_cond_effect_mismatched_output::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                pass
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(
+                torch.ops.mylib_cond_effect_mismatched_output.record.default
+            )
+
+            def true_fn(x):
+                torch.ops.mylib_cond_effect_mismatched_output.record(x)
+                return (x + 1, x + 2)
+
+            def false_fn(x):
+                return [x - 1, x - 2]
+
+            x = torch.ones(2)
+            true_graph = make_fx(true_fn)(x)
+            false_graph = make_fx(false_fn)(x)
+
+            def fn(x, pred):
+                return cond_op(pred, true_graph, false_graph, (x,))
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Unmatched output spec from torch.cond branches"
+            ):
+                aot_function(fn, nop)(x, torch.tensor(True))
 
     def test_functionalize_cond_with_effect_in_branch(self):
         with torch.library._scoped_library(
@@ -1008,6 +1718,142 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
             recorded.clear()
             self.assertEqual(functionalized(x, torch.tensor(False)), x - 1)
             self.assertEqual(recorded, [])
+
+    def test_aot_function_cond_with_python_callable_effect(self):
+        with torch.library._scoped_library(
+            "mylib_aot_cond_callable_effect", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_aot_cond_callable_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append("effect")
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_aot_cond_callable_effect.record.default)
+
+            def true_fn(x):
+                torch.ops.mylib_aot_cond_callable_effect.record(x)
+                return ()
+
+            def false_fn(x):
+                return ()
+
+            def fn(x, pred):
+                cond_op(pred, true_fn, false_fn, (x,))
+                return x + 1
+
+            compiled = aot_function(fn, nop)
+            x = torch.ones(2)
+            for pred, expected_effects in ((True, ["effect"]), (False, [])):
+                recorded.clear()
+                self.assertEqual(compiled(x, torch.tensor(pred)), x + 1)
+                self.assertEqual(recorded, expected_effects)
+
+            def mutation_true_fn(x):
+                torch.ops.mylib_aot_cond_callable_effect.record(x)
+                x.add_(1)
+                return (x,)
+
+            def mutation_false_fn(x):
+                x.sub_(1)
+                return (x,)
+
+            def mutation_fn(x, pred):
+                return cond_op(pred, mutation_true_fn, mutation_false_fn, (x,))[0]
+
+            compiled_mutation = aot_function(mutation_fn, nop)
+            for pred, expected, expected_effects in (
+                (True, 2, ["effect"]),
+                (False, 0, []),
+            ):
+                x = torch.ones(2)
+                recorded.clear()
+                self.assertEqual(
+                    compiled_mutation(x, torch.tensor(pred)),
+                    torch.full_like(x, expected),
+                )
+                self.assertEqual(x, torch.full_like(x, expected))
+                self.assertEqual(recorded, expected_effects)
+
+            def child_fn(x):
+                torch.ops.mylib_aot_cond_callable_effect.record(x)
+                return x + 1
+
+            false_graph = make_fx(lambda x: (x - 1,))(torch.ones(2))
+
+            def check_call_module_child(child):
+                parent_graph = torch.fx.Graph()
+                parent_x = parent_graph.placeholder("x")
+                parent_out = parent_graph.call_module("child", (parent_x,))
+                parent_graph.output((parent_out,))
+                true_graph = torch.fx.GraphModule({"child": child}, parent_graph)
+
+                def call_module_fn(x, pred):
+                    return cond_op(pred, true_graph, false_graph, (x,))[0]
+
+                compiled_call_module = aot_function(call_module_fn, nop)
+                for pred, expected, expected_effects in (
+                    (True, 2, ["effect"]),
+                    (False, 0, []),
+                ):
+                    x = torch.ones(2)
+                    recorded.clear()
+                    self.assertEqual(
+                        compiled_call_module(x, torch.tensor(pred)),
+                        torch.full_like(x, expected),
+                    )
+                    self.assertEqual(recorded, expected_effects)
+
+            check_call_module_child(make_fx(child_fn)(torch.ones(2)))
+
+            class ChildModule(torch.nn.Module):
+                def forward(self, x):
+                    return child_fn(x)
+
+            check_call_module_child(ChildModule())
+
+    def test_compile_cond_with_aliased_effectful_branches(self):
+        with torch.library._scoped_library("mylib_aliased_cond_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_aliased_cond_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor) -> None:
+                recorded.append("effect")
+
+            @record.register_fake
+            def record_fake(x):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_aliased_cond_effect.record.default)
+
+            def branch(x):
+                torch.ops.mylib_aliased_cond_effect.record(x)
+                return (x + 1,)
+
+            branch_graph = make_fx(branch)(torch.ones(2))
+
+            def fn(x, pred):
+                return cond_op(pred, branch_graph, branch_graph, (x,))[0]
+
+            for backend in ("aot_eager", "inductor"):
+                recorded.clear()
+                self.assertEqual(
+                    torch.compile(fn, backend=backend, fullgraph=True)(
+                        torch.ones(2), torch.tensor(True)
+                    ),
+                    torch.full((2,), 2.0),
+                )
+                self.assertEqual(recorded, ["effect"])
 
     def test_cond_preserves_backward_only_effect(self):
         with torch.library._scoped_library("mylib_cond_backward_effect", "FRAGMENT"):
@@ -1453,14 +2299,80 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 decomp.graph_module.true_graph_0.code,
             )
 
+            # A negative index still selects the last user result after the
+            # leading token is removed; it must not be classified as a token.
+            cond_node = next(
+                node
+                for node in decomp.graph_module.graph.nodes
+                if node.target is torch.ops.higher_order.cond
+            )
+            false_graph_node = cond_node.args[2]
+            holder = torch.nn.Module()
+            holder.add_module("branch", decomp.graph_module.false_graph_0)
+            decomp.graph_module.add_module("aliased", holder)
+            false_graph_node.target = "aliased.branch"
+            token_node = next(
+                user
+                for user in cond_node.users
+                if user.target is operator.getitem and user.args[1] == 0
+            )
+            token_node.args = (cond_node, -2)
+            result_node = next(
+                user
+                for user in cond_node.users
+                if user.target is operator.getitem and user.args[1] == 1
+            )
+            result_node.args = (cond_node, -1)
+            decomp.graph_module.recompile()
+
+            # FX permits list-valued output nodes. Keep that container while the
+            # module path removes the cond branch token prefix.
+            for branch in (
+                decomp.graph_module.true_graph_0,
+                decomp.graph_module.false_graph_0,
+            ):
+                output = next(
+                    node for node in branch.graph.nodes if node.op == "output"
+                )
+                output.args = (list(output.args[0]),)
+                branch.recompile()
+
             x = torch.randn(2, 2)
-            mod = decomp.module()
-            recorded.clear()
-            mod(x, torch.tensor(True))
-            self.assertEqual(recorded, ["true"])
-            recorded.clear()
-            mod(x, torch.tensor(False))
-            self.assertEqual(recorded, [])
+            original_true_graph = decomp.graph_module.true_graph_0
+            for _ in range(2):
+                mod = decomp.module()
+                mod_cond = next(
+                    node
+                    for node in mod.graph.nodes
+                    if node.target is torch.ops.higher_order.cond
+                )
+                branches = tuple(
+                    mod.get_submodule(branch_node.target)
+                    for branch_node in mod_cond.args[1:3]
+                )
+                self.assertIsNot(branches[0], original_true_graph)
+                for branch in branches:
+                    output = next(
+                        node for node in branch.graph.nodes if node.op == "output"
+                    )
+                    self.assertIsInstance(output.args[0], list)
+                recorded.clear()
+                mod(x, torch.tensor(True))
+                self.assertEqual(recorded, ["true"])
+                recorded.clear()
+                mod(x, torch.tensor(False))
+                self.assertEqual(recorded, [])
+
+            # Materializing a module must not strip tokens from the source EP.
+            self.assertIn(
+                "torch.ops.higher_order.with_effects", original_true_graph.code
+            )
+
+            for _ in range(2):
+                unflattened = torch.export.unflatten(decomp)
+                recorded.clear()
+                unflattened(x, torch.tensor(True))
+                self.assertEqual(recorded, ["true"])
 
             class PriorEffectM(torch.nn.Module):
                 def forward(self, x, pred):
@@ -1485,6 +2397,32 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             recorded.clear()
             mod(x, torch.tensor(False))
             self.assertEqual(recorded, ["before"])
+
+            class EffectOnlyCondM(torch.nn.Module):
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_export_cond_effect.record(
+                            x.mean(), "effect_only"
+                        )
+                        return ()
+
+                    def false_fn(x):
+                        return ()
+
+                    torch.cond(pred, true_fn, false_fn, (x,))
+                    return x + 1
+
+            ep = torch.export.export(
+                EffectOnlyCondM(), (x, torch.tensor(True))
+            ).run_decompositions()
+            for materialize in (ep.module, lambda: torch.export.unflatten(ep)):
+                recorded.clear()
+                self.assertEqual(materialize()(x, torch.tensor(True)), x + 1)
+                self.assertEqual(recorded, ["effect_only"])
+                recorded.clear()
+                self.assertEqual(materialize()(x, torch.tensor(False)), x + 1)
+                self.assertEqual(recorded, [])
+                ep.validate()
 
     def test_export_run_decompositions_cond_with_empty_tensor_operand(self):
         with torch.library._scoped_library(

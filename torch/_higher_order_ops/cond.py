@@ -52,13 +52,8 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         # Lifted AOT effect tokens are represented as None at runtime. They are
         # opaque to cond and consumed only by with_effects inside the branches.
-        # During Dynamo capture, None can only be a user operand and must retain
-        # the public torch.cond validation behavior.
-        args_to_validate = (
-            operands
-            if torch.compiler.is_dynamo_compiling()
-            else [arg for arg in operands if arg is not None]
-        )
+        # Public torch.cond rejects None before calling this internal operator.
+        args_to_validate = [arg for arg in operands if arg is not None]
         validate_subgraph_args_types(args_to_validate)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(pred, true_fn, false_fn, operands)
@@ -144,8 +139,9 @@ def cond(
           output is also allowed. We'll make the output dynamic by turning it
           into a symint.
 
-        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
-          true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor/int/SymInt): A tuple of
+          inputs to the true/false functions. It can be empty if true_fn/false_fn doesn't require
+          input. Defaults to ().
 
     Example::
 
@@ -203,12 +199,18 @@ def cond(
 
     """
     if torch.compiler.is_dynamo_compiling():
+        if isinstance(operands, (tuple, list)) and pytree.tree_any(
+            lambda operand: operand is None, operands
+        ):
+            raise RuntimeError("None is not a valid torch.cond operand.")
+        allowed_operand_types = (torch.Tensor, int, torch.SymInt)
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), operands
+            lambda operand: not isinstance(operand, allowed_operand_types), operands
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
-                f"consists of tensor leaves, but got {operands}."
+                "Expect operands to be a tuple of possibly nested dict/list/tuple "
+                "that only consists of Tensor, int, or SymInt leaves, "
+                f"but got {operands}."
             )
         return cond_op(pred, true_fn, false_fn, operands)
 
@@ -240,12 +242,14 @@ def cond(
         if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callable.")
 
+        allowed_operand_types = (torch.Tensor, int, torch.SymInt)
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), operands
+            lambda operand: not isinstance(operand, allowed_operand_types), operands
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
-                f"consists of tensor leaves, but got {operands}."
+                "Expect operands to be a tuple of possibly nested dict/list/tuple "
+                "that only consists of Tensor, int, or SymInt leaves, "
+                f"but got {operands}."
             )
 
     _validate_input(pred, true_fn, false_fn, operands)
@@ -731,8 +735,66 @@ def _merge_output(
 def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
     from torch._higher_order_ops.effects import _get_effect
 
+    inherited_forward_by_module: dict[torch.fx.GraphModule, bool] = {}
+    visited: set[tuple[int, bool]] = set()
+
+    def has_forward_provenance(node: torch.fx.Node, inherited_forward: bool) -> bool:
+        tag = node.meta.get("partitioner_tag")
+        if tag == "is_forward":
+            return True
+        if tag == "is_backward":
+            return False
+        return inherited_forward
+
+    def hop_submodule(
+        module: torch.fx.GraphModule, node: object
+    ) -> torch.fx.GraphModule | None:
+        if (
+            isinstance(node, torch.fx.Node)
+            and node.op == "get_attr"
+            and isinstance(node.target, str)
+        ):
+            submodule = module.get_submodule(node.target)
+            if isinstance(submodule, torch.fx.GraphModule):
+                return submodule
+        return None
+
+    def collect_inherited_provenance(
+        module: torch.fx.GraphModule, inherited_forward: bool
+    ) -> None:
+        inherited_forward_by_module[module] = (
+            inherited_forward_by_module.get(module, False) or inherited_forward
+        )
+        visit_key = (id(module), inherited_forward)
+        if visit_key in visited:
+            return
+        visited.add(visit_key)
+
+        for node in module.graph.nodes:
+            node_is_forward = has_forward_provenance(node, inherited_forward)
+            if node.target is torch.ops.higher_order.cond:
+                child_nodes = node.args[1:3]
+            elif node.target is torch.ops.higher_order.invoke_subgraph:
+                child_nodes = node.args[:1]
+            else:
+                continue
+            for child_node in child_nodes:
+                child = hop_submodule(module, child_node)
+                if child is not None:
+                    collect_inherited_provenance(child, node_is_forward)
+
+    collect_inherited_provenance(gm, False)
+
+    # Drop dead forward value computations before deciding whether an effect's
+    # data outputs are needed by backward. Effectful nodes themselves survive
+    # DCE, but dead getitems and their consumers do not.
+    for module in inherited_forward_by_module:
+        module.graph.eliminate_dead_code()
+        module.recompile()
+
     def removable_effect_from_token_getitem(
         token: torch.fx.Node,
+        inherited_forward: bool,
     ) -> torch.fx.Node | None:
         if (
             token.op != "call_function"
@@ -747,7 +809,7 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
         if (
             effect_node.op != "call_function"
             or effect_node.target is not torch.ops.higher_order.with_effects
-            or effect_node.meta.get("partitioner_tag") != "is_forward"
+            or not has_forward_provenance(effect_node, inherited_forward)
         ):
             return None
 
@@ -758,10 +820,7 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
                 return None
         return effect_node
 
-    for module in gm.modules():
-        if not isinstance(module, torch.fx.GraphModule):
-            continue
-
+    for module, inherited_forward in inherited_forward_by_module.items():
         for node in list(module.graph.nodes):
             if (
                 node.op != "call_function"
@@ -779,7 +838,9 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
                 if not isinstance(token, torch.fx.Node):
                     kept_tokens.append(token)
                     continue
-                effect_node = removable_effect_from_token_getitem(token)
+                effect_node = removable_effect_from_token_getitem(
+                    token, inherited_forward
+                )
                 if effect_node is None:
                     kept_tokens.append(token)
                     continue
@@ -805,6 +866,8 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
                 if not effect_node.users:
                     module.graph.erase_node(effect_node)
 
+        # Backward graph materialization can leave forward-tagged effectful calls
+        # unwrapped when they have no outputs to carry through with_effects.
         for node in reversed(module.graph.nodes):
             if (
                 node.op == "call_function"
@@ -813,19 +876,76 @@ def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
                     node.target, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)
                 )
                 and _get_effect(node.target) is not None
-                and node.meta.get("partitioner_tag") == "is_forward"
+                and has_forward_provenance(node, inherited_forward)
             ):
                 module.graph.erase_node(node)
 
         module.graph.eliminate_dead_code()
         module.recompile()
 
+    checked: set[tuple[int, bool]] = set()
+
+    def reject_replayed_forward_effects(
+        module: torch.fx.GraphModule, inherited_forward: bool
+    ) -> None:
+        visit_key = (id(module), inherited_forward)
+        if visit_key in checked:
+            return
+        checked.add(visit_key)
+
+        for node in module.graph.nodes:
+            node_is_forward = has_forward_provenance(node, inherited_forward)
+            effectful_target = None
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.with_effects
+            ):
+                if len(node.args) > 1:
+                    effectful_target = node.args[1]
+            elif (
+                node.op == "call_function"
+                and isinstance(
+                    node.target,
+                    (torch._ops.HigherOrderOperator, torch._ops.OpOverload),
+                )
+                and _get_effect(node.target) is not None
+            ):
+                effectful_target = node.target
+
+            if node_is_forward and effectful_target is not None:
+                raise RuntimeError(
+                    "torch.cond autograd does not support an effectful branch "
+                    f"operation whose result is required for backward ({effectful_target}). "
+                    "Saving effectful branch intermediates is not implemented, and "
+                    "replaying the operation would repeat the forward effect."
+                )
+
+            if node.target is torch.ops.higher_order.cond:
+                child_nodes = node.args[1:3]
+            elif node.target is torch.ops.higher_order.invoke_subgraph:
+                child_nodes = node.args[:1]
+            else:
+                continue
+            for child_node in child_nodes:
+                child = hop_submodule(module, child_node)
+                if child is not None:
+                    reject_replayed_forward_effects(child, node_is_forward)
+
+    reject_replayed_forward_effects(gm, False)
+
 
 def _collect_effects_from_graph_module(
     gm: torch.fx.GraphModule,
+    visited: set[int] | None = None,
 ) -> list[torch._library.effects.EffectType]:
     from torch._guards import InvokeSubgraphCache, TracingContext
     from torch._higher_order_ops.effects import _get_effect
+
+    if visited is None:
+        visited = set()
+    if id(gm) in visited:
+        return []
+    visited.add(id(gm))
 
     effects = []
 
@@ -866,10 +986,25 @@ def _collect_effects_from_graph_module(
             and node.op == "get_attr"
             and isinstance(node.target, str)
         ):
-            return gm.get_submodule(node.target)
+            submodule = gm.get_submodule(node.target)
+            return submodule if isinstance(submodule, torch.fx.GraphModule) else None
         return node if isinstance(node, torch.fx.GraphModule) else None
 
+    def add_graph_module_effects(submodule: torch.fx.GraphModule) -> None:
+        for effect in _collect_effects_from_graph_module(submodule, visited):
+            add_effect(effect)
+
     for node in gm.graph.nodes:
+        if node.op == "call_module":
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"expected call_module target to be a string, got {node.target}"
+                )
+            submodule = gm.get_submodule(node.target)
+            if isinstance(submodule, torch.fx.GraphModule):
+                add_graph_module_effects(submodule)
+            continue
+
         if node.op != "call_function":
             continue
 
@@ -887,8 +1022,7 @@ def _collect_effects_from_graph_module(
             for branch_node in node.args[1:3]:
                 submodule = submodule_from_node(branch_node)
                 if submodule is not None:
-                    for effect in _collect_effects_from_graph_module(submodule):
-                        add_effect(effect)
+                    add_graph_module_effects(submodule)
             continue
 
         if target is torch.ops.higher_order.invoke_subgraph:
@@ -900,11 +1034,13 @@ def _collect_effects_from_graph_module(
 
 
 def _collect_effects_from_callable(
-    fn: Callable,
+    fn: Callable, inputs: tuple[Any, ...]
 ) -> list[torch._library.effects.EffectType]:
-    if isinstance(fn, torch.fx.GraphModule):
-        return _collect_effects_from_graph_module(fn)
-    return []
+    # Materializing an existing GraphModule is still necessary: call_module
+    # targets can be ordinary nn.Modules whose effectful bodies are otherwise
+    # opaque to structural graph inspection.
+    gm = materialize_as_graph(fn, inputs)
+    return _collect_effects_from_graph_module(gm)
 
 
 @cond_op.py_functionalize_impl
@@ -912,20 +1048,109 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     from torch._higher_order_ops.auto_functionalize import (
         can_auto_functionalize,
         do_auto_functionalize_v2,
+        FunctionalCallableWithEpilogue,
     )
     from torch._higher_order_ops.effects import _get_or_create_token
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
+    should_auto_functionalize = can_auto_functionalize(hop_instance) and hasattr(
+        ctx, "mode"
+    )
+
+    branch_effects = []
+    if hasattr(ctx, "mode"):
+        for branch in (true_fn, false_fn):
+            for effect in _collect_effects_from_callable(branch, tuple(inputs)):
+                if effect not in branch_effects:
+                    branch_effects.append(effect)
+
+    token_keys = ()
+    output_spec = None
+    add_effect_tokens_to_branch: Callable | None = None
+    if branch_effects and hasattr(ctx, "mode"):
+        tokens = ctx.mode._tokens
+        for effect in branch_effects:
+            _get_or_create_token(
+                ctx.mode._allow_token_discovery, tokens, effect, cond_op
+            )
+
+        token_keys = tuple(branch_effects)
+
+        def add_effect_tokens_to_branch(branch):
+            @functools.wraps(branch)
+            def wrapped(*args):
+                nonlocal output_spec
+
+                token_args = args[: len(token_keys)]
+                branch_args = args[len(token_keys) :]
+                old_tokens = dict(ctx.mode._tokens)
+                try:
+                    for key, token in zip(token_keys, token_args):
+                        ctx.mode._tokens[key] = ctx.wrap_tensors(token)
+                    branch_out = branch(*branch_args)
+                    token_outs = tuple(
+                        ctx.unwrap_tensors(ctx.mode._tokens[key]) for key in token_keys
+                    )
+                finally:
+                    ctx.mode._tokens.clear()
+                    ctx.mode._tokens.update(old_tokens)
+
+                flat_branch_out, branch_out_spec = pytree.tree_flatten(branch_out)
+                if output_spec is None:
+                    output_spec = branch_out_spec
+                elif output_spec != branch_out_spec:
+                    raise RuntimeError(
+                        "Unmatched output spec from torch.cond branches: "
+                        f"{output_spec} vs {branch_out_spec}."
+                    )
+                return (*token_outs, *flat_branch_out)
+
+            return wrapped
+
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
-    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
-        return do_auto_functionalize_v2(
+    if should_auto_functionalize:
+        output_spec_holder = [None]
+        auto_true = (
+            FunctionalCallableWithEpilogue(true_fn, token_keys, output_spec_holder)
+            if token_keys
+            else true_fn
+        )
+        auto_false = (
+            FunctionalCallableWithEpilogue(false_fn, token_keys, output_spec_holder)
+            if token_keys
+            else false_fn
+        )
+        auto_inputs = (
+            (*[ctx.mode._tokens[key] for key in token_keys], *inputs)
+            if token_keys
+            else inputs
+        )
+        if token_keys:
+            hop_instance = HopInstance.create(
+                cond_op, pred, auto_true, auto_false, auto_inputs
+            )
+        cond_return = do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
-            tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
+            tuple(pytree.tree_flatten((pred, auto_true, auto_false, auto_inputs))[0]),
             {},
         )
+        if token_keys:
+            output_spec = output_spec_holder[0]
+            if output_spec is None:
+                raise AssertionError("cond branch output spec was not captured")
+            if not isinstance(cond_return, tuple):
+                raise AssertionError(
+                    f"expected tokenized cond output to be a tuple, got {type(cond_return)}"
+                )
+            token_outs = cond_return[: len(token_keys)]
+            user_outs = cond_return[len(token_keys) :]
+            for key, token in zip(token_keys, token_outs):
+                ctx.mode._tokens[key] = token
+            return pytree.tree_unflatten(user_outs, output_spec)
+        return cond_return
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
@@ -938,49 +1163,9 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 branch, unwrapped_inputs, branch_name, pre_dispatch
             )
 
-        branch_effects = []
-        for branch in (true_fn, false_fn):
-            for effect in _collect_effects_from_callable(branch):
-                if effect not in branch_effects:
-                    branch_effects.append(effect)
-
-        token_keys = ()
-        output_spec = None
         if branch_effects and hasattr(ctx, "mode"):
-            tokens = ctx.mode._tokens
-            for effect in branch_effects:
-                _get_or_create_token(
-                    ctx.mode._allow_token_discovery, tokens, effect, cond_op
-                )
-            token_keys = tuple(key for key in tokens if key in branch_effects)
-
-            def add_effect_tokens_to_branch(branch):
-                @functools.wraps(branch)
-                def wrapped(*args):
-                    nonlocal output_spec
-
-                    token_args = args[: len(token_keys)]
-                    branch_args = args[len(token_keys) :]
-                    old_tokens = dict(ctx.mode._tokens)
-                    try:
-                        for key, token in zip(token_keys, token_args):
-                            ctx.mode._tokens[key] = ctx.wrap_tensors(token)
-                        branch_out = branch(*branch_args)
-                        token_outs = tuple(
-                            ctx.unwrap_tensors(ctx.mode._tokens[key])
-                            for key in token_keys
-                        )
-                    finally:
-                        ctx.mode._tokens.clear()
-                        ctx.mode._tokens.update(old_tokens)
-
-                    flat_branch_out, branch_out_spec = pytree.tree_flatten(branch_out)
-                    if output_spec is None:
-                        output_spec = branch_out_spec
-                    return (*token_outs, *flat_branch_out)
-
-                return wrapped
-
+            if add_effect_tokens_to_branch is None:
+                raise AssertionError("effect-token branch wrapper was not created")
             functional_true = add_effect_tokens_to_branch(functional_true)
             functional_false = add_effect_tokens_to_branch(functional_false)
             unwrapped_inputs = (

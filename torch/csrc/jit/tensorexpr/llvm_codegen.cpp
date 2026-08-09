@@ -116,6 +116,16 @@ struct TypedPointer {
 };
 #endif
 
+#if LLVM_VERSION_MAJOR > 23
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return llvm::PointerType::get(ty->getContext(), addrspace);
+}
+#else
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return ty->getPointerTo(addrspace);
+}
+#endif
+
 llvm::CmpInst::Predicate llvm_comparison_predicate(
     CompareSelectOperation compare_op,
     const ScalarType& type) {
@@ -615,7 +625,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 }
 
 llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
-  return dtypeToLLVM(dtype)->getPointerTo();
+  return llvm_pointer_to(dtypeToLLVM(dtype));
 }
 
 void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
@@ -1474,8 +1484,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(loadType, 0));
+      auto vaddr = irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(loadType));
 #if LLVM_VERSION_MAJOR >= 12
       value_ = irb_.CreateAlignedLoad(loadType, vaddr, llvm::MaybeAlign(4));
 #else
@@ -1857,8 +1866,8 @@ void LLVMCodeGenImpl::visit(const StorePtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(val->getType(), 0));
+      auto vaddr =
+          irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(val->getType()));
 
 #if LLVM_VERSION_MAJOR >= 13
       irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));

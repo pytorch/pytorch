@@ -778,16 +778,24 @@ def _unlift_exported_program_lifted_states(
         node.target: node for node in ep.graph.nodes if node.op == "placeholder"
     }
 
-    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
-    new_gm.meta.update(ep.graph_module.meta)
-    ep = copy.copy(ep)
-    ep._graph_signature = ExportGraphSignature(
-        ep._graph_signature.input_specs, ep._graph_signature.output_specs
+    remove_effect_tokens = ep.verifiers[0].dialect != "TRAINING"
+    has_effect_tokens = any(
+        spec.kind == InputKind.TOKEN for spec in ep.graph_signature.input_specs
     )
+    if remove_effect_tokens and has_effect_tokens:
+        # Effect-token removal recursively mutates HOP subgraphs. A GraphModule
+        # constructed from the original root would share those submodules and
+        # make repeated module() calls corrupt the source program.
+        new_gm = copy.deepcopy(ep.graph_module)
+    else:
+        new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
+        new_gm.meta.update(ep.graph_module.meta)
+    ep = copy.copy(ep)
+    ep._graph_signature = copy.deepcopy(ep._graph_signature)
     ep._graph_module = new_gm
 
     # TODO T206340015
-    if ep.verifiers[0].dialect != "TRAINING":
+    if remove_effect_tokens:
         ep = _remove_effect_tokens(ep)
 
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)

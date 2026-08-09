@@ -612,8 +612,15 @@ def do_auto_functionalize(
 # from Functional mode -> fake mode for multiple invoke_subgraph calls that share,
 # the same inner graph module, we can hit the cache.
 class FunctionalCallableWithEpilogue:
-    def __init__(self, orig_callable: Callable):
+    def __init__(
+        self,
+        orig_callable: Callable,
+        effect_token_keys: tuple[Any, ...] = (),
+        output_spec_holder: list[Any] | None = None,
+    ):
         self.orig_callable = orig_callable
+        self.effect_token_keys = effect_token_keys
+        self.output_spec_holder = output_spec_holder
         # Propagate so callers pass inputs as a list, enabling input deallocation.
         self._boxed_call = getattr(orig_callable, "_boxed_call", False)
 
@@ -625,9 +632,48 @@ class FunctionalCallableWithEpilogue:
             FunctionalTensorMode,
         )
 
+        functional_mode = FunctionalTensorMode()
+        callable_to_functionalize = self.orig_callable
+        if self.effect_token_keys:
+
+            def callable_with_effect_tokens(*args, **kwargs):
+                boxed = (
+                    self._boxed_call and len(args) == 1 and isinstance(args[0], list)
+                )
+                flat_args = tuple(args[0]) if boxed else args
+                token_args = flat_args[: len(self.effect_token_keys)]
+                callable_args = flat_args[len(self.effect_token_keys) :]
+                old_tokens = dict(functional_mode._tokens)
+                try:
+                    for key, token in zip(self.effect_token_keys, token_args):
+                        functional_mode._tokens[key] = token
+                    if boxed:
+                        result = self.orig_callable(list(callable_args), **kwargs)
+                    else:
+                        result = self.orig_callable(*callable_args, **kwargs)
+                    token_outs = tuple(
+                        functional_mode._tokens[key] for key in self.effect_token_keys
+                    )
+                finally:
+                    functional_mode._tokens.clear()
+                    functional_mode._tokens.update(old_tokens)
+
+                flat_result, output_spec = pytree.tree_flatten(result)
+                if self.output_spec_holder is not None:
+                    if self.output_spec_holder[0] is None:
+                        self.output_spec_holder[0] = output_spec
+                    elif self.output_spec_holder[0] != output_spec:
+                        raise RuntimeError(
+                            "Unmatched output spec from torch.cond branches: "
+                            f"{self.output_spec_holder[0]} vs {output_spec}."
+                        )
+                return (*token_outs, *flat_result)
+
+            callable_to_functionalize = callable_with_effect_tokens
+
         functionalized = dispatch_functionalize(
-            self.orig_callable,
-            FunctionalTensorMode(),
+            callable_to_functionalize,
+            functional_mode,
             propagate_input_mutations=True,
         )
         if self._boxed_call:
@@ -639,7 +685,15 @@ class FunctionalCallableWithEpilogue:
         return functionalized(*args, **kwargs)
 
     def __hash__(self):
-        return id(self.orig_callable)
+        return hash(
+            (
+                id(self.orig_callable),
+                self.effect_token_keys,
+                id(self.output_spec_holder)
+                if self.output_spec_holder is not None
+                else None,
+            )
+        )
 
 
 def do_auto_functionalize_v2(
@@ -670,6 +724,8 @@ def do_auto_functionalize_v2(
 
     def _maybe_functionalize(name: str, arg: Any) -> Any:
         if name in subgraph_arg_names and callable(arg):
+            if isinstance(arg, FunctionalCallableWithEpilogue):
+                return arg
             return FunctionalCallableWithEpilogue(arg)
         return arg
 
