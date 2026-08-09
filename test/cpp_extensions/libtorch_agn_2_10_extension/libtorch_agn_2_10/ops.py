@@ -749,6 +749,45 @@ def my_permute(self, dims) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
 
 
+def my_index_select(self, dim, index) -> Tensor:
+    """
+    Indexes the input tensor along dimension dim using entries in index.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to index along
+        index: Tensor - 1-D tensor of indices to select
+
+    Returns: Tensor - values selected along dim
+    """
+    return torch.ops.libtorch_agn_2_10.my_index_select.default(self, dim, index)
+
+
+def my_floor_divide(self, other) -> Tensor:
+    """
+    Computes the element-wise floor division of self by other.
+
+    Args:
+        self: Tensor - dividend tensor
+        other: Tensor - divisor tensor
+
+    Returns: Tensor - result of floor division
+    """
+    return torch.ops.libtorch_agn_2_10.my_floor_divide.default(self, other)
+
+
+def my_is_pinned(self) -> bool:
+    """
+    Returns whether the tensor's storage is allocated in pinned memory.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: bool - True if the tensor is pinned, False otherwise
+    """
+    return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

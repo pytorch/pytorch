@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ..common import (
-    DeviceIdx,
     DeviceOpOverrides,
     register_device_op_overrides,
     TritonScratchWorkspace,
@@ -12,13 +11,13 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx: DeviceIdx) -> str:
+    def set_device(self, device_idx: int) -> str:
         return f"torch.xpu.set_device({device_idx})"
 
     def synchronize(self) -> str:
         return "torch.xpu.synchronize()"
 
-    def device_guard(self, device_idx: DeviceIdx) -> str:
+    def device_guard(self, device_idx: int) -> str:
         return f"torch.xpu._DeviceGuard({device_idx})"
 
     def current_stream(self) -> str:
