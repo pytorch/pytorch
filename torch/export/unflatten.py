@@ -821,6 +821,12 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    if any(spec.kind == InputKind.TOKEN for spec in module.graph_signature.input_specs):
+        # _remove_effect_tokens mutates every GraphModule in a tokenized HOP
+        # hierarchy. Preserve the source EP so unflatten() can be called again.
+        module = copy.copy(module)
+        module._graph_module = copy.deepcopy(module.graph_module)
+        module._graph_signature = copy.deepcopy(module._graph_signature)
     module = _remove_effect_tokens(module)
     m = UnflattenedModule(module, flat_args_adapter)
 
@@ -1743,8 +1749,18 @@ def _copy_graph_attrs(
     for child_fqn, names in seen_attrs.items():
         module = _get_attr(root_module, child_fqn) if child_fqn else root_module
         for name in names:
-            val = getattr(gm, name)
-            setattr(module, name, val)
+            val = _get_attr(gm, name)
+            target_module = module
+            *prefix, leaf = name.split(".")
+            for attr in prefix:
+                if not hasattr(target_module, attr):
+                    target_module.add_module(attr, torch.nn.Module())
+                target_module = getattr(target_module, attr)
+                if not isinstance(target_module, torch.nn.Module):
+                    raise AssertionError(
+                        f"expected module at {attr} in graph attr {name}"
+                    )
+            setattr(target_module, leaf, val)
 
 
 def _deduplicate_modules(partitions):

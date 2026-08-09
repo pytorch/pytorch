@@ -761,10 +761,10 @@ class HopSubgraphCache:
     def get_autograd_key_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
-    def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None: ...
+    def add_proxy_dispatch_entry(self, identifier: object, key: Callable) -> None: ...
 
     @abstractmethod
-    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
+    def get_proxy_dispatch_entry(self, identifier: object) -> Callable | None: ...
 
     @abstractmethod
     def add_functionalize_schema_entry(
@@ -846,7 +846,7 @@ class InvokeSubgraphReuseCondition:
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
-        self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.proxy_dispatch_cache: dict[object, Callable] = {}
         self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
@@ -881,10 +881,10 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_autograd_key_entry(self, identifier: str) -> Callable | None:
         return self.autograd_cache.get(identifier, None)
 
-    def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None:
+    def add_proxy_dispatch_entry(self, identifier: object, key: Callable) -> None:
         self.proxy_dispatch_cache[identifier] = key
 
-    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
+    def get_proxy_dispatch_entry(self, identifier: object) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
 
     def add_functionalize_schema_entry(

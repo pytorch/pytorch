@@ -2068,6 +2068,12 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(hash(arg))
                 id_hashed_objects.append(arg.orig_callable)
+                if arg.output_spec_holder is not None:
+                    # The holder's identity participates in the hash.  Keep that
+                    # identity protected for the lifetime of the cache entry via
+                    # its weak-referenceable wrapper (a list itself cannot be
+                    # weak-referenced).
+                    id_hashed_objects.append(arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the

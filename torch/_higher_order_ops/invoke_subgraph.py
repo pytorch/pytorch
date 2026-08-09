@@ -1226,8 +1226,12 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     graph = None
     invoke_subgraph_cache = get_invoke_subgraph_cache()
+    # Functionalization may discover effects during the first trace and add a
+    # token operand on later traces. Keep those proxy graphs separate: the
+    # original graph does not accept the newly added token.
+    proxy_cache_key = (identifier, len(operands))
     if invoke_subgraph_cache:
-        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
+        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(proxy_cache_key)
 
     if graph is None:
         from torch._dynamo.utils import dynamo_timed
@@ -1272,7 +1276,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                 f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
             )
         if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
+            invoke_subgraph_cache.add_proxy_dispatch_entry(proxy_cache_key, graph)
 
     node_args = (graph, identifier, *operands)
 

@@ -1591,7 +1591,13 @@ def decompose_auto_functionalized(graph):
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        if match.nodes[0].meta.get("has_effect", False):
+            for replacement_node in replacement_nodes:
+                if replacement_node.target is torch.ops.higher_order.cond:
+                    replacement_node.meta["has_effect"] = True
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
@@ -1632,12 +1638,23 @@ def decompose_auto_functionalized(graph):
             if len(args) != 1:
                 raise AssertionError(f"expected 1 arg, got {len(args)}")
             mutable_op = args[0]
-            return auto_functionalized_v2_dense(
-                mutable_op, only_clone_these_bases, **kwargs
+            # auto_functionalized_v2 has one packed return even when the dense
+            # decomposition contains a single tensor. Preserve that outer
+            # structure so replace_by_example rewrites its getitem users.
+            return (
+                auto_functionalized_v2_dense(
+                    mutable_op, only_clone_these_bases, **kwargs
+                ),
             )
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        if match.nodes[0].meta.get("has_effect", False):
+            for replacement_node in replacement_nodes:
+                if replacement_node.target is torch.ops.higher_order.cond:
+                    replacement_node.meta["has_effect"] = True
 
     graph_pass.apply(graph)
 

@@ -285,6 +285,7 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
                     Expr,
                     int,
                     EffectfulKernel,
+                    NoneAsConstantBuffer,
                     ShapeAsConstantBuffer,
                     OpaqueMultiOutput,
                 ),

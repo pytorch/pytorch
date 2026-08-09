@@ -260,6 +260,13 @@ def _extract_subgraphs_and_args(
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
         yield args[2], subgraph_args
+    elif node.target is torch.ops.higher_order.with_effects:
+        if args[1] is torch.ops.higher_order.cond:
+            subgraph_args = tuple(args[5])
+            yield args[3], subgraph_args
+            yield args[4], subgraph_args
+        elif args[1] is torch.ops.higher_order.invoke_subgraph:
+            yield args[2], tuple(args[4:])
     elif node.target is torch.ops.higher_order.flex_attention:
         # flex_attention currently yields two subgraphs.  The first (the score
         # calculation) has a signature starting with a scalar argument of the same dtype

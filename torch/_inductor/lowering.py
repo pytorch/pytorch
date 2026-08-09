@@ -9081,7 +9081,22 @@ def cond(
     # The branches are reordered to [false_fn, true_fn]
     # because during codegen the pred is converted to an integer with True -> 1 and False -> 0.
     # When iterating over the branches the false_fn is associated index 0.
+    operation_len = len(V.graph.operations)
     result = ir.Switch.create(pred, [false_fn, true_fn], operands, is_cond=True)
+    if V.graph.current_node.meta.get("has_effect", False):
+        from torch._higher_order_ops.effects import _EffectType
+
+        new_ops = V.graph.operations[operation_len:]
+        if not new_ops:
+            raise AssertionError("effectful cond did not create an operation")
+        previous_effect = V.graph.effectful_ops.get(_EffectType.ORDERED)
+        for new_op in new_ops:
+            new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
+            if previous_effect:
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_star_deps[op_name].add(previous_effect.get_name())
+        # pyrefly: ignore [unsupported-operation]
+        V.graph.effectful_ops[_EffectType.ORDERED] = new_ops[-1]
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
@@ -9393,7 +9408,10 @@ def _sink_tokens(tokens):
 
 @register_lowering(torch.ops.prims._make_token.default)
 def _make_token():
-    return None
+    # Keep a non-tensor IR value so multi-output lowerings retain the token's
+    # output slot. Returning Python None causes the output-flattening logic to
+    # shift user outputs into the token position.
+    return ir.NoneAsConstantBuffer()
 
 
 @register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
@@ -9406,6 +9424,12 @@ def with_effects(token, op, *args, **kwargs):
 
     # Get effect type
     effect_type = _get_effect(op)
+    if effect_type is None and op is torch.ops.higher_order.cond:
+        from torch._higher_order_ops.effects import _EffectType
+
+        # Effectful conds are wrapped by AOT token unlifting. The wrapper is
+        # emitted only when branch tracing found an ordered effect.
+        effect_type = _EffectType.ORDERED
     if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
         from torch._guards import InvokeSubgraphCache, TracingContext
 
@@ -9430,18 +9454,40 @@ def with_effects(token, op, *args, **kwargs):
     operation_len = len(V.graph.operations)
 
     # Lower the op
-    if op in lowerings:
-        result = lowerings[op](*args, **kwargs)
-        # Realize so that we can get the ops to show up in V.graph.operations
-        pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
-    else:
+    current_node_meta = V.graph.current_node.meta
+    old_meta: dict[str, Any] = {}
+    if op is torch.ops.higher_order.cond:
+        if "val" in current_node_meta and isinstance(
+            current_node_meta["val"], (list, tuple)
+        ):
+            old_meta["val"] = current_node_meta["val"]
+            current_node_meta["val"] = current_node_meta["val"][1:]
+        if "unbacked_bindings" in current_node_meta:
+            old_meta["unbacked_bindings"] = current_node_meta["unbacked_bindings"]
+            shifted_bindings = {}
+            for symbol, path in current_node_meta["unbacked_bindings"].items():
+                if path and isinstance(path[0], pytree.SequenceKey):
+                    if path[0].idx == 0:
+                        continue
+                    path = (pytree.SequenceKey(path[0].idx - 1), *path[1:])
+                shifted_bindings[symbol] = path
+            current_node_meta["unbacked_bindings"] = shifted_bindings
 
-        def wrap_tensors(x):
-            return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
+    try:
+        if op in lowerings:
+            result = lowerings[op](*args, **kwargs)
+            # Realize so that we can get the ops to show up in V.graph.operations
+            pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
+        else:
 
-        result = pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
-        )
+            def wrap_tensors(x):
+                return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
+
+            result = pytree.tree_map(
+                wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+            )
+    finally:
+        current_node_meta.update(old_meta)
 
     # Get all the operations created during the lowering above, and add StarDeps
     # to the previous node with the same effect
@@ -9461,6 +9507,11 @@ def with_effects(token, op, *args, **kwargs):
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
         )
+
+    if op is torch.ops.higher_order.cond:
+        if not isinstance(result, (tuple, list)):
+            raise AssertionError(f"expected cond result sequence, got {type(result)}")
+        return (token, *result)
 
     try:
 

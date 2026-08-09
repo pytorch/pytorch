@@ -3193,6 +3193,14 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 pred, lambda x: x[0] + 1, lambda x: x[0] * 2, (pytree_in,)
             )
 
+        def ignores_invalid_leaf(pred, x, invalid_leaf):
+            return torch.cond(
+                pred,
+                lambda x, ignored: x + 1,
+                lambda x, ignored: x - 1,
+                (x, invalid_leaf),
+            )
+
         pred = torch.tensor(True)
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
@@ -3201,12 +3209,44 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 fn(pred, pytree_in)
 
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_ignores_invalid_leaf = torch.compile(
+            ignores_invalid_leaf, backend="eager", fullgraph=True
+        )
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Higher Order Operator: torch\.cond",
+                torch._dynamo.exc.Unsupported,
+                r"Expect operands to be a tuple of possibly nested dict/list/tuple",
             ):
-                torch.compile(fn, backend="eager")(pred, pytree_in)
+                compiled_fn(pred, pytree_in)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                r"Expect operands to be a tuple of possibly nested dict/list/tuple",
+            ):
+                compiled_ignores_invalid_leaf(pred, torch.ones(2), pytree_in[0])
+
+    def test_cond_operands_with_int_and_symint(self):
+        def fn(pred, x, n):
+            return torch.cond(pred, lambda x, n: x + n, lambda x, n: x - n, (x, n))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        self.assertEqual(fn(torch.tensor(True), x, 2), x + 2)
+        self.assertEqual(fn(torch.tensor(False), x, 2), x - 2)
+        self.assertEqual(compiled(torch.tensor(True), x, 2), x + 2)
+        self.assertEqual(compiled(torch.tensor(False), x, 2), x - 2)
+
+        def dynamic_fn(pred, x):
+            return fn(pred, x, x.shape[0])
+
+        dynamic_compiled = torch.compile(
+            dynamic_fn, backend="eager", dynamic=True, fullgraph=True
+        )
+        for size in (3, 5):
+            x = torch.ones(size)
+            self.assertEqual(dynamic_compiled(torch.tensor(True), x), x + size)
+            self.assertEqual(dynamic_compiled(torch.tensor(False), x), x - size)
 
     def test_cond_with_empty_operands(self):
         @torch.compile(fullgraph=True, backend="eager")
