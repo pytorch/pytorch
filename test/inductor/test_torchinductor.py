@@ -8489,6 +8489,7 @@ for dtype in (torch.int32, torch.int64):
             )
 
     @skip_if_triton_cpu
+    @dynamo_config.patch(trace_autograd_ops=True)
     def test_pow_backward_dynamic_symint_exponent(self):
         # Under dynamic=True the integer exponent becomes a symbolic scalar;
         # pow's backward formula compared it with Scalar::equal, which was NYI

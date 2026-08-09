@@ -1696,7 +1696,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @torch._dynamo.config.patch({"trace_autograd_ops": True})
     def test_autograd_no_dynamo_trace_backward(self):
         """
         Test that dynamo does not trace into the backward compiled function,
@@ -1706,8 +1705,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
-            # Calls x.sum().backward() during forward execution of fn
-            (x_grad,) = torch.autograd.grad(x.sum(), x)
+            # Compile x.sum(), then run its backward after a graph break.
+            y = x.sum()
+            torch._dynamo.graph_break()
+            (x_grad,) = torch.autograd.grad(y, x)
             return x_grad
 
         a = torch.randn(10, 10, requires_grad=True, device="cpu")

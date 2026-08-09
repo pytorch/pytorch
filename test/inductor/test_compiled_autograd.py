@@ -232,6 +232,7 @@ main()
         for _ in range(3):
             self.run_as_subprocess(script)
 
+    @config.patch(trace_autograd_ops=True)
     def test_index_fill_value_grad_noncontiguous(self):
         def make_inputs():
             inp = torch.arange(25, dtype=torch.float32).reshape(5, 5)
