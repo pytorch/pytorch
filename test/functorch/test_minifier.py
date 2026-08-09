@@ -8,10 +8,16 @@ from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
 from torch._functorch.fx_minifier import dump_state
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestMinifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_has_mul_minifier(self):
         def failing_f(x, y):
             y = y / 3

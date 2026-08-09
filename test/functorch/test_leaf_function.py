@@ -18,6 +18,7 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -36,6 +37,8 @@ def extract_graph(fx_g, _, graph_cell):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFx(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _has_invoke_leaf_function_node(self, gm):
         for node in gm.graph.nodes:
             if node.op == "call_function" and node.target is invoke_leaf_function:
@@ -292,6 +295,8 @@ class f(torch.nn.Module):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionAotFunction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aot_function_simple(self):
         @leaf_function
         def my_fn(x, y):
@@ -499,6 +504,8 @@ class GraphModule(torch.nn.Module):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionEscapedGradients(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aot_function_escaped_gradient_multiple_closures(self):
         weight1 = torch.randn(3, 3, requires_grad=True)
         weight2 = torch.randn(3, 3, requires_grad=True)
@@ -634,6 +641,8 @@ class TestLeafFunctionEscapedGradients(TestCase):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFxAndCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for @leaf_function when mixing torch.compile and make_fx."""
 
     def test_not_called_during_compilation(self):
@@ -840,6 +849,8 @@ class outer(torch.nn.Module):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -2498,6 +2509,8 @@ instantiate_parametrized_tests(TestLeafFunctionDynamo)
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionRegisterHook(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for @leaf_function's register_multi_grad_hook API."""
 
     def test_hook_fires_on_backward(self):
@@ -2757,6 +2770,8 @@ class TestLeafFunctionRegisterHook(TestCase):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionGradDtype(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_pair(self, size, dtype, grad_dtype):
         torch.manual_seed(42)
         x_ref = torch.randn(size, dtype=dtype, requires_grad=True)

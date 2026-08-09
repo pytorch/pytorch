@@ -2,7 +2,6 @@
 
 import inspect
 import random
-import unittest
 from collections.abc import Callable
 
 import torch
@@ -12,10 +11,12 @@ from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-HAS_CUDA = torch.cuda.is_available()
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _num_args(fn: Callable):
@@ -96,9 +97,8 @@ def hard_mish(x):
 # evo_norm_inp = [(128, 2048, 8, 8)]
 
 
-def run_and_compare_activation(self, fn, inps):
+def run_and_compare_activation(self, fn, inps, device):
     with torch.jit.fuser("fuser1"):
-        device = "cuda"
         dtype = torch.float
         if isinstance(fn, nn.Module):
             fn = fn.to(device=device, dtype=dtype)
@@ -124,24 +124,25 @@ def run_and_compare_activation(self, fn, inps):
             self.assertEqual(ref_arg.grad, res_arg.grad)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
 class TestMemoryEfficientOpAuthoring(TestCase):
-    def test_gelu_bias(self):
-        run_and_compare_activation(self, gelu_bias, [(1024,), (1024,)])
+    hw_classification = HardwareClassification.CUDA
 
-    def test_mish(self):
-        run_and_compare_activation(self, mish, [(1024,)])
+    def test_gelu_bias(self, device):
+        run_and_compare_activation(self, gelu_bias, [(1024,), (1024,)], device)
 
-    def test_swish(self):
-        run_and_compare_activation(self, swish, [(1024,)])
+    def test_mish(self, device):
+        run_and_compare_activation(self, mish, [(1024,)], device)
 
-    def test_hard_sigmoid(self):
-        run_and_compare_activation(self, hard_sigmoid, [(1024,)])
+    def test_swish(self, device):
+        run_and_compare_activation(self, swish, [(1024,)], device)
 
-    def test_hard_swish(self):
-        run_and_compare_activation(self, hard_swish, [(1024,)])
+    def test_hard_sigmoid(self, device):
+        run_and_compare_activation(self, hard_sigmoid, [(1024,)], device)
 
-    def test_layer_norm(self):
+    def test_hard_swish(self, device):
+        run_and_compare_activation(self, hard_swish, [(1024,)], device)
+
+    def test_layer_norm(self, device):
         def layer_norm(x, weight, bias):
             dim = -1
             eps = 1e-5
@@ -155,9 +156,9 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         bs = 10
         ln_size = 16
         layer_norm_inps = [(bs, ln_size), (ln_size,), (ln_size,)]
-        run_and_compare_activation(self, layer_norm, layer_norm_inps)
+        run_and_compare_activation(self, layer_norm, layer_norm_inps, device)
 
-    def test_rmsnorm(self):
+    def test_rmsnorm(self, device):
         class T5LayerNorm(nn.Module):
             def __init__(self, hidden_size, eps=1e-6):
                 """
@@ -185,7 +186,7 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         hidden = 1024
         t5_norm = T5LayerNorm(hidden)
         t5_norm_inputs = [(bs, seq, hidden)]
-        run_and_compare_activation(self, t5_norm, t5_norm_inputs)
+        run_and_compare_activation(self, t5_norm, t5_norm_inputs, device)
 
     # TODO - Assertion failure
     # def test_hard_mish(self):
@@ -241,6 +242,8 @@ def check(f, t, delta, check_val=True, graph_input=False):
 
 
 class NoChangeTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nochange(self):
         def f(x):
             a = x + 1
@@ -339,6 +342,8 @@ class NoChangeTestCase(TestCase):
 
 
 class ReduceTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_immutable_list_type(self):
         def f(x):
             a = x.sum(dim=1)
@@ -473,6 +478,8 @@ class ReduceTestCase(TestCase):
 
 
 class RandomOpTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_random(self):
         def f(x):
             vals = [x]
@@ -489,6 +496,11 @@ class RandomOpTestCase(TestCase):
 
         for _ in range(30):
             check(fx_g, t, -1, graph_input=True)
+
+
+instantiate_device_type_tests(
+    TestMemoryEfficientOpAuthoring, globals(), only_for=("cuda",)
+)
 
 
 if __name__ == "__main__":

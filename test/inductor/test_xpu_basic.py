@@ -4,6 +4,8 @@ import os
 import sys
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 importlib.import_module("filelock")
@@ -23,6 +25,8 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 
 
 class XpuBasicTests(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     common = check_model_gpu
     device = "xpu"
 
@@ -49,6 +53,11 @@ class XpuBasicTests(TestCase):
             return a / b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
+
+
+instantiate_device_type_tests(
+    XpuBasicTests, globals(), only_for=("xpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
