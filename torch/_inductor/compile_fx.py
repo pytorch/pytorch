@@ -2009,6 +2009,22 @@ def get_input_idxs_to_check(
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
+            #
+            # A static input is weight-like: address-stable across calls, and
+            # the compiled artifact must never copy it per call (cudagraphs
+            # records its address; see cudagraphify_impl). So if the example
+            # is aligned, every call's input is aligned and the runtime check
+            # is skippable; cloning would also break the address the
+            # cudagraph recorded. This is why misclassifying a non-static
+            # input as static crashes rather than deoptimizes -- see
+            # Note: [is_static_input on backward placeholders].
+            #
+            # TODO: "address-stable" is per-recompile, not absolute: with
+            # inline_inbuilt_nn_modules (#126822) an unguarded static input
+            # may legally move (cudagraphs re-records), and if the new
+            # address is misaligned the baked-in alignment here is wrong and
+            # we IMA. Dynamo needs an alignment guard on unguarded static
+            # inputs so a misaligned swap recompiles instead.
             if i in static_input_idxs and tensor_is_aligned(input):
                 continue
             if not should_assume_input_aligned(input):
