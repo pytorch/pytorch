@@ -2,6 +2,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
@@ -21,8 +22,36 @@ namespace {
 bool use_lru = true;
 
 bool enable_guard_lookup_memo() {
-  py::object config_module = py::module_::import("torch._dynamo.config");
-  return config_module.attr("enable_guard_lookup_memo").cast<bool>();
+  PyObject* modules = PyImport_GetModuleDict();
+  if (modules == nullptr) {
+    if (PyErr_Occurred()) {
+      throw python_error();
+    }
+    return false;
+  }
+  PyObject* config_module = nullptr;
+  if (PyDict_GetItemStringRef(modules, "torch._dynamo.config", &config_module) <
+      0) {
+    throw python_error();
+  }
+  if (config_module == nullptr) {
+    return false;
+  }
+  py::object config_module_ref =
+      py::reinterpret_steal<py::object>(config_module);
+
+  PyObject* enabled = PyObject_GetAttrString(
+      config_module_ref.ptr(), "enable_guard_lookup_memo");
+  if (enabled == nullptr) {
+    throw python_error();
+  }
+  py::object enabled_ref = py::reinterpret_steal<py::object>(enabled);
+
+  int result = PyObject_IsTrue(enabled_ref.ptr());
+  if (result < 0) {
+    throw python_error();
+  }
+  return result != 0;
 }
 
 std::vector<std::shared_ptr<PrecompileEntry>> snapshot_precompile_entries(

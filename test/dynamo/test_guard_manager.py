@@ -2250,6 +2250,247 @@ class GuardActualPartialFastPathTests(torch._dynamo.test_case.TestCase):
             check=True,
         )
 
+    def test_extra_state_reads_loaded_config_without_import(self):
+        script = """
+            import builtins
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+
+            class SourceModel(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = SourceModel()
+            compiled, counter, source_entry, x = _warm_model(model)
+            fresh_code = SourceModel.forward.__code__.replace()
+
+            config_imports = []
+            original_import = builtins.__import__
+
+            def recording_import(name, globals=None, locals=None, fromlist=(), level=0):
+                if name == "torch._dynamo.config":
+                    config_imports.append(name)
+                return original_import(name, globals, locals, fromlist, level)
+
+            builtins.__import__ = recording_import
+            try:
+                _load_precompile_entry(
+                    fresh_code,
+                    source_entry.guard_manager,
+                    source_entry.code,
+                )
+            finally:
+                builtins.__import__ = original_import
+
+            SourceModel.forward.__code__ = fresh_code
+            expected = model(x)
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), expected)
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert entries[0]._debug_fast_guard_enabled
+            assert config_imports == [], config_imports
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_selects_cloned_self_by_framelocals_key(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "<structural-self>",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            root = root.clone_manager(lambda _: True)
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_ignores_self_source_decoy(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Decoy:
+                def __init__(self):
+                    self.value = 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x, decoy):
+                    return x + decoy.value
+
+            model = Model()
+            decoy = Decoy()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x, decoy), model(x, decoy))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "<structural-self>",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            decoy_manager = root.framelocals_manager(
+                ("decoy", 2),
+                "L['self']",
+                decoy,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            decoy_manager.add_lambda_guard(
+                lambda value: value.value == 1,
+                ["decoy value changed"],
+                None,
+            )
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(
+                    compiled(x, decoy), model(x, decoy)
+                )
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            original_entry = entries[0]
+            assert original_entry._debug_fast_guard_enabled
+
+            decoy.value = 2
+            torch.testing.assert_close(compiled(x, decoy), model(x, decoy))
+            assert counter.frame_count == 2, counter.frame_count
+            assert original_entry._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
+    def test_actual_partial_rejects_unsupported_leaf_by_self_membership(self):
+        script = """
+            from torch._C._dynamo import guards as cpp_guards
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_precompile_entries,
+                _load_precompile_entry,
+            )
+            from torch._dynamo.guards import GuardManagerType, GuardManagerWrapper
+            from torch._dynamo.testing import CompileCounter
+
+            class Holder:
+                def __init__(self):
+                    self.value = 1
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.holder = Holder()
+
+                def forward(self, x):
+                    return x + self.holder.value
+
+            model = Model()
+            counter = CompileCounter()
+            compiled = torch.compile(model, backend=counter, fullgraph=True)
+            x = torch.ones(2)
+            torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            source_entry = _only_cache_entry(Model.forward.__code__)
+            fresh_code = Model.forward.__code__.replace()
+            root = cpp_guards.RootGuardManager()
+            self_manager = root.framelocals_manager(
+                ("self", 0),
+                "L['self']",
+                model,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            self_manager.add_id_match_guard(
+                id(model), ["self identity changed"], None
+            )
+            holder_manager = self_manager.getattr_manager(
+                "holder",
+                "<opaque-holder-source>",
+                model.holder,
+                GuardManagerType.GUARD_MANAGER,
+            )
+            holder_manager.add_lambda_guard(
+                lambda value: value.value == 1,
+                ["holder value changed"],
+                None,
+            )
+            _load_precompile_entry(
+                fresh_code,
+                GuardManagerWrapper(root),
+                source_entry.code,
+            )
+
+            Model.forward.__code__ = fresh_code
+            for _ in range(8):
+                torch.testing.assert_close(compiled(x), model(x))
+            assert counter.frame_count == 1, counter.frame_count
+
+            entries = _debug_get_precompile_entries(fresh_code)
+            assert len(entries) == 1, len(entries)
+            assert not entries[0]._debug_fast_guard_enabled
+        """
+        self._run_guard_lookup_memo_script(script)
+
     def test_actual_partial_preserves_module_and_residual_guards(self):
         script = """
             import torch
