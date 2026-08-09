@@ -23,6 +23,7 @@ from torch._inductor.utils import (
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
+    _fused_all_gather_block_scaled_matmul_fallback,
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
@@ -35,7 +36,9 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.nn.functional import ScalingType
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_MX_GEMM,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -54,6 +57,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
+from torch.testing._internal.common_quantized import to_blocked as _to_blocked
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -78,6 +82,17 @@ def _enable_multicast_for_test(test_case: TestCase, device_index: int):
     finally:
         if old_disable_multicast is not None:
             os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = old_disable_multicast
+
+
+def _mxfp8_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize a 2D tensor to mxfp8: e4m3 data plus one e8m0 scale per 32 elements."""
+    blocks = x.reshape(x.shape[0], -1, 32)
+    amax = blocks.abs().amax(dim=-1, keepdim=True).clamp(min=1e-30)
+    # leave headroom below e4m3's max (448) so the cast cannot saturate
+    exp = torch.floor(torch.log2(amax)) - 8
+    data = (blocks / torch.exp2(exp)).clamp(-448, 448).to(torch.float8_e4m3fn)
+    scale = torch.exp2(exp.squeeze(-1)).to(torch.float8_e8m0fnu)
+    return data.reshape(x.shape), scale
 
 
 def _lc_ag_output_shape(shape: tuple[int, ...], world_size: int) -> tuple[int, ...]:
@@ -957,6 +972,108 @@ class AsyncTPTest(MultiProcContinuousTest):
 
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(PLATFORM_SUPPORTS_MX_GEMM, "Requires MX GEMM support (SM100+)")
+    # rows_per_rank must be a multiple of the 128-row scale tile, so it is
+    # parametrized directly rather than deriving it from a global M.
+    @parametrize("rows_per_rank", [128, 256])
+    @parametrize("num_Bs", [1, 3])
+    def test_fused_all_gather_block_scaled_matmul(
+        self, rows_per_rank: int, num_Bs: int
+    ) -> None:
+        """Block-scaled (mxfp8) all-gather matmul matches the unfused fallback."""
+        self._init_process()
+
+        N, K = 128, 256
+        group = dist.group.WORLD
+        torch.manual_seed(42 + self.rank)
+
+        A_shard, A_scale = _mxfp8_quantize(torch.rand(rows_per_rank, K, device="cuda"))
+        Bs, B_scales = [], []
+        for _ in range(num_Bs):
+            Bq, B_scale = _mxfp8_quantize(torch.rand(N, K, device="cuda"))
+            Bs.append(Bq.T)
+            B_scales.append(_to_blocked(B_scale))
+        A_scale = _to_blocked(A_scale)
+
+        recipe = [int(ScalingType.BlockWise1x32.value)]
+        kwargs = dict(
+            recipe_a=recipe,
+            recipe_b=recipe,
+            gather_dim=0,
+            group_name=group.group_name,
+            biases=[None] * num_Bs,
+            out_dtypes=[torch.bfloat16] * num_Bs,
+            use_fast_accum=[False] * num_Bs,
+        )
+        ag_0, mm_0 = _fused_all_gather_block_scaled_matmul_fallback(
+            A_shard, Bs, A_scale, B_scales=B_scales, **kwargs
+        )
+        ag_1, mm_1 = torch.ops.symm_mem.fused_all_gather_block_scaled_matmul(
+            A_shard, Bs, A_scale, B_scales=B_scales, **kwargs
+        )
+
+        # The fused path reproduces the reference exactly: it gathers the same
+        # bytes and hands the same operands to the same kernel.
+        self.assertEqual(ag_0, ag_1)
+        self.assertEqual(ag_0.stride(), ag_1.stride())
+        self.assertEqual(len(mm_0), num_Bs)
+        for out_0, out_1 in zip(mm_0, mm_1):
+            self.assertEqual(out_0, out_1)
+            self.assertEqual(out_0.stride(), out_1.stride())
+            self.assertEqual(out_0.dtype, torch.bfloat16)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(PLATFORM_SUPPORTS_MX_GEMM, "Requires MX GEMM support (SM100+)")
+    def test_fused_all_gather_block_scaled_matmul_rejects_bad_inputs(self) -> None:
+        """Configurations where a swizzled scale is not row-concatenable must raise.
+
+        The swizzle is local to a 128-row tile, so a shard that is not a whole
+        number of tiles would pad independently and silently mis-align the
+        gathered scale -- these guards are what keep that from happening.
+        """
+        self._init_process()
+
+        N, K = 128, 256
+        group = dist.group.WORLD
+        recipe = [int(ScalingType.BlockWise1x32.value)]
+        Bq, B_scale = _mxfp8_quantize(torch.rand(N, K, device="cuda"))
+
+        def run(A_shard, A_scale, gather_dim=0):
+            return torch.ops.symm_mem.fused_all_gather_block_scaled_matmul(
+                A_shard,
+                [Bq.T],
+                A_scale,
+                recipe,
+                [_to_blocked(B_scale)],
+                recipe,
+                gather_dim,
+                group.group_name,
+                [None],
+                [torch.bfloat16],
+                [False],
+            )
+
+        # rows per rank not a multiple of the 128-row scale tile
+        Aq, A_scale = _mxfp8_quantize(torch.rand(64, K, device="cuda"))
+        with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            run(Aq, _to_blocked(A_scale))
+
+        # a non-flat scale is not in the swizzled layout the kernel expects
+        Aq, A_scale = _mxfp8_quantize(torch.rand(128, K, device="cuda"))
+        with self.assertRaisesRegex(ValueError, "flat"):
+            run(Aq, A_scale)
+
+        # gather_dim != 0 would reorder A's rows out from under the scale
+        with self.assertRaisesRegex(ValueError, "gather_dim=0"):
+            run(Aq, _to_blocked(A_scale), gather_dim=1)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
