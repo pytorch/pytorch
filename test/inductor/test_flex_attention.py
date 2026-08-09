@@ -6548,26 +6548,25 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipUnless(TEST_MULTIGPU or TEST_MULTIXPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
-        second_device = device.split(":")[0] + ":1"
 
         class TestModule(torch.nn.Module):
             def forward(self, q, k, v, block_mask):
                 return flex_attention(q, k, v, block_mask=block_mask)
 
-        q = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
-        k = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
-        v = torch.randn(1, 1, 256, 32, device=second_device, dtype=torch.bfloat16)
+        q = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device=1, dtype=torch.bfloat16)
         mask = create_block_mask(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             B=None,
             H=None,
             Q_LEN=256,
             KV_LEN=256,
-            device=second_device,
+            device=1,
         )
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
-        self.assertEqual(attn_output.device, torch.device(second_device))
+        self.assertEqual(attn_output.device, torch.device(1))
 
     @supported_platform
     @skip_on_cpu
