@@ -3170,7 +3170,7 @@ class FunctoolsPartialVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         try:
-            return super().getattro_impl(tx, name)
+            return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
             raise_observed_exception(AttributeError, tx, args=[name])
 
