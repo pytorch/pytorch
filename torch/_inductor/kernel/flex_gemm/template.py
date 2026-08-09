@@ -18,7 +18,9 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmOutputContraction,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
+    local_reduce_needs_physical_callbacks,
 )
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.kernel.gemm_epilogue_analysis import GemmOutputLocalReducePlan
 from torch._inductor.select_algorithm import PartialRender
@@ -34,24 +36,31 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
     feeds_main: bool = False
+    swap_ab: bool = False
 
     @classmethod
     def from_output_plan(
         cls,
         local_reduce: GemmOutputLocalReducePlan | None,
         out_index: int | None,
+        *,
+        output_layout: FlexGemmOutputStorageLayout | None = None,
+        swap_ab: bool = False,
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
         """Bind analyzed local-reduction consumers to FlexGEMM's runtime ABI."""
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            FlexGemmLocalReduceGeometry(
+            geometry=FlexGemmLocalReduceGeometry(
                 local_reduce.match.geometry.group,
                 local_reduce.match.geometry.axis,
             ),
-            out_index,
-            local_reduce.feeds_main,
+            out_index=out_index,
+            output_layout=output_layout,
+            feeds_main=local_reduce.feeds_main,
+            swap_ab=swap_ab,
         )
 
     @property
@@ -64,12 +73,13 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.geometry.needs_physical_callbacks
+        tensorssa_axis = 1 - self.axis if self.swap_ab else self.axis
+        return local_reduce_needs_physical_callbacks(tensorssa_axis, self.group)
 
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueOutputConfig:
-    """Template input indices and plans for all user-visible outputs."""
+    """Template input indices and structural plans for returned values."""
 
     aux_out_indices: tuple[int, ...] = ()
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None = None
@@ -163,6 +173,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 FlexGemmOutputContraction,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
+            )
+            from torch._inductor.kernel.flex_gemm.output_layout import (
+                FlexGemmOutputStorageLayout,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
                 FlexGemmRuntimeLocalReducePlan,
@@ -263,6 +276,11 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
+        if local_reduce.output_layout is not None:
+            plan += (
+                ", output_layout="
+                f"FlexGemmOutputStorageLayout.{local_reduce.output_layout.name}"
+            )
         if local_reduce.feeds_main:
             plan += ", feeds_main=True"
         if local_reduce.feeds_main or local_reduce.needs_physical_callbacks:
