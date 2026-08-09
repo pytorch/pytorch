@@ -348,6 +348,11 @@ def _apply_inplace_reuses(
 ) -> None:
     """Transfer physical allocation ownership through in-place reuse chains."""
     name_to_buf_info = {info.buffer.get_name(): info for info in buf_info_list}
+    inplace_reuses = {
+        output_name: input_name
+        for output_name, input_name in inplace_reuses.items()
+        if output_name in name_to_buf_info
+    }
     original_size_free = {
         name: info.size_free for name, info in name_to_buf_info.items()
     }

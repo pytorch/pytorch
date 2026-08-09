@@ -364,6 +364,26 @@ class TestOperatorReorderForPeakMemory(TestCase):
             [(100, 100), (100, 100)],
         )
 
+    def test_inplace_reuse_ignores_other_graphs(self):
+        def buffer_info(name):
+            buffer = mock.Mock()
+            buffer.get_name.return_value = name
+            return memory.BufferInfo(buffer, 100, 100, 0, 0)
+
+        infos = [buffer_info("source"), buffer_info("destination")]
+        memory._apply_inplace_reuses(
+            infos,
+            {
+                "destination": "source",
+                "other_graph_destination": "other_graph_source",
+            },
+        )
+
+        self.assertEqual(
+            [(info.size_alloc, info.size_free) for info in infos],
+            [(100, 0), (0, 100)],
+        )
+
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     def test_inplace_buffer_reuse_peak_memory_estimate(self):
         def f(x, weight, bias):
