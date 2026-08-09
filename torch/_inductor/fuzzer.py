@@ -480,7 +480,6 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "aot_inductor.presets": DEFAULT,  # Typing
         "cuda.arch": DEFAULT,  # Out of Scope
         "cuda.version": DEFAULT,  # Out of Scope
-        "cutlass.cutlass_dir": DEFAULT,  # Out of Scope
         "cuda.cuda_cxx": DEFAULT,  # Out of Scope
         "rocm.arch": DEFAULT,  # Out of Scope
         "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
@@ -605,7 +604,13 @@ class ConfigFuzzer:
         self.detailed_results: dict[ComboType, dict[str, Any]] = {}
         self.config_module = config_module
         self.test_model_fn_factory = test_model_fn_factory
-        self.fields: dict[str, _ConfigEntry] = self.config_module._config
+        # Aliased entries resolve to another config, so fuzzing them is
+        # redundant and they carry no independent default value.
+        self.fields: dict[str, _ConfigEntry] = {
+            name: entry
+            for name, entry in self.config_module._config.items()
+            if entry.alias is None
+        }
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:
