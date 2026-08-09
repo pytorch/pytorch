@@ -17,6 +17,41 @@ HIERARCHY_MARKER = "# Review-surface hierarchy:"
 SECTION_MARKER = "# Grouped review-surface definitions:"
 GROUP_PREFIX = "# ["
 
+FAILURE_GUIDANCE = {
+    "Uncovered paths": (
+        "Under the appropriate `# [surface]` in CODEOWNERS, add `# /path/` if "
+        "owners are unknown or `/path/ @owner` if ownership is known."
+    ),
+    "Duplicate patterns": (
+        "Search CODEOWNERS for the exact pattern and keep it under only one "
+        "`# [surface]` section."
+    ),
+    "Stale patterns": (
+        "At the reported CODEOWNERS line, correct the commented path or remove it; "
+        "it matches no committed file."
+    ),
+    "Ineffective patterns": (
+        "At the reported CODEOWNERS line, move the commented pattern to the winning "
+        "surface, narrow it, or remove it."
+    ),
+    "Source-order mismatches": (
+        "In CODEOWNERS, place the broader pattern before the narrower override; "
+        "GitHub applies the last matching rule."
+    ),
+    "Missing effective surfaces": (
+        "Add a matching path under the named `# [surface]` in CODEOWNERS, or remove "
+        "that surface from the hierarchy."
+    ),
+    "Missing grouped sections": (
+        "Below `# Grouped review-surface definitions:`, add the missing "
+        "`# [surface]` section or remove its hierarchy declaration."
+    ),
+    "Undeclared grouped sections": (
+        "Add the section name to the review-surface hierarchy near the top of "
+        "CODEOWNERS, or rename or remove the section."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class TaxonomyPattern:
@@ -215,8 +250,10 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
         source_pattern = max(matches, key=lambda pattern: pattern.line_number)
         if effective_pattern != source_pattern:
             source_order_mismatches.append(
-                f"{path}: {source_pattern.group}:{source_pattern.path} overrides "
-                f"{effective_pattern.group}:{effective_pattern.path}"
+                f"{path}: CODEOWNERS:{source_pattern.line_number} "
+                f"[{source_pattern.group}] /{source_pattern.path} overrides "
+                f"CODEOWNERS:{effective_pattern.line_number} "
+                f"[{effective_pattern.group}] /{effective_pattern.path}"
             )
 
     duplicates = {
@@ -245,46 +282,75 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     )
 
 
+def print_failure_entries(title: str, entries: list[str]) -> None:
+    """Print failing entries with the corresponding remediation."""
+    if not entries:
+        return
+    print(f"\n{title} ({len(entries)}):")
+    print("\n".join(f"  {entry}" for entry in entries))
+    print(f"  Fix: {FAILURE_GUIDANCE[title]}")
+
+
 def print_report(report: Report) -> None:
-    """Print the coverage summary and each integrity failure."""
+    """Print an explained coverage summary and each integrity failure."""
     covered = report.tracked - len(report.uncovered)
     percentage = 100 * covered / report.tracked if report.tracked else 100.0
-    print(f"Tracked paths: {report.tracked}")
-    print(f"Covered paths: {covered}")
-    print(f"Uncovered paths: {len(report.uncovered)}")
-    print(f"Coverage: {percentage:.4f}%")
-    print(f"Review surfaces: {len(report.groups)}")
-    print(f"Patterns: {report.pattern_count}")
-    print(f"Paths with overrides: {len(report.overridden)}")
-    print(f"Duplicate patterns: {len(report.duplicates)}")
-    print(f"Stale patterns: {len(report.stale)}")
-    print(f"Ineffective patterns: {len(report.ineffective)}")
-    print(f"Source-order mismatches: {len(report.source_order_mismatches)}")
+    print("CODEOWNERS taxonomy summary")
+    print("  Edit CODEOWNERS to fix failures reported below.")
+    print("  Use `/path/ @owner` for active ownership or `# /path/` when unresolved.")
+    print(f"  Tracked paths: {report.tracked} (committed paths checked)")
+    print(f"  Covered paths: {covered} (matched by at least one pattern)")
+    print(f"  Coverage: {percentage:.4f}% (must remain 100%)")
+    print(
+        f"  Review surfaces: {len(report.groups)} "
+        "(sections that effectively cover committed paths)"
+    )
+    print(
+        f"  Patterns: {report.pattern_count} "
+        "(active ownership rules and commented unresolved paths)"
+    )
+    print(
+        f"  Overlapping paths: {len(report.overridden)} "
+        "(matched by multiple patterns; narrower rules are expected)"
+    )
+    print("\nIntegrity checks (all must be zero)")
+    print(f"  Uncovered paths: {len(report.uncovered)}")
+    print(f"  Duplicate patterns: {len(report.duplicates)}")
+    print(f"  Stale patterns: {len(report.stale)}")
+    print(f"  Ineffective patterns: {len(report.ineffective)}")
+    print(f"  Source-order mismatches: {len(report.source_order_mismatches)}")
 
     duplicate_entries = {
-        path: ", ".join(pattern.group for pattern in patterns)
+        path: ", ".join(
+            f"CODEOWNERS:{pattern.line_number} [{pattern.group}]"
+            for pattern in patterns
+        )
         for path, patterns in report.duplicates.items()
     }
     sections = [
         ("Uncovered paths", report.uncovered),
         (
             "Duplicate patterns",
-            [f"{path}: {groups}" for path, groups in duplicate_entries.items()],
+            [f"/{path}: {locations}" for path, locations in duplicate_entries.items()],
         ),
         (
             "Stale patterns",
-            [f"{pattern.group}:{pattern.path}" for pattern in report.stale],
+            [
+                f"CODEOWNERS:{pattern.line_number} [{pattern.group}] /{pattern.path}"
+                for pattern in report.stale
+            ],
         ),
         (
             "Ineffective patterns",
-            [f"{pattern.group}:{pattern.path}" for pattern in report.ineffective],
+            [
+                f"CODEOWNERS:{pattern.line_number} [{pattern.group}] /{pattern.path}"
+                for pattern in report.ineffective
+            ],
         ),
         ("Source-order mismatches", report.source_order_mismatches),
     ]
     for title, entries in sections:
-        if entries:
-            print(f"\n{title}:")
-            print("\n".join(f"  {entry}" for entry in entries))
+        print_failure_entries(title, entries)
 
 
 def emit_lint_error(description: str) -> None:
@@ -329,26 +395,18 @@ def main() -> int:
         if args.lintrunner:
             emit_lint_error(
                 f"CODEOWNERS taxonomy validation failed: {error}. "
-                "Run `python scripts/codeowners/check_taxonomy.py` for details."
+                "Fix the reported CODEOWNERS syntax or section error, then run "
+                "`python scripts/codeowners/check_taxonomy.py` locally."
             )
             return 0
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    if not args.lintrunner:
-        print_report(report)
     declared_group_set = set(declared_groups)
     section_group_set = set(section_groups)
     missing_groups = sorted(declared_group_set - report.groups)
     missing_sections = sorted(declared_group_set - section_group_set)
     undeclared_sections = sorted(section_group_set - declared_group_set)
-    if not args.lintrunner:
-        if missing_groups:
-            print(f"Missing effective surfaces: {', '.join(missing_groups)}")
-        if missing_sections:
-            print(f"Missing grouped sections: {', '.join(missing_sections)}")
-        if undeclared_sections:
-            print(f"Undeclared grouped sections: {', '.join(undeclared_sections)}")
     has_errors = bool(missing_groups or missing_sections or undeclared_sections) or any(
         (
             report.uncovered,
@@ -358,6 +416,12 @@ def main() -> int:
             report.source_order_mismatches,
         )
     )
+    if not args.lintrunner:
+        print_report(report)
+        print_failure_entries("Missing effective surfaces", missing_groups)
+        print_failure_entries("Missing grouped sections", missing_sections)
+        print_failure_entries("Undeclared grouped sections", undeclared_sections)
+        print(f"\nResult: {'FAIL' if has_errors else 'PASS'}")
     if args.lintrunner and has_errors:
         failure_counts = [
             (len(report.uncovered), "uncovered paths"),
@@ -373,7 +437,8 @@ def main() -> int:
         emit_lint_error(
             "CODEOWNERS taxonomy validation failed: "
             + ", ".join(failures)
-            + ". Run `python scripts/codeowners/check_taxonomy.py` for details."
+            + ". Run `python scripts/codeowners/check_taxonomy.py`; it lists each "
+            "offending entry and how to fix it."
         )
         return 0
     return int(has_errors)

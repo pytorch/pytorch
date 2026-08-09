@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import subprocess
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,6 +10,8 @@ from check_taxonomy import (
     analyze,
     compile_glob,
     parse_patterns,
+    print_report,
+    Report,
     TaxonomyPattern,
     tracked_paths,
 )
@@ -122,6 +126,28 @@ class TestCodeownersTaxonomy(TestCase):
         )
         self.assertEqual(report.source_order_mismatches, [])
 
+    def test_report_explains_summary_and_failures(self):
+        report = Report(
+            tracked=2,
+            pattern_count=1,
+            groups={"surface"},
+            uncovered=["uncovered.py"],
+            overridden={},
+            duplicates={},
+            stale=[],
+            ineffective=[],
+            source_order_mismatches=[],
+        )
+        output = StringIO()
+        with redirect_stdout(output):
+            print_report(report)
+        self.assertIn("Edit CODEOWNERS to fix failures", output.getvalue())
+        self.assertIn("`/path/ @owner`", output.getvalue())
+        self.assertIn("Tracked paths: 2 (committed paths checked)", output.getvalue())
+        self.assertIn("Integrity checks (all must be zero)", output.getvalue())
+        self.assertIn("Uncovered paths (1):", output.getvalue())
+        self.assertIn("Under the appropriate `# [surface]`", output.getvalue())
+
     def test_source_order_must_preserve_specificity(self):
         path = "torch/_higher_order_ops/flex_attention.py"
         specific = TaxonomyPattern("inductor", path, 1)
@@ -129,7 +155,10 @@ class TestCodeownersTaxonomy(TestCase):
         report = analyze([path], [specific, broad])
         self.assertEqual(
             report.source_order_mismatches,
-            [f"{path}: export:torch/_higher_order_ops/ overrides inductor:{path}"],
+            [
+                f"{path}: CODEOWNERS:2 [export] /torch/_higher_order_ops/ "
+                f"overrides CODEOWNERS:1 [inductor] /{path}"
+            ],
         )
 
     def test_broad_rule_before_specific_rule(self):
