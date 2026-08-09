@@ -38,6 +38,10 @@ static_assert(
 #define NCCL_HAS_COLLNET
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 3)
+#define NCCL_HAS_COMM_NAME
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
 #define NCCL_HAS_CTA_POLICY
 #endif
@@ -217,7 +221,7 @@ TORCH_API std::string getNcclErrorDetailStr(
     std::optional<std::string> processGroupFailureReason = std::nullopt);
 
 // Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type);
+TORCH_API ncclDataType_t getNcclDataType(at::ScalarType type);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
