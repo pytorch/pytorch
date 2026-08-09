@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 import operator
+import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -20,6 +22,22 @@ if TYPE_CHECKING:
     from torch.utils._pytree import TreeSpec
 
 aten = torch.ops.aten
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
+    # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
+    if type(val) is float:
+        return _ScalarKey("float", struct.pack(">d", val))
+    if type(val) is complex:
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
+    return val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -91,6 +109,14 @@ def fx_graph_cse(
 
         return True
 
+    def custom_context_key(node: fx.Node) -> tuple[int, int | None, int | None]:
+        custom = node.meta.get("custom", {})
+        return (
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
+        )
+
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
@@ -103,6 +129,45 @@ def fx_graph_cse(
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
+    # A node used as the mutable base of a functional-wrapper op is a distinct
+    # mutable buffer. Two identical factory ops feeding distinct bases (e.g. the
+    # forward and backward ``aten.full`` from a pair of ``ones_like`` calls) must
+    # not be CSE-merged, or the later mutation aliases a buffer that still has a
+    # live downstream view and reinplacing fails (mirrors the aten.empty
+    # exclusion below). See pytorch/pytorch#170160.
+    from torch._higher_order_ops.auto_functionalize import get_mutable_args
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        triton_kernel_wrapper_functional,
+    )
+
+    def _add_base(node: Any, bases: set[fx.Node]) -> None:
+        for b in node if isinstance(node, (list, tuple)) else (node,):
+            if isinstance(b, fx.Node):
+                bases.add(b)
+
+    nodes_used_as_mutation_base: set[fx.Node] = set()
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        # v2 lists its mutable buffers explicitly in ``_all_bases``.
+        for base in n.kwargs.get("_all_bases", ()):
+            _add_base(base, nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        # v1 has no ``_all_bases``; the mutated tensors are the args named by the
+        # wrapped op's schema (``_mutable_op`` is the first positional).
+        mutable_op = n.args[0]
+        mutable_args_names, _ = get_mutable_args(mutable_op)
+        for name in mutable_args_names:
+            _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=triton_kernel_wrapper_functional
+    ):
+        inner_kwargs = n.kwargs.get("kwargs", {})
+        for name in n.kwargs.get("tensors_to_clone", ()):
+            _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -110,12 +175,15 @@ def fx_graph_cse(
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
+            or n.is_impure()
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # Keep distinct functional-wrapper mutation bases independent.
+            or n in nodes_used_as_mutation_base
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
@@ -146,6 +214,7 @@ def fx_graph_cse(
                         arg_list[i] = env[v]
                     if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                         arg_list[i] = v.node
+                    arg_list[i] = _normalize_cse_arg(arg_list[i])
                 return tuple(arg_list), spec
 
             args, args_spec = substitute(n.args)
@@ -161,6 +230,7 @@ def fx_graph_cse(
                 "args_spec": args_spec,
                 "kwargs": kwargs,
                 "kwargs_spec": kwargs_spec,
+                "custom_context": custom_context_key(n),
             }
 
             # hash substituted args to a number, do not hash specs because specs are not hashable

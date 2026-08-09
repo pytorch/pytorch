@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -12,6 +12,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/Sleep.h>
+#include <ATen/native/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifndef USE_ROCM
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -27,7 +28,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <deque>
 
 namespace at::cuda::tunable {
 
@@ -42,75 +42,6 @@ class Callable {
       return Call(params);
     }
 };
-
-namespace {
-
-/** http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
-
-class Stats {
-  public:
-    Stats() {
-      _n = 0UL;
-      _mean = 0.0;
-      _M2 = 0.0;
-      _sum = 0.0;
-      _min = 0.0;
-      _max = 0.0;
-    }
-
-    void sample_value(const double x) {
-      double delta = 0;
-      _sum = _sum + x;
-      if (0UL == _n) {
-          _min = x;
-          _max = x;
-      }
-      else {
-          _min = _min < x ? _min : x;
-          _max = _max > x ? _max : x;
-      }
-      _n = _n + 1UL;
-      delta = x - _mean;
-      _mean = _mean + delta/_n;
-      _M2 = _M2 + delta * (x - _mean);
-    }
-
-    double variance() const {
-      return _M2/(_n-1);
-    }
-
-    double stddev() const {
-      return std::sqrt(variance());
-    }
-
-    unsigned long _n;
-    double _mean;
-    double _M2;
-    double _sum;
-    double _min;
-    double _max;
-};
-
-class FixedSizeStack {
-  private:
-      std::deque<std::string> stack;
-      const size_t max_size;
-
-  public:
-      FixedSizeStack(size_t size) : max_size(size) {}
-
-      void push(const std::string& value) {
-          if (stack.size() >= max_size) {
-              stack.pop_front(); // Remove the oldest entry
-          }
-          stack.push_back(value); // Add new entry
-      }
-
-      auto rbegin() { return stack.rbegin(); }
-      auto rend() { return stack.rend(); }
-};
-
-} // anonymous namespace
 
 template <typename ParamsT>
 class TunableOp {
@@ -263,7 +194,7 @@ class TunableOp {
       return timer.Duration() / num_iter;
     }
 
-    static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+    static at::native::tunable::Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       std::vector<StreamTimerNoSync> timer(num_iter);
@@ -282,7 +213,7 @@ class TunableOp {
           at::cuda::flush_icache();
         }
       }
-      Stats s;
+      at::native::tunable::Stats s;
       for (size_t i = 0; i < num_iter; i++) {
         s.sample_value(timer[i].Duration());
       }
@@ -300,7 +231,7 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
-      auto top_solns = FixedSizeStack(5);
+      auto top_solns = at::native::tunable::FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
