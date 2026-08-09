@@ -1126,9 +1126,12 @@ print(f"Found {count} GPUs")
 PY
 
   python scripts/bench_parallel.py \
-    --benchmark-set benchmarks/v1.json \
+    repros/canonical \
     --gpus 0,1,2,3,4,5,6,7 \
     --output "${debug_dir}/current.json"
+  # TODO: Add a single-input CI export mode to bench_report.py. For now it
+  # requires --compare, so compare the result with itself and export the
+  # unchanged head values as PyTorch v3 dashboard records.
   python scripts/bench_report.py \
     --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
     --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
