@@ -1104,6 +1104,37 @@ test_inductor_micro_benchmark() {
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
+test_better_benchmark() {
+  local test_reports_dir
+  test_reports_dir="$(pwd)/test/test-reports"
+  local debug_dir
+  debug_dir="$(pwd)/test/debug/better-benchmark"
+  local benchmark_dir
+  benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
+  mkdir -p "${test_reports_dir}" "${debug_dir}"
+
+  git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+
+  python - <<'PY'
+import torch
+
+count = torch.cuda.device_count()
+if count != 8:
+    raise RuntimeError(f"Expected 8 GPUs, found {count}")
+print(f"Found {count} GPUs")
+PY
+
+  pushd "${benchmark_dir}"
+  python scripts/bench_parallel.py \
+    --benchmark-set benchmarks/v1.json \
+    --gpus 0,1,2,3,4,5,6,7 \
+    --output "${debug_dir}/current.json"
+  python scripts/bench_report.py \
+    --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
+    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
+  popd
+}
+
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
   assert_git_not_dirty
@@ -2366,6 +2397,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *inductor_better_benchmark* ]]; then
+  test_better_benchmark
 elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
   test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
