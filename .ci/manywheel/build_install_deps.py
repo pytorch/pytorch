@@ -11,15 +11,19 @@ import argparse
 import os
 import subprocess
 import sys
+import sysconfig
 import time
 from pathlib import Path
 
 
-# NumPy build-time pin selected by Python version.
+# NumPy build-time pin selected by Python version. Checked high-to-low; the
+# first entry whose (major, minor) floor is satisfied wins. A plain string
+# prefix ("cp31") would wrongly capture cp315, so match on the version tuple.
 # Keep in sync with .ci/manywheel/build_common.sh.
-NUMPY_PINS: list[tuple[str, str]] = [
-    ("cp314", "2.3.4"),
-    ("cp31", "2.1.0"),
+NUMPY_PINS: list[tuple[tuple[int, int], str]] = [
+    ((3, 15), "2.5.1"),
+    ((3, 14), "2.3.4"),
+    ((3, 10), "2.1.0"),
 ]
 DEFAULT_NUMPY = "2.0.2"
 
@@ -42,11 +46,38 @@ def pip_install(*args: str) -> None:
 
 
 def numpy_pin() -> str:
-    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    for prefix, version in NUMPY_PINS:
-        if tag.startswith(prefix):
-            return version
+    version = sys.version_info[:2]
+    for floor, pin in NUMPY_PINS:
+        if version >= floor:
+            return pin
     return DEFAULT_NUMPY
+
+
+def is_rocm_py315() -> bool:
+    return sys.version_info[:2] == (3, 15) and "rocm" in os.environ.get(
+        "DESIRED_CUDA", ""
+    )
+
+
+def prefer_target_python_pkgconfig() -> None:
+    """Make ``pkg-config python3`` resolve the interpreter we are building for.
+
+    cp315 has no numpy wheel, so numpy is built from source. On the ROCm
+    manylinux image the distro's system ``python3-devel`` (Python 3.6) has its
+    ``python3.pc`` on pkg-config's default search path, so numpy's meson Cython
+    check resolves ``pkg-config python3`` to 3.6 and fails with "Cython requires
+    Python 3.8+". Prepend this interpreter's own pkgconfig dir so the correct
+    Python wins (pkg-config searches PKG_CONFIG_PATH before its default libdir).
+
+    Scoped to ROCm cp315: the CUDA/XPU/CPU images have no such stray python3.pc,
+    so their from-source numpy build already resolves correctly.
+    """
+    libpc = sysconfig.get_config_var("LIBPC")
+    if libpc and os.path.isfile(os.path.join(libpc, "python3.pc")):
+        existing = os.environ.get("PKG_CONFIG_PATH", "")
+        os.environ["PKG_CONFIG_PATH"] = (
+            f"{libpc}{os.pathsep}{existing}" if existing else libpc
+        )
 
 
 def main() -> None:
@@ -55,6 +86,11 @@ def main() -> None:
     args = parser.parse_args()
 
     os.chdir(args.package_dir)
+    # ROCm cp315 builds numpy from source (no cp315 wheel); redirect
+    # `pkg-config python3` to the interpreter we're building for so the ROCm
+    # image's system 3.6 python3.pc can't hijack it. No-op elsewhere.
+    if is_rocm_py315():
+        prefer_target_python_pkgconfig()
     pip_install("-qU", "-r", "requirements-build.txt")
     # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
     # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header
@@ -77,9 +113,14 @@ def main() -> None:
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
     if not os.environ.get("SKIP_SETUP_CLEAN"):
-        subprocess.run([sys.executable, "setup.py", "clean"], check=True)
+        subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
     pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+    # auditwheel repacks the manywheel with a valid ZIP64 record for >4GB ROCm
+    # wheels (pypa/wheel#692); imported by repair_wheel.py. CD-only, so it is
+    # installed here rather than in requirements.txt, and pinned for
+    # reproducible binary builds.
+    pip_install("-q", "auditwheel==6.4.2")
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
         print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")

@@ -54,11 +54,13 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     IS_FBCODE,
     IS_WINDOWS,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
@@ -889,6 +891,14 @@ class TestOpInfoProperties(TestCase):
     @parametrize("backend", BACKENDS)
     def test_eager_equivalence(self, device, dtype, op, backend):
         """Test bitwise equivalence with eager execution."""
+        if (
+            op.name == "nn.functional.gelu"
+            and dtype == torch.float32
+            and backend == "inductor_default"
+        ):
+            # Disabled due to CI failures; see
+            # https://github.com/pytorch/pytorch/issues/190242
+            self.skipTest("disabled due to CI failures; see #190242")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
@@ -938,6 +948,14 @@ class TestOpInfoProperties(TestCase):
 
         Verifies bitwise equivalence between eager and compiled execution.
         """
+        if (
+            TEST_WITH_ROCM
+            and getRocmVersion() >= (7, 14)
+            and op.name == "log10"
+            and dtype in (torch.float16, torch.float32)
+            and backend in ("inductor_default", "inductor_numerics")
+        ):
+            self.skipTest("known log10 eager-vs-compiled failure on ROCm 7.14")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 

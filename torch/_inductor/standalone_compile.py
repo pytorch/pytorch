@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import itertools
 import logging
 import os
 import pickle
@@ -494,10 +495,20 @@ def _resolve_fake_mode(
             if isinstance(last_node.args[0], torch.fx.Node)
             else last_node.args[0]
         )
-        for node in nodes:
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                maybe_fake_mode = maybe_get_fake_mode(maybe_tensor)
+        # Find a FakeTensor to recover its FakeTensorMode. This resolver was written when
+        # standalone_compile was only ever fed Dynamo/AOT graphs, which return a flat list
+        # of real Tensor outputs and stash the fake under "example_value". precompile now
+        # feeds make_fx graphs too, and those break both assumptions: make_fx stashes the
+        # fake under "val" (not "example_value"), and the traced fn's own return value is
+        # kept as an output leaf -- so when fn calls .backward() (which returns None) that
+        # None sits in the output list as a plain non-Node entry. So skip non-Node output
+        # entries (the old code called .meta on the None and crashed), check both metadata
+        # keys, and fall back to scanning every node since a make_fx fake may live only on
+        # an interior node. maybe_get_fake_mode also unwraps a traceable wrapper subclass.
+        output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
+        for node in itertools.chain(output_nodes, gm.graph.nodes):
+            for key in ("example_value", "val"):
+                maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 

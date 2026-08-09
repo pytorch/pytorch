@@ -16,8 +16,8 @@ import torch
 
 from . import cupti_python
 from .records import (
-    Api,
     Ctype,
+    CudaEvent,
     FIELD_CTYPE,
     FIELD_REGISTRY,
     Kernel,
@@ -259,14 +259,9 @@ class CuptiMonitor:
     # configure() (first-come-first-serve, no env var), defaults otherwise. Both cadences
     # default to -1 (no background flush / drain -- the caller drives flush()).
     #
-    # use_approx_timestamps defaults OFF. The per-subscriber timestamp callback re-times HOST
-    # records but cannot re-time DEVICE records: when a CUDA context already exists,
-    # cuptiSubscribe latches the device-record (GPU->CPU) correlation base immediately, on the
-    # clock active at subscribe time. Our callback is a per-subscriber attribute that can only
-    # be set after subscribe, so device records are already pinned to the default clock and end
-    # up ~1e4x off the host approx clock, then get dropped by windowing. It is only safe when
-    # the monitor subscribes before any CUDA context exists (standalone, first CUPTI consumer),
-    # so it stays opt-in via configure(use_approx_timestamps=True).
+    # use_approx_timestamps defaults OFF; when on, the per-subscriber timestamp callback
+    # re-times HOST and DEVICE records onto the profiler's approx clock (kineto's timebase).
+    # Opt-in via configure(use_approx_timestamps=True).
     _buffer_size: int = 4 * 1024 * 1024
     _background_flush_period_s: float = -1.0
     _background_drain_period_s: float = -1.0
@@ -325,6 +320,7 @@ class CuptiMonitor:
         # The CUPTI subscriber handle.
         self._subscriber: int | None = None
         self._latency_enabled = False
+        self._device_ts_enabled = False
         # Layout state -- a function of registration, recomputed only when the
         # The fields enabled per kind on the subscriber (a function of the observer
         # field union, recomputed only on register/deregister, never per buffer). The
@@ -491,17 +487,6 @@ class CuptiMonitor:
             self_flush,
             flush_period_ns,
             flush_fn,
-        )
-        # Drop noisy runtime/driver records in the native decoder by cbid -- CUPTI's own
-        # per-cbid activity filter is NOT_COMPATIBLE under user-defined records
-        from .monitor_trace import driver_kept_cbids, runtime_dropped_cbids
-
-        _cupti_monitor_native.set_cbid_filter(
-            Api.CBID.id,
-            {
-                int(ActivityKind.RUNTIME): (False, list(runtime_dropped_cbids())),
-                int(ActivityKind.DRIVER): (True, list(driver_kept_cbids())),
-            },
         )
         _cupti_monitor_native.start_decoder()
         # The decode thread self-flushes on background_flush_period_s (configured above); this
@@ -714,14 +699,13 @@ class CuptiMonitor:
         cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
-        # cuptiSubscribe latches the device-record correlation base against a pre-existing CUDA
-        # context, so a callback armed now (post-subscribe) can't re-time device records if one
-        # exists -- they stay pinned to CLOCK_REALTIME. Refuse rather than silently drop them.
-        if _has_active_cuda_context():
+        # Older libcupti can't re-time device records when a context predates the subscriber, so
+        # refuse rather than silently drop them; libcupti >= 130303 re-times regardless.
+        if self._cupti.get_version() < 130303 and _has_active_cuda_context():
             logger.warning(
                 "CUPTI monitor: use_approx_timestamps requested but a CUDA context already "
-                "exists; device records were correlated on CLOCK_REALTIME at subscribe and "
-                "cannot be re-timed. Falling back to the CLOCK_REALTIME pass-through."
+                "exists and this libcupti cannot re-time device records; falling back to the "
+                "CLOCK_REALTIME pass-through."
             )
             return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
@@ -913,6 +897,15 @@ class CuptiMonitor:
             ):
                 self._cupti.enable_kernel_latency_timestamps(self._subscriber, True)
                 self._latency_enabled = True
+        # Device-side CUDA_EVENT timestamps (the deviceTimestamp field, off by default) are
+        # needed to place graph event-record nodes as spans. Enable once, iff an observer
+        # selected the CUDA_EVENT device-timestamp field.
+        if self._subscriber is not None and not self._device_ts_enabled:
+            if CudaEvent.DEVICE_TIMESTAMP.id in target.get(
+                int(ActivityKind.CUDA_EVENT), frozenset()
+            ):
+                self._cupti.enable_cuda_event_device_timestamps(self._subscriber, True)
+                self._device_ts_enabled = True
 
     def _reconfigure(self, target: dict[int, frozenset[int]]) -> None:
         # Reconcile the per-field selection to ``target`` with a minimal diff: only
@@ -1210,6 +1203,17 @@ class CuptiMonitor:
                 # .copy() so the column is writable and owns its memory (the
                 # frombuffer view is read-only over the transient bytes).
                 cols[fid] = np.frombuffer(raw, dtype=ctype.numpy(size)).copy()
+            elif size > 8:
+                # Oversized field (the 20-byte CUpti_ActivityEnvironment union): keep its
+                # first 8 bytes as u8 -- the primary metric pair (power+powerLimit / smClock+
+                # memoryClock / temperature / fanSpeed), split downstream by ENVIRONMENT_KIND.
+                cols[fid] = (
+                    np.frombuffer(raw, dtype=np.uint8)
+                    .reshape(-1, size)[:, :8]
+                    .copy()
+                    .view("<u8")
+                    .ravel()
+                )
         return cols
 
     def _maybe_warn_backpressure(self) -> None:
