@@ -612,12 +612,11 @@ class TestAOTCompileToPython(TestCase):
         #
         # Only compile_to_python runs concurrently. The graphs are captured SERIALLY up
         # front because make_fx (fx symbolic tracing) is NOT thread-safe: it mutates
-        # process-global tracing state -- the CURRENT_PATCHER global in
-        # torch.fx._symbolic_trace and the fx.traceback node-meta globals. Capturing inside
+        # process-global patch targets and fx.traceback node-meta globals. Capturing inside
         # the worker threads would race that state against the make_fx run nested inside the
-        # OTHER thread's compile_to_python (which _COMPILE_LOCK covers, but capture is not
-        # the serialized entry point), intermittently raising "CURRENT_PATCHER is None in
-        # finally block" -- a make_fx concurrency artifact unrelated to the lock under test.
+        # OTHER thread's compile_to_python (_COMPILE_LOCK covers the latter, but capture is
+        # not the serialized entry point), making this test exercise an unrelated make_fx
+        # concurrency artifact instead of the lock under test.
         import threading
         import traceback
 

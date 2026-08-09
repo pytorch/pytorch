@@ -883,13 +883,14 @@ class Tracer(TracerBase):
             parameter_proxy_cache: dict[
                 str, Proxy
             ] = {}  # Reduce number of get_attr calls
-            tracing_thread_id = threading.get_ident()
 
+            # The patches below modify nn.Module process-wide. Thread-local patcher
+            # state keeps unrelated threads from entering the captured tracer.
             # Method dispatch on parameters is not recorded unless it's directly used.
             # Thus, we need to insert a proxy when __getattr__ requests a parameter.
             @functools.wraps(_orig_module_getattr)
             def module_getattr_wrapper(mod: torch.nn.Module, attr: str) -> Any:
-                if threading.get_ident() != tracing_thread_id:
+                if _CURRENT_PATCHER.current is None:
                     return _orig_module_getattr(mod, attr)
                 attr_val = _orig_module_getattr(mod, attr)
                 return self.getattr(attr, attr_val, parameter_proxy_cache)
@@ -898,7 +899,7 @@ class Tracer(TracerBase):
             def module_call_wrapper(
                 mod: torch.nn.Module, *args: Any, **kwargs: Any
             ) -> Any:
-                if threading.get_ident() != tracing_thread_id:
+                if _CURRENT_PATCHER.current is None:
                     return _orig_module_call(mod, *args, **kwargs)
 
                 def forward(*args: Any, **kwargs: Any) -> Any:
@@ -1239,27 +1240,32 @@ class _Patcher:
         self.visited.clear()
 
 
-CURRENT_PATCHER: _Patcher | None = None
+# Dynamo temporarily reverts FX patches while compiling on the tracing thread.
+# Keep that lifecycle state thread-local so unrelated compiles cannot revert a
+# different thread's active patches.
+class _PatcherTLS(threading.local):
+    current: _Patcher | None = None
+
+
+_CURRENT_PATCHER = _PatcherTLS()
 
 
 @contextlib.contextmanager
 def _new_patcher() -> Iterator[_Patcher]:
-    global CURRENT_PATCHER
-    prior_patcher = CURRENT_PATCHER
+    prior_patcher = _CURRENT_PATCHER.current
+    current_patcher = _Patcher()
     try:
-        CURRENT_PATCHER = _Patcher()
-        yield CURRENT_PATCHER
+        _CURRENT_PATCHER.current = current_patcher
+        yield current_patcher
     finally:
-        # Clear all the patches made by when using current patcher.
-        if CURRENT_PATCHER is None:
-            raise AssertionError("CURRENT_PATCHER is None in finally block")
-        CURRENT_PATCHER.revert_all_patches()
-        CURRENT_PATCHER = prior_patcher
+        # Clear all the patches made with the current patcher.
+        current_patcher.revert_all_patches()
+        _CURRENT_PATCHER.current = prior_patcher
 
 
 @contextlib.contextmanager
 def _maybe_revert_all_patches() -> Iterator[None]:
-    current_patcher = CURRENT_PATCHER
+    current_patcher = _CURRENT_PATCHER.current
     patches_made = None
     patches_removed = None
     try:
@@ -1271,7 +1277,7 @@ def _maybe_revert_all_patches() -> Iterator[None]:
             patches_made = current_patcher.reapply_all_patches()
         if patches_made != patches_removed:
             raise AssertionError(
-                "CURRENT_PATCHER was changed during a revert_all_patches"
+                "The current FX patcher was changed during a revert_all_patches"
             )
 
 

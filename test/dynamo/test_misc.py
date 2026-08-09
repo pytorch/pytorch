@@ -18,6 +18,7 @@ import math
 import operator
 import os
 import pickle
+import queue
 import random
 import re
 import subprocess
@@ -511,6 +512,51 @@ graph():
         # popping a stale entry.
         with self.assertRaisesRegex(RuntimeError, "empty stack"):
             torch._C._dynamo_restore_local_dispatch_key_set()
+
+    def test_tracing_context_tls_defaults_present(self):
+        # The _guards thread-local defaults tracing_context/compile_context to
+        # None per thread, so the hot-path try_get() calls (once per compiled
+        # call) hit a present attribute instead of a slow getattr-miss on a
+        # thread that never ran compilation itself (e.g. a worker thread running
+        # code compiled on another thread).
+        import threading
+
+        from torch._guards import _TLS, CompileContext, TracingContext
+
+        result = {}
+
+        def worker():
+            result["tc_present"] = "tracing_context" in _TLS.__dict__
+            result["cc_present"] = "compile_context" in _TLS.__dict__
+            result["tc"] = TracingContext.try_get()
+            result["cc"] = CompileContext.try_get()
+            # Off-context (compile_context defaulted to None), get() still raises
+            # -- the default makes this the "not set" AssertionError rather than
+            # an AttributeError, on every thread regardless of history.
+            try:
+                CompileContext.get()
+                result["get_raised"] = None
+            except AssertionError:
+                result["get_raised"] = "AssertionError"
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        self.assertTrue(result["tc_present"])
+        self.assertTrue(result["cc_present"])
+        self.assertIsNone(result["tc"])
+        self.assertIsNone(result["cc"])
+        self.assertEqual(result["get_raised"], "AssertionError")
+
+        # Exercise the set -> restore cycle against the new storage: try_get()
+        # sees the context inside tracing() and returns to the None default after.
+        from torch._guards import tracing
+
+        self.assertIsNone(TracingContext.try_get())
+        tc = TracingContext(None)
+        with tracing(tc):
+            self.assertIs(TracingContext.try_get(), tc)
+        self.assertIsNone(TracingContext.try_get())
 
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
@@ -1999,6 +2045,122 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
+
+    def test_min_max_key_and_default(self):
+        # Items are non-constant (tensors), so the fully-constant fold path is
+        # skipped; the key maps each to a compile-time-constant (ndim), which is
+        # what the key comparison requires. Comparison is on key(item) but the
+        # original tensor is returned.
+        def fn(x, y, z):
+            tensors = [x, y, z]
+            return (
+                max(tensors, key=lambda t: t.ndim).sum(),
+                min(tensors, key=lambda t: t.ndim).sum(),
+                max(tensors, key=lambda t: t.ndim, default=x).sum(),
+                max([], default=y).sum(),
+                min([x + 1], default=z).sum(),
+                max(x, z, key=lambda t: t.ndim).sum(),
+                min(x, z, key=lambda t: t.ndim).sum(),
+            )
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        self.assertEqual(opt(x, y, z), fn(x, y, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_min_max_key_none(self):
+        # key=None behaves like no key argument at all.
+        def fn(x):
+            return x + max([4, 1, 7], key=None) + min([4, 1, 7], key=None)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_min_max_default_none_sentinel(self):
+        # A real default=None must be honored for empty iterables and not be
+        # confused with the internal "omitted" sentinel (which raises).
+        def fn(x):
+            return (
+                max((), default=None),
+                min((), default=None),
+                max((), default=0),
+                x + 1,
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(opt(x)[:3], (None, None, 0))
+
+    def test_min_max_default_varargs_type_error(self):
+        def fn(a, b):
+            return max(a, b, default=0)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(1, 2)
+        with self.assertRaises(TypeError):
+            opt(1, 2)
+
+    def test_min_max_empty_no_default_value_error(self):
+        def fn(xs):
+            return max(xs)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
@@ -7871,36 +8033,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         _do_test(g)
 
-    def test_fx_tracing_does_not_intercept_compile_in_other_thread(self):
-        torch._dynamo.reset()
+    def test_fx_tracing_and_compile_are_isolated_across_threads(self):
         trace_entered = threading.Event()
         release_trace = threading.Event()
-        errors: list[Exception] = []
+        trace_finished = threading.Event()
+        errors: queue.Queue[Exception] = queue.Queue()
+        traced_modules: queue.Queue[torch.fx.GraphModule] = queue.Queue()
+        shared_weight = torch.nn.Parameter(torch.randn(4, 4))
 
         class TraceModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+                self.weight = shared_weight
+
             def forward(self, x):
                 trace_entered.set()
                 if not release_trace.wait(timeout=10):
-                    raise AssertionError("Compile worker did not finish")
-                return x + 1
+                    raise AssertionError("Compile backend did not start")
+                return self.relu(x) + self.weight
 
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
+                self.weight = shared_weight
 
             def forward(self, x):
-                return self.linear(x).relu()
+                return x @ self.weight
 
         model = Model().eval()
-        opt_model = torch.compile(model, backend="eager", dynamic=True)
 
         def trace_worker():
             try:
-                torch.fx.symbolic_trace(TraceModule())
+                traced_modules.put(torch.fx.symbolic_trace(TraceModule()))
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
                 release_trace.set()
+            finally:
+                trace_finished.set()
+
+        def backend(gm, _example_inputs):
+            # Dynamo enters _maybe_revert_all_patches before invoking the backend.
+            # Let the FX trace proceed while that context is active to verify that
+            # this thread cannot revert the tracing thread's patches.
+            release_trace.set()
+            if not trace_finished.wait(timeout=10):
+                raise AssertionError("FX trace worker did not finish")
+            return gm.forward
 
         def compile_worker():
             try:
@@ -7908,9 +8087,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     raise AssertionError("FX trace worker did not start")
                 x = torch.randn(3, 4)
                 with torch.no_grad():
-                    torch.testing.assert_close(opt_model(x), model(x))
+                    opt_model = torch.compile(model, backend=backend, dynamic=True)
+                    self.assertEqual(opt_model(x), model(x))
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
             finally:
                 release_trace.set()
 
@@ -7923,8 +8103,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertFalse(trace_thread.is_alive())
         self.assertFalse(compile_thread.is_alive())
-        if errors:
-            raise errors[0]
+        if not errors.empty():
+            raise errors.get()
+        self.assertEqual(traced_modules.qsize(), 1)
+        traced_module = traced_modules.get()
+        self.assertEqual(
+            [
+                node.target
+                for node in traced_module.graph.nodes
+                if node.op == "call_module"
+            ],
+            ["relu"],
+        )
+        self.assertEqual(
+            [
+                node.target
+                for node in traced_module.graph.nodes
+                if node.op == "get_attr"
+            ],
+            ["weight"],
+        )
+        self.assertIs(
+            torch.nn.Module.__call__, torch.fx._symbolic_trace._orig_module_call
+        )
+        self.assertIs(
+            torch.nn.Module.__getattr__,
+            torch.fx._symbolic_trace._orig_module_getattr,
+        )
 
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
@@ -10972,7 +11177,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return x * x
+            return torch.ones(2) * x
 
         fn(0)
         fn(1)
@@ -17225,7 +17430,6 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(opt(), "1:2:3")
 
     @unittest.skipIf(sys.version_info >= (3, 12), "comprehensions inlined in 3.12+")
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_listcomp_implicit_iterator_survives_graph_break(self):
         """Regression test: the implicit .0 iterator in a list comprehension
         must survive graph breaks under NGB.
@@ -17253,7 +17457,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertTrue(torch.all(result > x))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
         """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
         not plain dict, so that weakref.ref() works in RemovableHandle.
@@ -17267,6 +17470,117 @@ def forward(self, L_x_ : torch.Tensor):
         opt = torch.compile(fn, backend="eager")
         result = opt()
         self.assertEqual(result.shape, (3, 7))
+
+    def test_module_hook_handle_references_real_dict(self):
+        """A RemovableHandle created inside a compiled function must reference
+        the real module's (empty) hooks dict. This requires reconstructing the
+        empty hooks dict from its source; a sourceless fresh {} would make the
+        handle weakref point at the wrong object so remove() silently no-ops.
+        """
+
+        def hook(mod, inp, out):
+            return out
+
+        def fn(m, x):
+            y = m(x)
+            h = m.register_forward_hook(hook)
+            return y, h
+
+        m = torch.nn.Linear(3, 3)
+        opt = torch.compile(fn, backend="eager")
+        x = torch.randn(2, 3)
+        _, h = opt(m, x)
+        self.assertEqual(len(m._forward_hooks), 1)
+        self.assertIs(h.hooks_dict_ref(), m._forward_hooks)
+        h.remove()
+        self.assertEqual(len(m._forward_hooks), 0)
+
+    def test_custom_op_register_fake_inside_traced_function(self):
+        """Custom op defined with register_fake inside a traced function must
+        produce correct results. register_fake mutates _abstract_fn on the real
+        CustomOpDef as a side effect, so when the op is called before that
+        side effect is applied, get_fake_value graph-breaks ("Custom op missing
+        fake impl during tracing") and the op call falls back to eager. The
+        surrounding tensor ops still compile (exercising the resume path).
+        """
+        from typing import Tuple
+
+        def get_my_op():
+            @torch.library.custom_op("test::ngb_id", mutates_args=[])
+            def ngb_id(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @ngb_id.register_fake
+            def _(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return ngb_id
+
+        def fn(x):
+            x = x + 1  # non-empty prefix so a partial graph compiles
+            my_op = get_my_op()
+            return my_op(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(3)
+        result = opt(x)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], x + 1)
+        # The op call graph-breaks to eager; the surrounding ops still compile.
+        self.assertGreaterEqual(cnt.frame_count, 1)
+
+    def test_custom_op_missing_fake_impl_hard_errors(self):
+        """A custom op genuinely missing its fake impl (register_fake never
+        called) must still hard-error under compile. The missing-fake-impl
+        graph break is scoped to the register_fake-side-effect-pending case, so
+        it must NOT silently swallow this into an eager fallback.
+        """
+
+        @torch.library.custom_op("test::ngb_missing_fake", mutates_args=[])
+        def ngb_missing_fake(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return ngb_missing_fake(x) + 1
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
+
+    def test_custom_op_defined_inside_without_fake_hard_errors(self):
+        """A custom op DEFINED INSIDE the traced function but never
+        register_fake'd must still hard-error, and the gate must key off a
+        pending `_abstract_fn` mutation SPECIFICALLY, not any pending mutation.
+
+        Unlike test_custom_op_missing_fake_impl_hard_errors (op at module
+        scope, whose opdef is untracked so the gate short-circuits at
+        `vt is None`), the opdef here is tracked in side_effects. We store an
+        unrelated attribute on it so it has a pending NON-`_abstract_fn`
+        mutation: a gate that checked `has_pending_mutation(vt)` instead of
+        `has_pending_mutation_of_attr(vt, "_abstract_fn")` would then wrongly
+        graph-break and silently fall the genuinely-broken op back to eager.
+        The specific check hard-errors as it must.
+        """
+
+        def get_op():
+            @torch.library.custom_op("test::ngb_inside_nofake", mutates_args=[])
+            def op(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            return op
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            my_op = get_op()
+            # pending non-_abstract_fn mutation on the tracked opdef
+            my_op._unrelated_marker = 1
+            return my_op(x)
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
 
 
 instantiate_parametrized_tests(MiscTests)
