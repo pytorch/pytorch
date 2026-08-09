@@ -8566,7 +8566,8 @@ class TestMemPool(TestCase):
         finally:
             self._teardown_mempool_limited_memory_test()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180325")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not supported by CUDAMallocAsync")
+    @unittest.skipIf(EXPANDABLE_SEGMENTS, "not supported by expandable segments")
     @serialTest()
     def test_mempool_no_split(self):
         torch.cuda.empty_cache()
@@ -8625,6 +8626,45 @@ class TestMemPool(TestCase):
             lambda msg: f"{msg}\nExpected no_split pool to have fewer blocks, "
             f"but got {blocks_no_split} vs {blocks_split}",
         )
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not supported by CUDAMallocAsync")
+    @unittest.skipIf(EXPANDABLE_SEGMENTS, "not supported by expandable segments")
+    @serialTest()
+    def test_mempool_no_split_erased_on_release(self):
+        # Destroying a no_split MemPool must drop its id from the allocator's
+        # no_split_pools set. Otherwise a pool later registered under the same
+        # id silently inherits no_split and stops sharing segments.
+        gc.collect()
+        torch.cuda.empty_cache()
+        device = torch.cuda.current_device()
+        nelem_1mb = 1024 * 1024 // 4
+
+        pool = torch.cuda.MemPool(no_split=True)
+        pool_id = pool.id
+        with torch.cuda.use_mem_pool(pool):
+            a = torch.randn(4 * nelem_1mb, device="cuda")
+            b = torch.randn(4 * nelem_1mb, device="cuda")
+        # no_split: each 4 MB allocation gets its own 20 MB segment
+        self.assertEqual(len(pool.snapshot()), 2)
+
+        del a, b, pool
+        torch.cuda.empty_cache()
+        # the pool is fully gone -- nothing left under its id
+        self.assertEqual(torch.cuda.memory_snapshot(pool_id), [])
+
+        # Re-register the same id without no_split. The two 4 MB allocations
+        # should now share one 20 MB segment (split). Pre-fix, the stale
+        # no_split_pools entry would prevent splitting, giving 2 segments.
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, pool_id)
+        try:
+            c = torch.randn(4 * nelem_1mb, device="cuda")
+            d = torch.randn(4 * nelem_1mb, device="cuda")
+            self.assertEqual(len(torch.cuda.memory_snapshot(pool_id)), 1)
+        finally:
+            del c, d
+            torch._C._cuda_endAllocateToPool(device, pool_id)
+            torch._C._cuda_releasePool(device, pool_id)
+            torch.cuda.empty_cache()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
     @skipIfRocmArch(MI200_ARCH)
