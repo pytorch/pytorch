@@ -12276,6 +12276,148 @@ graph():
             ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs))
         )
 
+    def test_export_stateful_cache_tensor_scalar_slice_assignment(self):
+        class StatefulCache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.zeros(1, 100, 8)
+
+            def forward(self, x, start):
+                self.buffer[:, start : start + 2, :] = x
+                return self.buffer
+
+        inputs = (torch.randn(1, 2, 8), torch.tensor(5))
+        ep = torch.export.export(StatefulCache().eval(), inputs)
+        FileCheck().check("torch.ops.aten.item.default").check(
+            "torch.ops.aten.slice.Tensor"
+        ).check("torch.ops.aten.copy_.default").run(ep.graph_module.code)
+
+        exported_module = ep.module()
+        eager_module = StatefulCache().eval()
+        for start in (11, 17):
+            runtime_inputs = (torch.randn(1, 2, 8), torch.tensor(start))
+            self.assertEqual(
+                exported_module(runtime_inputs[0].clone(), runtime_inputs[1].clone()),
+                eager_module(runtime_inputs[0].clone(), runtime_inputs[1].clone()),
+            )
+
+    def test_export_tensor_scalar_indices_assignment_eager_semantics(self):
+        class TensorIndicesUpdate(torch.nn.Module):
+            def forward(self, buffer, value, batch, start):
+                buffer = buffer.clone()
+                buffer[batch, start : start + 2, :] = value
+                return buffer
+
+        inputs = (
+            torch.zeros(2, 10, 4),
+            torch.randn(1, 2, 4),
+            torch.tensor(1),
+            torch.tensor(3),
+        )
+        ep = torch.export.export(TensorIndicesUpdate(), inputs)
+        FileCheck().check("torch.ops.aten.select.int").check(
+            "torch.ops.aten.slice.Tensor"
+        ).check("torch.ops.aten.view.default").check(
+            "torch.ops.aten.copy_.default"
+        ).run(ep.graph_module.code)
+
+        for batch, start in ((0, 1), (1, 5)):
+            with self.subTest(batch=batch, start=start):
+                runtime_inputs = (
+                    torch.zeros(2, 10, 4),
+                    torch.randn(1, 2, 4),
+                    torch.tensor(batch),
+                    torch.tensor(start),
+                )
+                self.assertEqual(
+                    ep.module()(*copy.deepcopy(runtime_inputs)),
+                    TensorIndicesUpdate()(*copy.deepcopy(runtime_inputs)),
+                )
+
+    def test_export_tensor_scalar_index_assignment_too_many_indices(self):
+        class OverIndexedUpdate(torch.nn.Module):
+            def forward(self, x, index):
+                x = x.clone()
+                x[index, :] = 3
+                return x
+
+        with self.assertRaisesRegex(IndexError, "too many indices for tensor"):
+            torch.export.export(OverIndexedUpdate(), (torch.zeros(3), torch.tensor(1)))
+
+    def test_export_tensor_scalar_slice_assignment_ellipsis_scalar(self):
+        class EllipsisScalarUpdate(torch.nn.Module):
+            def forward(self, x, start, step):
+                torch._check(step.item() > 0)
+                x = x.clone()
+                x[..., start::step] = 3
+                return x
+
+        inputs = (torch.zeros(2, 3, 8), torch.tensor(1), torch.tensor(2))
+        ep = torch.export.export(EllipsisScalarUpdate(), inputs)
+        FileCheck().check("torch.ops.aten.slice.Tensor").check(
+            "torch.ops.aten.fill_.Tensor"
+        ).run(ep.graph_module.code)
+        self.assertEqual(
+            ep.module()(*copy.deepcopy(inputs)),
+            EllipsisScalarUpdate()(*copy.deepcopy(inputs)),
+        )
+
+    def test_export_tensor_scalar_slice_assignment_preserves_mask_index(self):
+        class MaskedStateUpdate(torch.nn.Module):
+            def forward(self, x, mask, start):
+                if isinstance(mask, torch.Tensor):
+                    if mask.dtype == torch.bool:
+                        torch._check(mask.item())
+                    else:
+                        torch._check(mask.item() == 1)
+                x = x.clone()
+                x[..., mask, start : start + 2] = 1
+                return x
+
+        for mask in (
+            True,
+            torch.tensor(True),
+            torch.tensor(1, dtype=torch.uint8),
+        ):
+            with self.subTest(mask=mask):
+                inputs = (torch.zeros(2, 3, 4), mask, torch.tensor(1))
+                ep = torch.export.export(MaskedStateUpdate(), inputs)
+                self.assertEqual(
+                    ep.module()(*copy.deepcopy(inputs)),
+                    MaskedStateUpdate()(*copy.deepcopy(inputs)),
+                )
+
+    def test_export_traceable_slice_preserves_mask_getitem(self):
+        class MaskGetitem(torch.nn.Module):
+            def forward(self, x, mask, length):
+                if isinstance(mask, torch.Tensor):
+                    if mask.dtype == torch.bool:
+                        torch._check(mask.item())
+                    else:
+                        torch._check(mask.item() == 1)
+                return x[mask, : length.shape[0]]
+
+        for mask in (
+            True,
+            torch.tensor(True),
+            torch.tensor(1, dtype=torch.uint8),
+        ):
+            with self.subTest(mask=mask):
+                inputs = (torch.randn(4, 5), mask, torch.randn(2))
+                ep = torch.export.export(
+                    MaskGetitem(),
+                    inputs,
+                    dynamic_shapes={
+                        "x": None,
+                        "mask": None,
+                        "length": {0: Dim("length", min=1, max=4)},
+                    },
+                )
+                self.assertEqual(
+                    ep.module()(*copy.deepcopy(inputs)),
+                    MaskGetitem()(*copy.deepcopy(inputs)),
+                )
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):

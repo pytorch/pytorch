@@ -1242,7 +1242,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
-        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+        if func.__name__ in ("__getitem__", "__setitem__") and isinstance(
+            args[0], torch.Tensor
+        ):
+            is_getitem = func.__name__ == "__getitem__"
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
@@ -1256,10 +1259,28 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 return is_integer_dtype(item.dtype)
 
-            def maybe_tensor_index_item(item: object) -> Any:
+            def is_basic_scalar_tensor_index(
+                item: object,
+            ) -> TypeGuard[torch.Tensor]:
+                # uint8 tensors have legacy mask semantics when used directly as
+                # indices, but are integer values when used as slice bounds.
+                return is_scalar_tensor_index(item) and item.dtype != torch.uint8
+
+            def maybe_tensor_slice_item(item: object) -> Any:
                 if is_scalar_tensor_index(item):
                     return item.item()
                 return item
+
+            def has_traceable_index(item: object) -> bool:
+                if isinstance(item, torch.SymInt):
+                    return is_getitem
+                if isinstance(item, slice):
+                    return any(
+                        (is_getitem and isinstance(s, torch.SymInt))
+                        or is_scalar_tensor_index(s)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                return is_basic_scalar_tensor_index(item)
 
             def rewrite(
                 dim: int, item: Any
@@ -1267,13 +1288,13 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 # Redirect to torch.select for indexing.
                 if item is None:
                     return dim + 1, (torch.unsqueeze, [dim])
+                if isinstance(item, bool):
+                    return None
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
-                if is_scalar_tensor_index(item):
+                if is_basic_scalar_tensor_index(item):
                     return dim, (
-                        lambda t, dim, item: torch.select(
-                            t, dim, maybe_tensor_index_item(item)
-                        ),
+                        lambda t, dim, item: torch.select(t, dim, item.item()),
                         [dim, item],
                     )
                 # Redirect to torch.ops.aten.slice for slicing.
@@ -1291,40 +1312,55 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                         lambda t, dim, start, stop, step: torch.ops.aten.slice(
                             t,
                             dim,
-                            maybe_tensor_index_item(start),
-                            maybe_tensor_index_item(stop),
-                            maybe_tensor_index_item(step),
+                            maybe_tensor_slice_item(start),
+                            maybe_tensor_slice_item(stop),
+                            maybe_tensor_slice_item(step),
                         ),
                         [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
 
             items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
+            original_items = items.copy()
 
-            has_symint = False
+            def has_scalar_tensor_slice_bound(item: object) -> bool:
+                return isinstance(item, slice) and any(
+                    is_scalar_tensor_index(s)
+                    for s in (item.start, item.stop, item.step)
+                )
+
+            def run_setitem_with_normalized_slices() -> None:
+                def normalize_slice(item: object) -> object:
+                    if not isinstance(item, slice):
+                        return item
+                    return slice(
+                        maybe_tensor_slice_item(item.start),
+                        maybe_tensor_slice_item(item.stop),
+                        maybe_tensor_slice_item(item.step),
+                    )
+
+                normalized_items = [normalize_slice(item) for item in original_items]
+                index = (
+                    tuple(normalized_items)
+                    if isinstance(args[1], tuple)
+                    else normalized_items[0]
+                )
+                func(args[0], index, args[2], **kwargs)
+
+            has_traceable_index_value = False
             index_ellipsis = None
             t = args[0]
             n_none_slices = t.ndim + 1
             for i, item in enumerate(items):
-                if (
-                    isinstance(item, torch.SymInt)
-                    or (
-                        isinstance(item, slice)
-                        and any(
-                            isinstance(s, torch.SymInt) or is_scalar_tensor_index(s)
-                            for s in (item.start, item.stop, item.step)
-                        )
-                    )
-                    or is_scalar_tensor_index(item)
-                ):
-                    has_symint = True
+                if has_traceable_index(item):
+                    has_traceable_index_value = True
                 if item is Ellipsis:
                     index_ellipsis = i
                 if item is not None:
                     n_none_slices -= 1
 
-            # only rewrite when there are symints
-            if has_symint:
+            # only rewrite when there are traceable dynamic index values
+            if has_traceable_index_value:
                 if index_ellipsis is not None:
                     none_slices = [slice(None)] * n_none_slices
                     items[index_ellipsis : index_ellipsis + 1] = none_slices
@@ -1334,9 +1370,22 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 sequence: list[tuple[Callable[..., object], list[Any]]] = []
                 for item in items:
                     if (r := rewrite(dim, item)) is None:
+                        if not is_getitem and any(
+                            has_scalar_tensor_slice_bound(item) for item in items
+                        ):
+                            # Advanced/mask indices cannot be represented as a
+                            # chain of views. Normalize only the slice bounds and
+                            # let native setitem preserve the remaining semantics.
+                            return run_setitem_with_normalized_slices, [], {}
                         return func, args, kwargs
                     dim, call_spec = r
                     sequence.append(call_spec)
+
+                if sum(item is not None for item in items) > t.ndim:
+                    # A no-op full slice still specifies a dimension. Defer to
+                    # native indexing so invalid arity raises instead of silently
+                    # applying the valid prefix of the index.
+                    return func, args, kwargs
 
                 def run() -> Any:
                     # Run sequence.
@@ -1344,6 +1393,14 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)
+                    if not is_getitem:
+                        # Native setitem performs more than copy_: notably, it
+                        # strips leading size-one dimensions from tensor values
+                        # before broadcasting and also accepts scalar values.
+                        # Assigning through the traced view preserves those
+                        # semantics while keeping tensor-derived indices symbolic.
+                        func(t, Ellipsis, args[2], **kwargs)
+                        return None
                     return t
 
                 return run, [], {}
