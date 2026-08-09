@@ -14,6 +14,7 @@ import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
 from torch.library import Library  # noqa: SCOPED_LIBRARY
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 def register_symm_mem_args(op, arg_names):
@@ -237,7 +238,7 @@ class TestFunctionalOpCompile(TestCase):
         torch._dynamo.reset()
         super().tearDown()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
     def test_functional_op_compiles_with_symm_mem_args(self):
         """Test that a functional op with registered symm_mem_args compiles and runs."""
         lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
@@ -274,7 +275,7 @@ class TestFunctionalOpCompile(TestCase):
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
         self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
     def test_functional_op_with_multiple_symm_mem_args(self):
         """Test that multiple symm_mem args are registered and visible during compilation."""
         lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
