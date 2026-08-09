@@ -1059,6 +1059,12 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
+# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# pyrefly: ignore [bad-assignment]
+numerics: Literal["default", "strict"] = os.environ.get(
+    "TORCHINDUCTOR_NUMERICS", "default"
+)  # type: ignore[assignment]
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
@@ -3163,6 +3169,7 @@ class eager_numerics:
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
+
 
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
