@@ -235,6 +235,9 @@ def get_warp_size(device) -> int:
 
 
 class TritonConstexprStruct:
+    _fields: tuple[str, ...]
+    _values: tuple[typing.Any, ...]
+
     """Serializable stand-in for user NamedTuple ``tl.constexpr`` values.
 
     Inductor embeds ``triton_meta`` into generated Python via ``repr``. User
@@ -277,11 +280,11 @@ class TritonConstexprStruct:
 
 def _is_namedtuple_instance(value: object) -> bool:
     """True for collections.namedtuple / typing.NamedTuple instances."""
-    cls = type(value)
+    fields = getattr(type(value), "_fields", None)
     return (
         isinstance(value, tuple)
-        and isinstance(getattr(cls, "_fields", None), tuple)
-        and all(isinstance(f, str) for f in cls._fields)
+        and isinstance(fields, tuple)
+        and all(isinstance(field, str) for field in fields)
     )
 
 
