@@ -1114,6 +1114,7 @@ test_better_benchmark() {
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
   git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  pushd "${benchmark_dir}"
 
   python - <<'PY'
 import torch
@@ -1124,7 +1125,6 @@ if count != 8:
 print(f"Found {count} GPUs")
 PY
 
-  pushd "${benchmark_dir}"
   python scripts/bench_parallel.py \
     --benchmark-set benchmarks/v1.json \
     --gpus 0,1,2,3,4,5,6,7 \
