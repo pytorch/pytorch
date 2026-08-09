@@ -506,7 +506,7 @@ class SetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not self.sq_contains(tx, args[0]).as_python_constant():
+        if not self.sq_contains_impl(tx, args[0]).as_python_constant():
             raise_observed_exception(KeyError, tx, args=[args[0]])
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
