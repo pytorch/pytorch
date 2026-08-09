@@ -1,0 +1,226 @@
+diff --git a/gemm_act.py b/gemm_act.py
+index f6bbf7f..0fc8cc0 100644
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -119,0 +120,22 @@ def register_local_reduce_fns(
++def validate_grouped_n_contract_device(
++    group: int | None, device_capacity: tuple[int, int]
++) -> None:
++    """Validate grouped-main support at the public dispatch boundary."""
++    if group is None:
++        return
++    major = device_capacity[0]
++    if major == 12:
++        raise NotImplementedError("grouped_n_contract is not yet supported on SM120")
++    if major not in (10, 11):
++        raise NotImplementedError(
++            "grouped_n_contract is currently validated only on "
++            "SM100 and SM110"
++        )
++    if group == 2 or (group == 4 and major == 10):
++        return
++    raise NotImplementedError(
++        "grouped_n_contract supports group 2 on SM100 and SM110, "
++        "plus group 4 on SM100"
++    )
++
++
+@@ -120,0 +136 @@ class GemmActMixin(ComposableEpiMixin):
++    grouped_n_contract_group = 1
+@@ -426,9 +426,12 @@ class GemmActMixin(ComposableEpiMixin):
+                     if const_expr(arg_kind == 4):
+                         scalar = scalars[scalar_arg_index]
+                         scalar_arg_index += 1
+-                        tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
+-                        tRS_rScalar.fill(scalar[0])
+-                        epilogue_aux_values.append(tRS_rScalar.load())
++                        if const_expr(self.grouped_n_contract_group == 1):
++                            tRS_rScalar = cute.make_rmem_tensor_like(tRS_rD, scalar.dtype)
++                            tRS_rScalar.fill(scalar[0])
++                            epilogue_aux_values.append(tRS_rScalar.load())
++                        else:
++                            epilogue_aux_values.append(scalar[0])
+                     else:
+                         if const_expr(arg_kind == 1):
+                             epilogue_aux = tRsTileAuxes[tile_arg_index]
+@@ -439,11 +442,18 @@ class GemmActMixin(ComposableEpiMixin):
+                         else:
+                             epilogue_aux = tDrColVecs[col_arg_index]
+                             col_arg_index += 1
+-                        tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+-                            tRS_rD, epilogue_aux.element_type
+-                        )
+-                        tRS_rEpilogueAux.store(epilogue_aux.load())
+-                        epilogue_aux_values.append(tRS_rEpilogueAux.load())
++                        if const_expr(
++                            self.grouped_n_contract_group != 1 and arg_kind == 3
++                        ):
++                            epilogue_aux_values.append(
++                                cute.filter_zeros(epilogue_aux).load()[0]
++                            )
++                        else:
++                            tRS_rEpilogueAux = cute.make_rmem_tensor_like(
++                                tRS_rD, epilogue_aux.element_type
++                            )
++                            tRS_rEpilogueAux.store(epilogue_aux.load())
++                            epilogue_aux_values.append(tRS_rEpilogueAux.load())
+             if const_expr(tDrLocalReduceValue is not None):
+                 epilogue_aux_values.append(tDrLocalReduceValue.load())
+             epilogue_result = params.tensor_epilogue_fn(
+@@ -446,10 +456,0 @@ class GemmActMixin(ComposableEpiMixin):
+-            elif const_expr(params.tensor_epilogue_returns_local_reduce):
+-                tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
+-                if const_expr(params.local_reduce_feeds_main):
+-                    tDrLocalReduce = tDrLocalReduce.local_reduce
+-                tRS_rD.store(epilogue_result[0])
+-                tDrLocalReduce.store(epilogue_result[1])
+-                tRS_rAuxOut = cute.make_rmem_tensor(
+-                    epilogue_result[0].shape, self.acc_dtype
+-                )
+-                tRS_rAuxOut.store(epilogue_result[0])
+@@ -457,4 +463,14 @@ class GemmActMixin(ComposableEpiMixin):
+-                tRS_rAuxOut = cute.make_rmem_tensor(
+-                    epilogue_result.shape, self.acc_dtype
+-                )
+-                tRS_rAuxOut.store(epilogue_result)
++                main_result = epilogue_result
++                if const_expr(params.tensor_epilogue_returns_local_reduce):
++                    tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
++                    if const_expr(params.local_reduce_feeds_main):
++                        tDrLocalReduce = tDrLocalReduce.local_reduce
++                    tDrLocalReduce.store(epilogue_result[1])
++                    main_result = epilogue_result[0]
++                    if const_expr(self.grouped_n_contract_group == 1):
++                        tRS_rD.store(main_result)
++                result_dtype = self.acc_dtype
++                if const_expr(self.grouped_n_contract_group != 1):
++                    result_dtype = main_result.element_type
++                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
++                tRS_rAuxOut.store(main_result)
+@@ -491,0 +508,62 @@ class GemmActSm120(GemmActMixin, GemmSm120):
++def _grouped_n_contract_epi_tile(epi_tile, group):
++    if isinstance(epi_tile[1], cute.Layout):
++        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
++    return (epi_tile[0], epi_tile[1] // group)
++
++
++def _grouped_n_contract_epi_tile_fn(gemm, epi_tile):
++    return _grouped_n_contract_epi_tile(epi_tile, 2)
++
++
++def _grouped_n_contract4_epi_tile_fn(gemm, epi_tile):
++    return _grouped_n_contract_epi_tile(epi_tile, 4)
++
++
++class GemmGroupedNContractMixin(GemmActMixin):
++    """Store the contracted logical main through PostAct while leaving D unused.
++
++    TODO: Move this specialization behind a stable provider-extension boundary
++    so Inductor can own it beside the generated epilogue.
++    """
++
++    grouped_n_contract_group = 2
++    _epi_ops = (
++        Scalar("alpha"),
++        Scalar("beta"),
++        Scalar("sr_seed", dtype=Int32),
++        RowVecLoad("mRowVecBroadcast"),
++        ColVecLoad("mColVecBroadcast"),
++        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
++        ScalarTupleLoad("mTensorEpilogueScalars"),
++        # TODO: Add row/tile captures after chunked N-sensitive loads are remapped.
++        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
++    )
++
++    def epi_to_underlying_arguments(
++        self, args: GemmActMixin.EpilogueArguments, *, loc=None, ip=None
++    ):
++        params = super().epi_to_underlying_arguments(args, loc=loc, ip=ip)
++        self.cta_tile_shape_aux_out_mn = (
++            self.cta_tile_shape_mnk[0],
++            self.cta_tile_shape_mnk[1] // self.grouped_n_contract_group,
++        )
++        return params
++
++class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
++    pass
++
++
++class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
++    grouped_n_contract_group = 4
++    _epi_ops = (
++        Scalar("alpha"),
++        Scalar("beta"),
++        Scalar("sr_seed", dtype=Int32),
++        RowVecLoad("mRowVecBroadcast"),
++        ColVecLoad("mColVecBroadcast"),
++        ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
++        ScalarTupleLoad("mTensorEpilogueScalars"),
++        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
++    )
++
++
+@@ -664,0 +766 @@ def _compile_gemm_act(
++    main_output_transform_group,
+@@ -688,0 +791,4 @@ def _compile_gemm_act(
++        "grouped_n_contract": {
++            10: GemmGroupedNContractSm100,
++            11: GemmGroupedNContractSm100,
++        },
+@@ -690,0 +800,2 @@ def _compile_gemm_act(
++    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group == 4:
++        GemmCls = GemmGroupedNContract4Sm100
+@@ -706 +817,5 @@ def _compile_gemm_act(
+-    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
++    pa_n = (
++        cute.sym_int()
++        if gemm_cls_name in ("gated", "grouped_n_contract")
++        else n
++    )
+@@ -720 +835,3 @@ def _compile_gemm_act(
+-        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
++        pa_leading_dim = (
++            1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
++        )
+@@ -900,0 +1018 @@ def gemm_act(
++    main_output_transform_group: int | None = None,
+@@ -950,0 +1069,16 @@ def gemm_act(
++    if main_output_transform_group is not None:
++        if main_output_transform_group not in (2, 4):
++            raise NotImplementedError(
++                f"unsupported grouped_n_contract group={main_output_transform_group}"
++            )
++        if main_output_transform_group == 4 and concat_layout and "B" in concat_layout:
++            raise NotImplementedError(
++                "grouped_n_contract group 4 does not yet support chunked B layout"
++            )
++        if tensor_epilogue_fn is None and tensor_epilogue_key is None:
++            raise RuntimeError("grouped_n_contract requires a generated tensor epilogue")
++        if tensor_epilogue_returns_aux or tensor_epilogue_returns_local_reduce:
++            raise NotImplementedError(
++                "grouped_n_contract does not compose with auxiliary outputs"
++            )
++        gemm_cls_name = "grouped_n_contract"
+@@ -957,0 +1092,18 @@ def gemm_act(
++    if main_output_transform_group is not None and any(
++        tensor.stride(-1) != 1 for tensor in postact_tensors
++    ):
++        raise NotImplementedError("grouped_n_contract requires PostAct to be n-major")
++    if main_output_transform_group is not None:
++        physical_n = B.shape[-2]
++        if physical_n % main_output_transform_group != 0:
++            raise RuntimeError(
++                f"grouped_n_contract physical N={physical_n} must be divisible by "
++                f"group={main_output_transform_group}"
++            )
++        expected_shape = (*A.shape[:-1], physical_n // main_output_transform_group)
++        for tensor in postact_tensors:
++            if tuple(tensor.shape) != expected_shape:
++                raise RuntimeError(
++                    "grouped_n_contract requires PostAct shape "
++                    f"{expected_shape}, got {tuple(tensor.shape)}"
++                )
+@@ -1034,0 +1173 @@ def gemm_act(
++    validate_grouped_n_contract_device(main_output_transform_group, device_capacity)
+@@ -1158,0 +1298 @@ def gemm_act(
++        0 if main_output_transform_group is None else main_output_transform_group,

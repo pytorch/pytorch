@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import copy
 import dataclasses
 import inspect
 import logging
@@ -7,10 +6,9 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, NoReturn, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
-from torch._prims_common import clone_preserve_strides
 from torch.utils._pytree import (
     _get_node_type,
     BUILTIN_TYPES,
@@ -1068,8 +1066,6 @@ class AdditionalInputs:
     those that are the same as the original are considered static. Moreover, we verify
     that the additional inputs are valid for the exported program. This guarantees that
     tracing with them instead of the original would have generated the same graph.
-    Verification raises an error if copying a Tensor example cannot preserve its layout
-    and aliasing without mutating the original.
 
     Example::
 
@@ -1152,156 +1148,17 @@ class AdditionalInputs:
             torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
-            examples = (args, kwargs or {})
-
-            def fail_copy() -> NoReturn:
-                raise RuntimeError(
-                    "AdditionalInputs verification cannot copy Tensor examples "
-                    "while preserving their layout and aliasing."
+            if hasattr(epm, "_guards_fn"):
+                flat_args_with_path = torch.export._unlift._check_inputs_match(
+                    args, kwargs or {}, epm._in_spec
                 )
-
-            deepcopy_memo = {}
-            for example in tree_iter(examples):
-                if not isinstance(example, torch.Tensor) or example.is_leaf:
-                    continue
-                if (
-                    example.layout is not torch.strided
-                    or example._is_view()
-                    and example._base is not None
-                    and example._base.is_leaf
-                    and example._base.requires_grad
-                ):
-                    fail_copy()
-                detached = example.detach().requires_grad_(example.requires_grad)
-                deepcopy_memo[id(example)] = clone_preserve_strides(detached)
-
-            args_copy, kwargs_copy = copy.deepcopy(examples, memo=deepcopy_memo)
-
-            original_tensors = [
-                x for x in tree_iter(examples) if isinstance(x, torch.Tensor)
-            ]
-            copied_tensors = [
-                x
-                for x in tree_iter((args_copy, kwargs_copy))
-                if isinstance(x, torch.Tensor)
-            ]
-            original_to_copy_tensor = {}
-            copy_to_original_tensor = {}
-            original_to_copy_storage = {}
-            copy_to_original_storage = {}
-
-            def record_tensor_copy(
-                original: torch.Tensor,
-                duplicate: torch.Tensor,
-                storage_less: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
-            ) -> None:
-                metadata_matches = (
-                    type(original) is type(duplicate)
-                    and original.device == duplicate.device
-                    and original.dtype == duplicate.dtype
-                    and original.layout == duplicate.layout
-                    and original.size() == duplicate.size()
-                    and original.requires_grad == duplicate.requires_grad
-                    and original.is_leaf == duplicate.is_leaf
-                )
-                if original.layout is torch.strided:
-                    metadata_matches = metadata_matches and (
-                        original.stride() == duplicate.stride()
-                        and original.storage_offset() == duplicate.storage_offset()
-                    )
-
-                original_has_storage = torch._C._has_storage(original)
-                duplicate_has_storage = torch._C._has_storage(duplicate)
-                if (
-                    not metadata_matches
-                    or original_has_storage != duplicate_has_storage
-                ):
-                    fail_copy()
-
-                original_tensor = id(original)
-                copied_tensor = id(duplicate)
-                if (
-                    original_tensor == copied_tensor
-                    or original_to_copy_tensor.setdefault(
-                        original_tensor, copied_tensor
-                    )
-                    != copied_tensor
-                    or copy_to_original_tensor.setdefault(
-                        copied_tensor, original_tensor
-                    )
-                    != original_tensor
-                ):
-                    fail_copy()
-
-                if not original_has_storage:
-                    if storage_less is None:
-                        fail_copy()
-                    storage_less.append((original, duplicate))
-                    return
-
-                original_storage = original.untyped_storage()._cdata
-                copied_storage = duplicate.untyped_storage()._cdata
-                if (
-                    original_storage == copied_storage
-                    or original_to_copy_storage.setdefault(
-                        original_storage, copied_storage
-                    )
-                    != copied_storage
-                    or copy_to_original_storage.setdefault(
-                        copied_storage, original_storage
-                    )
-                    != original_storage
-                ):
-                    fail_copy()
-
-            storage_less = []
-            for original, duplicate in zip(
-                original_tensors, copied_tensors, strict=True
-            ):
-                record_tensor_copy(original, duplicate, storage_less)
-
-            if storage_less and len(original_tensors) > 1:
-                for original, duplicate in storage_less:
-                    if original.layout is torch.sparse_coo:
-                        original_components = (original._indices(), original._values())
-                        copied_components = (duplicate._indices(), duplicate._values())
-                    elif original.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                        original_components = (
-                            original.crow_indices(),
-                            original.col_indices(),
-                            original.values(),
-                        )
-                        copied_components = (
-                            duplicate.crow_indices(),
-                            duplicate.col_indices(),
-                            duplicate.values(),
-                        )
-                    elif original.layout in {torch.sparse_csc, torch.sparse_bsc}:
-                        original_components = (
-                            original.ccol_indices(),
-                            original.row_indices(),
-                            original.values(),
-                        )
-                        copied_components = (
-                            duplicate.ccol_indices(),
-                            duplicate.row_indices(),
-                            duplicate.values(),
-                        )
-                    else:
-                        fail_copy()
-
-                    for original_component, copied_component in zip(
-                        original_components, copied_components, strict=True
-                    ):
-                        record_tensor_copy(original_component, copied_component)
-            epm_copy = copy.deepcopy(epm)
-            try:
-                epm_copy(*args_copy, **kwargs_copy)
-            except AssertionError as e:
-                raise RuntimeError(
-                    "Expected additional input to satisfy the exported program, "
-                    f"but got runtime assertion error: {e}"
-                ) from e
+                try:
+                    epm._guards_fn(*(arg for _, arg in flat_args_with_path))
+                except AssertionError as e:
+                    raise RuntimeError(
+                        "Expected additional input to satisfy the exported program, "
+                        f"but got runtime assertion error: {e}"
+                    ) from e
 
 
 def _warn_on_None_dynamic_shape_dimension():

@@ -151,6 +151,7 @@ torch.library.define(
     "(Tensor x) -> (Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+torch.library.define("testlib::additional_inputs_side_effect", "(Tensor x) -> Tensor")
 torch.library.define(
     "testlib::foo_unbacked",
     "(Scalar x) -> (Tensor)",
@@ -196,6 +197,20 @@ def foo_unbacked(x):
     if x < 6:
         return torch.ones(4, 4)
     return torch.ones(4, 4)
+
+
+_ADDITIONAL_INPUTS_SIDE_EFFECTS = []
+
+
+@torch.library.impl("testlib::additional_inputs_side_effect", "CPU")
+def additional_inputs_side_effect_impl(x):
+    _ADDITIONAL_INPUTS_SIDE_EFFECTS.append(tuple(x.shape))
+    return x.clone()
+
+
+@torch.library.register_fake("testlib::additional_inputs_side_effect")
+def additional_inputs_side_effect_fake(x):
+    return torch.empty_like(x)
 
 
 @dataclass
@@ -385,9 +400,9 @@ class TestDynamismExpression(TestCase):
                         Slice(),
                         (x,),
                         dynamic_shapes=dynamic_shapes,
-                        strict=False,
                     )
                     self.assertEqual(len(ep.range_constraints), 1)
+                    self.assertEqual(ep._guards_code, [])
                     for new_width in (0, 3, 5, 8, 13):
                         y = torch.randn(4, new_width)
                         self.assertEqual(ep.module()(y), y[:, index])
@@ -395,8 +410,6 @@ class TestDynamismExpression(TestCase):
     def test_export_slice_static_bound_crosses_dynamic_dim(self):
         self._check_export_slice_static_bound_crosses_dynamic_dim((slice(None, 5),))
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_slice_static_bound_crosses_dynamic_dim_variants(self):
         self._check_export_slice_static_bound_crosses_dynamic_dim(
             (
@@ -4821,7 +4834,8 @@ def forward(self, causal_mask, fill_value):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 x, y = xs["data"][0]
-                assert x.shape[0] >= 8  # noqa: S101
+                if not (x.shape[0] >= 8):
+                    raise AssertionError(f"expected x.shape[0] >= 8, got {x.shape[0]}")
                 assert y.shape[0] <= 32  # noqa: S101
                 return x + 1, y + 2
 
@@ -6913,126 +6927,53 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                         strict=strict,
                     )
 
-    def test_additional_inputs_verify_does_not_mutate(self):
-        class InputMutation(torch.nn.Module):
-            def forward(self, x):
-                x.add_(1)
-                return x
+    def test_additional_inputs_verify_does_not_run_program(self):
+        _ADDITIONAL_INPUTS_SIDE_EFFECTS.clear()
 
-        input1 = (torch.zeros(3),)
-        input2 = (torch.zeros(4),)
+        class SideEffect(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.testlib.additional_inputs_side_effect(x)
+
+        ai = torch.export.AdditionalInputs()
+        ai.add((torch.ones(4),))
+
+        export(SideEffect(), (torch.ones(3),), dynamic_shapes=ai)
+
+        self.assertEqual(_ADDITIONAL_INPUTS_SIDE_EFFECTS, [])
+
+    def test_additional_inputs_verify_preserves_rng_state(self):
+        class Random(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand_like(x)
+
+        input1 = (torch.ones(3),)
+        input2 = (torch.ones(4),)
         ai = torch.export.AdditionalInputs()
         ai.add(input2)
+        rng_state = torch.get_rng_state().clone()
 
-        torch.export.export(InputMutation(), input1, dynamic_shapes=ai)
-        self.assertEqual(input2[0], torch.zeros(4))
+        export(Random(), input1, dynamic_shapes=ai)
 
-        expanded_input = torch.zeros(1).expand(4)
-        ai = torch.export.AdditionalInputs()
-        ai.add((expanded_input,))
-        with self.assertRaisesRegex(RuntimeError, "more than one element"):
-            torch.export.export(InputMutation(), input1, dynamic_shapes=ai)
-        self.assertEqual(expanded_input, torch.zeros(4))
+        self.assertEqual(torch.get_rng_state(), rng_state)
 
-        class AliasedInputMutation(torch.nn.Module):
-            def forward(self, x, y):
-                x.add_(1)
-                torch._assert_async(torch.all(y == 1))
-                return y
+    @requires_gpu
+    def test_additional_inputs_verify_preserves_accelerator_rng_state(self):
+        device = torch.device(f"{device_type}:0")
 
-        input_base = torch.zeros(3)
-        additional_base = torch.zeros(4)
-        aliased_inputs = (additional_base[:], additional_base[:])
-        ai = torch.export.AdditionalInputs()
-        ai.add(aliased_inputs)
-        torch.export.export(
-            AliasedInputMutation(),
-            (input_base[:], input_base[:]),
-            dynamic_shapes=ai,
-        )
-        self.assertEqual(additional_base, torch.zeros(4))
-
-        grad_input = torch.zeros(4, requires_grad=True)
-        ai = torch.export.AdditionalInputs()
-        ai.add((grad_input,))
-        with self.assertRaisesRegex(RuntimeError, "leaf Variable"):
-            torch.export.export(InputMutation(), input1, dynamic_shapes=ai)
-        self.assertEqual(grad_input, torch.zeros(4))
-
-        meta_input = torch.zeros(1, device="meta").expand(4)
-        ai = torch.export.AdditionalInputs()
-        ai.add((meta_input,))
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot copy Tensor examples while preserving"
-        ):
-            torch.export.export(
-                InputMutation(),
-                (torch.zeros(3, device="meta"),),
-                dynamic_shapes=ai,
-            )
-
-        class ToDense(torch.nn.Module):
+        class Random(torch.nn.Module):
             def forward(self, x):
-                return x.to_dense()
+                return x + torch.rand(x.shape, device=device).cpu()
 
-        sparse_input = torch.eye(4).to_sparse()
-        ai = torch.export.AdditionalInputs()
-        ai.add((sparse_input,))
-        torch.export.export(
-            ToDense(),
-            (torch.eye(3).to_sparse(),),
-            dynamic_shapes=ai,
-        )
-        self.assertEqual(sparse_input, torch.eye(4).to_sparse())
-
-        class AddSparse(torch.nn.Module):
-            def forward(self, x, y):
-                return (x + y).to_dense()
-
-        sparse_alias = sparse_input.detach()
-        ai = torch.export.AdditionalInputs()
-        ai.add((sparse_input, sparse_alias))
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot copy Tensor examples while preserving"
-        ):
-            torch.export.export(
-                AddSparse(),
-                (torch.eye(3).to_sparse(), torch.eye(3).to_sparse()),
-                dynamic_shapes=ai,
-            )
-
-        class NoMutation(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        nonleaf_input = torch.ones(4, requires_grad=True) * 2
-        ai = torch.export.AdditionalInputs()
-        ai.add((nonleaf_input,))
-        torch.export.export(InputMutation(), input1, dynamic_shapes=ai)
-        self.assertEqual(nonleaf_input, torch.full((4,), 2.0))
-
-        leaf = torch.ones(4, requires_grad=True)
-        ai = torch.export.AdditionalInputs()
-        ai.add((leaf[:],))
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot copy Tensor examples while preserving"
-        ):
-            torch.export.export(NoMutation(), input1, dynamic_shapes=ai)
-
-        class BufferMutation(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
-
-            def forward(self, x):
-                self.buf.add_(1)
-                return x + self.buf
-
-        mod = BufferMutation()
+        input1 = (torch.ones(3),)
+        input2 = (torch.ones(4),)
         ai = torch.export.AdditionalInputs()
         ai.add(input2)
-        torch.export.export(mod, input1, dynamic_shapes=ai)
-        self.assertEqual(mod.buf, torch.zeros(1))
+        device_module = torch.get_device_module(device_type)
+        rng_state = device_module.get_rng_state(device).clone()
+
+        export(Random(), input1, dynamic_shapes=ai)
+
+        self.assertEqual(device_module.get_rng_state(device), rng_state)
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
