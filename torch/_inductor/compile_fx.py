@@ -268,9 +268,14 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   address cudagraphs recorded.
 # Codegen itself does NOT consult staticness: triton code assumes the
 # alignment of the example inputs (see Note: [Input Alignment handling in
-# Inductor]). An input whose example was misaligned gets no-assumption code
-# and never needs a check or copy; an aligned example bakes in the fast
-# path, with the runtime check as the safety net for non-static inputs.
+# Inductor]). Per input, at compile time:
+#
+#   example input      | generated code      | later misaligned call
+#   -------------------+---------------------+--------------------------
+#   misaligned         | no assumption       | runs fine, no check/copy
+#   aligned, nonstatic | assumes aligned     | runtime check -> clone
+#   aligned, static    | assumes aligned     | (contract: cannot happen)
+#
 # Consequently a misclassified static input is a correctness bug,
 # not a missed optimization: kernels may run with a baked-in alignment the
 # runtime tensor doesn't satisfy (CUDA misaligned address), and cudagraph
@@ -283,16 +288,24 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 # needs an alignment guard on unguarded static inputs so a misaligned swap
 # recompiles instead.
 #
-# In the backward, staticness cannot be looked up positionally: the
-# backward's input list is (saved values in partitioner-chosen order,
-# tangents, ...), so forward input indices don't apply there. Instead, the
-# producer of the backward graph stamps meta["is_static_input"] on
-# placeholders it knows to be address-stable; AOTAutograd's partitioner
-# does this in _extract_fwd_bwd_modules, where primals are still 1:1 with
-# flat forward inputs. Unstamped placeholders fall back to name-based
-# classification (all "primals_*" static; see compile_fx_backward), so
-# producers that do not stamp (custom partition_fns) keep the historical,
-# less safe behavior.
+# The backward graph's inputs are tangents plus saved tensors, and a saved
+# tensor's staticness derives from what it is: a saved activation is
+# allocated by the compiled forward (address-stable while cudagraphs owns
+# the pool, and always aligned), while a saved forward *input* is exactly
+# as static as it was in the forward -- a saved param is address-stable, a
+# saved plain user input is not. So classifying backward inputs requires
+# mapping each saved primal back to the forward input it came from and
+# consulting the forward's static_input_indices. That mapping cannot be
+# done positionally from here: the backward's input list is (saved values
+# in partitioner-chosen order, tangents, ...), so forward input indices
+# don't apply to it. Instead, the producer of the backward graph -- the
+# only party that still knows the correspondence -- stamps
+# meta["is_static_input"] on placeholders it knows to be address-stable;
+# AOTAutograd's partitioner does this in _extract_fwd_bwd_modules, where
+# primals are still 1:1 with flat forward inputs. Unstamped placeholders
+# fall back to name-based classification (all "primals_*" static; see
+# compile_fx_backward), so producers that do not stamp (custom
+# partition_fns) keep the historical, less safe behavior.
 def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
