@@ -19,7 +19,7 @@ def get_tensor_symint(tensor, *, coeff=1):
 
     # NB: Only FakeTensor is associated with a memo
     tensor = mb_unwrap_functional_tensor(tensor)
-    if isinstance(tensor, FakeTensor):
+    if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return tensor.get_nested_int(coeff=coeff)
 
     global _tensor_id_counter
@@ -261,12 +261,12 @@ class NestedTensor(torch.Tensor):
     # Convenience accessors that return a min / max seqlen if one is present and do NOT
     # compute / cache them if they're not.
     @property
-    def _maybe_max_seqlen(self) -> Optional[int]:
+    def _maybe_max_seqlen(self) -> int | torch.SymInt | None:
         mt = self._max_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
     @property
-    def _maybe_min_seqlen(self) -> Optional[int]:
+    def _maybe_min_seqlen(self) -> int | torch.SymInt | None:
         mt = self._min_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
@@ -360,7 +360,7 @@ class NestedTensor(torch.Tensor):
         ragged_source = offsets if lengths is None else lengths
         ragged_size = outer_size[ragged_idx]
         ragged_source = mb_unwrap_functional_tensor(ragged_source)
-        if isinstance(ragged_source, FakeTensor):
+        if isinstance(ragged_source, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             if is_nested_int(ragged_size):
                 ragged_source.nested_int_memo = ragged_size
         elif is_nested_int(ragged_size):

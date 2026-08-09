@@ -22,9 +22,9 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -677,11 +677,11 @@ def sc_visit(
             match getattr(e, a):
                 case torch.Tensor() as inner:
                     visit(inner)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
     visit(t)
@@ -753,8 +753,11 @@ def apply_in_graph_mutations(
     if input_info.mutates_storage_metadata:
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
-                # pyrefly: ignore [bad-argument-type, no-matching-overload]
-                inpt_old.set_(inpt_new)
+                if input_info.mutation_is_shallow_copy_data:
+                    torch.ops.aten.shallow_copy_data_(inpt_old, inpt_new)
+                else:
+                    # pyrefly: ignore [bad-argument-type, no-matching-overload]
+                    inpt_old.set_(inpt_new)
 
     # Note [Ordering of resize_() and set_()]
     # Importantly: the common usage in FSDP is that we have a dummy parameter
@@ -1295,7 +1298,7 @@ def handle_effect_tokens_fn(
     return inner_fn, args, args_descs
 
 
-# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
+# Given a function operating on Subclass -> Subclass, returns a function that operates on Tensor -> Tensor
 # Also returns:
 # - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
 # - the updated ViewAndMutationMeta for this dense -> dense function.
@@ -1356,7 +1359,11 @@ def aot_dispatch_subclass(
                 )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
+            subclass_meta.grad_input_metas = create_subclass_meta(
+                grad_inputs,
+                include_nested_ints=True,
+                allowed_nested_int_ids=allowed_nested_int_ids,
+            )
 
             # Add extra symints as outputs to the forward/backward graphs
             forward_outs, forward_outs_descs = unwrap_tensor_subclasses(
@@ -1370,6 +1377,8 @@ def aot_dispatch_subclass(
                 wrapped_outs[1],
                 wrapped_outs_descs[1],
                 append_symints=True,
+                include_nested_ints=True,
+                allowed_nested_int_ids=allowed_nested_int_ids,
             )
             return (
                 (forward_outs, backward_outs),
@@ -1475,14 +1484,15 @@ def aot_dispatch_subclass(
     # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
-    meta_updated = run_functionalized_fw_and_collect_metadata(
-        without_output_descs(metadata_fn),
-        # pyrefly: ignore [bad-argument-type]
-        flat_args_descs=primals_unwrapped_descs,
-        static_input_indices=remapped_static_indices,
-        keep_input_mutations=meta.keep_input_mutations,
-        # pyrefly: ignore [not-iterable]
-    )(*primals_unwrapped)
+    with torch._dynamo.eval_frame._use_eager_on_nested_compile():
+        meta_updated = run_functionalized_fw_and_collect_metadata(
+            without_output_descs(metadata_fn),
+            # pyrefly: ignore [bad-argument-type]
+            flat_args_descs=primals_unwrapped_descs,
+            static_input_indices=remapped_static_indices,
+            keep_input_mutations=meta.keep_input_mutations,
+            # pyrefly: ignore [not-iterable]
+        )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
 
@@ -1502,7 +1512,6 @@ def create_functional_call(
     strict_out_tuple: bool = True,
 ) -> Callable[..., Any]:
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
-    # https://github.com/pytorch/pytorch/issues/103569
 
     @simple_wraps(mod)
     def functional_call(*args: Any, **kwargs: Any) -> Any:
