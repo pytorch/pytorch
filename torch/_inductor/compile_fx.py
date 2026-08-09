@@ -284,8 +284,8 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #   backward input                    | addr-stable    | align-stable
 #   ----------------------------------+----------------+------------------
 #   saved fw input                    | same as that input in the forward
-#   saved inductor intermediate       | cudagraphs [2] | yes [2]
-#   saved fallback (custom) op output | cudagraphs     | NO: KNOWN HOLE [3]
+#   saved inductor intermediate       | pool-owned [2] | yes [2]
+#   saved fallback (custom) op output | pool-owned [2] | NO: KNOWN HOLE [3]
 #   tangent                           | no             | no
 #
 # [1] per-recompile: may legally move under inline_inbuilt_nn_modules
@@ -293,13 +293,22 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #     misaligned, alignment baked into existing kernels is wrong and we
 #     IMA; dynamo needs an alignment guard on unguarded statics so a
 #     misaligned swap recompiles instead.
-# [2] allocator-aligned base + deterministic codegen offsets: even a saved
-#     odd-offset view is stably misaligned, so bw codegen makes no
-#     assumption for it. Under cudagraphs, activations from inline code
-#     between graph partitions are NOT pool-allocated and get demoted
-#     (get_static_bw_input_idxs, see compile_fx_backward). A saved alias
-#     of a user input takes the "saved fw input" row: the partitioner
-#     saves the base primal and recomputes the view in backward.
+# [2] align: allocator-aligned base + deterministic codegen offsets; even
+#     a saved odd-offset view is stably misaligned, so bw codegen makes no
+#     assumption for it. addr: "cudagraphs on" is NOT sufficient --
+#     address-stability holds only for tensors allocated inside a region a
+#     CUDA graph actually owns. With piecewise/partitioned forwards
+#     (graph_partition, cudagraph-unsafe ops), code between partitions
+#     runs eagerly, so its allocations move per call even though
+#     "cudagraphs is on"; those saved activations are demoted wholesale
+#     (forward_is_partitioned -> get_static_bw_input_idxs, see
+#     compile_fx_backward -- conservative: partition-owned activations are
+#     demoted too). Same caveat at the dynamo level: graph breaks make
+#     each compiled region its own cudagraph (trees), and staticness only
+#     transfers within a region's pool lineage (cudagraph_managed_idxs).
+#     A saved alias of a user input takes the "saved fw input" row: the
+#     partitioner saves the base primal and recomputes the view in
+#     backward.
 # [3] allocated by arbitrary user code, so alignment may vary call to
 #     call, but it is classified static (unstamped, non-primal) and gets
 #     no runtime check: an alignment flip IMAs in the backward. Inductor
