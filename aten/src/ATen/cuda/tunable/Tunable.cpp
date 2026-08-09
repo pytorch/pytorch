@@ -24,9 +24,13 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -47,9 +51,127 @@
 
 namespace at::cuda::tunable {
 
+namespace {
+
+// Matches a tunableop params signature against a wildcard pattern. Both
+// strings are split on '_' and compared token-by-token; '*' in the pattern
+// matches any single token. Returns true iff every pattern token equals
+// the corresponding concrete token (or is '*').
+bool matches_wildcard_pattern(
+    const std::string& pattern,
+    const std::string& concrete) {
+  if (pattern.find('*') == std::string::npos) {
+    // Pattern has no wildcard token -> only exact match counts.
+    return pattern == concrete;
+  }
+  size_t p_i = 0, c_i = 0;
+  while (p_i < pattern.size() && c_i < concrete.size()) {
+    // Find next token boundary in each string.
+    size_t p_end = pattern.find('_', p_i);
+    if (p_end == std::string::npos) {
+      p_end = pattern.size();
+    }
+    size_t c_end = concrete.find('_', c_i);
+    if (c_end == std::string::npos) {
+      c_end = concrete.size();
+    }
+    const auto p_tok = std::string_view(pattern).substr(p_i, p_end - p_i);
+    const auto c_tok = std::string_view(concrete).substr(c_i, c_end - c_i);
+    if (p_tok != "*" && p_tok != c_tok) {
+      return false;
+    }
+    p_i = (p_end == pattern.size()) ? pattern.size() : p_end + 1;
+    c_i = (c_end == concrete.size()) ? concrete.size() : c_end + 1;
+  }
+  // Both must be fully consumed (same token count).
+  return p_i >= pattern.size() && c_i >= concrete.size();
+}
+
+constexpr int64_t kServingDispatchLogEvery = 100000;
+constexpr size_t kServingDispatchMaxMissSigs = 2000;
+
+std::atomic<int64_t> serving_dispatch_total{0};
+std::atomic<int64_t> serving_dispatch_concrete_hits{0};
+std::atomic<int64_t> serving_dispatch_wildcard_hits{0};
+std::atomic<int64_t> serving_dispatch_misses{0};
+std::atomic<int64_t> serving_dispatch_last_logged_total{0};
+
+} // namespace
+
 TuningContext* getTuningContext() {
   static TuningContext tuning_context;
   return &tuning_context;
+}
+
+void LogServingDispatchSummary(bool force) {
+  if (!getTuningContext()->IsServingDispatchCounterEnabled()) {
+    return;
+  }
+  const auto total = serving_dispatch_total.load(std::memory_order_relaxed);
+  if (total == 0) {
+    return;
+  }
+
+  auto last_logged =
+      serving_dispatch_last_logged_total.load(std::memory_order_relaxed);
+  if (!force && total - last_logged < kServingDispatchLogEvery) {
+    return;
+  }
+  if (!serving_dispatch_last_logged_total.compare_exchange_strong(
+          last_logged,
+          total,
+          std::memory_order_relaxed,
+          std::memory_order_relaxed)) {
+    return;
+  }
+
+  const auto concrete_hits =
+      serving_dispatch_concrete_hits.load(std::memory_order_relaxed);
+  const auto wildcard_hits =
+      serving_dispatch_wildcard_hits.load(std::memory_order_relaxed);
+  const auto misses = serving_dispatch_misses.load(std::memory_order_relaxed);
+  const auto hits = concrete_hits + wildcard_hits;
+  const auto hit_rate = static_cast<double>(hits) * 100.0 /
+      static_cast<double>(total);
+  TORCH_WARN(
+      "[TunableOp][DispatchCounter] total=",
+      total,
+      " hits=",
+      hits,
+      " concrete=",
+      concrete_hits,
+      " wildcard=",
+      wildcard_hits,
+      " misses=",
+      misses,
+      " hit_rate_pct=",
+      hit_rate);
+}
+
+void RecordServingDispatch(bool tuned_hit, bool via_wildcard, const std::string& op_signature, const std::string& params_signature) {
+  if (!getTuningContext()->IsServingDispatchCounterEnabled()) {
+    return;
+  }
+  if (!tuned_hit) {
+    serving_dispatch_misses.fetch_add(1, std::memory_order_relaxed);
+    // Dump each distinct missing GEMM signature once (capped) so we can see
+    // exactly which shapes/ops fall through to the default (untuned) kernel.
+    if (!op_signature.empty()) {
+      static std::mutex miss_sig_mutex;
+      static std::unordered_set<std::string> logged_miss_sigs;
+      std::lock_guard<std::mutex> lk(miss_sig_mutex);
+      if (logged_miss_sigs.size() < kServingDispatchMaxMissSigs &&
+          logged_miss_sigs.emplace(op_signature + "," + params_signature).second) {
+        TORCH_WARN("[TunableOp][Miss] ", op_signature, ",", params_signature);
+      }
+    }
+  } else if (via_wildcard) {
+    serving_dispatch_wildcard_hits.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    serving_dispatch_concrete_hits.fetch_add(1, std::memory_order_relaxed);
+  }
+  serving_dispatch_total.fetch_add(1, std::memory_order_relaxed);
+  LogServingDispatchSummary(false);
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
@@ -83,12 +205,55 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
-  if (it == km.cend()) {
-    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
+  if (it != km.cend()) {
+    TUNABLE_LOG3(
+        "ResultEntry found for ",
+        op_signature,
+        ",",
+        params_signature);
+    return it->second;
+  }
+  // Exact-match-only Lookup. Callers that want to look up a wildcard key
+  // (e.g. operator() in TunableOp.h, or try_dispatch in Blas.cpp) must pass
+  // the already-formed wildcard signature; this Lookup will neither expand
+  // wildcards in the request nor match a wildcard request against concrete
+  // candidates. The previous "fuzzy fallback" scan was removed because it
+  // conflicted with the case-4 "is the wildcard KEY persisted?" check
+  // performed by operator() (the scan would spuriously return a concrete
+  // result for a wildcard request).
+  TUNABLE_LOG3(
+      "missing params_signature, returning null ResultEntry for ",
+      op_signature,
+      ",",
+      params_signature);
+  return ResultEntry::Null();
+}
+
+ResultEntry TuningResultsManager::LookupWildcardFallback(
+    const std::string& op_signature,
+    const std::string& concrete_params_signature) {
+  std::scoped_lock l{lock_};
+  auto kernel_map_it = results_.find(op_signature);
+  if (kernel_map_it == results_.cend()) {
     return ResultEntry::Null();
   }
-  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
-  return it->second;
+  const auto& km = kernel_map_it->second;
+  for (const auto& [key, entry] : km) {
+    if (key.find('*') == std::string::npos) {
+      continue; // skip concrete entries
+    }
+    if (matches_wildcard_pattern(key, concrete_params_signature)) {
+      TUNABLE_LOG3(
+          "wildcard fallback hit for ",
+          op_signature,
+          ",",
+          concrete_params_signature,
+          " via wildcard ",
+          key);
+      return entry;
+    }
+  }
+  return ResultEntry::Null();
 }
 
 void TuningResultsManager::AddImpl(const std::string& op_signature,
@@ -503,6 +668,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 
 TuningContext::TuningContext() :
     enable_{false},
+    serving_dispatch_counter_enable_{false},
     tuning_enable_{true},
     record_untuned_enable_{false},
     manager_initialized_{false},
@@ -516,8 +682,7 @@ TuningContext::TuningContext() :
     rotating_buffer_size_{-1},
     results_count_from_input_file_{0},
     is_shutting_down_{false}
-{
-}
+{}
 
 TuningContext::~TuningContext() {
   is_shutting_down_ = true;
@@ -528,6 +693,7 @@ TuningContext::~TuningContext() {
     return;
   }
   TUNABLE_LOG1("Closing File");
+  LogServingDispatchSummary(true);
   GetTuningResultsManager().CloseRealtimeAppend(); // Since, we do instant logging by default now.
 
   if (untuned_file_.good()) {
@@ -551,6 +717,14 @@ bool TuningContext::IsTunableOpEnabled() const {
     return true;
   }
   return enable_;
+}
+
+void TuningContext::EnableServingDispatchCounter(bool value) {
+  serving_dispatch_counter_enable_ = value;
+}
+
+bool TuningContext::IsServingDispatchCounterEnabled() const {
+  return serving_dispatch_counter_enable_;
 }
 
 void TuningContext::EnableTuning(bool value) {
@@ -934,6 +1108,43 @@ bool TuningContext::GetLogOkay() const {
 std::ostream& TuningContext::GetLog() const {
   static auto streamptr = get_stream(GetLogFilename());
   return *streamptr;
+}
+
+namespace {
+
+// Per-thread stack of dynamic-dims masks. Producers in Blas.cpp /
+// CUDABlas.cpp / ScaledBlas.cpp read the top via GetCurrentDynamicDimsMask()
+// and stamp it onto the constructed Gemm*Params before calling the
+// TunableOp. The stack semantics let nested wrappers compose naturally:
+// e.g. an outer torch.cuda.tunable.dynamic_dims_mask(...) ctx-mgr around a
+// benchmark loop, with inner per-choice or per-call wrappers; each
+// TunableDynamicDimsGuard pushes on construction and pops on destruction.
+std::vector<DynamicDimsMask>& dynamic_dims_stack() {
+  // Function-local TLS: avoids a static-init dependency on std::vector's
+  // ctor running before any TunableDynamicDimsGuard is constructed.
+  thread_local std::vector<DynamicDimsMask> stack;
+  return stack;
+}
+
+} // namespace
+
+DynamicDimsMask GetCurrentDynamicDimsMask() {
+  const auto& stack = dynamic_dims_stack();
+  if (stack.empty()) {
+    return DynamicDimsMask{};
+  }
+  return stack.back();
+}
+
+TunableDynamicDimsGuard::TunableDynamicDimsGuard(DynamicDimsMask mask) {
+  dynamic_dims_stack().push_back(mask);
+}
+
+TunableDynamicDimsGuard::~TunableDynamicDimsGuard() {
+  auto& stack = dynamic_dims_stack();
+  if (!stack.empty()) {
+    stack.pop_back();
+  }
 }
 
 } // namespace at::cuda::tunable

@@ -189,13 +189,21 @@ Use the C++ or Python APIs instead.
 
 """
 
+import concurrent.futures
+import contextlib
 import glob
 import multiprocessing as mp
 import os
 import shutil
 import warnings
+from collections.abc import Iterator
 
 import torch
+
+_DYN_M_BIT = 1 << 0
+_DYN_N_BIT = 1 << 1
+_DYN_K_BIT = 1 << 2
+_DYN_BATCH_BIT = 1 << 3
 
 
 __all__ = [
@@ -211,6 +219,9 @@ __all__ = [
     "get_max_tuning_iterations",
     "set_cublaslt_requested_algo_count",
     "get_cublaslt_requested_algo_count",
+    "push_dynamic_dims_mask",
+    "pop_dynamic_dims_mask",
+    "dynamic_dims_mask",
     "set_filename",
     "get_filename",
     "get_results",
@@ -303,6 +314,71 @@ def get_cublaslt_requested_algo_count() -> int:
         torch._C._cuda_tunableop_get_cublaslt_requested_algo_count  # type: ignore[attr-defined]
     )
     return get_count()
+
+
+def _pack_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> int:
+    r"""Pack four per-dim flags into the single byte mask used by C++."""
+    bits = 0
+    if M:
+        bits |= _DYN_M_BIT
+    if N:
+        bits |= _DYN_N_BIT
+    if K:
+        bits |= _DYN_K_BIT
+    if BATCH:
+        bits |= _DYN_BATCH_BIT
+    return bits
+
+
+def push_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> object:
+    r"""Push a per-call dynamic-dims mask onto the thread-local TunableOp stack.
+
+    Returns an opaque handle (PyCapsule) that must be passed to
+    :func:`pop_dynamic_dims_mask`. Prefer the :func:`dynamic_dims_mask`
+    context manager unless you need raw push/pop semantics.
+
+    The mask wildcards the named GEMM dims when computing the TunableOp
+    DynamicSignature; tuned entries seeded under the wildcard key will be
+    reused by subsequent shapes that differ only in the dynamic dim(s).
+    """
+    bits = _pack_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    return torch._C._cuda_tunableop_push_dynamic_dims_mask(bits)  # type: ignore[attr-defined]
+
+
+def pop_dynamic_dims_mask(handle: object) -> None:
+    r"""Pop a previously-pushed dynamic-dims mask. Pass the handle returned
+    by :func:`push_dynamic_dims_mask`."""
+    torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)  # type: ignore[attr-defined]
+
+
+@contextlib.contextmanager
+def dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> Iterator[None]:
+    r"""Context manager that wraps a scope with a per-call dynamic-dims mask.
+
+    Each TunableOp GEMM call inside the scope uses the given mask when
+    computing its wildcard signature; outside the scope the legacy
+    concrete-only behavior applies.
+    """
+    handle = push_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    try:
+        yield
+    finally:
+        pop_dynamic_dims_mask(handle)
 
 
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:

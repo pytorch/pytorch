@@ -5,7 +5,9 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._inductor.config
+from torch._inductor import config as inductor_config
 from torch._inductor import ir
+from torch._inductor.utils import has_free_symbols
 from torch._inductor.virtualized import V
 
 from .ir import FixedLayout, FlexibleLayout, Layout
@@ -115,6 +117,96 @@ class KernelInputs(ABC):
             A tuple of shape tuples for each input node
         """
         return tuple(node.get_size() for node in self._input_nodes)
+
+    def _mnk_operand_shapes(
+        self,
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...]] | None:
+        """
+        Return the (mat1_shape, mat2_shape) used for GEMM dim-dynamism
+        analysis in `dynamic_dim_mask`.
+
+        The base implementation assumes the GEMM operands are the trailing
+        two inputs. Subclasses that track explicit operand positions (see
+        MMKernelInputs.mat1_idx / mat2_idx) override this so the mask is
+        derived from the real operands -- which matters for scaled GEMM,
+        where the trailing inputs are scale/bias tensors.
+
+        Returns None when there are fewer than two inputs.
+        """
+        shapes = self.shapes_symbolic()
+        if len(shapes) < 2:
+            return None
+        return shapes[-2], shapes[-1]
+
+    def dynamic_dim_mask(self, op_name: str) -> tuple[bool, bool, bool, bool]:
+        """
+        Derive a per-call (dyn_m, dyn_n, dyn_k, dyn_batch) mask describing
+        which logical GEMM dims are dynamic (SymInt) for this op invocation.
+
+        The autotune path pushes this mask so TunableOp persists wildcard keys
+        that runtime lookup can reuse.
+
+        Operands are selected via `_mnk_operand_shapes()` so subclasses that
+        track explicit operand positions (see MMKernelInputs) read the true
+        mat1/mat2 shapes rather than the trailing two inputs.
+
+        Mask derivation rules:
+        - mm / addmm / scaled_mm:
+            (M, K) = mat1.shape, (K, N) = mat2.shape
+            dyn_m = is_symbolic(M); dyn_k = is_symbolic(K); dyn_n = is_symbolic(N);
+            dyn_batch = False
+        - bmm / baddbmm:
+            (B, M, K) = mat1.shape, (B, K, N) = mat2.shape
+            dyn_batch = is_symbolic(B); others as above
+
+        For unrecognized op_names we return all-zero (no wildcarding) so the
+        caller falls back to the legacy concrete-only behavior.
+        """
+        # Feature disabled: persist concrete signatures for new tuning entries.
+        if not getattr(
+            inductor_config.triton,
+            "autotune_tunableop_dynamic_dims_wildcard",
+            True,
+        ):
+            return (False, False, False, False)
+
+        # IR dimensions may be symbolic sympy expressions.
+        def _dyn(d: Any) -> bool:
+            return has_free_symbols((d,))
+
+        # Operands come from the subclass-aware selector so that kernels
+        # whose GEMM operands are not the trailing two inputs (e.g. scaled
+        # GEMM, where the trailing inputs are scale/bias tensors) still read
+        # the true mat1/mat2 shapes.
+        operand_shapes = self._mnk_operand_shapes()
+        if operand_shapes is None:
+            return (False, False, False, False)
+        mat1_shape, mat2_shape = operand_shapes
+
+        # bmm / baddbmm: both operands carry a leading batch dim.
+        if op_name in ("bmm", "baddbmm") and len(mat1_shape) >= 3 and len(mat2_shape) >= 3:
+            b1, m, k1 = mat1_shape[-3], mat1_shape[-2], mat1_shape[-1]
+            b2, k2, n = mat2_shape[-3], mat2_shape[-2], mat2_shape[-1]
+            dyn_batch = _dyn(b1) or _dyn(b2)
+            dyn_m = _dyn(m)
+            dyn_k = _dyn(k1) or _dyn(k2)
+            dyn_n = _dyn(n)
+            return (dyn_m, dyn_n, dyn_k, dyn_batch)
+
+        # mm / addmm / scaled_mm: 2D matmul, no batch axis.
+        if (
+            op_name in ("mm", "addmm", "scaled_mm", "_scaled_mm")
+            and len(mat1_shape) >= 2
+            and len(mat2_shape) >= 2
+        ):
+            m, k1 = mat1_shape[-2], mat1_shape[-1]
+            k2, n = mat2_shape[-2], mat2_shape[-1]
+            dyn_m = _dyn(m)
+            dyn_k = _dyn(k1) or _dyn(k2)
+            dyn_n = _dyn(n)
+            return (dyn_m, dyn_n, dyn_k, False)
+
+        return (False, False, False, False)
 
     def shapes_hinted(self) -> tuple[tuple[int, ...], ...]:
         """
@@ -312,6 +404,22 @@ class MMKernelInputs(KernelInputs):
         """
         nodes = self.nodes()
         return nodes[self._mat1_idx], nodes[self._mat2_idx]
+
+    def _mnk_operand_shapes(
+        self,
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...]] | None:
+        """
+        Select the GEMM operand shapes using the explicit mat1_idx / mat2_idx
+        positions instead of the trailing two inputs.
+
+        This is required for callsites where the operands are not the last two
+        inputs -- e.g. scaled GEMM, whose inputs are
+        [mat_a, mat_b, scale_a, scale_b, (bias)] with mat1_idx=0, mat2_idx=1.
+        Reading the trailing inputs there would derive the mask from the
+        scale/bias tensors rather than the true M/N/K operands.
+        """
+        shapes = self.shapes_symbolic()
+        return shapes[self._mat1_idx], shapes[self._mat2_idx]
 
     def mnk_hinted(self) -> tuple[int, int, int]:
         """

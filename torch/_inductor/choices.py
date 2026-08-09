@@ -392,7 +392,17 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+
+        # All-False is a no-op, but keep it explicit on the caller.
+        try:
+            mask = kernel_inputs.dynamic_dim_mask(op_name)
+        except Exception:  # noqa: BLE001
+            mask = (False, False, False, False)
+        for caller in callers:
+            caller.tunable_dyn_dims_mask = mask
+
+        return callers
 
     def triton_kernel_kwargs(
         self,

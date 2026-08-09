@@ -141,20 +141,43 @@ class BenchmarkTensors:
 
 @dataclasses.dataclass
 class AutotuneArgs:
-    """During autotuning, we need to pass the same inputs to all choices.
+    """Inputs used during autotuning.
+
     Note:
         Since we typically have a mix of external choices and triton choices, we create
         two lists of inputs for the same underlying buffers:
         - External inputs (for aten kernels): Include offset for sliced tensors
         - Triton inputs: Use base pointer for sliced tensors, without offset
+
+    Per-choice override:
+        Extern choices may need tensors materialized from their own bound
+        input nodes, not the shared autotune inputs. Those overrides are keyed
+        by ``id(choice)``.
     """
 
     triton: BenchmarkTensors
     extern: BenchmarkTensors
     expected: torch.Tensor | None = None
+    # Per-choice override keyed by id(choice).
+    per_choice: dict[int, BenchmarkTensors] = dataclasses.field(default_factory=dict)
 
-    def get_benchmark_tensors(self, extern=False) -> BenchmarkTensors:
-        """Returns the inputs and output tensors for a given choice."""
+    def get_benchmark_tensors(
+        self,
+        extern: bool = False,
+        choice: ChoiceCaller | None = None,
+    ) -> BenchmarkTensors:
+        """Returns the inputs and output tensors for a given choice.
+
+        If ``choice`` is provided and has a per-choice override registered,
+        return that override instead of the shared ``triton``/``extern``
+        bundle. This allows different choices in the same autotune call to
+        be benchmarked with input tensors derived from their own bound
+        ``input_nodes``.
+        """
+        if choice is not None:
+            override = self.per_choice.get(id(choice))
+            if override is not None:
+                return override
         bench_tensors = self.extern if extern else self.triton
         return bench_tensors
 
@@ -166,12 +189,14 @@ class AutotuneArgs:
         out: torch.Tensor,
         out_extern: torch.Tensor,
         expected: torch.Tensor | None = None,
+        per_choice: dict[int, BenchmarkTensors] | None = None,
     ) -> Self:
         """Factory method to create AutotuneInputs from separate inputs/outputs"""
         return cls(
             triton=BenchmarkTensors(example_inputs, out),
             extern=BenchmarkTensors(example_inputs_extern, out_extern),
             expected=expected,
+            per_choice=per_choice or {},
         )
 
     def verify(self, **kwargs):
@@ -3528,6 +3553,12 @@ class ExternKernelCaller(ChoiceCaller):
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        mask = getattr(self, "tunable_dyn_dims_mask", None)
+        if mask is not None and any(mask):
+            with torch.cuda.tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self.bmreq.benchmark(*args, out=out)
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -4933,10 +4964,138 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
+
+        Materializes a global ``triton``/``extern`` bundle from the provided
+        ``input_nodes`` (back-compat path), then for any choice whose bound
+        ``input_nodes`` diverge from the global ``input_nodes`` (different
+        size / stride / dtype / device of any positional input) materializes
+        a per-choice ``BenchmarkTensors`` and registers it in
+        ``AutotuneArgs.per_choice``. Identical per-choice layouts are
+        deduplicated via a layout key cache so we only allocate once per
+        unique layout.
+
+        This unblocks lowerings that pass differently-shaped IR nodes for
+        different choices (e.g., addmm passing a 1D bias to ``aten_addmm``
+        but a 2D-expanded bias to Triton/CUTLASS templates) without the
+        autotune harness force-materializing the global layout for every
+        choice.
         """
         if input_gen_fns is None:
             input_gen_fns = {}
 
+        example_inputs, example_inputs_extern, out, out_extern = (
+            cls._materialize_inputs(
+                choices, input_nodes, layout, input_gen_fns, hint_override
+            )
+        )
+
+        # Per-choice materialization. Only consider extern-style choices --
+        # template (Triton/CUTLASS/CK/CppGemm) choices share a single
+        # generated kernel signature with the global input_nodes layout, so
+        # giving them per-choice tensors would mismatch the kernel's
+        # compile-time shape constants.
+        global_key = cls._node_layout_key(input_nodes)
+        per_choice: dict[int, BenchmarkTensors] = {}
+        # Cache: layout_key -> BenchmarkTensors. Includes the global key so
+        # choices whose layout matches global don't get a redundant entry.
+        layout_cache: dict[str, BenchmarkTensors] = {
+            global_key: BenchmarkTensors(example_inputs_extern, out_extern),
+        }
+        for choice in choices:
+            if not cls._is_extern(choice):
+                continue
+            choice_nodes = getattr(choice, "input_nodes", None)
+            if not choice_nodes:
+                continue
+            try:
+                ckey = cls._node_layout_key(choice_nodes)
+            except Exception:
+                # Defensive: if we can't compute the layout key (e.g. a
+                # choice's input_nodes contain something with no get_size),
+                # fall back to the global bundle for this choice.
+                continue
+            if ckey == global_key:
+                continue
+            if ckey not in layout_cache:
+                _, ch_extern, _, ch_out = cls._materialize_inputs(
+                    (choice,), choice_nodes, layout, input_gen_fns, hint_override
+                )
+                layout_cache[ckey] = BenchmarkTensors(ch_extern, ch_out)
+                log.info(
+                    "[per_choice_inputs] registered override for choice=%s "
+                    "(extern=%s); global_key=%s choice_key=%s; "
+                    "bundle bias.size=%s bias.stride=%s",
+                    getattr(choice, "name", type(choice).__name__),
+                    type(choice).__name__,
+                    global_key,
+                    ckey,
+                    tuple(ch_extern[0].size()) if ch_extern else None,
+                    tuple(ch_extern[0].stride()) if ch_extern else None,
+                )
+            per_choice[id(choice)] = layout_cache[ckey]
+
+        expected = None
+        if VERIFY:
+            # Run the verification call on the per-choice bundle for
+            # choices[0] if it has one, else on the global extern bundle.
+            verify_inputs = example_inputs_extern
+            verify_out = out_extern
+            override = per_choice.get(id(choices[0])) if choices else None
+            if override is not None:
+                verify_inputs = override.input_tensors
+                verify_out = override.output_tensor  # type: ignore[assignment]
+            choices[0].benchmark(*verify_inputs, out=verify_out)
+            expected = verify_out.clone()  # type: ignore[union-attr]
+
+        return AutotuneArgs.from_choice_args(
+            example_inputs,
+            example_inputs_extern,
+            out,
+            out_extern,
+            expected,
+            per_choice=per_choice,
+        )
+
+    @classmethod
+    def _node_layout_key(cls, nodes: Sequence[ir.IRNode]) -> str:
+        """Stable, hashable key describing the layout (size+stride+dtype+
+        device) of every node in ``nodes``. Used to dedup per-choice
+        materializations across choices that bind structurally identical
+        input lists.
+        """
+        parts: list[Any] = []
+        for n in nodes:
+            try:
+                size = tuple(n.get_size())
+                stride = tuple(n.get_stride())
+                dtype = str(n.get_dtype())
+                device = str(n.get_device())
+            except Exception:
+                # If a node doesn't expose layout info (rare), fall back to
+                # its name -- this still gives stable per-choice grouping.
+                size = stride = ()
+                dtype = device = ""
+            parts.append((size, stride, dtype, device, n.get_name()))
+        return repr(parts)
+
+    @classmethod
+    def _materialize_inputs(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]],
+        hint_override: int | None = None,
+    ) -> tuple[
+        list[torch.Tensor], list[torch.Tensor], torch.Tensor, torch.Tensor
+    ]:
+        """Materialize example tensors for a given list of input nodes.
+
+        Returns (triton_inputs, extern_inputs, triton_out, extern_out). This
+        is the body of the previous monolithic ``get_inputs``, factored out
+        so it can be called multiple times -- once for the global
+        ``input_nodes`` and again per divergent choice.
+        """
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
@@ -5080,18 +5239,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         out_extern = torch.as_strided(out_base, out.size(), out.stride(), out_offset)
-        expected = None
-        if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
-            expected = out_extern.clone()
-
-        return AutotuneArgs.from_choice_args(
-            example_inputs,
-            example_inputs_extern,
-            out,
-            out_extern,
-            expected,
-        )
+        return example_inputs, example_inputs_extern, out, out_extern
 
     @staticmethod
     def _is_extern(choice: ChoiceCaller) -> bool:
@@ -5101,7 +5249,31 @@ class AlgorithmSelectorCache(PersistentCache):
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        # Pass `choice` so AutotuneArgs can return a per-choice override
+        # bundle when one was registered (Option 2 / per-choice benchmark
+        # inputs). Choices without an override fall through to the shared
+        # extern/triton bundles.
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            extern=cls._is_extern(choice), choice=choice
+        )
+        # Diagnostic: announce which bundle this choice is benchmarking
+        # against. Useful to confirm at a JIT-inductor `torch.compile` log
+        # level whether `aten_addmm` is consuming a per-choice (1D bias)
+        # override or the shared `extern` (2D-expanded bias) bundle.
+        used_per_choice = id(choice) in autotune_args.per_choice
+        log.info(
+            "[per_choice_inputs] benchmark_choice name=%s extern=%s "
+            "used_per_choice_override=%s bias.size=%s bias.stride=%s",
+            getattr(choice, "name", type(choice).__name__),
+            cls._is_extern(choice),
+            used_per_choice,
+            tuple(benchmark_tensors.input_tensors[0].size())
+            if benchmark_tensors.input_tensors
+            else None,
+            tuple(benchmark_tensors.input_tensors[0].stride())
+            if benchmark_tensors.input_tensors
+            else None,
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
