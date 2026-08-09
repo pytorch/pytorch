@@ -320,6 +320,8 @@ class InductorMeta(typing.TypedDict, total=False):
     RSPLIT_SIZE: int
     has_loadstore_with_contiguous_rdim: bool
     tma_min_block_sizes: dict[str, int]
+    uses_tma: bool
+    uses_device_tma: bool
     host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int

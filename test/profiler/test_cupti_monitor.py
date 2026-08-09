@@ -33,6 +33,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
+    TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
@@ -2424,6 +2425,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(sync, monitor._enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_node_recorder_arm_before_capture(self):
         # End-to-end usage, and the ordering contract it depends on: the recorder learns a
         # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
@@ -2488,6 +2493,10 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
     def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
         # The serial-chain case above is the one where every candidate ordering agrees. This
         # is the case that separates them: two event nodes on CONCURRENT branches of differing
