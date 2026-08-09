@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize as parametrize_test,
@@ -186,6 +187,8 @@ class DummyContextManager:
 
 
 class TestModuleHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
         fired_hooks: list[int] = []
@@ -549,6 +552,8 @@ def _hook_to_pickle(*args, **kwargs):
 
 
 class TestStateDictHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @swap([True, False])
     def test_load_state_dict_pre_hook(self):
         m = nn.Linear(10, 10)
@@ -943,6 +948,8 @@ class TestStateDictHooks(TestCase):
 
 
 class TestModuleGlobalHooks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         nn.modules.module._global_backward_hooks = OrderedDict()
         nn.modules.module._global_forward_hooks = OrderedDict()
@@ -1254,6 +1261,7 @@ class TestModuleGlobalHooks(TestCase):
 
 
 class TestModuleHookNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
