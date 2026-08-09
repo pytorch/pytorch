@@ -522,7 +522,7 @@ class SetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.sq_contains(tx, args[0]).as_python_constant():
+        if self.sq_contains_impl(tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             # sq_contains validated/normalized args[0]; a set key was coerced
