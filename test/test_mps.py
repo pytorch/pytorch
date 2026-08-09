@@ -14245,7 +14245,6 @@ class TestConvolutionMPS(TestCaseMPS):
         name_fn=lambda kernel_size, stride, dilation: f"k{kernel_size}_s{stride}_d{dilation}",
     )
     def test_conv1d_mpp_causal_padding(self, kernel_size, stride, dilation):
-        torch.manual_seed(0)
         left_padding = dilation * (kernel_size - 1)
         x = torch.randn(2, 7, 257)
         weight = torch.randn(33, 7, kernel_size)
