@@ -5147,6 +5147,8 @@ class GraphModule(torch.nn.Module):
         clone: "f64[s64, s55]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
         mul: "f64[s64, s55]" = torch.ops.aten.mul.Tensor(clone, primals_14);  clone = None
+
+        mul_2: "Sym(s55*s71)" = primals_15 * primals_16
         return (
             mul,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_2,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values'), idx=0)
@@ -5159,14 +5161,18 @@ class GraphModule(torch.nn.Module):
             primals_9,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor')
             primals_10,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor'), idx=0)
             primals_14,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_15,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_16,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
+            mul_2,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             primals_16,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_2,  # SavedForBackwardsAOTOutput(idx=0)
             primals_6,  # SavedForBackwardsAOTOutput(idx=1)
             primals_8,  # SavedForBackwardsAOTOutput(idx=2)
             primals_10,  # SavedForBackwardsAOTOutput(idx=3)
             primals_14,  # SavedForBackwardsAOTOutput(idx=4)
-            primals_16,  # SavedForBackwardsAOTOutput(idx=5)
+            primals_15,  # SavedForBackwardsAOTOutput(idx=5)
+            primals_16,  # SavedForBackwardsAOTOutput(idx=6)
+            mul_2,  # SavedForBackwardsAOTOutput(idx=7)
         )
 """,
         )
@@ -5182,7 +5188,9 @@ class GraphModule(torch.nn.Module):
         primals_8: "Sym(s0)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_min_seqlen_tensor'), idx=0)
         primals_10: "Sym(s83)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_max_seqlen_tensor'), idx=0)
         primals_14: "Sym(s51)",  # PlainAOTInput(idx=1)
+        primals_15: "Sym(s71)",  # PlainAOTInput(idx=2)
         primals_16: "Sym(s55)",  # PlainAOTInput(idx=3)
+        mul_2: "Sym(s55*s71)",
         tangents_1: "f64[s64, s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
         tangents_2: "i64[s51 + 1]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_offsets')
         tangents_3: "f32[s0, 0]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_min_seqlen_tensor')
@@ -5201,7 +5209,9 @@ class GraphModule(torch.nn.Module):
             tangents_4,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_max_seqlen_tensor')
             primals_10,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_max_seqlen_tensor'), idx=0)
             primals_14,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
+            primals_15,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=1)
             primals_16,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=2)
+            mul_2,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
             primals_16,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=1)
             None,  # None
             None,  # None
@@ -5248,6 +5258,8 @@ class GraphModule(torch.nn.Module):
         cat: "f64[s64, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
 
         add_2: "Sym(2*s55)" = primals_16 + primals_16
+
+        mul: "Sym(2*s55*s71)" = primals_15 * add_2
         return (
             cat,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_2,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values'), idx=0)
@@ -5260,15 +5272,18 @@ class GraphModule(torch.nn.Module):
             primals_9,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor')
             primals_10,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_max_seqlen_tensor'), idx=0)
             primals_14,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_15,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             add_2,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
+            mul,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             add_2,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_2,  # SavedForBackwardsAOTOutput(idx=0)
             primals_6,  # SavedForBackwardsAOTOutput(idx=1)
             primals_8,  # SavedForBackwardsAOTOutput(idx=2)
             primals_10,  # SavedForBackwardsAOTOutput(idx=3)
             primals_14,  # SavedForBackwardsAOTOutput(idx=4)
-            primals_16,  # SavedForBackwardsAOTOutput(idx=5)
-            add_2,  # SavedForBackwardsAOTOutput(idx=6)
+            primals_15,  # SavedForBackwardsAOTOutput(idx=5)
+            primals_16,  # SavedForBackwardsAOTOutput(idx=6)
+            add_2,  # SavedForBackwardsAOTOutput(idx=7)
         )
 """,
         )
@@ -5284,6 +5299,7 @@ class GraphModule(torch.nn.Module):
         primals_8: "Sym(s0)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_min_seqlen_tensor'), idx=0)
         primals_10: "Sym(s83)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_max_seqlen_tensor'), idx=0)
         primals_14: "Sym(s51)",  # PlainAOTInput(idx=1)
+        primals_15: "Sym(s71)",  # PlainAOTInput(idx=2)
         primals_16: "Sym(s55)",  # PlainAOTInput(idx=3)
         add_2: "Sym(2*s55)",
         tangents_1: "f64[s64, 2*s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
@@ -5294,6 +5310,8 @@ class GraphModule(torch.nn.Module):
         slice_1: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_16)
         slice_2: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_16, add_2);  tangents_1 = add_2 = None
         add_4: "f64[s64, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
+
+        mul_1: "Sym(s55*s71)" = primals_15 * primals_16
         return (
             add_4,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_values')
             primals_2,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_values'), idx=0)
@@ -5306,7 +5324,9 @@ class GraphModule(torch.nn.Module):
             tangents_4,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_max_seqlen_tensor')
             primals_10,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_max_seqlen_tensor'), idx=0)
             primals_14,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
+            primals_15,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=1)
             primals_16,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=2)
+            mul_1,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
             primals_16,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=1)
             None,  # None
             None,  # None

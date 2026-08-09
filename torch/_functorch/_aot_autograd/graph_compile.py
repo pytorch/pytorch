@@ -1931,9 +1931,34 @@ def _partition_joint_graph_into_fw_bw(
     mutated_inp_runtime_indices = compute_inner_mutated_inp_indices_from_subclass_meta(
         fw_metadata, inner_meta
     )
+    num_inner_mutated_inp_outputs = len(mutated_inp_runtime_indices)
+    num_outer_mutated_inps = fw_metadata.num_mutated_inp_runtime_indices
+    # Input metadata does not include nested-int size/stride arguments, but the
+    # corresponding subclass output metadata can. Count the actual output
+    # arity so the partitioner does not mistake those values for saved tensors.
+    # Synthetic-base paths do not populate subclass output metadata, so retain
+    # the inner-input count as their fallback.
+    if fw_metadata.subclass_fw_graph_out_meta:
+        mutated_inp_output_metas = fw_metadata.subclass_fw_graph_out_meta[
+            :num_outer_mutated_inps
+        ]
+        if len(mutated_inp_output_metas) != num_outer_mutated_inps:
+            raise AssertionError(
+                "expected one subclass output metadata entry per mutated input: "
+                f"{len(mutated_inp_output_metas)} != {num_outer_mutated_inps}"
+            )
+        num_inner_mutated_inp_outputs = sum(
+            meta.arg_count for meta in mutated_inp_output_metas
+        )
+        if num_inner_mutated_inp_outputs < len(mutated_inp_runtime_indices):
+            raise AssertionError(
+                "mutated subclass output metadata must cover every mutated inner "
+                f"input: {num_inner_mutated_inp_outputs} < "
+                f"{len(mutated_inp_runtime_indices)}"
+            )
     num_tokens = len(fw_metadata.tokens)
     num_inner_fwd_outputs = (
-        len(mutated_inp_runtime_indices)
+        num_inner_mutated_inp_outputs
         + inner_meta.num_outputs
         + inner_meta.num_intermediate_bases
         + inner_meta.num_outputs_rng_offset

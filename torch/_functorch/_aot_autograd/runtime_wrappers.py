@@ -3188,14 +3188,27 @@ def _codegen_backward_epilogue(
         buf.writeline("out = tuple(out)")
 
         if has_subclass:
-            buf.bind(_wrap_subclasses_=wrap_tensor_subclasses)
+            buf.bind(_wrap_subclasses_=wrap_tensor_subclasses, torch=torch)
             if (
                 maybe_subclass_meta.grad_input_metas is None
             ):  # pyrefly: ignore [missing-attribute]
                 raise AssertionError("grad_input_metas must not be None")
-            buf.bind(
-                _grad_input_metas_=maybe_subclass_meta.grad_input_metas
+            grad_input_metas = (
+                maybe_subclass_meta.grad_input_metas
             )  # pyrefly: ignore [missing-attribute]
+            buf.bind(_grad_input_metas_=grad_input_metas)
+            expected_grad_input_count = sum(meta.arg_count for meta in grad_input_metas)
+            buf.writeline(f"_expected_grad_input_count = {expected_grad_input_count}")
+            buf.writeline("if len(out) > _expected_grad_input_count:")
+            with buf.indent():
+                buf.writeline("dropped = out[:len(out) - _expected_grad_input_count]")
+                buf.writeline("if any(isinstance(x, torch.Tensor) for x in dropped):")
+                with buf.indent():
+                    buf.writeline(
+                        "raise AssertionError("
+                        "'unexpected tensor outputs before subclass grad inputs')"
+                    )
+                buf.writeline("out = out[len(out) - _expected_grad_input_count:]")
             if codegen_wrap_fn is not None:
                 buf.bind(_wrap_=codegen_wrap_fn)
                 buf.writeline("if make_subclass_override is None:")

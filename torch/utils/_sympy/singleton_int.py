@@ -11,20 +11,29 @@ class SingletonInt(sympy.AtomicExpr):
     # This is probably not super important unless we are in multiple dispatch
     # situations with other more exotic Expr types.
     _op_priority = 99999
-    _val: int
-    _coeff: int
+    _val: sympy.Integer
+    _coeff: sympy.Integer
 
     def __new__(
-        cls, *args: Any, coeff: int | None = None, **kwargs: Any
+        cls,
+        val: int | sympy.Integer,
+        coeff: int | sympy.Integer = 1,
+        **kwargs: Any,
     ) -> "SingletonInt":
-        instance = super().__new__(cls, *args, **kwargs)
+        val = sympy.sympify(val)
+        coeff = sympy.sympify(coeff)
+        instance = super().__new__(cls, val, coeff, **kwargs)
         return instance
 
     # The semantics of this class should match that of NestedIntSymNodeImpl in
     # c10/core/NestedIntSymNodeImpl.h
-    def __init__(self, val: int, *, coeff: int = 1) -> None:
-        self._val = val
-        self._coeff = coeff
+    def __init__(
+        self,
+        val: int | sympy.Integer,
+        coeff: int | sympy.Integer = 1,
+    ) -> None:
+        self._val = sympy.sympify(val)
+        self._coeff = sympy.sympify(coeff)
         super().__init__()
 
     # See NOTE [ Inequalities with nested int ]
