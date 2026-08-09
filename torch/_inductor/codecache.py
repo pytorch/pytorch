@@ -1350,7 +1350,11 @@ class FxGraphHashDetails:
     # Excluded kwargs param that are not stable between runs or that
     # don't affect compiled output (like compile_region_name which is
     # just a debug label).
-    EXCLUDED_KWARGS = ["graph_id", "compile_region_name"]
+    EXCLUDED_KWARGS = [
+        "graph_id",
+        "compile_region_name",
+        "aot_autograd_needs_fx_graph_cache_key",
+    ]
     TENSOR_METADATA_KEYS = ("val", "example_value")
     LIKE_FACTORY_TARGETS = (
         torch.empty_like,
