@@ -26,7 +26,7 @@ BASELINE_JOB = "linux-cuda-sm86/default"
 
 # (ciflow label, job simulating its runner, test.sh function it dispatches to).
 # Only the `smoke` configs are keyed to the bare ciflow/h100 and ciflow/b200 tags;
-# the cutlass/distributed/symm-mem jobs carry their own labels.
+# the cutlass / distributed / symm-mem jobs carry their own labels.
 TARGETS = [
     ("ciflow/h100", "linux-cuda-sm90/default", "test_python_smoke"),
     ("ciflow/b200", "linux-cuda-sm100/default", "test_python_smoke_b200"),
@@ -43,13 +43,10 @@ def function_body(text: str, function: str) -> re.Match[str]:
 
 
 def smoke_patterns(text: str, function: str) -> dict[str, list[str | None]]:
-    """{run_test.py file: [-k expr, ...]} for one test.sh function.
-
-    A None entry means some include runs the whole file.
-    """
+    """{run_test.py file: [-k expr, ...]}; a None entry runs the whole file."""
     out: dict[str, list[str | None]] = {}
-    body = re.sub(r"\\\n\s*", " ", function_body(text, function).group(2))
-    for line in body.split("\n"):
+    joined = re.sub(r"\\\n\s*", " ", function_body(text, function).group(2))
+    for line in joined.split("\n"):
         try:
             toks = shlex.split(line, comments=True)
         except ValueError:
@@ -68,39 +65,42 @@ def smoke_patterns(text: str, function: str) -> dict[str, list[str | None]]:
 
 
 def selects(patterns: list[str | None], test_id: str) -> bool:
-    """Would any of these -k expressions select this Class::method id?"""
+    """Would any of these -k expressions select this Class::method id?
+
+    Matching the whole id, rather than the method name, is what makes a
+    class-scoped filter such as `-k TestForeachMM` count as coverage.
+    """
     for expr in patterns:
         if expr is None:
             return True
-        # Only ` or ` is understood. A pattern using `and`/`not` is opaque and
-        # assumed not to select, so we over-report rather than silently skip.
+        # Only ` or ` is understood. A pattern using `and`/`not` is treated as
+        # opaque, so we over-report a gap rather than miss one.
         if any(p and p.strip() in test_id for p in expr.split(" or ")):
             return True
     return False
 
 
 def measure(files: list[str]) -> tuple[dict[str, dict[str, set[str]]], dict[str, str]]:
-    """-> ({file: {label: concrete tests needing that label}}, {file: error})"""
+    """-> ({file: {label: concrete tests needing it}}, {file: why not measured})"""
     from tools.testing.introspection import collector, platforms
 
     ran: dict[str, dict[str, set[str]]] = {}
     errors: dict[str, str] = {}
     for job in [BASELINE_JOB] + [j for _, j, _ in TARGETS]:
-        results = collector.collect(platforms.get_job(job), "status", files)
-        for rel, payload in results.items():
+        for rel, payload in collector.collect(
+            platforms.get_job(job), "status", files
+        ).items():
             if "error" in payload:
                 errors.setdefault(rel, str(payload["error"]))
             else:
                 ran.setdefault(rel, {})[job] = set(payload["ran"])
 
-    needs: dict[str, dict[str, set[str]]] = {}
+    needs = {}
     for rel, by_job in ran.items():
-        if len(by_job) != len(TARGETS) + 1:
-            errors.setdefault(rel, "incomplete measurement across capabilities")
+        if rel in errors:
             continue
-        # ciflow/h100 and ciflow/b200 are independent labels, so a test needing
-        # sm90+ belongs in both smoke lists: a b200-labelled PR runs only the b200
-        # list and would otherwise skip it.
+        # h100 and b200 are independent labels, so a test needing sm90+ belongs in
+        # both lists: a b200-labelled PR runs only the b200 list.
         needs[rel] = {
             label: by_job[job] - by_job[BASELINE_JOB] for label, job, _ in TARGETS
         }
@@ -108,23 +108,23 @@ def measure(files: list[str]) -> tuple[dict[str, dict[str, set[str]]], dict[str,
 
 
 def locations(files: list[str]) -> dict[str, dict[str, list]]:
-    """{file: {Class::method: [defining file, first decorator line]}}"""
+    """{file: {Class::method: [defining file, line its decorators start on]}}"""
     from tools.testing.introspection import collector, platforms
 
     job = platforms.get_job(TARGETS[-1][1])  # widest capability: most tests exist
     out = {}
     for rel, payload in collector.collect(job, "enumloc", files).items():
-        # A file whose status measured fine can still fail enumloc (different
-        # import path); fall back to concrete ids rather than aborting.
-        out[rel] = {} if "error" in payload else payload.get("locations", {})
+        if "error" in payload:
+            raise SystemExit(f"gpu_coverage: cannot locate tests in {rel}: {payload}")
+        out[rel] = payload.get("locations", {})
     return out
 
 
 def decorator_starts(path: Path) -> dict[int, str]:
     """{line a function's decorator stack starts on: function name}.
 
-    inspect.getsourcelines, which the engine uses for locations, reports that
-    line rather than the `def`.
+    inspect.getsourcelines, which the engine uses, reports that line and not the
+    `def`, so this is the key its locations are expressed in.
     """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -150,8 +150,8 @@ def base_names(tests: set[str], locs: dict[str, list]) -> set[str]:
         if loc:
             defs = cache.setdefault(loc[0], decorator_starts(REPO_ROOT / loc[0]))
             name = defs.get(loc[1])
-        # Falling back to the concrete id happens for tests defined outside the
-        # test tree; it is a valid -k token but pins the parametrize values.
+        # Without a location the test is defined outside the test tree; its
+        # concrete id is still a valid -k token, just a brittle one.
         names.add(name or t.split("::")[-1])
     return names
 
@@ -160,20 +160,18 @@ def smoke_line(rel: str, names: set[str]) -> str:
     include = rel[len("test/") : -len(".py")]
     kexpr = " or ".join(sorted(names))
     return (
-        f"  time python test/run_test.py --include {include} "
-        f'-k "{kexpr}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running\n'
+        f'  time python test/run_test.py --include {include} -k "{kexpr}" '
+        f"$PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running\n"
     )
 
 
 def insert(text: str, function: str, line: str) -> str:
     m = function_body(text, function)
     anchor = "  assert_git_not_dirty\n"
-    body = m.group(2)
-    if anchor not in body:
+    if anchor not in m.group(2):
         raise SystemExit(f"gpu_coverage: no insertion anchor in {function}()")
-    return (
-        text[: m.start(2)] + body.replace(anchor, line + anchor, 1) + text[m.end(2) :]
-    )
+    body = m.group(2).replace(anchor, line + anchor, 1)
+    return text[: m.start(2)] + body + text[m.end(2) :]
 
 
 def is_test_file(rel: str) -> bool:
@@ -193,15 +191,13 @@ def changed_test_files() -> list[str]:
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        check=False,
     )
     if merge_base.returncode or not merge_base.stdout.strip():
-        # Returning nothing here would silently make the whole check a no-op, so
-        # it is fatal. A shallow fetch of the base branch is the usual cause.
+        # Returning nothing here would make the whole check a silent no-op. A
+        # shallow fetch of the base branch is the usual cause.
         raise SystemExit(
-            f"gpu_coverage: no merge-base with origin/{base_ref} "
-            f"({merge_base.stderr.strip() or 'unknown error'}); "
-            f"the base branch must be fetched unshallowed"
+            f"gpu_coverage: no merge-base with origin/{base_ref}: "
+            f"{merge_base.stderr.strip() or 'unknown'}"
         )
     diff = subprocess.run(
         ["git", "diff", "--name-only", merge_base.stdout.strip(), "HEAD"],
@@ -219,7 +215,7 @@ def resolve(paths: list[str]) -> list[str]:
         try:
             rel = str(Path(p).resolve().relative_to(REPO_ROOT))
         except ValueError:
-            raise SystemExit(f"gpu_coverage: {p} is not inside {REPO_ROOT}") from None
+            raise SystemExit(f"gpu_coverage: {p} is outside {REPO_ROOT}") from None
         if not is_test_file(rel):
             raise SystemExit(f"gpu_coverage: {p} is not an existing test/**/test_*.py")
         out.append(rel)
@@ -233,16 +229,17 @@ def main() -> int:
     ap.add_argument("files", nargs="*")
     args = ap.parse_args()
 
-    files = set(resolve(args.files))
+    files = resolve(args.files)
     if args.changed:
-        files |= set(changed_test_files())
+        files += changed_test_files()
+    files = sorted(set(files))
     if not files:
         print("gpu_coverage: no test files to check")
         return 0
 
     text = TEST_SH.read_text(encoding="utf-8")
-    selected = {fn: smoke_patterns(text, fn) for _, _, fn in TARGETS}
-    needs, errors = measure(sorted(files))
+    patterns = {fn: smoke_patterns(text, fn) for _, _, fn in TARGETS}
+    needs, errors = measure(files)
     locs = locations(sorted(needs)) if needs else {}
 
     gaps = 0
@@ -252,7 +249,7 @@ def main() -> int:
             missing = {
                 t
                 for t in needs[rel][label]
-                if not selects(selected[function].get(include, []), t)
+                if not selects(patterns[function].get(include, []), t)
             }
             if not missing:
                 continue
@@ -265,10 +262,10 @@ def main() -> int:
                 continue
             runner = label.split("/")[1]
             print(
-                f"::error file={rel},title=GPU coverage gap::"
-                f"{', '.join(sorted(names))} run on {runner} but not on a10g, and "
-                f"{function}() in .ci/pytorch/test.sh does not select them. Run "
-                f"`python tools/testing/gpu_coverage.py --write {rel}` to fix."
+                f"::error file={rel},title=GPU coverage gap::{', '.join(sorted(names))} "
+                f"run on {runner} but not on a10g, and {function}() in "
+                f".ci/pytorch/test.sh does not select them. Fix: python "
+                f"tools/testing/gpu_coverage.py --write {rel}"
             )
             print(f"\nGPU coverage gap: {rel}")
             for n in sorted(names):
@@ -288,7 +285,7 @@ def main() -> int:
         print(
             f"\n{gaps} gap(s). These tests skip silently wherever CI runs them.\n"
             f"This only makes the job cover them; running it still needs the "
-            f"ciflow label applied manually."
+            f"ciflow label applied by hand."
         )
         return 1
     print(f"gpu_coverage: {len(files)} file(s) OK")
