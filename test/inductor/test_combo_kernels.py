@@ -3085,6 +3085,7 @@ class _PeakMemFakeScheduler:
         return nodes
 
 
+@instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -3114,6 +3115,54 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             "combo_kernel_peak_memory_pct_threshold": pct_thr,
             "combo_kernel_max_distance": max_distance,
         }
+
+    @requires_cuda_and_triton
+    @parametrize("gate_enabled", [True, False])
+    def test_peak_memory_reorder_order(self, gate_enabled):
+        from torch._inductor import memory
+        from torch._inductor.scheduler import Scheduler
+
+        calls = []
+        planning_calls = 0
+        create_combo = Scheduler.create_combo_kernel_nodes
+        prepare_planning_info = memory.prepare_planning_info
+        reorder = memory.reorder_for_peak_memory
+
+        def record_combo(scheduler, *args, **kwargs):
+            calls.append("combo")
+            return create_combo(scheduler, *args, **kwargs)
+
+        def record_reorder(*args, **kwargs):
+            calls.append("reorder")
+            return reorder(*args, **kwargs)
+
+        def record_prepare_planning_info(*args, **kwargs):
+            nonlocal planning_calls
+            planning_calls += 1
+            return prepare_planning_info(*args, **kwargs)
+
+        def fn(a, b):
+            return a.sin(), b.cos()
+
+        inputs = [torch.randn(16, device=GPU_TYPE) for _ in range(2)]
+        with (
+            patch.object(Scheduler, "create_combo_kernel_nodes", record_combo),
+            patch.object(memory, "prepare_planning_info", record_prepare_planning_info),
+            patch.object(memory, "reorder_for_peak_memory", record_reorder),
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_peak_memory_pct_threshold": (
+                        0.05 if gate_enabled else None
+                    ),
+                    "combo_kernel_peak_memory_increase_gb": None,
+                }
+            ),
+        ):
+            self.assertEqual(torch.compile(fn)(*inputs), fn(*inputs))
+
+        self.assertEqual(calls, ["reorder", "combo"])
+        self.assertEqual(planning_calls, 1)
 
     @staticmethod
     def _make_wide_resnet_like():
@@ -3317,8 +3366,14 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                     **cfg,
                 ),
             ):
+                compiled = torch.compile(model)
                 with torch.no_grad():
-                    _ = torch.compile(model)(x)
+                    compiled(x)
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                with torch.no_grad():
+                    compiled(x)
                 torch.cuda.synchronize()
             return torch.cuda.max_memory_allocated()
 

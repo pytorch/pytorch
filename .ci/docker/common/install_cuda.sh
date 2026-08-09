@@ -107,21 +107,6 @@ function install_cupti_headers {
   echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
-function install_124 {
-  CUDNN_VERSION=9.1.0.70
-  CUSPARSELT_VERSION=0.6.2.3
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
-  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux
-
-  install_cudnn 12 $CUDNN_VERSION
-
-  CUDA_VERSION=12.4 bash install_nccl.sh
-
-  CUDA_VERSION=12.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
-
-  ldconfig
-}
-
 function install_126 {
   CUDNN_VERSION=9.10.2.21
   CUSPARSELT_VERSION=0.7.1.0
@@ -257,8 +242,6 @@ function install_134 {
 while test $# -gt 0
 do
     case "$1" in
-    12.4) install_124;
-        ;;
     12.6|12.6.*) install_126;
         ;;
     12.8|12.8.*) install_128;
