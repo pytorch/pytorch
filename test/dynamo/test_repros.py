@@ -8531,24 +8531,37 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(x_compiled2.size(), x_eager2.size())
         self.assertEqual(x_compiled2.stride(), x_eager2.stride())
 
-    @expectedFailureDynamic
     def test_issue_185888_as_strided_inplace_rank_change(self):
-        # Rank-changing as_strided_ (1D -> 2D)
-        # Expected failure under dynamic shapes because guard generation
-        # expects invariant rank and throws IndexError on rank change.
+        # 1. Verify it cleanly graph-breaks (fails fullgraph) instead of crashing
         def fn(x):
             x.as_strided_((2, 2), (2, 1))
             return x.clone()
 
-        x_eager = torch.arange(4.0, dtype=torch.float32)
-        fn(x_eager)
-
         x_compiled = torch.arange(4.0, dtype=torch.float32)
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        compiled_fn(x_compiled)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, 
+            "In-place rank mutation on graph input is not supported"
+        ):
+            compiled_fn(x_compiled)
 
-        self.assertEqual(x_compiled.size(), x_eager.size())
-        self.assertEqual(x_compiled.stride(), x_eager.stride())
+        # 2. Verify the silent correctness bug is fixed:
+        # If a user passes a tensor that matches the overlapping dims but has the wrong rank,
+        # Dynamo MUST graph break rather than executing the compiled graph.
+        compiled_fn_safe = torch.compile(fn, backend="aot_eager")
+
+        # Trace with 1D
+        out1 = compiled_fn_safe(torch.arange(4.0, dtype=torch.float32))
+        
+        # Call with 2D (overlapping dim size matches, but rank differs)
+        # This must trigger a graph break, not silently execute
+        cnt = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        out2 = compiled_fn_safe(torch.randn(2, 2))
+        self.assertGreater(
+            torch._dynamo.utils.counters["stats"]["unique_graphs"], 
+            cnt, 
+            "Rank mismatch did not trigger a graph break!"
+        )
 
     def test_dual_tensor_input_graph_breaks(self):
         import torch.autograd.forward_ad as fwAD

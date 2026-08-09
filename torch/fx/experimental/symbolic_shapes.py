@@ -58,6 +58,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
 from torch._custom_class_base import CustomClassBase
+from torch._dynamo.exc import Unsupported
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
@@ -6544,20 +6545,29 @@ class ShapeEnv:
                 constraint_size,
                 constraint_stride,
             ) in sources_tensors_constraints:
+                curr_sizes = curr_t.size()
+                curr_strides = curr_t.stride()
+
+                if len(curr_sizes) != len(constraint_size) or len(curr_strides) != len(constraint_stride):
+                    raise Unsupported(
+                        f"In-place rank mutation on graph input is not supported under dynamic shapes. "
+                        f"Original rank: {len(constraint_size)}, Current rank: {len(curr_sizes)}."
+                    )
+
                 if is_sparse_any(curr_t):
-                    for i, ss in enumerate(curr_t.size()):
+                    for i, ss in enumerate(curr_sizes):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
                         track_symint(property_source, ss, constraint_size[i])
                 else:
-                    for i, ss in enumerate(curr_t.size()):
+                    for i, ss in enumerate(curr_sizes):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
                         track_symint(property_source, ss, constraint_size[i])
 
-                    for i, ss in enumerate(curr_t.stride()):
+                    for i, ss in enumerate(curr_strides):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
                         )
