@@ -82,17 +82,27 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
 
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;
-  NCCL_CHECK(
-      nccl_api_,
+  auto shrinkStatus = nccl_api_->commShrink(
       nccl_comm_,
-      nccl_api_->commShrink(
-          nccl_comm_,
-          excluded.data(),
-          static_cast<int>(excluded.size()),
-          &childComm,
-          &childOptions->config,
-          shrink_flags),
-      "NCCL commShrink failed");
+      excluded.data(),
+      static_cast<int>(excluded.size()),
+      &childComm,
+      &childOptions->config,
+      shrink_flags);
+  try {
+    waitForNcclChildComm(
+        *nccl_api_,
+        nccl_comm_,
+        &childComm,
+        shrinkStatus,
+        true,
+        childOptions->timeout,
+        "NCCL commShrink failed");
+  } catch (...) {
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    throw;
+  }
 
   auto excludedBeforeRank = static_cast<int>(std::ranges::count_if(
       excluded, [this](int rank) { return rank < getRank(); }));
