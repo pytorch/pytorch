@@ -3348,6 +3348,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
 
+    @property
+    def uses_tma(self) -> bool:
+        return bool(self.host_tma_descriptor_args or self._emitted_device_tma)
+
+    @property
+    def uses_device_tma(self) -> bool:
+        return self._emitted_device_tma
+
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
 
@@ -3642,7 +3650,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
-        if self._use_strict_sum():
+        if self._strict_sum_rblock() is not None:
             return False
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
             V.graph.get_current_device_or_throw(),
@@ -3760,10 +3768,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     @cache_on_self
-    def _use_strict_sum(self) -> bool:
-        return self.num_reduction_dims == 1 and (
-            self.features.strict_sum_rblock() is not None
-        )
+    def _strict_sum_rblock(self) -> int | None:
+        if self.num_reduction_dims != 1:
+            return None
+        return self.features.strict_sum_rblock()
 
     def want_no_x_dim(self):
         return (
@@ -5261,7 +5269,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
         # Eager tree-reduces each tile before accumulating tiles linearly.
-        strict_sum = self._use_strict_sum() and reduction_type == "sum"
+        strict_sum = self._strict_sum_rblock() is not None and reduction_type == "sum"
         strict_sum_loop = strict_sum and not self.persistent_reduction
 
         # When we do native matmtul codegen,
@@ -6595,6 +6603,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
+                if self.uses_tma:
+                    self.body.writeline("xoffset += XBLOCK")
+
                 # no need to sum if XBLOCK == 1, or does that matter?
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
@@ -7016,6 +7027,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self.tma_min_block_sizes:
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.uses_tma:
+            out["uses_tma"] = True
+        if self.uses_device_tma:
+            out["uses_device_tma"] = True
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:
@@ -7028,10 +7043,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
-        if self._use_strict_sum():
-            rblock = self.features.strict_sum_rblock()
-            if rblock is None:
-                raise AssertionError("strict sum reduction requires a reduction block")
+        if (rblock := self._strict_sum_rblock()) is not None:
             out["strict_sum_rblock"] = rblock
         if (
             config.benchmark_kernel
@@ -7308,12 +7320,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._prescan_host_tma_materializability()
         self.codegen_body()
 
-        # TMA probing sets tma_min_block_sizes even when the access falls back
-        # to tl.load; a stale constraint regresses non-TMA kernels.
-        if (
-            not self.inductor_meta.get("host_tma_descriptor_args")
-            and not self._emitted_device_tma
-        ):
+        tma_fields = (
+            "tma_min_block_sizes",
+            "uses_tma",
+            "uses_device_tma",
+            "host_tma_descriptor_args",
+        )
+        final_kernel_meta = self.inductor_meta_per_kernel()
+        for field in tma_fields:
+            self.inductor_meta.pop(field, None)
+            if field in final_kernel_meta:
+                self.inductor_meta[field] = final_kernel_meta[field]
+
+        if not self.uses_tma:
+            # TMA probing sets tma_min_block_sizes even when the access falls
+            # back to tl.load; a stale constraint regresses non-TMA kernels.
             self.inductor_meta.pop("tma_min_block_sizes", None)
 
         self._filter_pdl(self.body)
@@ -7433,10 +7454,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return math.prod(rblocks) if rblocks else None
 
     def _get_persistent_reduction_block(self, rnumel) -> int:
-        if self._use_strict_sum():
-            rblock = self.features.strict_sum_rblock()
-            if rblock is None:
-                raise AssertionError("strict sum requires a reduction block")
+        if (rblock := self._strict_sum_rblock()) is not None:
             if V.graph.sizevars.statically_known_geq(rblock, rnumel):
                 return rblock
             raise AssertionError(

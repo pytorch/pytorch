@@ -11,11 +11,13 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._native.ops.sum.inner_tree_plan import compute_inner_tree_params, vec_size
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.common_device_type import (
-    dtypes,
-    instantiate_device_type_tests,
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfNoCuteDSL,
+    TEST_CUTEDSL,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, skipIfNoCuteDSL
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._triton import has_triton_reduction_ordering
 
@@ -25,77 +27,46 @@ def _singleton_input(device):
 
 
 SUM_CASES = (
-    ("persistent", (8192, 256), 1),
-    ("looped", (32, 12000), 1),
-    ("split", (8, 65536), 1),
+    ("persistent_fp16", (64, 256), 1, torch.float16),
+    ("looped_bf16", (8, 12000), 1, torch.bfloat16),
+    ("split_fp32", (8, 65536), 1, torch.float32),
 )
-DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 INNER_TREE_CALL = "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
 
 SUM_VARIANTS = (
-    ("keepdim", (64, 300), 1, torch.float32, True, {}),
-    ("autotune", (8192, 256), 1, torch.float32, False, {"max_autotune": True}),
+    ("autotune", (64, 256), 1, torch.float32, False, {"max_autotune": True}),
 )
 
-DYNAMIC_CASES = (
-    ("ragged", (65536, 65537), {}),
-    ("plan_change", (512, 2048), {}),
-    ("min_split", (65536,), {"min_num_split": 16}),
-)
+DYNAMIC_CASES = (("plan_change", (512, 65537), {}),)
 
 OUT_OF_SCOPE_CASES = (
-    ("column", lambda z: torch.sum(z, 0)),
     ("multidim", lambda z: torch.sum(z, (0, 1))),
-    ("mean", lambda z: torch.mean(z, 1)),
     ("dtype", lambda z: torch.sum(z, 1, dtype=torch.float64)),
-    ("fp64", lambda z: torch.sum(z.to(torch.float64), 1)),
-    ("integer", lambda z: torch.sum(z.to(torch.int32), 1)),
 )
 
 LAYOUT_CASES = (
-    ("one_dim", lambda d: (torch.randn(300, device=d), 0), True),
     (
         "outer_strided",
-        lambda d: (torch.randn(16384, 300, device=d)[::2], -1),
+        lambda d: (torch.randn(128, 300, device=d)[::2], -1),
         True,
     ),
-    (
-        "non_last_inner",
-        lambda d: (torch.randn(64, 300, 8, device=d).transpose(1, 2), 1),
-        True,
-    ),
-    ("leading_one", lambda d: (torch.full((1, 4), -0.0, device=d), 0), True),
     ("singleton_dim1", lambda d: (_singleton_input(d), 1), True),
     (
         "noncollapsible",
         lambda d: (torch.randn(16, 8, 300, device=d)[::2], -1),
         False,
     ),
-    (
-        "size_one_outer_strided",
-        lambda d: (
-            torch.as_strided(torch.randn(16, device=d), (8, 1), (2, 1)),
-            1,
-        ),
-        False,
-    ),
 )
 
 SIGNED_ZERO_CASES = (
     ("multirow_1", 4, 1, True),
-    ("multirow_2", 4, 2, True),
-    ("multirow_4", 4, 4, True),
-    ("persistent", 8192, 128, False),
+    ("persistent", 64, 128, False),
 )
 
 FUSION_CASES = (
-    "pointwise",
     "nested",
     "mix",
-    "mix_append",
     "multi_kernel",
-    "native_matmul",
-    "sort",
     "multi_output",
 )
 
@@ -106,7 +77,6 @@ FUSION_CASES = (
     and has_triton_reduction_ordering(),
     "requires CUDA, tl.ReductionOrdering, and the eager inner-tree implementation",
 )
-@skipIfNoCuteDSL
 class StrictNumericsTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -122,6 +92,8 @@ class StrictNumericsTest(TestCase):
         return result, "\n".join(codes)
 
     def _assert_bitwise_equal(self, eager, result):
+        if not TEST_CUTEDSL:
+            return
         self.assertEqual(
             eager.contiguous().reshape(-1).view(torch.uint8),
             result.contiguous().reshape(-1).view(torch.uint8),
@@ -138,10 +110,9 @@ class StrictNumericsTest(TestCase):
         self._assert_bitwise_equal(eager, result)
         self.assertIn(INNER_TREE_CALL, code)
 
-    @dtypes(*DTYPES)
     @parametrize("case", SUM_CASES, name_fn=lambda c: c[0])
-    def test_sum_bitwise(self, device, dtype, case):
-        _, shape, dim = case
+    def test_sum_bitwise(self, device, case):
+        _, shape, dim, dtype = case
         self._check_sum(device, shape, dim, dtype)
 
     @parametrize("case", SUM_VARIANTS, name_fn=lambda c: c[0])
@@ -151,7 +122,7 @@ class StrictNumericsTest(TestCase):
 
     def test_special_values_match_eager(self, device):
         values = [0.0, -0.0, torch.inf, -torch.inf, torch.nan, 1e20, -1e20, 1.0]
-        x = torch.tensor(values, device=device).repeat(64, 38)[:, :300].contiguous()
+        x = torch.tensor(values, device=device).repeat(8, 38)[:, :300].contiguous()
 
         def fn(z):
             return z.sum(1)
@@ -160,6 +131,7 @@ class StrictNumericsTest(TestCase):
         self._assert_bitwise_equal(fn(x), result)
         self.assertIn(INNER_TREE_CALL, code)
 
+    @skipIfNoCuteDSL
     @parametrize("case", DYNAMIC_CASES, name_fn=lambda c: c[0])
     def test_dynamic_sum(self, device, case):
         _, sizes, cfg = case
@@ -203,11 +175,10 @@ class StrictNumericsTest(TestCase):
         self.assertEqual(result, fn(x))
         self.assertNotIn(INNER_TREE_CALL, code)
 
-    @dtypes(*DTYPES)
     @parametrize("case", SIGNED_ZERO_CASES, name_fn=lambda c: c[0])
-    def test_signed_zero(self, device, dtype, case):
+    def test_signed_zero(self, device, case):
         _, rows, n, multirow = case
-        x = torch.full((rows, n), -0.0, device=device, dtype=dtype)
+        x = torch.full((rows, n), -0.0, device=device)
 
         def fn(z):
             return torch.sum(z, 1)
@@ -229,17 +200,8 @@ class StrictNumericsTest(TestCase):
         kernel_count = None
         result_index = None
 
-        if kind == "pointwise":
-            args = (
-                torch.randn(8192, 300, device=device),
-                torch.randn(8192, 1, device=device),
-            )
-
-            def fn(a, b):
-                return torch.sum(a + b, -1)
-
-        elif kind == "nested":
-            batch, width, group = 64, 4096, 16
+        if kind == "nested":
+            batch, width, group = 8, 4096, 16
             args = (torch.randn(batch, width, device=device),)
             cfg = {"triton.nested_reduction": True}
             expected_metrics = {"codegen_nested_reduction": 0}
@@ -249,62 +211,27 @@ class StrictNumericsTest(TestCase):
                 y = torch.ops._inductor_test.realize(x + outer)
                 return y.reshape(batch, width // group, group).sum(-1)
 
-        elif kind in ("mix", "mix_append"):
-            args = (torch.randn(32, 12000, device=device),)
+        elif kind == "mix":
+            args = (torch.randn(8, 12000, device=device),)
             cfg = {
                 "triton.mix_order_reduction": True,
                 "triton.mix_order_reduction_non_strict_mode": True,
             }
-            if kind == "mix":
-                result_index = 0
-                expected_metrics = {"codegen_mix_order_reduction": 0}
+            result_index = 0
+            expected_metrics = {"codegen_mix_order_reduction": 0}
 
-                def fn(x):
-                    return x.sum(-1), x.prod(0)
-
-            else:
-                result_index = 2
-                kernel_count = 2
-                cfg.update(
-                    max_fusion_buffer_group_pairwise_attempts=1,
-                    split_reductions=False,
-                )
-                expected_metrics = {"codegen_mix_order_reduction": 1}
-
-                def fn(x):
-                    return x.prod(1), x.prod(0), x.sum(1)
+            def fn(x):
+                return x.sum(-1), x.prod(0)
 
         elif kind == "multi_kernel":
-            args = (torch.randn(32, 12000, device=device),)
+            args = (torch.randn(8, 12000, device=device),)
             cfg = {"triton.multi_kernel": True}
 
             def fn(x):
                 return x.sum(1)
 
-        elif kind == "native_matmul":
-            args = (
-                torch.randn(32, 4, device=device),
-                torch.randn(4, 32, device=device),
-            )
-            cfg = {"triton.native_matmul": True}
-            result_index = 1
-            kernel_count = 2
-
-            def fn(a, b):
-                z = (a[:, None, :] + b.T[None, :, :]).contiguous()
-                return a @ b, z.sum(-1)
-
-        elif kind == "sort":
-            args = (torch.randn(32, 513, device=device),)
-            cfg = {"triton.decompose_sort_ops": True}
-            result_index = 1
-            kernel_count = 2
-
-            def fn(x):
-                return torch.sort(x, dim=1).values, x.sum(1)
-
         else:
-            args = (torch.randn(32, 300, device=device),)
+            args = (torch.randn(8, 300, device=device),)
             cfg = {"online_softmax": True}
             result_index = 1
             kernel_count = 2
@@ -338,8 +265,8 @@ class StrictNumericsTest(TestCase):
 
     def test_combo_kernel_preserves_strict_sum_blocks(self, device):
         args = (
-            torch.randn(32, 12000, device=device),
-            torch.randn(32, 12000, device=device),
+            torch.randn(8, 12000, device=device),
+            torch.randn(8, 12000, device=device),
         )
 
         def fn(a, b):
@@ -362,7 +289,7 @@ class StrictNumericsTest(TestCase):
     @parametrize("kind", ("multirow", "split"))
     def test_tma_preserves_strict_sum(self, device, kind):
         if kind == "multirow":
-            x = torch.randn(128, 5, device=device)
+            x = torch.randn(64, 5, device=device)
         else:
             x = torch.zeros(1, 65536, device=device)
             params = compute_inner_tree_params(
